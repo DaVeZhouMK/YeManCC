@@ -4,6 +4,9 @@ node_modules/
 # 构建产物（vite 输出、esbuild 临时产物、本地打包）
 dist/
 build/
+# 放行 WebView2 SDK 的 build 目录：上面的 build/ 会误伤 deps/webview2/build，
+# 其头文件(include/)与静态库(x64/*.lib)必须随仓库提交，否则 CI 无法编译原生壳
+!deps/webview2/build/
 pkg/
 YeManCC.zip
 

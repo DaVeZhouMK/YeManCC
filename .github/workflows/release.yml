@@ -37,13 +37,13 @@ jobs:
         run: |
           $root = $env:GITHUB_WORKSPACE
           $native = Join-Path $root 'native'
-          # 追加 deps 的 include/lib（WebView2 SDK + nlohmann/json，已提交进仓库）
-          $env:INCLUDE = "$env:INCLUDE;$native\deps\webview2\build\native\include;$native\deps\json"
-          $env:LIB     = "$env:LIB;$native\deps\webview2\build\native\x64"
+          # 追加 deps 的 include/lib（WebView2 SDK + nlohmann/json，已提交进仓库，位于仓库根 deps/）
+          $env:INCLUDE = "$env:INCLUDE;$root\deps\webview2\build\native\include;$root\deps\json"
+          $env:LIB     = "$env:LIB;$root\deps\webview2\build\native\x64"
           Set-Location $native
           rc.exe /nologo /Fo app.res app.rc
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          cl.exe /nologo /std:c++20 /utf-8 /EHsc /MT /O2 /DNDEBUG /DUNICODE /D_UNICODE main.cpp /Fe:YeManCC.exe /Fo:main.obj /link /SUBSYSTEM:WINDOWS deps\webview2\build\native\x64\WebView2LoaderStatic.lib app.res user32.lib gdi32.lib shell32.lib shlwapi.lib ole32.lib oleaut32.lib dwmapi.lib winhttp.lib advapi32.lib version.lib psapi.lib PowrProf.lib
+          cl.exe /nologo /std:c++20 /utf-8 /EHsc /MT /O2 /DNDEBUG /DUNICODE /D_UNICODE main.cpp /Fe:YeManCC.exe /Fo:main.obj /link /SUBSYSTEM:WINDOWS $root\deps\webview2\build\native\x64\WebView2LoaderStatic.lib app.res user32.lib gdi32.lib shell32.lib shlwapi.lib ole32.lib oleaut32.lib dwmapi.lib winhttp.lib advapi32.lib version.lib psapi.lib PowrProf.lib
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           if (-not (Test-Path YeManCC.exe)) { exit 1 }
 
