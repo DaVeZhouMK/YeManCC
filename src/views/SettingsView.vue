@@ -354,7 +354,7 @@ onBeforeUnmount(() => {});
     </section>
 
     <section class="card">
-      <h3 class="card-title">📦 版本</h3>
+      <h3 class="card-title">📦 版本和更新</h3>
       <p class="muted body">当前版本：<b class="ac-name">{{ appVersion }}</b></p>
       <div class="upd-row">
         <button class="ac-add" :disabled="updateState === 'checking' || updateState === 'downloading'" @click="onCheckUpdate">
@@ -376,7 +376,7 @@ onBeforeUnmount(() => {});
         <Toggle
           v-model="updateAccel.enabled"
           label="启动更新加速"
-          description="运行 steamcommunity_302 代理以加速 GitHub 更新"
+          description="加速 GitHub"
           color="accent"
           compact
           :disabled="uaBusy"
