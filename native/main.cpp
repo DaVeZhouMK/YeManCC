@@ -3005,6 +3005,9 @@ static json httpGet(const std::string& url) {
     HINTERNET hSession = WinHttpOpen(L"QQ/1.0", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
         WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
     if (!hSession) throw std::runtime_error("WinHttpOpen failed");
+    // raw.githubusercontent.com 会 302 跳转到 CDN，必须自动跟随重定向
+    DWORD redirectPolicy = WINHTTP_OPTION_REDIRECT_POLICY_ALWAYS;
+    WinHttpSetOption(hSession, WINHTTP_OPTION_REDIRECT_POLICY, &redirectPolicy, sizeof(redirectPolicy));
     HINTERNET hConnect = WinHttpConnect(hSession, host, uc.nPort, 0);
     if (!hConnect) { WinHttpCloseHandle(hSession); throw std::runtime_error("WinHttpConnect failed"); }
     HINTERNET hRequest = WinHttpOpenRequest(hConnect, L"GET", objectPath.c_str(), nullptr,
@@ -3026,7 +3029,15 @@ static json httpGet(const std::string& url) {
         WinHttpReadData(hRequest, chunk.data(), avail, &rd);
         chunk.resize(rd); body += chunk;
     }
+    DWORD statusCode = 0;
+    DWORD statusSize = sizeof(statusCode);
+    WinHttpQueryHeaders(hRequest, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
+                        WINHTTP_HEADER_NAME_BY_INDEX, &statusCode, &statusSize, WINHTTP_NO_HEADER_INDEX);
     WinHttpCloseHandle(hRequest); WinHttpCloseHandle(hConnect); WinHttpCloseHandle(hSession);
+    if (statusCode < 200 || statusCode >= 300) {
+        std::string preview = body.size() > 200 ? body.substr(0, 200) : body;
+        throw std::runtime_error("HTTP " + std::to_string(statusCode) + ": " + preview);
+    }
     return json::parse(body);
 }
 
@@ -3042,6 +3053,8 @@ static bool downloadFile(const std::string& url, const std::wstring& dest) {
     HINTERNET hS = WinHttpOpen(L"QQ/1.0", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
         WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
     if (!hS) return false;
+    DWORD redirectPolicy = WINHTTP_OPTION_REDIRECT_POLICY_ALWAYS;
+    WinHttpSetOption(hS, WINHTTP_OPTION_REDIRECT_POLICY, &redirectPolicy, sizeof(redirectPolicy));
     HINTERNET hC = WinHttpConnect(hS, host, uc.nPort, 0);
     if (!hC) { WinHttpCloseHandle(hS); return false; }
     HINTERNET hR = WinHttpOpenRequest(hC, L"GET", objectPath.c_str(), nullptr,
