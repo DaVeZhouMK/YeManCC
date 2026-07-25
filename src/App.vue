@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, provide, onMounted, onUnmounted } from 'vue';
 import { useRouter } from 'vue-router';
-import TitleBar from '@/components/TitleBar.vue';
 import NavRail from '@/components/NavRail.vue';
 import DebugView from '@/components/DebugView.vue';
 import { useDebugStore } from '@/stores/debug';
@@ -103,7 +102,6 @@ onUnmounted(() => {
 
 <template>
   <div class="app-shell" :style="scalerStyle">
-    <TitleBar />
     <div class="app-body">
       <NavRail />
       <main class="app-main" :class="{ 'is-preloading': preloading }">

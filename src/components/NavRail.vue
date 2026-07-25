@@ -42,6 +42,13 @@ async function quit() {
 
 <template>
   <nav class="navrail">
+    <div class="nav-brand app-region-drag">
+      <span class="nb-bolt">⚡</span>
+      <div class="nb-titles">
+        <span class="nb-title">YeManCC</span>
+        <span class="nb-sub">野蛮系统控制中心</span>
+      </div>
+    </div>
     <div class="nav-items">
       <button
         v-for="r in ROUTES"
@@ -70,6 +77,36 @@ async function quit() {
 </template>
 
 <style scoped>
+.nav-brand {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 6px 10px;
+  margin-bottom: 6px;
+  border-bottom: 1px solid #1c2533;
+}
+.nb-bolt {
+  color: var(--accent-2);
+  font-size: 18px;
+  line-height: 1;
+}
+.nb-titles {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.15;
+}
+.nb-title {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  color: var(--text);
+}
+.nb-sub {
+  font-size: 9px;
+  font-weight: 500;
+  letter-spacing: 0.5px;
+  color: var(--text-dim);
+}
 .navrail {
   width: var(--nav-w);
   flex: 0 0 var(--nav-w);

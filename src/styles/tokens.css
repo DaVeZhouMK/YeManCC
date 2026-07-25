@@ -13,7 +13,7 @@
   --radius-ctrl: 8px; /* 控件 */
   --focus-ring: 0 0 0 2px var(--accent), 0 0 12px rgba(46, 166, 255, 0.5);
 
-  --nav-w: 124px;
+  --nav-w: 140px;
 }
 
 * {
