@@ -3002,7 +3002,7 @@ static json httpGet(const std::string& url) {
     if (!crackHttpUrl(url, uc, host, path, extra, objectPath))
         throw std::runtime_error("Invalid URL");
     bool https = (uc.nScheme == INTERNET_SCHEME_HTTPS);
-    HINTERNET hSession = WinHttpOpen(L"QQ/1.0", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
+    HINTERNET hSession = WinHttpOpen(L"QQ/1.0", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
         WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
     if (!hSession) throw std::runtime_error("WinHttpOpen failed");
     // raw.githubusercontent.com 会 302 跳转到 CDN，必须自动跟随重定向
@@ -3050,7 +3050,7 @@ static bool downloadFile(const std::string& url, const std::wstring& dest) {
     std::error_code cleanupEc;
     std::filesystem::remove(dest, cleanupEc);
     bool https = true;
-    HINTERNET hS = WinHttpOpen(L"QQ/1.0", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
+    HINTERNET hS = WinHttpOpen(L"QQ/1.0", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
         WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
     if (!hS) return false;
     DWORD redirectPolicy = WINHTTP_OPTION_REDIRECT_POLICY_ALWAYS;
@@ -3132,6 +3132,80 @@ static bool unzipTar(const std::wstring& zip, const std::wstring& dest) {
     return code == 0;
 }
 
+// ── 更新加速器（steamcommunity_302 等）：辅助 GitHub 更新下载 ──
+// 配置持久化于 <exe_dir>\\config\\update_accelerator.json；开关默认关闭，路径默认指向
+// C:\\SOFT\\steamcommunity\\steamcommunity_302.cli.exe。开启后 native 的 WinHTTP 改为
+// 自动跟随系统代理，从而走该工具的加速通道。
+static std::wstring updateAccelPath() { return exe_dir() + L"\\config\\update_accelerator.json"; }
+static std::wstring g_updateAccelPath;
+static std::atomic<bool> g_updateAccelEnabled{ false };
+
+static void updateAccelLoad() {
+    g_updateAccelPath = L"C:\\SOFT\\steamcommunity\\steamcommunity_302.cli.exe";
+    g_updateAccelEnabled = false;
+    std::string c = sgReadFile(updateAccelPath());
+    if (c.empty()) return; // 首启：默认路径，默认关闭
+    try {
+        json j = json::parse(c);
+        g_updateAccelEnabled = j.value("enabled", false);
+        std::string p = j.value("path", std::string{});
+        if (!p.empty()) g_updateAccelPath = U2W(p);
+    } catch (...) {}
+    if (g_updateAccelPath.empty()) g_updateAccelPath = L"C:\\SOFT\\steamcommunity\\steamcommunity_302.cli.exe";
+}
+static void updateAccelSave() {
+    json j = { {"enabled", g_updateAccelEnabled.load()}, {"path", W2U(g_updateAccelPath)} };
+    std::error_code ec;
+    fspath::create_directories(fspath::path(updateAccelPath()).parent_path(), ec);
+    sgWriteFile(updateAccelPath(), j.dump(2));
+}
+static bool isUpdateAccelRunning() {
+    std::wstring target = sgBaseName(g_updateAccelPath);
+    if (target.empty()) return false;
+    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snap == INVALID_HANDLE_VALUE) return false;
+    PROCESSENTRY32W pe{ sizeof(pe) };
+    bool running = false;
+    if (Process32FirstW(snap, &pe)) {
+        do {
+            std::wstring exe = pe.szExeFile;
+            if (exe.size() > 4 && _wcsicmp(exe.c_str() + exe.size() - 4, L".exe") == 0)
+                exe.resize(exe.size() - 4);
+            if (_wcsicmp(exe.c_str(), target.c_str()) == 0) { running = true; break; }
+        } while (Process32NextW(snap, &pe));
+    }
+    CloseHandle(snap);
+    return running;
+}
+static bool startUpdateAccel() {
+    if (g_updateAccelPath.empty() || !fspath::exists(g_updateAccelPath)) return false;
+    if (isUpdateAccelRunning()) return true;
+    HINSTANCE r = ShellExecuteW(nullptr, L"open", g_updateAccelPath.c_str(), nullptr, nullptr, SW_HIDE);
+    return (reinterpret_cast<intptr_t>(r) > 32);
+}
+static bool stopUpdateAccel() {
+    std::wstring target = sgBaseName(g_updateAccelPath);
+    if (target.empty()) return false;
+    bool killed = false;
+    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snap != INVALID_HANDLE_VALUE) {
+        PROCESSENTRY32W pe{ sizeof(pe) };
+        if (Process32FirstW(snap, &pe)) {
+            do {
+                std::wstring exe = pe.szExeFile;
+                if (exe.size() > 4 && _wcsicmp(exe.c_str() + exe.size() - 4, L".exe") == 0)
+                    exe.resize(exe.size() - 4);
+                if (_wcsicmp(exe.c_str(), target.c_str()) == 0) {
+                    HANDLE h = OpenProcess(PROCESS_TERMINATE, FALSE, pe.th32ProcessID);
+                    if (h) { TerminateProcess(h, 0); CloseHandle(h); killed = true; }
+                }
+            } while (Process32NextW(snap, &pe));
+        }
+        CloseHandle(snap);
+    }
+    return killed;
+}
+
 static void reg_updater() {
     ipc_on("app.version", [](const json&) -> json {
         return APP_VER_STR;
@@ -3182,6 +3256,45 @@ static void reg_updater() {
         ShellExecuteW(nullptr, L"open", bat.c_str(), nullptr, nullptr, SW_HIDE);
         PostQuitMessage(0);
         return true;
+    });
+
+    // ── 更新加速器（steamcommunity_302 等）：开启/关闭、查看运行状态 ──
+    ipc_on("updateAccel.get", [](const json&) -> json {
+        bool exists = fspath::exists(g_updateAccelPath);
+        bool running = exists && isUpdateAccelRunning();
+        return {
+            {"enabled", g_updateAccelEnabled.load()},
+            {"path", W2U(g_updateAccelPath)},
+            {"exists", exists},
+            {"running", running}
+        };
+    });
+    ipc_on("updateAccel.set", [](const json& a) -> json {
+        if (a.contains("enabled")) g_updateAccelEnabled = a.value("enabled", g_updateAccelEnabled.load());
+        if (a.contains("path")) {
+            std::string p = a.value("path", std::string{});
+            if (!p.empty()) g_updateAccelPath = U2W(p);
+        }
+        bool ok = true;
+        if (g_updateAccelEnabled) {
+            if (!fspath::exists(g_updateAccelPath)) {
+                g_updateAccelEnabled = false;
+                ok = false;
+            } else {
+                ok = startUpdateAccel();
+            }
+        } else {
+            ok = stopUpdateAccel();
+        }
+        updateAccelSave();
+        bool running = isUpdateAccelRunning();
+        return {
+            {"enabled", g_updateAccelEnabled.load()},
+            {"path", W2U(g_updateAccelPath)},
+            {"exists", fspath::exists(g_updateAccelPath)},
+            {"running", running},
+            {"ok", ok}
+        };
     });
 }
 
@@ -4644,6 +4757,10 @@ int WINAPI wWinMain(HINSTANCE hi, HINSTANCE, LPWSTR, int ns) {
 
     // ── 掌机前端自动关闭：加载开关 + 进程名列表（持久化于 config/autoclose.json）──
     autoCloseLoad();
+
+    // ── 更新加速器：加载开关/路径（持久化于 config/update_accelerator.json）──
+    updateAccelLoad();
+    if (g_updateAccelEnabled) startUpdateAccel(); // 若上次退出前开启，则自动启动
 
     // Register all commands
     reg_window();

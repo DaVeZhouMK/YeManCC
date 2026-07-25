@@ -2,7 +2,7 @@
 import { ref, onMounted, onBeforeUnmount, computed } from 'vue';
 import Toggle from '@/components/Toggle.vue';
 import GamepadVisualizer from '@/components/GamepadVisualizer.vue';
-import { summonGet, summonSet, toggleTask, taskExists, autocloseGet, autocloseSet, type GamepadSettings, type AutoCloseConfig, checkUpdate, downloadUpdate, installUpdate, compareVersions, UPDATE_MANIFEST_URL, updatePackageUrl } from '@/bridge/yeman';
+import { summonGet, summonSet, toggleTask, taskExists, autocloseGet, autocloseSet, updateAccelGet, updateAccelSet, type GamepadSettings, type AutoCloseConfig, type UpdateAccelState, checkUpdate, downloadUpdate, installUpdate, compareVersions, UPDATE_MANIFEST_URL, updatePackageUrl } from '@/bridge/yeman';
 import { shell } from '@/bridge/api';
 import { APP_VERSION } from '@/version';
 
@@ -23,6 +23,27 @@ const errMsg = ref('');
 // ── 掌机前端自动关闭：总开关 + 可编辑进程名列表 ──
 const autoClose = ref<AutoCloseConfig>({ enabled: false, procs: [] });
 const acBusy = ref(false);
+
+// ── 更新加速器：总开关 + 默认路径 + 文件/运行状态 ──
+const updateAccel = ref<UpdateAccelState>({
+  enabled: false,
+  path: 'C:\\SOFT\\steamcommunity\\steamcommunity_302.cli.exe',
+  exists: false,
+  running: false,
+});
+const uaBusy = ref(false);
+const uaStatusText = computed(() => {
+  if (uaBusy.value) return '处理中…';
+  if (!updateAccel.value.exists) return '文件未找到';
+  if (updateAccel.value.running) return '运行中';
+  return updateAccel.value.enabled ? '未运行' : '已关闭';
+});
+const uaTagClass = computed(() => {
+  if (uaBusy.value) return '';
+  if (updateAccel.value.running) return 'ok';
+  if (updateAccel.value.enabled && !updateAccel.value.exists) return 'err';
+  return '';
+});
 
 // 版本号：构建期由 version.json 注入（scripts/write-version.mjs → src/version.ts）
 const appVersion = APP_VERSION;
@@ -130,6 +151,11 @@ async function load() {
   } catch {
     /* 保持默认值 */
   }
+  try {
+    updateAccel.value = await updateAccelGet();
+  } catch {
+    /* 保持默认值 */
+  }
 }
 
 async function saveAutoClose(opts: { procsOnly?: boolean } = {}) {
@@ -171,6 +197,21 @@ async function onAcProcInput(idx: number, val: string) {
   autoClose.value.procs[idx] = val;
   // 输入即存（失焦/回车时触发 @change），避免退出页面丢失
   await saveAutoClose();
+}
+
+async function onUpdateAccelToggle(v: boolean) {
+  errMsg.value = '';
+  uaBusy.value = true;
+  const prev = updateAccel.value.enabled;
+  try {
+    const next = await updateAccelSet({ enabled: v });
+    updateAccel.value = next;
+  } catch (e) {
+    updateAccel.value.enabled = prev;
+    errMsg.value = '更新加速开关失败：' + (e as Error).message;
+  } finally {
+    uaBusy.value = false;
+  }
 }
 
 async function onBootMin(v: boolean) {
@@ -330,6 +371,20 @@ onBeforeUnmount(() => {});
           {{ updateState === 'downloading' ? '下载并安装中…' : '下载并安装' }}
         </button>
       </div>
+
+      <div class="upd-row ua-row">
+        <Toggle
+          v-model="updateAccel.enabled"
+          label="启动更新加速"
+          description="运行 steamcommunity_302 代理以加速 GitHub 更新"
+          color="accent"
+          compact
+          :disabled="uaBusy"
+          @update:model-value="onUpdateAccelToggle"
+        />
+        <span class="upd-tag" :class="uaTagClass">{{ uaStatusText }}</span>
+      </div>
+      <p class="muted body ua-path">{{ updateAccel.path }}</p>
     </section>
   </div>
 </template>
@@ -550,6 +605,21 @@ onBeforeUnmount(() => {});
 }
 .upd-tag.err {
   color: #ff9ea1;
+}
+.ua-row {
+  align-items: flex-start;
+  margin-top: 12px;
+}
+.ua-row .toggle-row {
+  flex: 1;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+.ua-path {
+  font-size: 10px;
+  margin-top: 4px;
+  word-break: break-all;
+  opacity: 0.7;
 }
 .upd-has {
   margin-top: 10px;
