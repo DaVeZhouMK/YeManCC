@@ -1,0 +1,30 @@
+/* gamepad.css — 手柄/键盘可见选择高亮增强
+ * 基础发光环 `.focused` 已在 tokens.css 定义（var(--focus-ring)）。
+ * 这里只补强：滑块这类“输入框只有 6px 高”的控件，直接描边看不见，
+ * 改为高亮整条轨道 + 滑块发光；并让选中项强制置顶不被相邻卡片遮挡。 */
+
+/* 滑块：高亮整条轨道 + 滑块发光（原生 range 输入框本身仅 6px 高） */
+input[type='range'].focused {
+  outline: none !important;
+  box-shadow: none !important;
+}
+.slider-track-wrap:has(input[type='range'].focused) {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 6px;
+  box-shadow: 0 0 10px 2px rgba(46, 166, 255, 0.5);
+}
+input[type='range'].focused::-webkit-slider-thumb {
+  box-shadow: 0 0 0 3px var(--accent), 0 0 8px 2px rgba(46, 166, 255, 0.75);
+}
+
+/* 下拉触发器：点亮气泡边缘（.focused 基础环已覆盖，这里仅保证层级在弹出层之上） */
+.dd-trigger.focused {
+  z-index: 6;
+}
+
+/* 选中项强制置顶，避免被相邻卡片/文字遮挡 */
+.focused {
+  position: relative;
+  z-index: 6;
+}

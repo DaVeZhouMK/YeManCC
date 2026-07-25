@@ -1,0 +1,35 @@
+# 依赖
+node_modules/
+
+# 构建产物（vite 输出、esbuild 临时产物、本地打包）
+dist/
+build/
+pkg/
+YeManCC.zip
+
+# 自动更新暂存（native 写入 %LOCALAPPDATA%，不在此）
+# 运行时日志
+debug.log
+*.log
+
+# 构建期自动生成的文件（scripts/write-version.mjs 产出，勿提交）
+src/version.ts
+native/version.h
+native/app.res
+native/main.obj
+native/YeManCC.exe
+native/*.ilk
+native/*.pdb
+
+# 测试/临时
+testrun/
+*.obj
+*.rar
+
+# 工具/IDE 数据
+.workbuddy/
+.vscode/
+
+# 系统
+Thumbs.db
+Desktop.ini

@@ -1,0 +1,29 @@
+{
+  "name": "yemancc",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "YeManCC — 野蛮系统控制中心 (Vue3 + QiangQiang WebView2 shell)",
+  "scripts": {
+    "version:write": "node scripts/write-version.mjs",
+    "predev": "node scripts/write-version.mjs",
+    "dev": "vite",
+    "prebuild": "node scripts/write-version.mjs",
+    "build": "vite build",
+    "preview": "vite preview",
+    "type-check": "vue-tsc --noEmit",
+    "test:m2": "esbuild tools/m2_selftest.ts --bundle --platform=node --format=cjs --outfile=build/m2_selftest.cjs --alias:@=./src && node build/m2_selftest.cjs",
+    "publish": "powershell -ExecutionPolicy Bypass -File tools/publish.ps1"
+  },
+  "dependencies": {
+    "pinia": "^2.1.7",
+    "vue": "^3.4.21",
+    "vue-router": "^4.3.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.0.4",
+    "typescript": "^5.4.5",
+    "vite": "^5.2.8",
+    "vue-tsc": "^2.0.13"
+  }
+}
