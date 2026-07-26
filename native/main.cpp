@@ -3133,32 +3133,9 @@ static bool unzipTar(const std::wstring& zip, const std::wstring& dest) {
 }
 
 // ── 更新加速器（steamcommunity_302 等）：辅助 GitHub 更新下载 ──
-// 配置持久化于 <exe_dir>\\config\\update_accelerator.json；开关默认关闭，路径默认指向
-// C:\\SOFT\\steamcommunity\\steamcommunity_302.cli.exe。开启后 native 的 WinHTTP 改为
-// 自动跟随系统代理，从而走该工具的加速通道。
-static std::wstring updateAccelPath() { return exe_dir() + L"\\config\\update_accelerator.json"; }
-static std::wstring g_updateAccelPath;
-static std::atomic<bool> g_updateAccelEnabled{ false };
-
-static void updateAccelLoad() {
-    g_updateAccelPath = L"C:\\SOFT\\steamcommunity\\steamcommunity_302.cli.exe";
-    g_updateAccelEnabled = false;
-    std::string c = sgReadFile(updateAccelPath());
-    if (c.empty()) return; // 首启：默认路径，默认关闭
-    try {
-        json j = json::parse(c);
-        g_updateAccelEnabled = j.value("enabled", false);
-        std::string p = j.value("path", std::string{});
-        if (!p.empty()) g_updateAccelPath = U2W(p);
-    } catch (...) {}
-    if (g_updateAccelPath.empty()) g_updateAccelPath = L"C:\\SOFT\\steamcommunity\\steamcommunity_302.cli.exe";
-}
-static void updateAccelSave() {
-    json j = { {"enabled", g_updateAccelEnabled.load()}, {"path", W2U(g_updateAccelPath)} };
-    std::error_code ec;
-    fspath::create_directories(fspath::path(updateAccelPath()).parent_path(), ec);
-    sgWriteFile(updateAccelPath(), j.dump(2));
-}
+// 路径固定指向 C:\\SOFT\\steamcommunity\\steamcommunity_302.cli.exe。native 的 WinHTTP 已改为
+// 自动跟随系统代理，该工具运行后更新请求即走加速通道。此功能为手动触发，不会随程序启动。
+static const std::wstring g_updateAccelPath = L"C:\\SOFT\\steamcommunity\\steamcommunity_302.cli.exe";
 static bool isUpdateAccelRunning() {
     std::wstring target = sgBaseName(g_updateAccelPath);
     if (target.empty()) return false;
@@ -3258,40 +3235,29 @@ static void reg_updater() {
         return true;
     });
 
-    // ── 更新加速器（steamcommunity_302 等）：开启/关闭、查看运行状态 ──
+    // ── 更新加速器（steamcommunity_302 等）：手动切换、查看运行状态 ──
     ipc_on("updateAccel.get", [](const json&) -> json {
         bool exists = fspath::exists(g_updateAccelPath);
         bool running = exists && isUpdateAccelRunning();
         return {
-            {"enabled", g_updateAccelEnabled.load()},
-            {"path", W2U(g_updateAccelPath)},
             {"exists", exists},
             {"running", running}
         };
     });
-    ipc_on("updateAccel.set", [](const json& a) -> json {
-        if (a.contains("enabled")) g_updateAccelEnabled = a.value("enabled", g_updateAccelEnabled.load());
-        if (a.contains("path")) {
-            std::string p = a.value("path", std::string{});
-            if (!p.empty()) g_updateAccelPath = U2W(p);
-        }
+    ipc_on("updateAccel.set", [](const json&) -> json {
+        bool exists = fspath::exists(g_updateAccelPath);
+        bool running = exists && isUpdateAccelRunning();
         bool ok = true;
-        if (g_updateAccelEnabled) {
-            if (!fspath::exists(g_updateAccelPath)) {
-                g_updateAccelEnabled = false;
-                ok = false;
-            } else {
-                ok = startUpdateAccel();
-            }
-        } else {
+        if (running) {
             ok = stopUpdateAccel();
+        } else if (exists) {
+            ok = startUpdateAccel();
+        } else {
+            ok = false;
         }
-        updateAccelSave();
-        bool running = isUpdateAccelRunning();
+        running = exists && isUpdateAccelRunning();
         return {
-            {"enabled", g_updateAccelEnabled.load()},
-            {"path", W2U(g_updateAccelPath)},
-            {"exists", fspath::exists(g_updateAccelPath)},
+            {"exists", exists},
             {"running", running},
             {"ok", ok}
         };
@@ -4758,9 +4724,7 @@ int WINAPI wWinMain(HINSTANCE hi, HINSTANCE, LPWSTR, int ns) {
     // ── 掌机前端自动关闭：加载开关 + 进程名列表（持久化于 config/autoclose.json）──
     autoCloseLoad();
 
-    // ── 更新加速器：加载开关/路径（持久化于 config/update_accelerator.json）──
-    updateAccelLoad();
-    if (g_updateAccelEnabled) startUpdateAccel(); // 若上次退出前开启，则自动启动
+    // ── 更新加速器：不会随程序自动启动，仅在前端手动触发 ──
 
     // Register all commands
     reg_window();

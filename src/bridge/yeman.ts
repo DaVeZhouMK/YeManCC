@@ -209,34 +209,28 @@ export async function autocloseSet(cfg: AutoCloseConfig): Promise<AutoCloseConfi
   return { enabled: !!r.enabled, procs: Array.isArray(r.procs) ? r.procs : [] };
 }
 
-// ── 更新加速器（steamcommunity_302 等）：总开关 + 路径 + 文件/运行状态 ──
+// ── 更新加速器（steamcommunity_302 等）：手动按钮 + 文件/运行状态 ──
 export interface UpdateAccelState {
-  enabled: boolean;
-  path: string;
   exists: boolean;
   running: boolean;
 }
 export async function updateAccelGet(): Promise<UpdateAccelState> {
-  const defaultPath = 'C:\\SOFT\\steamcommunity\\steamcommunity_302.cli.exe';
   try {
     const r = await invoke<Partial<UpdateAccelState>>('updateAccel.get', {});
     return {
-      enabled: !!r.enabled,
-      path: typeof r.path === 'string' ? r.path : defaultPath,
       exists: !!r.exists,
       running: !!r.running,
     };
   } catch {
-    return { enabled: false, path: defaultPath, exists: false, running: false };
+    return { exists: false, running: false };
   }
 }
-export async function updateAccelSet(cfg: { enabled: boolean; path?: string }): Promise<UpdateAccelState> {
-  const r = await invoke<Partial<UpdateAccelState>>('updateAccel.set', cfg);
+export async function updateAccelToggle(): Promise<UpdateAccelState & { ok: boolean }> {
+  const r = await invoke<Partial<UpdateAccelState & { ok: boolean }>>('updateAccel.set', {});
   return {
-    enabled: !!r.enabled,
-    path: typeof r.path === 'string' ? r.path : cfg.path ?? 'C:\\SOFT\\steamcommunity\\steamcommunity_302.cli.exe',
     exists: !!r.exists,
     running: !!r.running,
+    ok: !!r.ok,
   };
 }
 

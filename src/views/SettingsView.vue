@@ -2,7 +2,7 @@
 import { ref, onMounted, onBeforeUnmount, computed } from 'vue';
 import Toggle from '@/components/Toggle.vue';
 import GamepadVisualizer from '@/components/GamepadVisualizer.vue';
-import { summonGet, summonSet, toggleTask, taskExists, autocloseGet, autocloseSet, updateAccelGet, updateAccelSet, type GamepadSettings, type AutoCloseConfig, type UpdateAccelState, checkUpdate, downloadUpdate, installUpdate, compareVersions, UPDATE_MANIFEST_URL, updatePackageUrl } from '@/bridge/yeman';
+import { summonGet, summonSet, toggleTask, taskExists, autocloseGet, autocloseSet, updateAccelGet, updateAccelToggle, type GamepadSettings, type AutoCloseConfig, type UpdateAccelState, checkUpdate, downloadUpdate, installUpdate, compareVersions, UPDATE_MANIFEST_URL, updatePackageUrl } from '@/bridge/yeman';
 import { shell } from '@/bridge/api';
 import { APP_VERSION } from '@/version';
 
@@ -24,10 +24,8 @@ const errMsg = ref('');
 const autoClose = ref<AutoCloseConfig>({ enabled: false, procs: [] });
 const acBusy = ref(false);
 
-// ── 更新加速器：总开关 + 默认路径 + 文件/运行状态 ──
+// ── 更新加速器：手动按钮 + 文件/运行状态 ──
 const updateAccel = ref<UpdateAccelState>({
-  enabled: false,
-  path: 'C:\\SOFT\\steamcommunity\\steamcommunity_302.cli.exe',
   exists: false,
   running: false,
 });
@@ -36,12 +34,12 @@ const uaStatusText = computed(() => {
   if (uaBusy.value) return '处理中…';
   if (!updateAccel.value.exists) return '文件未找到';
   if (updateAccel.value.running) return '运行中';
-  return updateAccel.value.enabled ? '未运行' : '已关闭';
+  return '已关闭';
 });
 const uaTagClass = computed(() => {
   if (uaBusy.value) return '';
   if (updateAccel.value.running) return 'ok';
-  if (updateAccel.value.enabled && !updateAccel.value.exists) return 'err';
+  if (!updateAccel.value.exists) return 'err';
   return '';
 });
 
@@ -199,16 +197,21 @@ async function onAcProcInput(idx: number, val: string) {
   await saveAutoClose();
 }
 
-async function onUpdateAccelToggle(v: boolean) {
+async function onUpdateAccelToggle() {
   errMsg.value = '';
   uaBusy.value = true;
-  const prev = updateAccel.value.enabled;
   try {
-    const next = await updateAccelSet({ enabled: v });
+    const next = await updateAccelToggle();
     updateAccel.value = next;
+    if (!next.ok) {
+      errMsg.value = next.running
+        ? '停止加速失败'
+        : next.exists
+          ? '启动加速失败'
+          : '加速器文件未找到';
+    }
   } catch (e) {
-    updateAccel.value.enabled = prev;
-    errMsg.value = '更新加速开关失败：' + (e as Error).message;
+    errMsg.value = '更新加速操作失败：' + (e as Error).message;
   } finally {
     uaBusy.value = false;
   }
@@ -363,6 +366,11 @@ onBeforeUnmount(() => {});
         <span v-if="updateState === 'latest'" class="upd-tag ok">已是最新</span>
         <span v-else-if="updateState === 'error'" class="upd-tag err">{{ updateErr }}</span>
         <span v-else-if="updateState === 'checking'" class="upd-tag">连接更新服务器…</span>
+        <span class="upd-divider" />
+        <button class="ac-add ua-btn" :disabled="uaBusy || !updateAccel.exists" @click="onUpdateAccelToggle">
+          {{ updateAccel.running ? '停止更新加速' : '启动更新加速' }}
+        </button>
+        <span class="upd-tag" :class="uaTagClass">{{ uaStatusText }}</span>
       </div>
       <div v-if="updateState === 'has' && updateInfo" class="upd-has">
         <p class="upd-line">发现新版本 <b class="ac-name">{{ updateInfo.version }}</b></p>
@@ -371,20 +379,6 @@ onBeforeUnmount(() => {});
           {{ updateState === 'downloading' ? '下载并安装中…' : '下载并安装' }}
         </button>
       </div>
-
-      <div class="upd-row ua-row">
-        <Toggle
-          v-model="updateAccel.enabled"
-          label="启动更新加速"
-          description="加速 GitHub"
-          color="accent"
-          compact
-          :disabled="uaBusy"
-          @update:model-value="onUpdateAccelToggle"
-        />
-        <span class="upd-tag" :class="uaTagClass">{{ uaStatusText }}</span>
-      </div>
-      <p class="muted body ua-path">{{ updateAccel.path }}</p>
     </section>
   </div>
 </template>
@@ -606,20 +600,18 @@ onBeforeUnmount(() => {});
 .upd-tag.err {
   color: #ff9ea1;
 }
-.ua-row {
-  align-items: flex-start;
-  margin-top: 12px;
+.upd-divider {
+  width: 1px;
+  height: 18px;
+  background: rgba(255, 255, 255, 0.12);
+  margin: 0 4px;
 }
-.ua-row .toggle-row {
-  flex: 1;
-  padding-top: 0;
-  padding-bottom: 0;
+.ua-btn {
+  border-style: dashed;
 }
-.ua-path {
-  font-size: 10px;
-  margin-top: 4px;
-  word-break: break-all;
-  opacity: 0.7;
+.ua-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 .upd-has {
   margin-top: 10px;
