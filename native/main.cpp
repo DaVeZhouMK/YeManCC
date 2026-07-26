@@ -343,7 +343,24 @@ static std::unordered_map<std::string, bool> g_permissions; // cmd -> allowed
 #define ID_TRAY_SHOW 4001
 #define ID_TRAY_MIN  4002
 #define ID_TRAY_EXIT 4003
+#define ID_TRAY_SEP  4004
 static NOTIFYICONDATAW g_nid = {};
+static HINSTANCE       g_hinst = nullptr;
+static HWND            g_menuHwnd = nullptr;
+struct TrayMenuItem { std::wstring label; int cmd; bool danger = false; };
+static std::vector<TrayMenuItem> g_menuItems;
+static std::vector<RECT> g_menuItemRects;
+static int g_menuHover = -1;
+static int g_menuW = 0, g_menuH = 0;
+static bool g_menuClassReg = false;
+// 配色（对齐前端 tokens.css：--bg-panel #121722 / --text #e9eef5 / --text-dim #8b96a8 / --bg-input #1a2230 / --danger #e5484d）
+static const COLORREF MENU_BG     = RGB(0x12,0x17,0x22);
+static const COLORREF MENU_TEXT   = RGB(0xe9,0xee,0xf5);
+static const COLORREF MENU_DIM    = RGB(0x8b,0x96,0xa8);
+static const COLORREF MENU_HOVER  = RGB(0x1a,0x22,0x30);
+static const COLORREF MENU_SEP     = RGB(0x2a,0x33,0x42);
+static const COLORREF MENU_DANGER = RGB(0xe5,0x48,0x4d);
+static const int MENU_RADIUS = 12;
 static bool            g_trayActive = false;
 static HICON           g_appIconLarge = nullptr;
 static HICON           g_appIconSmall = nullptr;
@@ -3747,10 +3764,197 @@ static LRESULT CALLBACK SplashProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         EndPaint(h, &ps);
         return 0;
     }
-    return DefWindowProcW(h, m, w, l);
-}
+        return DefWindowProcW(h, m, w, l);
+    }
 
-static void showSplash(HINSTANCE hi, int w, int h) {
+    // ── 自绘托盘右键菜单（深色圆角，程序风格；替代系统 TrackPopupMenu）──
+    static void closeTrayMenu();
+    static void execMenuCmd(int cmd);
+
+    static LRESULT CALLBACK TrayMenuProc(HWND h, UINT m, WPARAM w, LPARAM l) {
+        switch (m) {
+        case WM_PAINT: {
+            PAINTSTRUCT ps; HDC hdc = BeginPaint(h, &ps);
+            RECT rc; GetClientRect(h, &rc);
+            int r = MENU_RADIUS;
+            // 背景圆角
+            HBRUSH bBg = CreateSolidBrush(MENU_BG);
+            HPEN pen = CreatePen(PS_NULL, 0, 0);
+            SelectObject(hdc, pen); SelectObject(hdc, bBg);
+            RoundRect(hdc, 0, 0, rc.right, rc.bottom, 2*r, 2*r);
+            DeleteObject(pen); DeleteObject(bBg);
+
+            HFONT hFont = CreateFontW(13, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+                DEFAULT_CHARSET, 0, 0, CLEARTYPE_QUALITY, 0, L"Segoe UI");
+            auto old = SelectObject(hdc, hFont);
+            SetBkMode(hdc, TRANSPARENT);
+            int i = 0;
+            for (auto& item : g_menuItems) {
+                if (item.cmd == ID_TRAY_SEP) {
+                    RECT sr = g_menuItemRects[i];
+                    HPEN sp = CreatePen(PS_SOLID, 1, MENU_SEP);
+                    SelectObject(hdc, sp);
+                    MoveToEx(hdc, sr.left + 14, (sr.top + sr.bottom) / 2, nullptr);
+                    LineTo(hdc, sr.right - 14, (sr.top + sr.bottom) / 2);
+                    DeleteObject(sp);
+                } else {
+                    RECT ir = g_menuItemRects[i];
+                    if (i == g_menuHover) {
+                        HBRUSH bH = CreateSolidBrush(MENU_HOVER);
+                        HPEN ph = CreatePen(PS_NULL, 0, 0);
+                        SelectObject(hdc, ph); SelectObject(hdc, bH);
+                        RoundRect(hdc, ir.left + 4, ir.top + 2, ir.right - 4, ir.bottom - 2, 6, 6);
+                        DeleteObject(ph); DeleteObject(bH);
+                    }
+                    SetTextColor(hdc, item.danger ? MENU_DANGER : MENU_TEXT);
+                    RECT tr = ir; tr.left += 14;
+                    DrawTextW(hdc, item.label.c_str(), -1, &tr,
+                        DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+                }
+                i++;
+            }
+            SelectObject(hdc, old);
+            DeleteObject(hFont);
+            EndPaint(h, &ps);
+            return 0;
+        }
+        case WM_MOUSEMOVE: {
+            POINT p{ GET_X_LPARAM(l), GET_Y_LPARAM(l) };
+            int hit = -1;
+            for (size_t i = 0; i < g_menuItemRects.size(); i++) {
+                if (PtInRect(&g_menuItemRects[i], p) && g_menuItems[i].cmd != ID_TRAY_SEP) {
+                    hit = (int)i; break;
+                }
+            }
+            if (hit != g_menuHover) { g_menuHover = hit; InvalidateRect(h, nullptr, FALSE); }
+            return 0;
+        }
+        case WM_LBUTTONDOWN: {
+            POINT p{ GET_X_LPARAM(l), GET_Y_LPARAM(l) };
+            RECT cr; GetClientRect(h, &cr);
+            if (!PtInRect(&cr, p)) { closeTrayMenu(); return 0; } // 点窗口外：关闭
+            for (size_t i = 0; i < g_menuItemRects.size(); i++) {
+                if (PtInRect(&g_menuItemRects[i], p) && g_menuItems[i].cmd != ID_TRAY_SEP) {
+                    execMenuCmd(g_menuItems[i].cmd);
+                    return 0;
+                }
+            }
+            return 0;
+        }
+        case WM_KEYDOWN:
+            if (w == VK_ESCAPE) { closeTrayMenu(); return 0; }
+            return 0;
+        case WM_ACTIVATE:
+            if (LOWORD(w) == WA_INACTIVE) closeTrayMenu();
+            return 0;
+        case WM_KILLFOCUS:
+            closeTrayMenu();
+            return 0;
+        case WM_DESTROY:
+            g_menuHwnd = nullptr;
+            return 0;
+        }
+        return DefWindowProcW(h, m, w, l);
+    }
+
+    static void closeTrayMenu() {
+        if (g_menuHwnd) {
+            ReleaseCapture();
+            DestroyWindow(g_menuHwnd);
+            g_menuHwnd = nullptr;
+        }
+    }
+
+    static void execMenuCmd(int cmd) {
+        closeTrayMenu();
+        if (cmd == ID_TRAY_SHOW) {
+            if (!IsWindowVisible(g_hwnd)) {
+                SetWindowPos(g_hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+                showWindowAnimated(g_hwnd, SW_SHOW);
+            } else hideWindowAnimated(g_hwnd);
+        } else if (cmd == ID_TRAY_MIN) {
+            hideWindowAnimated(g_hwnd);
+        } else if (cmd == ID_TRAY_EXIT) {
+            Shell_NotifyIconW(NIM_DELETE, &g_nid);
+            g_trayActive = false;
+            DestroyWindow(g_hwnd);
+        }
+    }
+
+    static void showTrayMenu() {
+        if (g_menuHwnd) closeTrayMenu();
+        bool hidden = !IsWindowVisible(g_hwnd);
+        g_menuItems.clear();
+        g_menuItems.push_back({ hidden ? L"显示窗口" : L"隐藏窗口", ID_TRAY_SHOW });
+        g_menuItems.push_back({ L"隐藏到托盘", ID_TRAY_MIN });
+        g_menuItems.push_back({ L"", ID_TRAY_SEP });
+        g_menuItems.push_back({ L"退出", ID_TRAY_EXIT, true });
+
+        int scale = GetDpiForSystem() / 96;
+        int itemH = 34 * scale;
+        int padY  = 6 * scale;
+        int w = 170 * scale;
+        int seps = 0;
+        for (auto& it : g_menuItems) if (it.cmd == ID_TRAY_SEP) seps++;
+        int itemCount = (int)g_menuItems.size() - seps;
+        int h = padY * 2 + itemH * itemCount + 8 * scale * seps;
+
+        g_menuItemRects.assign(g_menuItems.size(), RECT{});
+        int y = padY;
+        for (size_t i = 0; i < g_menuItems.size(); i++) {
+            if (g_menuItems[i].cmd == ID_TRAY_SEP) {
+                g_menuItemRects[i] = { 0, y, w, y + 8 * scale };
+                y += 8 * scale;
+            } else {
+                g_menuItemRects[i] = { 0, y, w, y + itemH };
+                y += itemH;
+            }
+        }
+        g_menuW = w; g_menuH = h;
+
+        // 定位到托盘图标矩形（根治 GetMessagePos 陈旧坐标导致菜单位置飘的问题）
+        RECT ri{};
+        NOTIFYICONIDENTIFIER ni{sizeof(ni)};
+        ni.hWnd = g_hwnd;
+        ni.uID  = g_nid.uID;
+        BOOL gotRect = (Shell_NotifyIconGetRect(&ni, &ri) == S_OK);
+        if (!gotRect) { POINT p; GetCursorPos(&p); ri = { p.x, p.y, p.x + 1, p.y + 1 }; }
+        HMONITOR mon = MonitorFromRect(&ri, MONITOR_DEFAULTTONEAREST);
+        MONITORINFO mi{sizeof(mi)}; GetMonitorInfoW(mon, &mi);
+        int x = ri.right - w;            // 右对齐图标右缘
+        int yy = ri.top - h;             // 默认向上展开
+        if (yy < mi.rcWork.top) yy = ri.bottom; // 顶部任务栏则向下展开
+        if (x < mi.rcWork.left) x = mi.rcWork.left;
+        if (x + w > mi.rcWork.right) x = mi.rcWork.right - w;
+
+        if (!g_menuClassReg) {
+            WNDCLASSEXW mc{sizeof(mc)};
+            mc.lpfnWndProc   = TrayMenuProc;
+            mc.hInstance     = g_hinst;
+            mc.lpszClassName = L"QQ_TrayMenu";
+            mc.hCursor       = LoadCursorW(nullptr, IDC_ARROW);
+            mc.hbrBackground = CreateSolidBrush(MENU_BG);
+            RegisterClassExW(&mc);
+            g_menuClassReg = true;
+        }
+        if (!g_menuHwnd) {
+            g_menuHwnd = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+                L"QQ_TrayMenu", L"", WS_POPUP, x, yy, w, h, nullptr, nullptr, g_hinst, nullptr);
+            DWORD round = 2; // DWMWCP_ROUND
+            DwmSetWindowAttribute(g_menuHwnd, 33, &round, sizeof(round));
+            MARGINS m = {0,0,0,1};
+            DwmExtendFrameIntoClientArea(g_menuHwnd, &m);
+        } else {
+            SetWindowPos(g_menuHwnd, nullptr, x, yy, w, h, SWP_NOZORDER);
+        }
+        g_menuHover = -1;
+        ShowWindow(g_menuHwnd, SW_SHOW);
+        SetWindowPos(g_menuHwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+        UpdateWindow(g_menuHwnd);
+        SetCapture(g_menuHwnd);
+    }
+
+    static void showSplash(HINSTANCE hi, int w, int h) {
     if (!g_cfg.value("/window/splash"_json_pointer, false)) return;
     WNDCLASSEXW sc{sizeof(sc)};
     sc.lpfnWndProc  = SplashProc;
@@ -4454,26 +4658,10 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
             showWindowAnimated(g_hwnd, SW_SHOW);
             ipc_emit("tray.doubleClick");
             break;
-        case WM_RBUTTONUP: {
+        case WM_RBUTTONUP:
             ipc_emit("tray.rightClick");
-            HMENU hMenu = CreatePopupMenu();
-            bool hidden = !IsWindowVisible(g_hwnd);
-            AppendMenuW(hMenu, MF_STRING, ID_TRAY_SHOW, hidden ? L"显示窗口" : L"隐藏窗口");
-            AppendMenuW(hMenu, MF_STRING, ID_TRAY_MIN, L"隐藏到托盘");
-            AppendMenuW(hMenu, MF_SEPARATOR, 0, nullptr);
-            AppendMenuW(hMenu, MF_STRING, ID_TRAY_EXIT, L"退出");
-            POINT pt;
-            DWORD msgPos = GetMessagePos();
-            pt.x = GET_X_LPARAM(msgPos);
-            pt.y = GET_Y_LPARAM(msgPos);
-            SetForegroundWindow(g_hwnd);
-            TrackPopupMenu(hMenu, TPM_RIGHTALIGN | TPM_BOTTOMALIGN,
-                           pt.x, pt.y, 0, g_hwnd, nullptr);
-            // 经典要求：弹出菜单后发一个空消息，确保菜单能正确消失
-            PostMessageW(g_hwnd, WM_NULL, 0, 0);
-            DestroyMenu(hMenu);
+            showTrayMenu();
             break;
-        }
         }
         return 0;
 
@@ -4548,6 +4736,7 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
 // ================================================================
 
 int WINAPI wWinMain(HINSTANCE hi, HINSTANCE, LPWSTR, int ns) {
+    g_hinst = hi;
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
 
