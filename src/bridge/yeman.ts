@@ -1049,11 +1049,15 @@ const PLAN_ID = '1cb8b882-a900-4b9f-9bac-99d151e64441';
 const SUB_GUID = '4f971e89-eebd-4455-a8de-9e59040e7347'; // 电源按钮（CAPS）
 const ITEM_GUID = '7648efa3-dd9c-4e3e-b566-50f929386280';
 
-// 电源按钮循环：0=不操作, 2=S3 睡眠, 3=S4 休眠
+// 电源按钮循环。val 是 powercfg 实际写入注册表的【动作值】，绝不是 powercfg 列表里的显示序号(index)！
+// ⚠️ 易错点：powercfg /query 的「Possible values」第一列是显示序号(0,1,2,3,4)，
+//   第二列 00000002 才是真正动作值。睡眠必须写 2(0x02)，写 1 会得到非法值 0x01 导致电源键失灵。
+//   合法动作值：0=不操作, 2=睡眠(S3), 3=休眠(S4), 6=关机, 8=关闭显示器。
 const POWER_BTN_QUEUE = [
-  { val: '2', name: 'S3 睡眠到内存' },
-  { val: '3', name: 'S4 休眠到硬盘' },
-  { val: '0', name: '不操作' },
+  { val: '2', name: 'S3 睡眠到内存' }, // idx 0
+  { val: '3', name: 'S4 休眠到硬盘' }, // idx 1
+  { val: '0', name: '不操作' },        // idx 2
+  { val: '8', name: '关闭显示器' },    // idx 3（对应 powercfg 值 0x08）
 ] as const;
 export type PowerBtnIdx = 0 | 1 | 2;
 export function powerBtnName(idx: PowerBtnIdx): string {

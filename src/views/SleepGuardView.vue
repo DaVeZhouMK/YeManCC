@@ -284,6 +284,7 @@ refresh();
             { value: 0, label: 'S3 睡眠' },
             { value: 1, label: 'S4 休眠' },
             { value: 2, label: '不操作' },
+            { value: 3, label: '关闭显示器' },
           ]"
           color="ac"
           @update:model-value="(v: number) => onPwrBtn(true, v as PowerBtnIdx)"
@@ -297,6 +298,7 @@ refresh();
             { value: 0, label: 'S3 睡眠' },
             { value: 1, label: 'S4 休眠' },
             { value: 2, label: '不操作' },
+            { value: 3, label: '关闭显示器' },
           ]"
           color="dc"
           @update:model-value="(v: number) => onPwrBtn(false, v as PowerBtnIdx)"
