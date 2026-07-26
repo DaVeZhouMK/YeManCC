@@ -1049,17 +1049,17 @@ const PLAN_ID = '1cb8b882-a900-4b9f-9bac-99d151e64441';
 const SUB_GUID = '4f971e89-eebd-4455-a8de-9e59040e7347'; // 电源按钮（CAPS）
 const ITEM_GUID = '7648efa3-dd9c-4e3e-b566-50f929386280';
 
-// 电源按钮循环。val 是 powercfg 实际写入注册表的【动作值】，绝不是 powercfg 列表里的显示序号(index)！
-// ⚠️ 易错点：powercfg /query 的「Possible values」第一列是显示序号(0,1,2,3,4)，
-//   第二列 00000002 才是真正动作值。睡眠必须写 2(0x02)，写 1 会得到非法值 0x01 导致电源键失灵。
-//   合法动作值：0=不操作, 2=睡眠(S3), 3=休眠(S4), 6=关机, 8=关闭显示器。
+// 电源按钮循环。val 是 powercfg 实际写入注册表的【动作值】(十进制，powercfg 原样写入)。
+// ⚠️ 用户实测指定映射：不操作=0 / 睡眠=1 / 休眠=2 / 关闭显示器=4（即注册表 0x00/0x01/0x02/0x04）。
+//   注：0x01、0x04 并非 Windows 标准合法动作码（标准仅 0/2/3/6/8），写入后电源键行为由用户自测。
+//   检测(getPowerBtnIdx)与写入(setPowerBtnIdx)统一以本表 val 为准——注册表值原样回映到 idx。
 const POWER_BTN_QUEUE = [
-  { val: '2', name: 'S3 睡眠到内存' }, // idx 0
-  { val: '3', name: 'S4 休眠到硬盘' }, // idx 1
-  { val: '0', name: '不操作' },        // idx 2
-  { val: '8', name: '关闭显示器' },    // idx 3（对应 powercfg 值 0x08）
+  { val: '1', name: 'S3 睡眠到内存' }, // idx 0 → 写 1 (0x01)
+  { val: '2', name: 'S4 休眠到硬盘' }, // idx 1 → 写 2 (0x02)
+  { val: '0', name: '不操作' },        // idx 2 → 写 0 (0x00)
+  { val: '4', name: '关闭显示器' },    // idx 3 → 写 4 (0x04)
 ] as const;
-export type PowerBtnIdx = 0 | 1 | 2;
+export type PowerBtnIdx = 0 | 1 | 2 | 3;
 export function powerBtnName(idx: PowerBtnIdx): string {
   return POWER_BTN_QUEUE[idx].name;
 }
