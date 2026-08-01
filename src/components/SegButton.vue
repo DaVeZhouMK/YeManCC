@@ -9,24 +9,27 @@ const props = withDefaults(
     options: Opt[];
     color?: 'ac' | 'dc' | 'accent';
     full?: boolean;
+    disabled?: boolean;
   }>(),
-  { color: 'accent', full: false }
+  { color: 'accent', full: false, disabled: false }
 );
 const emit = defineEmits<{ (e: 'update:modelValue', v: string | number): void }>();
 function pick(v: string | number) {
+  if (props.disabled) return;
   emit('update:modelValue', v);
 }
 const accentVar = props.color === 'dc' ? 'var(--accent-2)' : 'var(--accent)';
 </script>
 
 <template>
-  <div class="seg" :class="{ full: full }" :style="{ '--seg-accent': accentVar }">
+  <div class="seg" :class="{ full: full, disabled: disabled }" :style="{ '--seg-accent': accentVar }">
     <button
       v-for="o in options"
       :key="o.value"
       type="button"
       class="seg-btn"
       :class="{ active: o.value === modelValue }"
+      :disabled="disabled"
       @click="pick(o.value)"
     >
       {{ o.label }}
@@ -76,5 +79,16 @@ const accentVar = props.color === 'dc' ? 'var(--accent-2)' : 'var(--accent)';
 }
 .seg-btn:focus-visible {
   box-shadow: var(--focus-ring);
+}
+/* 禁用态：整体变暗 + 取消鼠标响应，视觉上明确表达"已锁定" */
+.seg.disabled {
+  opacity: 0.45;
+  pointer-events: none;
+}
+.seg.disabled .seg-btn {
+  cursor: default;
+}
+.seg.disabled .seg-btn.active {
+  opacity: 0.65;
 }
 </style>

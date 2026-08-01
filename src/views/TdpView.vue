@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, nextTick, inject } from 'vue';
+import { ref, reactive, computed, onMounted, nextTick, inject, watch, type Ref } from 'vue';
 import Slider from '@/components/Slider.vue';
 import Toggle from '@/components/Toggle.vue';
 import Dropdown from '@/components/Dropdown.vue';
@@ -17,15 +17,20 @@ import {
   type Vendor,
 } from '@/bridge/yeman';
 import { useWakeTaskStore } from '@/stores/wakeTask';
+import InlineIcon from '@/components/InlineIcon.vue';
 
 const powerMode = ref<'ac' | 'dc'>('ac');
 const cpuName = ref('检测中…');
 const vendor = ref<Vendor>('unknown');
 
-const acTdp = ref(300);
+const acTdp = ref(200);
 const dcTdp = ref(35);
-const acCeiling = ref(300);
-const dcCeiling = ref(300);
+const acCeiling = ref(200);
+const dcCeiling = ref(200);
+
+// ── 快速切换：滑块（左）+ 上限下拉（右）── 即时改当前 TDP 并记忆（写 tdp-{mode}.txt）；打开时仅作初始位置、不自动下发、不联动下方
+const quickTdp = ref(200);
+const quickCeiling = ref(200);
 
 const tasks = reactive({ acRestore: false, dcRestore: false, bootTdp: false });
 type TaskKey = keyof typeof tasks;
@@ -37,7 +42,8 @@ const busy = ref(false);
 const errMsg = ref('');
 
 const ceilingOpts = TDP_CEILINGS.map((v) => ({ value: v, label: v + ' W' }));
-const modeLabel = computed(() => (powerMode.value === 'ac' ? '🔌 当前电源为 AC 模式' : '🔋 当前电源为 DC 模式'));
+const modeLabel = computed(() => (powerMode.value === 'ac' ? '当前电源为 AC 模式' : '当前电源为 DC 模式'));
+const modeIcon = computed(() => (powerMode.value === 'ac' ? 'plug' : 'battery'));
 
 async function refreshModeAndCpu() {
   // 并行检测（不串行等待）
@@ -61,6 +67,14 @@ async function loadValues() {
     dcTdp.value = dRes.value;
     dcCeiling.value = smallestCeiling(dRes.value);
   }
+  // 顶部快速切换初始显示「当前电源模式」记忆值（仅作拖动条初始位置；打开时不自动下发硬件）
+  if (powerMode.value === 'ac') {
+    quickTdp.value = acTdp.value;
+    quickCeiling.value = acCeiling.value;
+  } else {
+    quickTdp.value = dcTdp.value;
+    quickCeiling.value = dcCeiling.value;
+  }
 }
 
 async function loadTasks() {
@@ -83,23 +97,42 @@ async function safeExists(name: string): Promise<boolean> {
   }
 }
 
+// ── 快速切换：滑块(左) + 上限下拉(右) 提交 ──
+// 即时改「当前电源模式」TDP：下发硬件 + 记忆写入 tdp-{mode}.txt（下次打开作初始位置）；
+// 打开页面时仅读 txt 作拖动条初始位置，不会自动下发硬件；不联动下方 AC/DC 配置滑块。
+async function onQuickCommit(v: number) {
+  quickTdp.value = v;
+  await applyTdp(powerMode.value, v, { save: true });
+}
+// 选上限档：把当前模式 TDP 即时设为该上限，下发硬件并记忆
+function onQuickCeiling(v: number) {
+  quickCeiling.value = v;
+  applyTdp(powerMode.value, v, { save: true });
+}
+
+// AC/DC 浮动上限滑块：纯后台——只写 txt（持久化配置），不实发；靠开机/计划任务/TPD 读 txt 应用
 async function onAcCommit(v: number) {
-  await applyTdp('ac', v);
+  await applyTdp('ac', v, { apply: false });
 }
 async function onDcCommit(v: number) {
-  await applyTdp('dc', v);
+  await applyTdp('dc', v, { apply: false });
 }
-async function applyTdp(mode: 'ac' | 'dc', v: number) {
+async function applyTdp(
+  mode: 'ac' | 'dc',
+  v: number,
+  opts: { apply?: boolean; save?: boolean } = {}
+) {
   errMsg.value = '';
   try {
-    const apply = mode === powerMode.value;
-    await setTdp(mode, v, { apply, vendor: vendor.value });
+    const apply = opts.apply ?? mode === powerMode.value;
+    const save = opts.save ?? true;
+    await setTdp(mode, v, { apply, vendor: vendor.value, save });
   } catch (e) {
     errMsg.value = 'TDP 下发失败：' + (e as Error).message + '（可能需要以管理员身份运行）';
   }
 }
 
-// 选上限档：把当前值直接设为该上限（省去再拖动一次，对齐 HTA ddSelect）
+// 选上限档：把当前模式 TDP 浮动上限设为该值（纯后台写 txt）
 function onCeiling(mode: 'ac' | 'dc', val: number) {
   if (mode === 'ac') {
     acCeiling.value = val;
@@ -167,24 +200,60 @@ onMounted(async () => {
     <div class="statusbar">
       <div>
         <div class="sb-cpu">{{ cpuName }}</div>
-        <div class="sb-sub muted">{{ modeLabel }}</div>
+        <div class="sb-sub muted"><InlineIcon :name="modeIcon" /> {{ modeLabel }}</div>
       </div>
     </div>
 
     <div v-if="errMsg" class="err-bar">{{ errMsg }}</div>
 
+    <!-- 快速切换 TDP：滑块(左) + 上限下拉(右)，作用于当前电源模式 -->
+    <section class="card quick-card">
+      <h3 class="card-title"><InlineIcon name="tdp" /> 快速切换 TDP</h3>
+      <div class="quick-row">
+        <Slider
+          v-model="quickTdp"
+          :min="TDP_MIN"
+          :max="quickCeiling"
+          :step="1"
+          label="TDP 当前值"
+          unit="W"
+          color="accent"
+          @commit="onQuickCommit"
+        />
+        <Dropdown
+          class="quick-ceiling"
+          :model-value="quickCeiling"
+          :options="ceilingOpts"
+          color="accent"
+          width="92px"
+          @change="onQuickCeiling"
+        />
+      </div>
+    </section>
+
     <section class="card">
-      <h3 class="card-title">🔌 AC 插电 TDP 上限</h3>
-      <Slider
-        v-model="acTdp"
-        :min="TDP_MIN"
-        :max="acCeiling"
-        :step="1"
-        :label="'TDP 上限'"
-        :unit="'W'"
-        color="ac"
-        @commit="onAcCommit"
-      />
+      <h3 class="card-title"><InlineIcon name="plug" /> AC 插电 TDP 浮动上限</h3>
+      <div class="tdp-row">
+        <Slider
+          v-model="acTdp"
+          :min="TDP_MIN"
+          :max="acCeiling"
+          :step="1"
+          :label="'TDP 浮动上限'"
+          :unit="'W'"
+          color="ac"
+          @commit="onAcCommit"
+        />
+        <Dropdown
+          class="quick-ceiling"
+          :model-value="acCeiling"
+          :options="ceilingOpts"
+          color="ac"
+          aria-label="AC上限"
+          width="92px"
+          @change="(v: number) => onCeiling('ac', v)"
+        />
+      </div>
       <Toggle
         v-model="tasks.acRestore"
         label="插电恢复 TDP"
@@ -193,31 +262,31 @@ onMounted(async () => {
         :disabled="busy"
         @update:model-value="(v: boolean) => toggleTaskSafe('TDP-插电AC模式TDP调节', v, 'acRestore')"
       />
-      <div class="row">
-        <span class="row-label">AC滑块最大值</span>
-        <Dropdown
-          :model-value="acCeiling"
-          :options="ceilingOpts"
-          color="ac"
-          aria-label="AC滑块最大值"
-          width="120px"
-          @change="(v: number) => onCeiling('ac', v)"
-        />
-      </div>
     </section>
 
     <section class="card">
-      <h3 class="card-title">🔋 DC 离电 TDP 上限</h3>
-      <Slider
-        v-model="dcTdp"
-        :min="TDP_MIN"
-        :max="dcCeiling"
-        :step="1"
-        :label="'TDP 上限'"
-        :unit="'W'"
-        color="dc"
-        @commit="onDcCommit"
-      />
+      <h3 class="card-title"><InlineIcon name="battery" /> DC 离电 TDP 浮动上限</h3>
+      <div class="tdp-row">
+        <Slider
+          v-model="dcTdp"
+          :min="TDP_MIN"
+          :max="dcCeiling"
+          :step="1"
+          :label="'TDP 浮动上限'"
+          :unit="'W'"
+          color="dc"
+          @commit="onDcCommit"
+        />
+        <Dropdown
+          class="quick-ceiling"
+          :model-value="dcCeiling"
+          :options="ceilingOpts"
+          color="dc"
+          aria-label="DC上限"
+          width="92px"
+          @change="(v: number) => onCeiling('dc', v)"
+        />
+      </div>
       <Toggle
         v-model="tasks.dcRestore"
         label="离电恢复 TDP"
@@ -226,21 +295,10 @@ onMounted(async () => {
         :disabled="busy"
         @update:model-value="(v: boolean) => toggleTaskSafe('TDP-离电DC模式TDP调节', v, 'dcRestore')"
       />
-      <div class="row">
-        <span class="row-label">DC滑块最大值</span>
-        <Dropdown
-          :model-value="dcCeiling"
-          :options="ceilingOpts"
-          color="dc"
-          aria-label="DC滑块最大值"
-          width="120px"
-          @change="(v: number) => onCeiling('dc', v)"
-        />
-      </div>
     </section>
 
     <section class="card">
-      <h3 class="card-title">⚡ 任务计划启动 TDP 最大值</h3>
+      <h3 class="card-title"><InlineIcon name="calendar" /> 任务计划启动 TDP 最大值</h3>
       <Toggle
         v-model="tasks.bootTdp"
         label="开机启动 TDP + 电源预设"
@@ -310,5 +368,35 @@ onMounted(async () => {
   justify-content: space-between;
   gap: 10px;
   margin-top: 8px;
+}
+/* ── AC/DC 浮动上限行 + 上限下拉 + 内联锁定按钮 ── */
+.tdp-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.tdp-row > .slider {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+/* ── 快速切换 TDP：滑块(左) + 上限下拉(右) ── */
+.quick-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 4px;
+}
+.quick-row > .slider {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.quick-ceiling {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+}
+.quick-ceiling :deep(.dd-trigger) {
+  height: 40px;
+  min-height: 40px;
 }
 </style>

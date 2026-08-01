@@ -1,8 +1,11 @@
 <script setup lang="ts">
+import InlineIcon from './InlineIcon.vue';
+
 type State = 'on' | 'off' | 'ac' | 'dc' | 'warn';
 withDefaults(
   defineProps<{
     title?: string;
+    icon?: string;
     state?: State;
     text?: string;
     value?: string;
@@ -22,7 +25,9 @@ const dotColor: Record<State, string> = {
   <div class="state-card">
     <span class="dot" :style="{ background: dotColor[state] }"></span>
     <div class="sc-body">
-      <div class="sc-title" v-if="title">{{ title }}</div>
+      <div class="sc-title" v-if="title || icon">
+        <InlineIcon v-if="icon" :name="icon" /> {{ title }}
+      </div>
       <div class="sc-text" v-if="text">{{ text }}</div>
     </div>
     <div class="sc-value" v-if="value">{{ value }}</div>

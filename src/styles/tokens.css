@@ -1,8 +1,12 @@
 :root {
   /* ── 视觉令牌（沿用 PLAN §四，规范化截图） ── */
-  --bg: #0b0e13; /* 全局深色底 */
-  --bg-panel: #121722; /* 卡片底 */
-  --bg-input: #1a2230; /* 滑轨/输入底 */
+  /* 分块透明：根节点透出桌面，局部底板提供识别度，前景元素保持实色。 */
+  --glass-a: 0.03; /* 仅作为局部玻璃底板的透明度参考 */
+  --bg: transparent;
+  --bg-solid: #0b1016;
+  --bg-panel: rgba(13, 19, 28, 0.97); /* 气泡/卡片：接近实体，仅 3% 透 */
+  --bg-input: #151e2b; /* 输入、滑轨与开关底：100% 不透明 */
+  --bg-nav: rgba(11, 16, 24, 0.98); /* 导航底板：接近实体 */
   --text: #e9eef5; /* 主文字 */
   --text-dim: #8b96a8; /* 次文字 */
   --accent: #2ea6ff; /* 主蓝 (AC/选中/焦点/悬浮) */
@@ -13,7 +17,7 @@
   --radius-ctrl: 8px; /* 控件 */
   --focus-ring: 0 0 0 2px var(--accent), 0 0 12px rgba(46, 166, 255, 0.5);
 
-  --nav-w: 140px;
+  --nav-w: 105px;
 }
 
 * {
@@ -29,7 +33,7 @@ body,
 }
 
 body {
-  background: var(--bg);
+  background: transparent;
   color: var(--text);
   font-family: 'Segoe UI', 'Microsoft YaHei', system-ui, -apple-system, sans-serif;
   font-size: 13px;

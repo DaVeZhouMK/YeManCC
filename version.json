@@ -1,6 +1,6 @@
 {
-  "version": "0.0.1",
-  "notes": "首次公开版本：系统控制中心 + 掌机前端自动关闭 + 自动更新框架（完整 zip 包 + sha256 校验 + 保留 config/）。",
-  "sha256": "512507C4364DA2DEB328D8486B24A4F7DFC1509D608BB96579CB2391B4D1D0E8",
-  "publishedAt": "2026-07-25"
+  "version": "0.0.2",
+  "notes": "更新器现可同步部署 PowerControl 依赖包（保留用户 TDP/FPS/配置数据）。",
+  "sha256": "",
+  "publishedAt": ""
 }

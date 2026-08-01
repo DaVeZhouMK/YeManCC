@@ -1,10 +1,12 @@
 <script setup lang="ts">
+import InlineIcon from './InlineIcon.vue';
+
 defineProps<{ text: string }>();
 </script>
 
 <template>
   <div class="warn-bar">
-    <span class="warn-icon">⚠</span>
+    <span class="warn-icon"><InlineIcon name="warning" /></span>
     <span class="warn-text">{{ text }}</span>
   </div>
 </template>

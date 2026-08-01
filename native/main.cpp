@@ -35,6 +35,7 @@
 #include <unordered_map>
 #include <filesystem>
 #include <fstream>
+#include <sstream>
 #include <limits>
 #include <cstring>
 #include <cstdlib>
@@ -163,7 +164,7 @@ static bool is_allowed_shell_target(const std::string& target) {
         }
 
         auto scheme = lower.substr(0, colon + 1);
-        return scheme == "http:" || scheme == "https:" || scheme == "mailto:" || scheme == "file:";
+        return scheme == "http:" || scheme == "https:" || scheme == "mailto:" || scheme == "file:" || scheme == "steam:";
     }
 
     return value.rfind("\\\\", 0) == 0;
@@ -293,6 +294,9 @@ static bool g_startMinimized = false; // 启动参数 --minimized：开机最小
 // ── 按键呼出（后台手柄呼出）──
 static bool g_summonEnabled = true;   // 「按键呼出」开关：后台按住 LB+RB 呼出程序（设置可关，默认开）
 static bool g_bDoubleMinimize = true; // 双击 B 最小化到托盘（设置可关）
+static HWND g_prevForeground = nullptr; // 呼出前的前台窗口（游戏）：双击 B 关闭后归还其焦点
+static ULONGLONG g_returnFocusDeadline = 0; // 双击 B 后回游戏焦点的截止时间
+static int g_summonFocusRetries = 0; // 呼出后的有限延迟对焦次数
 static bool g_tdpShortcut = false;    // Start + 上/下 快捷调节 TDP（前端处理，持久化在 native）
 static bool g_fpsShortcut = false;    // Start + 左/右 快捷调节 RTSS 锁帧（前端处理，持久化在 native）
 static bool g_killGame = false;       // 选择(Back) + B 长按 0.5s → 结束当前游戏（执行 KiLL-EXE.bat）
@@ -345,6 +349,9 @@ static std::unordered_map<std::string, bool> g_permissions; // cmd -> allowed
 #define ID_TRAY_EXIT 4003
 #define ID_TRAY_SEP  4004
 static NOTIFYICONDATAW g_nid = {};
+static bool            g_taskbarResident = false; // 任务栏常驻开关（前端 tray.create/remove 同步，默认不常驻）
+static HANDLE          g_xboxThread = nullptr; // Xbox/全屏游戏检测线程句柄
+static std::atomic<bool> g_xboxActive{false};  // 检测线程启停（前端 xbox.setActive 控制）
 static HINSTANCE       g_hinst = nullptr;
 static HWND            g_menuHwnd = nullptr;
 struct TrayMenuItem { std::wstring label; int cmd; bool danger = false; };
@@ -360,10 +367,12 @@ static const COLORREF MENU_DIM    = RGB(0x8b,0x96,0xa8);
 static const COLORREF MENU_HOVER  = RGB(0x1a,0x22,0x30);
 static const COLORREF MENU_SEP     = RGB(0x2a,0x33,0x42);
 static const COLORREF MENU_DANGER = RGB(0xe5,0x48,0x4d);
-static const int MENU_RADIUS = 12;
+static const int MENU_RADIUS = 14; // +15% 气泡放大
 static bool            g_trayActive = false;
 static HICON           g_appIconLarge = nullptr;
 static HICON           g_appIconSmall = nullptr;
+static HICON           g_memTrayIcon  = nullptr; // 内存变色托盘图标（动态生成，用完 DestroyIcon）
+static int             g_memTrayLevel = -1;      // 上次内存档位：-1=未初始化 0=黑(<80) 1=黄(80-90) 2=红(90+)
 
 static HICON loadAppIcon(HINSTANCE hInstance, int cx, int cy) {
     HICON icon = (HICON)LoadImageW(
@@ -438,6 +447,7 @@ static std::vector<DWORD> g_acSwitchTicks;          // 5 秒滑动窗口内的�
 #define ACDC_DEBOUNCE_MS  5000    // 每次变化后延迟 5s 刷新；期间再变化则顺延重新计时
 #define ACDC_BURST_MS     5000    // 熔断滑动窗口 = 5s
 #define ACDC_BURST_LIMIT  10      // 5s 内 >10 次切换 → 直接退出，防止系统卡死
+#define MEM_TRAY_TIMER_ID 0xA201  // 内存变色托盘图标刷新（30 s）
 
 // ================================================================
 //  睡眠守护（Sleep Guard）— 见 docs/sleep-guard-design.md v5
@@ -498,6 +508,32 @@ static std::wstring sgBaseName(const std::wstring& path) { // 取文件名并去
 static void sgWriteFile(const std::wstring& path, const std::string& content) {
     std::ofstream f(path, std::ios::binary);
     if (f) f.write(content.data(), (std::streamsize)content.size());
+}
+// 原子写：先写同目录临时文件，再用 MoveFileEx / ReplaceFileW 替换目标。
+// 关键（RTSS 配置损坏根因）：绝不回退到「截断式写」。RTSS 在游戏内持续读取
+// Profiles\Global，一旦被读到半截就会解析崩溃 / 配置损坏（损坏后 RTSS 无法启动，必须删配置）。
+// 若目标被 RTSS 钩子短暂占用导致替换失败 → 重试若干次；仍失败则保留原文件、返回 false（绝不截断）。
+static bool sgWriteFileAtomic(const std::wstring& path, const std::string& content) {
+    std::wstring tmp = path + L".ymcc.tmp";
+    {
+        std::ofstream f(tmp, std::ios::binary | std::ios::trunc);
+        if (!f) return false;
+        f.write(content.data(), (std::streamsize)content.size());
+        f.flush();
+    }
+    // 1) 首选 MoveFileEx（原子替换）。目标可能被 RTSS 钩子短暂占用 → 重试。
+    for (int attempt = 0; attempt < 6; attempt++) {
+        if (MoveFileExW(tmp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+            return true;
+        if (attempt < 5) Sleep(50);
+    }
+    // 2) 退路 ReplaceFileW：专为「目标可能正被其它进程打开」设计，
+    //    把旧文件让位、新文件顶上，比 MoveFileEx 更能扛占用。
+    if (ReplaceFileW(path.c_str(), tmp.c_str(), nullptr, REPLACEFILE_WRITE_THROUGH, nullptr, 0))
+        return true;
+    // 3) 仍失败：原文件保持完整（不截断！），清理临时文件后返回 false，由调用方决定是否重试。
+    DeleteFileW(tmp.c_str());
+    return false;
 }
 static std::string sgReadFile(const std::wstring& path) {
     std::ifstream f(path, std::ios::binary);
@@ -684,13 +720,57 @@ static DWORD WINAPI autoCloseThread(LPVOID) {
     }
     return 0;
 }
-// 将已隐藏/后台的窗口带到前台（绕过前台锁限制，AttachThreadInput 附加到前台线程）
+// 将已隐藏/后台的窗口带到前台（绕过前台锁，可靠抢焦）
+// 主动把键盘/手柄焦点交给 WebView（不依赖 WM_SETFOCUS 是否被触发）：
+// 前台锁可能拒绝后台进程的 SetForegroundWindow，导致窗口可见但 WebView 文档未获焦点，
+// 进而 getGamepads() 冻结、手柄内容页无法对焦。经 AttachThreadInput 抢前台 + 重试，
+// 再显式 MoveFocus 把导航焦点交给 WebView（对齐可用的 YeManCC5 行为）。
+#define SUMMON_FOCUS_TIMER_ID 0x5A31
+#define RETURN_GAME_FOCUS_TIMER_ID 0x5A32
+static void refocusWebView() {
+    if (!g_hwnd || !IsWindow(g_hwnd)) return;
+    if (IsIconic(g_hwnd) || !IsWindowVisible(g_hwnd)) ShowWindow(g_hwnd, SW_RESTORE);
+    for (int i = 0; i < 6; ++i) {
+        HWND fg = GetForegroundWindow();
+        DWORD fgTid = fg ? GetWindowThreadProcessId(fg, nullptr) : 0;
+        DWORD myTid = GetCurrentThreadId();
+        bool att = fgTid && fgTid != myTid && AttachThreadInput(myTid, fgTid, TRUE);
+        SetForegroundWindow(g_hwnd);
+        SetActiveWindow(g_hwnd);
+        if (att) AttachThreadInput(myTid, fgTid, FALSE);
+        if (GetForegroundWindow() == g_hwnd) break;
+        Sleep(25);
+    }
+    if (g_ctrl) g_ctrl->MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC);
+}
+
+static bool refocusPreviousWindow() {
+    HWND target = g_prevForeground;
+    if (!target || target == g_hwnd || !IsWindow(target)) return false;
+    HWND fg = GetForegroundWindow();
+    DWORD fgTid = fg ? GetWindowThreadProcessId(fg, nullptr) : 0;
+    DWORD myTid = GetCurrentThreadId();
+    bool attached = fgTid && fgTid != myTid && AttachThreadInput(myTid, fgTid, TRUE);
+    SetForegroundWindow(target);
+    SetActiveWindow(target);
+    if (attached) AttachThreadInput(myTid, fgTid, FALSE);
+    return GetForegroundWindow() == target;
+}
+
 static void bringToFront(HWND hwnd) {
     if (!hwnd) return;
-    if (!IsWindowVisible(hwnd)) ShowWindow(hwnd, SW_RESTORE);
-    // 置顶：呼出后位于所有窗口之上（含无边框全屏游戏），且不受“前台锁”限制——
-    // 否则后台进程首次 SetForegroundWindow 会被 Windows 静默拒绝，表现为“必须点击一次才弹出来”
+    // 最小化(WS_VISIBLE 仍在但已收进任务栏，IsWindowVisible 仍返回 TRUE)也必须恢复，
+    // 否则呼出/抢焦时 ShowWindow 被跳过 → 窗口仍是最小化、看不到（"程序觉得有页面但实际没有"）。
+    if (IsIconic(hwnd) || !IsWindowVisible(hwnd)) ShowWindow(hwnd, SW_RESTORE);
+    // 置顶：呼出后位于所有窗口之上（含无边框全屏游戏）
     SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+    // 可靠抢焦：后台进程直接 SetForegroundWindow 会被 Windows 前台锁静默拒绝
+    // （表现为"必须点击一次才弹出来"）。模拟一次 Alt 按键使系统认为本进程在调用菜单，
+    // 从而合法赋予前台；再附加前台线程兜底，兼容个别驱动/独占全屏。
+    INPUT inp = {0};
+    inp.type = INPUT_KEYBOARD;
+    inp.ki.wVk = VK_MENU;
+    SendInput(1, &inp, sizeof(INPUT));
     HWND fg = GetForegroundWindow();
     DWORD fgTid = fg ? GetWindowThreadProcessId(fg, nullptr) : 0;
     DWORD myTid = GetCurrentThreadId();
@@ -698,6 +778,14 @@ static void bringToFront(HWND hwnd) {
     if (fgTid && fgTid != myTid) attached = AttachThreadInput(myTid, fgTid, TRUE) != 0;
     SetForegroundWindow(hwnd);
     if (attached) AttachThreadInput(myTid, fgTid, FALSE);
+    inp.ki.dwFlags = KEYEVENTF_KEYUP;
+    SendInput(1, &inp, sizeof(INPUT));
+    // 主动把焦点交给 WebView（不依赖 WM_SETFOCUS）：否则窗口可见但文档未获焦点，
+    // getGamepads() 冻结、手柄内容页无法对焦。
+    refocusWebView();
+    // 呼出后在 UI 线程做有限次延迟重试，覆盖 WebView 尚未完成恢复/导航的窗口。
+    g_summonFocusRetries = 0;
+    SetTimer(g_hwnd, SUMMON_FOCUS_TIMER_ID, 80, nullptr);
 }
 // 后台手柄轮询线程：检测任意手柄 LB+RB 同时按住满 0.5 秒 → 呼出程序（仅当窗口未在前台时）
 static void hideWindowAnimated(HWND hwnd); // 前向声明（本线程要用）
@@ -730,10 +818,12 @@ static DWORD WINAPI gamepadSummonThread(LPVOID) {
         bool selectHeld = false;  // 选择(Back) 键
         bool xPressed = false;    // X 键
         bool dpUp = false, dpDown = false, dpLeft = false, dpRight = false;
+        XINPUT_STATE live = {}; bool haveLive = false;
         for (DWORD i = 0; i < 4; i++) {
             XINPUT_STATE s; ZeroMemory(&s, sizeof(s));
             if (XInputGetState(i, &s) == ERROR_SUCCESS) {
                 WORD w = s.Gamepad.wButtons;
+                if (!haveLive) { live = s; haveLive = true; } // 捕获首个已连手柄完整状态供前端转发
                 if ((w & XINPUT_GAMEPAD_LEFT_SHOULDER) && (w & XINPUT_GAMEPAD_RIGHT_SHOULDER)) {
                     both = true;
                 }
@@ -753,20 +843,28 @@ static DWORD WINAPI gamepadSummonThread(LPVOID) {
             if (g_summonEnabled && g_bDoubleMinimize && IsWindowVisible(g_hwnd) && (now - lastBPress) <= B_DOUBLE_MS) {
                 lastBPress = 0;
                 hideWindowAnimated(g_hwnd);
+                // 先立即回焦；独占全屏/前台锁拒绝时交给消息线程限时重试。
+                g_returnFocusDeadline = now + 1800;
+                if (!refocusPreviousWindow() && IsWindow(g_prevForeground))
+                    SetTimer(g_hwnd, RETURN_GAME_FOCUS_TIMER_ID, 35, nullptr);
+                else
+                    g_prevForeground = nullptr;
+                if (g_returnFocusDeadline <= now) g_returnFocusDeadline = 0;
             } else {
                 lastBPress = now;
             }
         }
         prevB = bPressed;
-        // ── 按住 LB+RB 0.5s → 呼出（仅隐藏时）──
+        // ── 按住 LB+RB 0.5s → 任何窗口状态都强制呼出/抢焦 ──
         if (both) {
             if (holdStart == 0) holdStart = now;
             if (armed && g_summonEnabled && g_hwnd && (now - holdStart) >= HOLD_MS) {
                 armed = false;
-                // 仅当窗口隐藏在托盘时呼出。已可见（哪怕被遮挡/开始菜单在前）绝不再抢焦点，
-                // 否则按住 LB+RB 会强行把焦点从开始菜单/其它窗口抢回，表现为“手柄控制了开始菜单”。
-                if (!IsWindowVisible(g_hwnd))
-                    bringToFront(g_hwnd);
+                HWND fg = GetForegroundWindow();
+                if (fg && fg != g_hwnd) g_prevForeground = fg;
+                bringToFront(g_hwnd);
+                // 通知前端重新接管手柄导航（呼出后前端循环可能未运行/窗口可见态未刷新）
+                ipc_emit("gamepad.summon", json::object());
             }
         } else {
             holdStart = 0;
@@ -807,7 +905,46 @@ static DWORD WINAPI gamepadSummonThread(LPVOID) {
             kxHoldStart = 0;
             kxArmed = true;
         }
-        Sleep(50);
+        // ── 转发手柄状态给前端引擎（绕开 WebView2 Gamepad API 在后台/呼出时读不到手柄的限制）──
+        // 内容页导航/滑块由前端引擎消费此状态；native 仅保留全局快捷（LB+RB 呼出/B双击/Start+方向 TDP 等）。
+        // 按键索引对齐 W3C 标准 Gamepad（0=A 1=B 2=X 3=Y 4=LB 5=RB 6=LT 7=RT 8=Back 9=Start
+        // 10=LS 11=RS 12=↑ 13=↓ 14=← 15=→），轴 [LX,LY(上为负),RX,RY(上为负)] 归一化 [-1,1]。
+        {
+            static bool prevHadLive = false;
+            if (haveLive) {
+                WORD w = live.Gamepad.wButtons;
+                std::vector<int> bt(16, 0);
+                auto setb = [&](int idx, bool on) { if (on) bt[idx] = 1; };
+                setb(0,  w & XINPUT_GAMEPAD_A);
+                setb(1,  w & XINPUT_GAMEPAD_B);
+                setb(2,  w & XINPUT_GAMEPAD_X);
+                setb(3,  w & XINPUT_GAMEPAD_Y);
+                setb(4,  w & XINPUT_GAMEPAD_LEFT_SHOULDER);
+                setb(5,  w & XINPUT_GAMEPAD_RIGHT_SHOULDER);
+                setb(6,  live.Gamepad.bLeftTrigger  > 30);
+                setb(7,  live.Gamepad.bRightTrigger > 30);
+                setb(8,  w & XINPUT_GAMEPAD_BACK);
+                setb(9,  w & XINPUT_GAMEPAD_START);
+                setb(10, w & XINPUT_GAMEPAD_LEFT_THUMB);
+                setb(11, w & XINPUT_GAMEPAD_RIGHT_THUMB);
+                setb(12, w & XINPUT_GAMEPAD_DPAD_UP);
+                setb(13, w & XINPUT_GAMEPAD_DPAD_DOWN);
+                setb(14, w & XINPUT_GAMEPAD_DPAD_LEFT);
+                setb(15, w & XINPUT_GAMEPAD_DPAD_RIGHT);
+                auto norm = [](short v) { double d = v / 32767.0; if (d > 1) d = 1; if (d < -1) d = -1; return d; };
+                json st = json::object();
+                st["connected"] = true;
+                st["buttons"] = bt;
+                st["axes"] = json::array({ norm(live.Gamepad.sThumbLX), -norm(live.Gamepad.sThumbLY),
+                                           norm(live.Gamepad.sThumbRX), -norm(live.Gamepad.sThumbRY) });
+                ipc_emit("gamepad.state", st);
+                prevHadLive = true;
+            } else if (prevHadLive) {
+                ipc_emit("gamepad.state", json::object({ { "connected", false } }));
+                prevHadLive = false;
+            }
+        }
+        Sleep(10);
     }
     return 0;
 }
@@ -917,6 +1054,249 @@ static SmtLive detectSmtLive() {
     return lv;
 }
 
+// ================================================================
+//  CCD 核心控制：L3 域拓扑检测 + 全局进程亲和性（UXTU 同款思路）
+// ================================================================
+
+static int popcountPtr(ULONG_PTR m) {
+    int c = 0;
+    while (m) { c++; m &= (m - 1); }
+    return c;
+}
+
+static std::string toHexU(ULONG_PTR v) {
+    if (v == 0) return "0";
+    static const char* hex = "0123456789ABCDEF";
+    std::string s;
+    while (v) { s.push_back(hex[v & 0xF]); v >>= 4; }
+    std::reverse(s.begin(), s.end());
+    return s;
+}
+
+struct CcdTopology {
+    int logical = 0;
+    int l3Domains = 0;
+    int physicalCores = 0;
+    std::vector<std::string> ccdMasks;
+};
+
+static CcdTopology detectCcdTopology() {
+    CcdTopology t;
+    DWORD len = 0;
+    if ((GetLogicalProcessorInformationEx(RelationCache, nullptr, &len) ||
+         GetLastError() != ERROR_INSUFFICIENT_BUFFER) || len == 0) {
+        // 回退：只用 SMT 检测的逻辑核数
+        SmtLive lv = detectSmtLive();
+        t.logical = lv.logic;
+        return t;
+    }
+    std::vector<BYTE> buf(len);
+    auto* info = reinterpret_cast<SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX*>(buf.data());
+    if (!GetLogicalProcessorInformationEx(RelationCache, info, &len)) {
+        SmtLive lv = detectSmtLive();
+        t.logical = lv.logic;
+        return t;
+    }
+    std::vector<ULONG_PTR> masks;
+    int l3Records = 0;
+    BYTE* ptr = buf.data();
+    BYTE* end = buf.data() + len;
+    while (ptr < end) {
+        auto* rec = reinterpret_cast<SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX*>(ptr);
+        if (rec->Relationship == RelationCache) {
+            // 注意：SDK 10.0.26100 的 CACHE_RELATIONSHIP 用 GroupMasks[]（无 Processor 成员），
+            // 必须用 rec->Cache.GroupMasks，不能用 rec->Processor.GroupMask（那是缓存记录里不存在的联合体成员）。
+            auto& c = rec->Cache;
+            if (c.Level == 3) {              // L3 即一个 CCD 的缓存域
+                l3Records++;
+                for (WORD g = 0; g < c.GroupCount; g++) {
+                    ULONG_PTR m = (ULONG_PTR)c.GroupMasks[g].Mask;
+                    if (m) masks.push_back(m);
+                }
+            }
+        }
+        ptr += rec->Size;
+    }
+    // 去重（同一 L3 域可能跨多个 group 重复出现）
+    std::sort(masks.begin(), masks.end());
+    masks.erase(std::unique(masks.begin(), masks.end()), masks.end());
+    // 兜底：掩码为空但确有 >=2 个 L3 域（少数 AMD 把 GroupMask 报空），按逻辑核数均分
+    if (masks.empty() && l3Records >= 2) {
+        DWORD total = GetActiveProcessorCount(ALL_PROCESSOR_GROUPS);
+        if (total > 0 && total <= 64) {
+            ULONG_PTR full = ((ULONG_PTR)1 << total) - 1;
+            int per = (int)(total / l3Records);
+            for (int i = 0; i < l3Records; i++) {
+                ULONG_PTR lo = (ULONG_PTR)i * per;
+                ULONG_PTR hi = (i + 1 == l3Records) ? (ULONG_PTR)total : (ULONG_PTR)(i + 1) * per;
+                ULONG_PTR m = full & (((ULONG_PTR)1 << hi) - 1) & ~(((ULONG_PTR)1 << lo) - 1);
+                if (m) masks.push_back(m);
+            }
+        }
+    }
+    t.l3Domains = (int)masks.size();
+    // 物理核数：读取 RelationProcessor，避免把 SMT 线程误显示为核心。
+    DWORD pLen = 0;
+    if (!GetLogicalProcessorInformationEx(RelationProcessorCore, nullptr, &pLen) &&
+        GetLastError() == ERROR_INSUFFICIENT_BUFFER && pLen > 0) {
+        std::vector<BYTE> pBuf(pLen);
+        if (GetLogicalProcessorInformationEx(RelationProcessorCore,
+                reinterpret_cast<SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX*>(pBuf.data()), &pLen)) {
+            BYTE* pp = pBuf.data();
+            BYTE* pe = pBuf.data() + pLen;
+            while (pp < pe) {
+                auto* rec = reinterpret_cast<SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX*>(pp);
+                if (rec->Relationship == RelationProcessorCore) t.physicalCores++;
+                pp += rec->Size;
+            }
+        }
+    }
+    for (auto m : masks) {
+        t.ccdMasks.push_back("0x" + toHexU(m));
+        t.logical += popcountPtr(m);
+    }
+    if (t.logical == 0) {
+        SmtLive lv = detectSmtLive();
+        t.logical = lv.logic;
+    }
+    return t;
+}
+
+static std::atomic<int>       g_ccdMode{0};
+static std::vector<ULONG_PTR> g_ccdMasks;
+static std::mutex             g_ccdMutex;
+static std::unordered_set<DWORD> g_ccdSeen;
+static std::atomic<bool>      g_ccdRunning{false};
+static std::atomic<bool>      g_ccdStop{false};
+static DWORD                  g_ccdSelfPid = 0;
+static std::wstring           g_ccdSelfExe;
+
+static void writeLog(const std::string& level, const std::string& msg);  // 定义在文件后部, 前置声明供 CCD 日志用
+
+static bool ccdSkipProcess(DWORD pid, const std::wstring& exe) {
+    if (pid == 0 || pid == g_ccdSelfPid) return true;
+    static const wchar_t* skip[] = {
+        L"system", L"registry", L"smss.exe", L"csrss.exe", L"wininit.exe",
+        L"services.exe", L"lsass.exe", L"winlogon.exe", L"audiodg.exe",
+        L"dwm.exe", L"svchost.exe", nullptr
+    };
+    std::wstring lower = exe;
+    std::transform(lower.begin(), lower.end(), lower.begin(), ::towlower);
+    for (int i = 0; skip[i]; i++)
+        if (lower == skip[i]) return true;
+    if (!g_ccdSelfExe.empty() && lower == g_ccdSelfExe) return true;
+    return false;
+}
+
+// 返回: 0=成功, -1=打开失败(进程已退出/受保护), >0=SetProcessAffinityMask 的错误码
+static int ccdApplyToPid(DWORD pid, ULONG_PTR mask) {
+    HANDLE h = OpenProcess(PROCESS_SET_INFORMATION | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    if (!h) return -1;
+    BOOL ok = SetProcessAffinityMask(h, mask);
+    DWORD err = ok ? 0 : GetLastError();
+    CloseHandle(h);
+    return ok ? 0 : (int)err;
+}
+
+static void ccdApplyMode(int mode) {
+    std::lock_guard<std::mutex> lk(g_ccdMutex);
+    if (g_ccdMasks.empty()) return;
+    ULONG_PTR mask = 0;
+    if (mode == 0) {
+        for (auto m : g_ccdMasks) mask |= m;
+    } else if (mode >= 1 && mode <= (int)g_ccdMasks.size()) {
+        mask = g_ccdMasks[mode - 1];
+    } else {
+        return;
+    }
+    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snap == INVALID_HANDLE_VALUE) return;
+    PROCESSENTRY32W pe{ sizeof(pe) };
+    std::vector<DWORD> pids;
+    if (Process32FirstW(snap, &pe)) {
+        do {
+            if (!ccdSkipProcess(pe.th32ProcessID, pe.szExeFile))
+                pids.push_back(pe.th32ProcessID);
+        } while (Process32NextW(snap, &pe));
+    }
+    CloseHandle(snap);
+    int failOpen = 0, failSet = 0;
+    for (DWORD pid : pids) {
+        int e = ccdApplyToPid(pid, mask);
+        if (e < 0) failOpen++;
+        else if (e > 0) failSet++;
+    }
+    g_ccdSeen.clear();
+    for (DWORD pid : pids) g_ccdSeen.insert(pid);
+    if (failOpen || failSet) {
+        char buf[160];
+        snprintf(buf, sizeof(buf), "[ccd] mode=%d 应用完成: 打开失败=%d 设置失败=%d", mode, failOpen, failSet);
+        writeLog("warn", buf);
+    }
+}
+
+static void ccdApplyNew(int mode) {
+    std::lock_guard<std::mutex> lk(g_ccdMutex);
+    if (g_ccdMasks.empty()) return;
+    ULONG_PTR mask = 0;
+    if (mode == 0) {
+        for (auto m : g_ccdMasks) mask |= m;
+    } else if (mode >= 1 && mode <= (int)g_ccdMasks.size()) {
+        mask = g_ccdMasks[mode - 1];
+    } else {
+        return;
+    }
+    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snap == INVALID_HANDLE_VALUE) return;
+    PROCESSENTRY32W pe{ sizeof(pe) };
+    if (Process32FirstW(snap, &pe)) {
+        do {
+            DWORD pid = pe.th32ProcessID;
+            if (ccdSkipProcess(pid, pe.szExeFile)) continue;
+            if (g_ccdSeen.count(pid)) continue;
+            g_ccdSeen.insert(pid);
+            ccdApplyToPid(pid, mask);
+        } while (Process32NextW(snap, &pe));
+    }
+    CloseHandle(snap);
+}
+
+static DWORD WINAPI ccdWorker(LPVOID) {
+    int lastMode = -1;
+    int fullCount = 0;
+    while (!g_ccdStop.load()) {
+        int mode = g_ccdMode.load();
+        if (mode != lastMode) {
+            ccdApplyMode(mode);
+            lastMode = mode;
+            fullCount = 0;
+        } else if (mode != 0) {
+            // 每 ~30s 全量刷新一次: 兜住 PID 复用导致的漏应用, 同时限制 g_ccdSeen 无界增长
+            if (++fullCount >= 25) {
+                ccdApplyMode(mode);
+                fullCount = 0;
+            } else {
+                ccdApplyNew(mode);
+            }
+        }
+        Sleep(1200);
+    }
+    return 0;
+}
+
+static void ccdStartWorker() {
+    g_ccdStop.store(false);  // 窗口可能销毁重建(托盘/常驻切换), 允许 worker 重启
+    if (g_ccdRunning.exchange(true)) return;
+    g_ccdSelfPid = GetCurrentProcessId();
+    wchar_t path[MAX_PATH]{};
+    if (GetModuleFileNameW(nullptr, path, MAX_PATH)) {
+        g_ccdSelfExe = std::filesystem::path(path).filename().wstring();
+        std::transform(g_ccdSelfExe.begin(), g_ccdSelfExe.end(), g_ccdSelfExe.begin(), ::towlower);
+    }
+    HANDLE h = CreateThread(nullptr, 0, ccdWorker, nullptr, 0, nullptr);
+    if (h) CloseHandle(h);
+}
+
 // SMT 开关的真正实现：通过注册表 FeatureSettingsOverride 的 0x40 位（Speculative Store Bypass
 // 缓解位）控制超线程。置位 ⇒ 该缓解启用 ⇒ 系统只给每物理核 1 线程 → 真正关闭超线程（N 核 / N 线程）。
 // 与 bcdedit numproc 不同，本机制不会按固件枚举顺序砍核，能稳定得到「每核 1 线程」。
@@ -972,28 +1352,48 @@ static bool sgApplyTdp(int watts) {
     sgRunExeSync(exe, a);
     return true; // best-effort：外部 exe 已调用（成功与否由 YeManTdpCtl 自身决定）
 }
-static void sgRestoreTdp() { // 还原到用户配置的 DC TDP（PowerControl/tdp-dc.txt）
-    std::wstring p = L"C:\\SOFT\\YeMan\\PowerControl\\tdp-dc.txt";
-    std::string c = sgReadFile(p);
-    if (c.empty()) return;
-    try { int w = std::stoi(c); if (w > 0) sgApplyTdp(w); } catch (...) {}
+// 前向声明（定义见下方 手柄全局快捷调节 段，按电源模式选 tdp-ac/tdp-dc）
+static std::wstring nativeTdpTxtPath();
+static int nativeReadTdp(const std::wstring& primary);
+
+static void sgRestoreTdp() { // 还原到用户配置的 TDP（插电→tdp-ac.txt / 电池→tdp-dc.txt）
+    // 修复(2026-07-30 重加)：旧版写死 tdp-dc.txt(30W)，插电开机被拍到电池档→主频爆低。
+    // 现与手柄调节/前端同源：按当前电源模式选真相源 txt。
+    int w = nativeReadTdp(nativeTdpTxtPath());
+    if (w > 0) sgApplyTdp(w);
 }
 
 // ── 手柄全局快捷调节（后台 XInput 线程处理，不依赖窗口焦点，游戏内全屏也生效） ──
-// TDP：读 tdp-ac.txt（桌面恒 AC，与前端 adjustTdp 同真相源），±delta 后存档并立即下发硬件。
-static int nativeReadTdp() {
+// TDP：按当前电源模式（AC/DC）选真相源 txt——插电改 tdp-ac.txt、电池改 tdp-dc.txt，
+// 与前端 setTdp/计划任务 bat 完全同源；±delta 后先存档再立即下发硬件。
+// 修复(2026-07-27)：旧版写死 tdp-ac.txt，掌机离电时手柄调节不落 DC 档，
+// 导致界面回读与离电恢复跳回旧值。
+static std::wstring nativeTdpTxtPath() {
+    // GetSystemPowerStatus: ACLineStatus 0=电池(DC)，1=交流(AC)，255=未知→按 AC（与 sys.info 同判定）
+    SYSTEM_POWER_STATUS sps{};
+    bool dc = (GetSystemPowerStatus(&sps) && sps.ACLineStatus == 0);
+    return dc ? L"C:\\SOFT\\YeMan\\PowerControl\\tdp-dc.txt"
+              : L"C:\\SOFT\\YeMan\\PowerControl\\tdp-ac.txt";
+}
+static int nativeReadTdp(const std::wstring& primary) {
     int v = 0;
-    std::string c = sgReadFile(L"C:\\SOFT\\YeMan\\PowerControl\\tdp-ac.txt");
-    if (c.empty()) c = sgReadFile(L"C:\\SOFT\\YeMan\\PowerControl\\tdp-dc.txt");
+    std::string c = sgReadFile(primary);
+    if (c.empty()) { // 主 txt 缺失时兜底读另一份，仅作起始值参考
+        std::wstring other = (primary.find(L"tdp-dc") != std::wstring::npos)
+            ? L"C:\\SOFT\\YeMan\\PowerControl\\tdp-ac.txt"
+            : L"C:\\SOFT\\YeMan\\PowerControl\\tdp-dc.txt";
+        c = sgReadFile(other);
+    }
     if (!c.empty()) { try { v = std::stoi(c); } catch (...) { v = 0; } }
     return v;
 }
 static void nativeAdjustTdp(int delta) {
     if (!g_tdpShortcut) return;
-    int cur = nativeReadTdp();
+    std::wstring txt = nativeTdpTxtPath();
+    int cur = nativeReadTdp(txt);
     int next = clampInt((cur > 0 ? cur : 0) + delta, 2, 300);
     if (next == cur) return;
-    sgWriteFile(L"C:\\SOFT\\YeMan\\PowerControl\\tdp-ac.txt", std::to_string(next));
+    sgWriteFile(txt, std::to_string(next)); // 先落盘对应电源模式的真相源
     sgApplyTdp(next);
     ipc_emit("gamepad.refresh", {}); // 通知前端回读刷新（窗口可见时）
 }
@@ -1028,11 +1428,12 @@ static void nativeAdjustRtss(int delta) {
         cur = next;
         out += "Limit=" + std::to_string(next) + "\r\n";
     }
-    sgWriteFile(g, out);
+    sgWriteFileAtomic(g, out); // 原子写，避免 RTSS 在游戏内读 Global 时读到半截
     std::wstring dll = L"\"C:\\Program Files (x86)\\RivaTuner Statistics Server\\RTSSHooks64.dll\"";
     std::wstring ru  = L"C:\\Windows\\System32\\rundll32.exe";
+    // 外部改完文件后：LoadProfile 重新载入磁盘 → UpdateProfiles 套用到运行中的游戏。
+    // ⚠ 不要 SaveProfile：那会让 RTSS 把"内存里的旧状态"写回磁盘，覆盖刚改的内容甚至写坏（损坏根因）。
     sgRunExeSync(ru, dll + L" LoadProfile");
-    sgRunExeSync(ru, dll + L" SaveProfile");
     sgRunExeSync(ru, dll + L" UpdateProfiles");
     ipc_emit("gamepad.refresh", {});
 }
@@ -1197,7 +1598,8 @@ static SgResumeResult sgResumeAll(bool restoreTdp) {
     SgResumeResult rr;
     try {
         std::wstring dir = SG_DIR + L"\\suspended";
-        if (!fspath::exists(dir)) { if (restoreTdp) sgRestoreTdp(); return rr; }
+        // 修复(2026-07-30 重加)：目录缺失 → 直接返回，绝不碰 TDP（避免插电开机被拍到电池档）。
+        if (!fspath::exists(dir)) { return rr; }
         for (auto& e : fspath::directory_iterator(dir)) {
             if (!e.is_regular_file()) continue;
             std::wstring fn = e.path().filename().wstring();
@@ -1233,7 +1635,9 @@ static SgResumeResult sgResumeAll(bool restoreTdp) {
                 rr.names += W2U(nm);
             }
         }
-        if (restoreTdp) sgRestoreTdp();
+        // 修复(2026-07-30 重加)：仅当本次睡眠确有压低 TDP（g_sgTdpLowered）才还原；
+        // 空目录/孤儿恢复（启动）不碰 TDP，防止误拍到电池档。
+        if (restoreTdp && g_sgTdpLowered) sgRestoreTdp();
     } catch (...) {}
     return rr;
 }
@@ -1402,24 +1806,52 @@ static int parseEffectType(const std::string& name) {
 }
 
 static void applyWindowEffect(HWND hwnd, int effectType) {
-    // DWMWA_SYSTEMBACKDROP_TYPE = 38 (Windows 11 22H2+)
-    DwmSetWindowAttribute(hwnd, 38, &effectType, sizeof(effectType));
-    if (effectType >= 2) {
-        MARGINS m = {-1, -1, -1, -1};
-        DwmExtendFrameIntoClientArea(hwnd, &m);
-    }
+    // DWM 属性（模糊/边框/标题）统一由 applyFramelessDwmAttrs() 通过
+    // SetWindowCompositionAttribute(ACCENT_ENABLE_BLURBEHIND) 管理，不再使用
+    // DWMWA_SYSTEMBACKDROP_TYPE（在本机/此窗口样式下不透）。
+    (void)hwnd; // DWM 操作已集中到 applyFramelessDwmAttrs
     if (g_ctrl) {
         ComPtr<ICoreWebView2Controller2> ctrl2;
         if (SUCCEEDED(g_ctrl.As(&ctrl2))) {
-            BYTE alpha = (effectType >= 2) ? 0 : 255;
+            BYTE alpha = g_frameless ? 0 : 255;
             auto clr = currentWindowBackgroundColor();
             ctrl2->put_DefaultBackgroundColor({alpha, GetRValue(clr), GetGValue(clr), GetBValue(clr)});
         }
     }
+    // 同步边框/标题色与 Accent Blur 状态
+    if (g_frameless) applyFramelessDwmAttrs();
 }
 
 // Set DWM visual attributes once. Uses g_bgClr captured at window creation.
 // Safe to call again if g_bgClr changes (e.g. window.setBackgroundColor).
+struct ACCENTPOLICY { DWORD AccentState; DWORD AccentFlags; DWORD GradientColor; DWORD AnimationId; };
+struct WINCOMPATTRDATA { DWORD attribute; PVOID pData; ULONG dataSize; };
+using pSetWindowCompositionAttribute = BOOL (WINAPI*)(HWND, WINCOMPATTRDATA*);
+
+// 用 SetWindowCompositionAttribute(ACCENT_ENABLE_BLURBEHIND) 在 DWM 合成器层
+// 给整窗加模糊。比 DWMWA_SYSTEMBACKDROP_TYPE 兼容性更好，在本机/此窗口样式下
+// SystemBackdrop 始终不透，而这条路线经多年实战验证可稳定工作。
+static void applyAccentBlur(HWND hwnd, bool enable) {
+    static HMODULE hUser = GetModuleHandleW(L"user32.dll");
+    static pSetWindowCompositionAttribute fn = hUser
+        ? (pSetWindowCompositionAttribute)GetProcAddress(hUser, "SetWindowCompositionAttribute")
+        : nullptr;
+    if (!fn) return;
+    const DWORD WCA_ACCENT_POLICY = 19;
+    const DWORD ACCENT_DISABLED = 0;
+    const DWORD ACCENT_ENABLE_BLURBEHIND = 3;
+    ACCENTPOLICY policy = {};
+    if (enable) {
+        policy.AccentState = ACCENT_ENABLE_BLURBEHIND;
+        policy.AccentFlags = 2; // 让模糊覆盖四边
+        policy.GradientColor = 0x20000000; // ARGB: alpha 32 的纯黑，极淡 tint，主要靠 CSS 面板着色
+    } else {
+        policy.AccentState = ACCENT_DISABLED;
+    }
+    WINCOMPATTRDATA data = { WCA_ACCENT_POLICY, &policy, sizeof(policy) };
+    fn(hwnd, &data);
+}
+
 static void applyFramelessDwmAttrs() {
     if (!g_frameless || !g_hwnd) return;
 
@@ -1434,20 +1866,25 @@ static void applyFramelessDwmAttrs() {
     // DWMWCP_ROUND = 2, DWMWCP_DONOTROUND = 1. Toggle via window.rounded (default true).
     DWORD cornerPref = g_rounded ? 2u : 1u;
     DwmSetWindowAttribute(g_hwnd, 33, &cornerPref, sizeof(cornerPref));
-    // DWMWA_BORDER_COLOR = 34 — concrete color matching bg is more reliable
-    // than DWMWA_COLOR_NONE which can flash on defocus on some installs.
-    DwmSetWindowAttribute(g_hwnd, 34, &g_bgClr, sizeof(g_bgClr));
-    // DWMWA_CAPTION_COLOR = 35
-    DwmSetWindowAttribute(g_hwnd, 35, &g_bgClr, sizeof(g_bgClr));
-
-    // Frame margins / backdrop
+    // SystemBackdrop 与本机窗口样式冲突，统一关闭，改走 SetWindowCompositionAttribute BlurBehind。
+    int noneEffect = 0;
+    DwmSetWindowAttribute(g_hwnd, 38, &noneEffect, sizeof(noneEffect));
     if (g_effectType >= 2) {
-        MARGINS m = {-1, -1, -1, -1};
-        DwmExtendFrameIntoClientArea(g_hwnd, &m);
-        DwmSetWindowAttribute(g_hwnd, 38, &g_effectType, sizeof(g_effectType));
+        // 磨砂玻璃：边框/标题色必须 COLOR_NONE，否则 DWM 用实色填充扩展区 → 不透明。
+        COLORREF none = 0xFFFFFFFE; // DWMWA_COLOR_NONE
+        DwmSetWindowAttribute(g_hwnd, 34, &none, sizeof(none));
+        DwmSetWindowAttribute(g_hwnd, 35, &none, sizeof(none));
+        applyAccentBlur(g_hwnd, true);
     } else {
+        // DWMWA_BORDER_COLOR = 34 — concrete color matching bg is more reliable
+        // than DWMWA_COLOR_NONE which can flash on defocus on some installs.
+        DwmSetWindowAttribute(g_hwnd, 34, &g_bgClr, sizeof(g_bgClr));
+        // DWMWA_CAPTION_COLOR = 35
+        DwmSetWindowAttribute(g_hwnd, 35, &g_bgClr, sizeof(g_bgClr));
+        // 非磨砂：底部留 1px frame，避免白边。
         MARGINS m = {0, 0, 0, 1};
         DwmExtendFrameIntoClientArea(g_hwnd, &m);
+        applyAccentBlur(g_hwnd, false);
     }
 }
 
@@ -1483,7 +1920,7 @@ static json loadConfig() {
 #define WM_IPC_RESULT (WM_USER + 3)
 
 static int  g_asyncMode = 1;   // 0/1/2，见上（默认 1：仅 shell.run 异步，实测零冻结且风险面最小）
-static int  g_poolSize  = 8;   // 实测 8 线程使 11 个首屏子进程全并行，2.4s 内完成（4 线程需 3.8s）
+static int  g_poolSize  = 3;   // 改为 3：默认异步池线程数。实测首屏已降至 1 个 shell.run，正常交互峰值并发 2-4，3 线程绰绰有余，省 ~5 条常驻线程
 
 // ── 诊断 trace（仅 YEMAN_TRACE=1 时激活；生产零开销）──
 static std::atomic<bool> g_traceOn{false};
@@ -1679,6 +2116,13 @@ static void enableWindowTransitions(HWND hwnd) {
 static void showWindowAnimated(HWND hwnd, int showCmd, bool activate) {
     if (!hwnd) return;
 
+    // 非常驻时确保任务栏按钮不出现：WS_EX_APPWINDOW 窗口在显示后可能被 shell 重新加入任务栏。
+    if (hwnd == g_hwnd && !g_taskbarResident) {
+        ComPtr<ITaskbarList3> tb2;
+        if (SUCCEEDED(CoCreateInstance(CLSID_TaskbarList, nullptr, CLSCTX_ALL, IID_PPV_ARGS(&tb2))) && SUCCEEDED(tb2->HrInit()))
+            tb2->DeleteTab(hwnd);
+    }
+
     // Hiding is explicit: just hide, no animation/activation.
     if (showCmd == SW_HIDE) {
         hideWindowAnimated(hwnd);
@@ -1789,8 +2233,15 @@ static void applyNativeTheme() {
     DwmSetWindowAttribute(g_hwnd, 20, &darkMode, sizeof(darkMode));
 
     if (g_frameless) {
-        DwmSetWindowAttribute(g_hwnd, 34, &g_bgClr, sizeof(g_bgClr));
-        DwmSetWindowAttribute(g_hwnd, 35, &g_bgClr, sizeof(g_bgClr));
+        if (g_effectType >= 2) {
+            // 磨砂玻璃：边框/标题色必须 COLOR_NONE，否则 DWM 用实色填满扩展区 → 不透明。
+            COLORREF none = 0xFFFFFFFE; // DWMWA_COLOR_NONE
+            DwmSetWindowAttribute(g_hwnd, 34, &none, sizeof(none));
+            DwmSetWindowAttribute(g_hwnd, 35, &none, sizeof(none));
+        } else {
+            DwmSetWindowAttribute(g_hwnd, 34, &g_bgClr, sizeof(g_bgClr));
+            DwmSetWindowAttribute(g_hwnd, 35, &g_bgClr, sizeof(g_bgClr));
+        }
     } else {
         COLORREF border = darkMode ? RGB(64, 70, 82) : RGB(218, 221, 227);
         const COLORREF captionDefault = 0xFFFFFFFF; // DWMWA_COLOR_DEFAULT
@@ -1805,7 +2256,7 @@ static void applyNativeTheme() {
     if (g_ctrl) {
         ComPtr<ICoreWebView2Controller2> ctrl2;
         if (SUCCEEDED(g_ctrl.As(&ctrl2))) {
-            BYTE alpha = (g_effectType >= 2) ? 0 : 255;
+            BYTE alpha = g_frameless ? 0 : 255;
             ctrl2->put_DefaultBackgroundColor({
                 alpha, GetRValue(g_bgClr), GetGValue(g_bgClr), GetBValue(g_bgClr)
             });
@@ -1850,6 +2301,7 @@ static void reg_window() {
     });
     ipc_on("window.show", [](const json&) -> json {
         showWindowAnimated(g_hwnd, IsIconic(g_hwnd) ? SW_RESTORE : SW_SHOW);
+        refocusWebView();
         return true;
     });
     ipc_on("window.hide", [](const json&) -> json {
@@ -1922,8 +2374,10 @@ static void reg_window() {
         // Update WebView2 default background
         if (g_ctrl) {
             ComPtr<ICoreWebView2Controller2> ctrl2;
-            if (SUCCEEDED(g_ctrl.As(&ctrl2)))
-                ctrl2->put_DefaultBackgroundColor({255, GetRValue(clr), GetGValue(clr), GetBValue(clr)});
+            if (SUCCEEDED(g_ctrl.As(&ctrl2))) {
+            BYTE alpha = g_frameless ? 0 : 255;
+            ctrl2->put_DefaultBackgroundColor({alpha, GetRValue(clr), GetGValue(clr), GetBValue(clr)});
+            }
         }
         return true;
     });
@@ -2078,6 +2532,16 @@ static void reg_fs() {
         f.write(content.data(), content.size());
         return true;
     });
+    // 原子写：先写临时文件再 MoveFileEx/ReplaceFileW 替换，避免截断式写被 RTSS 并发读取时读到半截（损坏根因）。
+    // ⚠ 原子替换失败时绝不回退到截断式写（sgWriteFile）——那会把正在被 RTSS 读取的配置文件写半截，
+    // 导致 RTSS 解析崩溃 / 配置永久损坏。此处保留原文件、返回 false，由调用方决定重试。
+    ipc_on("fs.writeTextFileAtomic", [](const json& a) -> json {
+        auto path    = a.value("path", std::string{});
+        auto content = a.value("content", std::string{});
+        std::wstring wp = U2W(path);
+        bool ok = sgWriteFileAtomic(wp, content);
+        return ok;
+    });
     ipc_on("fs.exists", [](const json& a) -> json {
         return fspath::exists(U2W(a.value("path", std::string{})));
     });
@@ -2183,6 +2647,35 @@ static void reg_shell_app() {
                                           nullptr, SW_SHOWNORMAL);
         if (ret <= 32) throw std::runtime_error("failed to execute program");
         return true;
+    });
+    // ── shell.hidden：与 shell.execute 行为一致（异步、不阻塞、进程脱离存活），
+    //    但用 CREATE_NO_WINDOW 隐藏窗口。专供「自动CPU浮动优化」守护等
+    //    需要后台常驻但不弹窗的场景。⚠ 不要改动 shell.execute / shell.run。──
+    ipc_on("shell.hidden", [](const json& a) -> json {
+        auto program = a.value("program", std::string{});
+        if (program.empty()) throw std::runtime_error("program is required");
+        std::wstring cmdLine = quote_windows_arg(U2W(program));
+        if (a.contains("args") && a["args"].is_array()) {
+            for (auto& arg : a["args"]) {
+                if (!arg.is_string()) throw std::runtime_error("shell.hidden args must be strings");
+                cmdLine += L" ";
+                cmdLine += quote_windows_arg(U2W(arg.get<std::string>()));
+            }
+        }
+        std::vector<wchar_t> cmd(cmdLine.begin(), cmdLine.end());
+        cmd.push_back(0);
+        STARTUPINFOW si{sizeof(si)};
+        PROCESS_INFORMATION pi{};
+        // CREATE_NO_WINDOW 隐藏窗口；不创建可继承管道（守护 stdout 不需要，避免缓冲死锁）；
+        // 不传 envBlock（YeManCC 以 requireAdministrator 运行，子进程不会再弹 UAC/MessageBox）。
+        if (!CreateProcessW(nullptr, cmd.data(), nullptr, nullptr, FALSE,
+            CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi)) {
+            DWORD le = GetLastError();
+            throw std::runtime_error(("Failed to start hidden process (Win32 " + std::to_string(le) + ")").c_str());
+        }
+        CloseHandle(pi.hThread);
+        CloseHandle(pi.hProcess);
+        return json{{"ok", true}};
     });
     ipc_on("app.exit", [](const json& a) -> json {
         PostQuitMessage(a.value("code", 0));
@@ -2787,6 +3280,100 @@ static void reg_devtools() {
 //  Commands: System tray
 // ================================================================
 
+// ── 内存变色托盘图标生成：圆角方块底色 + 白色 Y 字 ──
+// 底色按内存负载切换：黑(<80%) / 黄(80-90%) / 红(90-100%)
+// 饱和度刻意压低，保证白色 Y 字始终清晰可辨。
+static HICON makeMemoryIcon(COLORREF bgColor) {
+    const int cx = 24, cy = 24; // 比 SM_CXSMICON(16) 大，缩放后更清晰
+    HDC hdcScreen = GetDC(nullptr);
+    HDC hdcMem    = CreateCompatibleDC(hdcScreen);
+
+    BITMAPINFO bmi{};
+    bmi.bmiHeader.biSize        = sizeof(BITMAPINFOHEADER);
+    bmi.bmiHeader.biWidth       = cx;
+    bmi.bmiHeader.biHeight      = -cy;           // top-down
+    bmi.bmiHeader.biPlanes      = 1;
+    bmi.bmiHeader.biBitCount    = 32;
+    bmi.bmiHeader.biCompression = BI_RGB;
+
+    void* pvBits = nullptr;
+    HBITMAP hBmp = CreateDIBSection(hdcMem, &bmi, DIB_RGB_COLORS, &pvBits, nullptr, 0);
+    HBITMAP hOld = (HBITMAP)SelectObject(hdcMem, hBmp);
+
+    // ① 圆角矩形底色填充（用 GDI 路径模拟圆角）
+    RECT rc{0, 0, cx, cy};
+    HRGN rgn = CreateRoundRectRgn(0, 0, cx + 1, cy + 1, 5, 5);
+    HBRUSH hBr = CreateSolidBrush(bgColor);
+    FillRgn(hdcMem, rgn, hBr);
+    DeleteObject(hBr);
+    DeleteObject(rgn);
+
+    // ② 白色 Y 字居中绘制
+    SetBkMode(hdcMem, TRANSPARENT);
+    SetTextColor(hdcMem, RGB(255, 255, 255));
+    HFONT hFont = CreateFontW(
+        -18, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+        CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE,
+        L"Segoe UI"
+    );
+    HFONT hOldFnt = (HFONT)SelectObject(hdcMem, hFont);
+    DrawTextW(hdcMem, L"Y", 1, &rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+    SelectObject(hdcMem, hOldFnt);
+    DeleteObject(hFont);
+
+    SelectObject(hdcMem, hOld);
+    DeleteDC(hdcMem);
+    ReleaseDC(nullptr, hdcScreen);
+
+    // ③ 位图 → 图标（mask 全零 = 全不透明）
+    ICONINFO ii{};
+    ii.fIcon   = TRUE;
+    ii.hbmMask = CreateBitmap(cx, cy, 1, 1, nullptr); // 全 0 → 不透明
+    ii.hbmColor= hBmp;
+    HICON hIcon = CreateIconIndirect(&ii);
+
+    DeleteObject(ii.hbmMask);
+    DeleteObject(hBmp);          // 释放 DIB section
+    return hIcon;
+}
+
+// 按物理内存负载百分比返回档位：0=黑(<80) 1=黄(80-90) 2=红(90+)
+static int memTrayLevel() {
+    MEMORYSTATUSEX ms{}; ms.dwLength = sizeof(ms);
+    if (!GlobalMemoryStatusEx(&ms)) return 0;
+    if (ms.dwMemoryLoad >= 90) return 2;
+    if (ms.dwMemoryLoad >= 80) return 1;
+    return 0;
+}
+
+// 刷新托盘图标颜色（仅当档位变化时才重建图标，避免无谓 GDI 开销）
+static void refreshMemTrayIcon() {
+    if (!g_trayActive || !g_hwnd) return;
+    int lvl = memTrayLevel();
+    if (lvl == g_memTrayLevel && g_memTrayIcon) return; // 档位未变，跳过
+
+    // 销毁旧动态图标
+    if (g_memTrayIcon) { DestroyIcon(g_memTrayIcon); g_memTrayIcon = nullptr; }
+
+    static const COLORREF colors[] = {
+        RGB(20, 20, 26),     // 0: 黑（与当前 Y 徽标底色一致）
+        RGB(195, 165, 50),   // 1: 低饱和琥珀/金黄
+        RGB(178, 62, 58),    // 2: 低饱和砖红
+    };
+
+    COLORREF bg = colors[lvl];
+    if (lvl == 0) {
+        // 黑色档位：直接复用原始 app icon，不生成新图标
+        g_nid.hIcon = g_appIconSmall ? g_appIconSmall : LoadIconW(nullptr, IDI_APPLICATION);
+    } else {
+        g_memTrayIcon = makeMemoryIcon(bg);
+        g_nid.hIcon   = g_memTrayIcon;
+    }
+    Shell_NotifyIconW(NIM_MODIFY, &g_nid);
+    g_memTrayLevel = lvl;
+}
+
 // Add (or re-add) the notification-area (system tray) icon. Called both from the
 // IPC command and once at startup so the app is always resident in the taskbar.
 static bool trayCreate(const std::wstring& tip) {
@@ -2798,17 +3385,85 @@ static bool trayCreate(const std::wstring& tip) {
     g_nid.uCallbackMessage = WM_TRAYICON;
     g_nid.hIcon            = g_appIconSmall ? g_appIconSmall : LoadIconW(nullptr, IDI_APPLICATION);
     wcsncpy_s(g_nid.szTip, tip.c_str(), _TRUNCATE);
+    // 启用 Vista+ 通知图标版本：回调消息 lParam 直接携带原始鼠标消息
+    // (WM_LBUTTONUP / WM_LBUTTONDBLCLK / WM_RBUTTONUP)，否则默认旧版只发 NIN_SELECT，
+    // 导致双击托盘图标无法唤出窗口（case WM_LBUTTONDBLCLK 永不触发）。
+    g_nid.uVersion = NOTIFYICON_VERSION_4;
     BOOL ok = Shell_NotifyIconW(NIM_ADD, &g_nid);
     // NIM_ADD can transiently fail if Explorer is still starting; retry once.
     if (!ok) ok = Shell_NotifyIconW(NIM_ADD, &g_nid);
+    if (ok) Shell_NotifyIconW(NIM_SETVERSION, &g_nid); // 必须在 ADD 之后调用
     g_trayActive = !!ok;
+    if (g_trayActive) refreshMemTrayIcon(); // 创建后立即按当前内存档位更新颜色
     return g_trayActive;
 }
 
+// ── 任务栏常驻模式：同步「任务栏按钮」与「托盘图标」二选一 ──
+// on=true  → 常规窗口(移除 WS_EX_TOOLWINDOW)+ AddTab：显示任务栏按钮；托盘移除（不靠托盘）。
+// on=false → 工具窗口(WS_EX_TOOLWINDOW)+ DeleteTab：无任务栏按钮；托盘在位（默认）。
+// 注意：工具窗口本身不会自动产生任务栏按钮，故 AddTab/DeleteTab 不会造成重复按钮。
+static void applyResidentMode() {
+    if (!g_hwnd) return;
+    bool on = g_taskbarResident;
+    // 不再切换 WS_EX_TOOLWINDOW：该样式会让 DWM 忽略 SystemBackdrop 属性，毛玻璃整片失效。
+    // 隐藏任务栏按钮完全靠 ITaskbarList::DeleteTab 实现；窗口恒为 WS_EX_APPWINDOW（Backdrop 友好）。
+    // 同步 shell 任务栏按钮（AddTab 显示 / DeleteTab 隐藏）
+    ComPtr<ITaskbarList3> tb;
+    if (SUCCEEDED(CoCreateInstance(CLSID_TaskbarList, nullptr, CLSCTX_ALL, IID_PPV_ARGS(&tb))) && SUCCEEDED(tb->HrInit())) {
+        if (on) tb->AddTab(g_hwnd); else tb->DeleteTab(g_hwnd);
+    }
+    // 托盘：仅「非常驻」时存在（常驻=任务栏按钮，不靠托盘）
+    if (on) {
+        if (g_trayActive) { Shell_NotifyIconW(NIM_DELETE, &g_nid); g_trayActive = false; }
+    } else {
+        if (!g_trayActive) trayCreate(L"野蛮控制中心");
+    }
+    // 重新套用 DWM 属性（含 SystemBackdrop），确保在样式确定后 backdrop 真正生效
+    applyFramelessDwmAttrs();
+}
+
+// ── Xbox / 全屏游戏检测线程 ──
+// 由前端「Xbox 游戏模式」开关经 xbox.setActive 启停。检测到全屏游戏（Xbox 独占 / D3D 独占 / 演示模式）
+// 时确保托盘在位，防止被全屏游戏压住、找不到入口；游戏结束后按 g_taskbarResident 决定去留。
+static DWORD WINAPI xboxDetectThread(LPVOID) {
+    bool wasGaming = false;
+    while (g_xboxActive.load(std::memory_order_relaxed)) {
+        bool gaming = false;
+        // 信号1：系统级“前台有全屏/独占全屏应用”（Xbox 独占全屏游戏会触发 QUNS_BUSY / QUNS_RUNNING_D3D_FULL_SCREEN）
+        QUERY_USER_NOTIFICATION_STATE st = QUNS_ACCEPTS_NOTIFICATIONS;
+        if (SUCCEEDED(SHQueryUserNotificationState(&st))) {
+            if (st == QUNS_BUSY || st == QUNS_RUNNING_D3D_FULL_SCREEN || st == QUNS_PRESENTATION_MODE)
+                gaming = true;
+        }
+        // 信号2：前台窗口矩形 == 所在显示器矩形（兜底，捕捉未触发信号1的全屏游戏）
+        if (!gaming) {
+            HWND fg = GetForegroundWindow();
+            if (fg && fg != GetDesktopWindow() && fg != GetShellWindow()) {
+                RECT wr{}; MONITORINFO mi{}; mi.cbSize = sizeof(mi);
+                HMONITOR hm = MonitorFromWindow(fg, MONITOR_DEFAULTTONEAREST);
+                if (hm && GetWindowRect(fg, &wr) && GetMonitorInfo(hm, &mi) && EqualRect(&wr, &mi.rcMonitor))
+                    gaming = true;
+            }
+        }
+        if (gaming && !wasGaming) {
+            // 进入全屏：确保托盘在位作为兜底入口（防被全屏压住找不到窗口）
+            if (!g_trayActive) trayCreate(L"野蛮控制中心");
+        } else if (!gaming && wasGaming) {
+            // 离开全屏：按常驻模式恢复（常驻=任务栏按钮、否则=托盘）
+            applyResidentMode();
+        }
+        wasGaming = gaming;
+        Sleep(1500);
+    }
+    return 0;
+}
+
 static void reg_tray() {
-    ipc_on("tray.create", [](const json& a) -> json {
-        auto tip = U2W(a.value("tooltip", std::string{"App"}));
-        return trayCreate(tip);
+    // 任务栏常驻：resident=true → 显示任务栏按钮(并移除托盘)；false → 仅托盘(默认)
+    ipc_on("tray.setResident", [](const json& a) -> json {
+        g_taskbarResident = a.value("resident", false);
+        applyResidentMode();
+        return g_taskbarResident;
     });
     ipc_on("tray.setTooltip", [](const json& a) -> json {
         if (!g_trayActive) return false;
@@ -2817,10 +3472,21 @@ static void reg_tray() {
         Shell_NotifyIconW(NIM_MODIFY, &g_nid);
         return true;
     });
-    ipc_on("tray.remove", [](const json&) -> json {
-        if (!g_trayActive) return false;
-        Shell_NotifyIconW(NIM_DELETE, &g_nid);
-        g_trayActive = false;
+    // Xbox / 全屏游戏检测：由前端「Xbox 游戏模式」开关启停
+    ipc_on("xbox.setActive", [](const json& a) -> json {
+        bool on = a.value("active", false);
+        if (on && !g_xboxActive.load()) {
+            g_xboxActive = true;
+            g_xboxThread = CreateThread(nullptr, 0, xboxDetectThread, nullptr, 0, nullptr);
+        } else if (!on && g_xboxActive.load()) {
+            g_xboxActive = false;
+            if (g_xboxThread) {
+                WaitForSingleObject(g_xboxThread, 2000);
+                CloseHandle(g_xboxThread);
+                g_xboxThread = nullptr;
+            }
+            // Xbox 关闭不再影响任务栏常驻（两者解耦；任务栏常驻由前端独立开关控制）
+        }
         return true;
     });
 }
@@ -3224,8 +3890,12 @@ static void reg_updater() {
         }
         return W2U(dest);
     });
-    // 安装：解压已下载的 package.zip → 写 update.bat 用 robocopy 合并覆盖安装目录
-    // （排除 config/ 与 app.config.json，保留用户数据）→ 重启 → 自删 bat → 退出主程序
+    // 安装：解压已下载的 package.zip → 写 update.bat 用 robocopy 合并覆盖
+    //   - 程序本体 → exe 所在目录（排除 app.config.json 与 config/，保留用户数据）
+    //   - 依赖包 PowerControl → C:\SOFT\YeMan\PowerControl（与前端 yeman.ts 的 PC_DIR 默认一致），
+    //     排除用户运行时数据（tdp-*.txt / FPS-*.txt / Power.txt / *.json / *.log / *.pid / *.hb / hwinfo-ok），
+    //     只覆盖代码/资产（bat/vbs/ps1/xml/reg/exe/png/md/pow 等）。
+    //   两段独立，PowerControl 部署失败不影响程序本体更新。
     ipc_on("app.installUpdate", [](const json&) -> json {
         auto zip = app_data_dir() + L"\\update\\package.zip";
         if (!fspath::exists(zip)) throw std::runtime_error("No update package downloaded");
@@ -3235,15 +3905,27 @@ static void reg_updater() {
         wchar_t exePath[MAX_PATH]; GetModuleFileNameW(nullptr, exePath, MAX_PATH);
         std::wstring exeStr(exePath);
         std::wstring exedir = exeStr.substr(0, exeStr.find_last_of(L"\\"));
+        // 依赖包固定目标目录（与前端 yeman.ts 的 PC_DIR 默认一致）
+        std::wstring pcDir = L"C:\\SOFT\\YeMan\\PowerControl";
         auto bat = app_data_dir() + L"\\update.bat";
         {
             std::ofstream f(bat);
             f << "@echo off\n";
             f << "timeout /t 1 /nobreak >nul\n";
             f << "copy \"" << W2U(exePath) << "\" \"" << W2U(exePath) << ".old\" >nul 2>&1\n";
-            // /E 递归；/XF 排除 app.config.json（保留已安装的）；/XD 排除 config（保留用户数据）
+            // 1) 程序本体：/E 递归；/XF 排除 app.config.json（保留已安装的）；/XD 排除 config 与 PowerControl
+            //    （PowerControl 单独部署，避免误入程序目录）
             f << "robocopy \"" << W2U(staging) << "\" \"" << W2U(exedir)
-              << "\" /E /XF app.config.json /XD config /NFL /NDL /NJH /NJS /NP\n";
+              << "\" /E /XF app.config.json /XD config PowerControl /NFL /NDL /NJH /NJS /NP\n";
+            // 2) 首次过渡清理：若旧版安装器曾把 PowerControl 误放进程序目录，清掉
+            f << "if exist \"" << W2U(exedir) << "\\PowerControl\" rmdir /S /Q \""
+              << W2U(exedir) << "\\PowerControl\"\n";
+            // 3) 依赖包 PowerControl：仅覆盖代码/资产，排除用户运行时数据（保留用户已保存的 TDP/FPS/配置）
+            f << "if exist \"" << W2U(staging) << "\\PowerControl\" (\n";
+            f << "  if not exist \"" << W2U(pcDir) << "\" mkdir \"" << W2U(pcDir) << "\"\n";
+            f << "  robocopy \"" << W2U(staging) << "\\PowerControl\" \"" << W2U(pcDir)
+              << "\" /E /XF tdp-ac.txt tdp-dc.txt tdp-lock-dc.txt FPS-ac.txt FPS-dc.txt Power.txt startup_trace.txt *.json *.log *.pid *.hb hwinfo-ok /NFL /NDL /NJH /NJS /NP\n";
+            f << ")\n";
             f << "start \"\" \"" << W2U(exePath) << "\"\n";
             f << "del \"%~f0\"\n";
         }
@@ -3653,6 +4335,47 @@ static void reg_extras() {
         return out;
     });
 
+    // ── cpu.topology：检测 L3 缓存域（CCD）拓扑，决定 CPU 核心控制卡片是否显示。
+    //    返回 { logical, l3Domains, ccdMasks:["0x...", ...] } ──
+    ipc_on("cpu.topology", [](const json&) -> json {
+        CcdTopology t = detectCcdTopology();
+        json r;
+        r["logical"]    = t.logical;
+        r["physicalCores"] = t.physicalCores;
+        r["l3Domains"]  = t.l3Domains;
+        r["ccdMasks"]   = t.ccdMasks;
+        return r;
+    });
+
+    // ── cpu.setCcdMode：全局进程亲和性，0=全核，1..N=仅第 N-1 个 CCD。
+    //    首次调用启动后台轮询线程，新启动的进程会被自动限制到目标 CCD。──
+    ipc_on("cpu.setCcdMode", [](const json& a) -> json {
+        int mode = a.value("mode", 0);
+        if (mode < 0) throw std::runtime_error("mode must be >= 0");
+        CcdTopology t = detectCcdTopology();
+        if (t.ccdMasks.size() < 2)
+            throw std::runtime_error("this CPU has fewer than 2 L3 domains");
+        if (mode > (int)t.ccdMasks.size())
+            throw std::runtime_error("CCD mode exceeds detected L3 domains");
+        {
+            std::lock_guard<std::mutex> lk(g_ccdMutex);
+            g_ccdMasks.clear();
+            for (auto& s : t.ccdMasks) {
+                ULONG_PTR m = 0;
+                try {
+                    m = std::stoull(s, nullptr, 16);
+                } catch (...) {}
+                if (m) g_ccdMasks.push_back(m);
+            }
+        }
+        ccdStartWorker();
+        g_ccdMode.store(mode);
+        json r;
+        r["mode"] = mode;
+        r["applied"] = true;
+        return r;
+    });
+
     ipc_on("shell.run", [](const json& a) -> json {
         auto program = a.value("program", std::string{});
         if (program.empty()) throw std::runtime_error("program is required");
@@ -3784,8 +4507,8 @@ static LRESULT CALLBACK SplashProc(HWND h, UINT m, WPARAM w, LPARAM l) {
             RoundRect(hdc, 0, 0, rc.right, rc.bottom, 2*r, 2*r);
             DeleteObject(pen); DeleteObject(bBg);
 
-            HFONT hFont = CreateFontW(13, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
-                DEFAULT_CHARSET, 0, 0, CLEARTYPE_QUALITY, 0, L"Segoe UI");
+            HFONT hFont = CreateFontW(17, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+                DEFAULT_CHARSET, 0, 0, CLEARTYPE_QUALITY, 0, L"Segoe UI"); // +30% 字号
             auto old = SelectObject(hdc, hFont);
             SetBkMode(hdc, TRANSPARENT);
             int i = 0;
@@ -3794,8 +4517,8 @@ static LRESULT CALLBACK SplashProc(HWND h, UINT m, WPARAM w, LPARAM l) {
                     RECT sr = g_menuItemRects[i];
                     HPEN sp = CreatePen(PS_SOLID, 1, MENU_SEP);
                     SelectObject(hdc, sp);
-                    MoveToEx(hdc, sr.left + 14, (sr.top + sr.bottom) / 2, nullptr);
-                    LineTo(hdc, sr.right - 14, (sr.top + sr.bottom) / 2);
+                    MoveToEx(hdc, sr.left + 16, (sr.top + sr.bottom) / 2, nullptr);
+                    LineTo(hdc, sr.right - 16, (sr.top + sr.bottom) / 2);
                     DeleteObject(sp);
                 } else {
                     RECT ir = g_menuItemRects[i];
@@ -3803,11 +4526,11 @@ static LRESULT CALLBACK SplashProc(HWND h, UINT m, WPARAM w, LPARAM l) {
                         HBRUSH bH = CreateSolidBrush(MENU_HOVER);
                         HPEN ph = CreatePen(PS_NULL, 0, 0);
                         SelectObject(hdc, ph); SelectObject(hdc, bH);
-                        RoundRect(hdc, ir.left + 4, ir.top + 2, ir.right - 4, ir.bottom - 2, 6, 6);
+                        RoundRect(hdc, ir.left + 5, ir.top + 2, ir.right - 5, ir.bottom - 2, 7, 7);
                         DeleteObject(ph); DeleteObject(bH);
                     }
                     SetTextColor(hdc, item.danger ? MENU_DANGER : MENU_TEXT);
-                    RECT tr = ir; tr.left += 14;
+                    RECT tr = ir; tr.left += 16;
                     DrawTextW(hdc, item.label.c_str(), -1, &tr,
                         DT_LEFT | DT_VCENTER | DT_SINGLELINE);
                 }
@@ -3891,20 +4614,20 @@ static LRESULT CALLBACK SplashProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         g_menuItems.push_back({ L"退出", ID_TRAY_EXIT, true });
 
         int scale = GetDpiForSystem() / 96;
-        int itemH = 34 * scale;
-        int padY  = 6 * scale;
-        int w = 170 * scale;
+        int itemH = 39 * scale; // 34 * 1.15 ≈ 39（气泡 +15%）
+        int padY  = 7 * scale;  // 6 * 1.15 ≈ 7
+        int w = 196 * scale;    // 170 * 1.15 ≈ 196
         int seps = 0;
         for (auto& it : g_menuItems) if (it.cmd == ID_TRAY_SEP) seps++;
         int itemCount = (int)g_menuItems.size() - seps;
-        int h = padY * 2 + itemH * itemCount + 8 * scale * seps;
+        int h = padY * 2 + itemH * itemCount + 9 * scale * seps; // 分隔 8 * 1.15 ≈ 9
 
         g_menuItemRects.assign(g_menuItems.size(), RECT{});
         int y = padY;
         for (size_t i = 0; i < g_menuItems.size(); i++) {
             if (g_menuItems[i].cmd == ID_TRAY_SEP) {
-                g_menuItemRects[i] = { 0, y, w, y + 8 * scale };
-                y += 8 * scale;
+                g_menuItemRects[i] = { 0, y, w, y + 9 * scale };
+                y += 9 * scale;
             } else {
                 g_menuItemRects[i] = { 0, y, w, y + itemH };
                 y += itemH;
@@ -4091,7 +4814,9 @@ static void setupWebView(ICoreWebView2Controller* ctrl) {
     ComPtr<ICoreWebView2Controller2> ctrl2;
     if (SUCCEEDED(g_ctrl.As(&ctrl2))) {
         auto clr = currentWindowBackgroundColor();
-        BYTE alpha = (g_effectType >= 2) ? 0 : 255;
+        // 普通 WebView2 客户区承担稳定的底版，局部透明度由 CSS 面板控制。
+        // 这避免透明子表面与 layered/鼠标命中发生冲突。
+        BYTE alpha = g_frameless ? 0 : 255;
         ctrl2->put_DefaultBackgroundColor({alpha, GetRValue(clr), GetGValue(clr), GetBValue(clr)});
     }
 
@@ -4331,7 +5056,7 @@ static HRESULT finishCreateController(ICoreWebView2Environment* env) {
             ComPtr<ICoreWebView2ControllerOptions3> opts3;
             if (SUCCEEDED(opts.As(&opts3))) {
                 auto clr = currentWindowBackgroundColor();
-                BYTE alpha = (g_effectType >= 2) ? 0 : 255;
+                BYTE alpha = g_frameless ? 0 : 255;
                 opts3->put_DefaultBackgroundColor({alpha, GetRValue(clr), GetGValue(clr), GetBValue(clr)});
             }
             return env10->CreateCoreWebView2ControllerWithOptions(g_hwnd, opts.Get(), handler.Get());
@@ -4354,19 +5079,16 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         if (g_frameless) return TRUE; // prevents DefWindowProc from repainting NC area
         break;
     case WM_ERASEBKGND:
-        if (g_frameless && g_bgBrush) {
-            HDC hdc = (HDC)w;
-            RECT rc;
-            GetClientRect(h, &rc);
-            FillRect(hdc, &rc, g_bgBrush);
+        if (g_frameless) {
+            // 根窗口保持透明，避免原生 GDI 底色覆盖前端分块底板与桌面。
             return 1;
         }
         break;
     case WM_PAINT:
-        if (g_frameless && g_bgBrush) {
+        if (g_frameless) {
+            // 无边框窗口不绘制整窗背景；WebView2 和前端局部底板负责内容。
             PAINTSTRUCT ps;
-            HDC hdc = BeginPaint(h, &ps);
-            FillRect(hdc, &ps.rcPaint, g_bgBrush);
+            BeginPaint(h, &ps);
             EndPaint(h, &ps);
             return 0;
         }
@@ -4452,27 +5174,56 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     case WM_KILLFOCUS:
         ipc_emit("window.blur");
         return 0;
+    case WM_TIMER:
+        if (w == SUMMON_FOCUS_TIMER_ID) {
+            refocusWebView();
+            if (++g_summonFocusRetries >= 3) {
+                KillTimer(g_hwnd, SUMMON_FOCUS_TIMER_ID);
+                g_summonFocusRetries = 0;
+            }
+        }
+        if (w == RETURN_GAME_FOCUS_TIMER_ID) {
+            const ULONGLONG now = GetTickCount64();
+            if (refocusPreviousWindow() || now >= g_returnFocusDeadline ||
+                !g_prevForeground || !IsWindow(g_prevForeground)) {
+                KillTimer(g_hwnd, RETURN_GAME_FOCUS_TIMER_ID);
+                g_returnFocusDeadline = 0;
+                g_prevForeground = nullptr;
+            }
+        }
+        if (w == MEM_TRAY_TIMER_ID) {
+            refreshMemTrayIcon();
+        }
+        return 0;
     case WM_SYSCOMMAND:
-        // The window lives only in the tray, never in the main taskbar.
-        // Intercept minimize and hide to the tray instead.
+        // 拦截最小化：工具窗口(WS_EX_TOOLWINDOW)最小化后 DWM 会残留一个缩略图黑块
+        // （用户实测「最小化才会出现黑块」）。改为直接隐藏到托盘，不真正最小化。
         if ((w & 0xFFF0) == SC_MINIMIZE) {
             hideWindowAnimated(h);
             return 0;
         }
+        // 任务栏常驻(WS_EX_APPWINDOW)时允许最小化落到任务栏（按钮可恢复窗口）。
         break;
     case WM_CLOSE:
         saveWindowState();
         ipc_emit("window.closing");
-        if (g_trayActive) { hideWindowAnimated(h); return 0; }
+        // 托盘常驻 或 任务栏常驻：关闭=隐藏（托盘/任务栏按钮仍可作入口），不退出进程
+        if (g_trayActive || g_taskbarResident) { hideWindowAnimated(h); return 0; }
         hideWindowAnimated(h);
         DestroyWindow(h);
         return 0;
     case WM_DESTROY:
+        // CCD worker 退出（收尾清理）
+        g_ccdStop.store(true);
         // 取消电源通知订阅 + 清防抖定时器
         if (g_acdcNotify) { UnregisterPowerSettingNotification(g_acdcNotify); g_acdcNotify = nullptr; }
         KillTimer(h, TIMER_ID_ACDC);
-        // 睡眠守护：退出前尽力恢复全部冻结进程 + 还原 TDP（防冻死游戏）
-        sgResumeAll(true);
+        KillTimer(h, SUMMON_FOCUS_TIMER_ID);
+        KillTimer(h, RETURN_GAME_FOCUS_TIMER_ID);
+        KillTimer(h, MEM_TRAY_TIMER_ID);
+        if (g_memTrayIcon) { DestroyIcon(g_memTrayIcon); g_memTrayIcon = nullptr; }
+        // 退出前只恢复被冻结的进程（避免游戏卡死），不还原 TDP，防止退出时触发 PawnIO 安装检测/弹窗
+        sgResumeAll(false);
         // Cleanup watchers
         for (auto& [id, w] : g_watchers) {
             if (stopWatcher(w, 1000))
@@ -4486,6 +5237,15 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
             WaitForSingleObject(g_summonThread, 1000);
             CloseHandle(g_summonThread);
             g_summonThread = nullptr;
+        }
+        // Xbox/全屏检测线程退出并回收
+        if (g_xboxActive.load()) {
+            g_xboxActive = false;
+            if (g_xboxThread) {
+                WaitForSingleObject(g_xboxThread, 2000);
+                CloseHandle(g_xboxThread);
+                g_xboxThread = nullptr;
+            }
         }
         // 掌机前端自动关闭：通知后台轮询线程退出并回收
         if (g_autoCloseThread) {
@@ -4635,10 +5395,13 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         else if (w == PBT_APMRESUMEAUTOMATIC) {
             // 自动/误唤醒候选：直接恢复游戏 + 还原 TDP（不做误唤醒判定、不重睡）
             if (g_sgInSuspend) sgRealWake("resume_auto");
+            // 通知前端手柄引擎：唤醒后重置边沿并（若有手柄）重启循环，确保稳定
+            ipc_emit("gamepad.restart", {});
         }
         else if (w == PBT_APMRESUMESUSPEND) {
             // S3 确定性用户唤醒：直接恢复
             if (g_sgInSuspend) sgRealWake("resume_suspend");
+            ipc_emit("gamepad.restart", {});
         }
         return TRUE;
 
@@ -4654,8 +5417,12 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
             ipc_emit("tray.click");
             break;
         case WM_LBUTTONDBLCLK:
-            SetWindowPos(g_hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
-            showWindowAnimated(g_hwnd, SW_SHOW);
+            // 双击托盘图标：总是彻底隐藏主窗口到托盘，并刷新任务栏状态。
+            // 之前这里是直接 showWindowAnimated(SW_SHOW)，导致双击后任务栏出现黑框窗口；
+            // 后改为 toggle 仍有用户反馈黑块残留。双击托盘语义明确为"完全退到后台"，
+            // 故不再呼出，只隐藏；呼出由单击托盘(LBUTTONUP)负责。
+            hideWindowAnimated(g_hwnd);
+            applyResidentMode(); // 强制重新同步任务栏按钮/托盘状态，消除残留黑框/按钮
             ipc_emit("tray.doubleClick");
             break;
         case WM_RBUTTONUP:
@@ -4805,18 +5572,22 @@ int WINAPI wWinMain(HINSTANCE hi, HINSTANCE, LPWSTR, int ns) {
     wc.hInstance      = hi;
     wc.lpszClassName  = L"QQ";
     wc.hCursor        = LoadCursorW(nullptr, IDC_ARROW);
-    wc.hbrBackground  = CreateSolidBrush(bgClr);
+    // 无边框透明基线：窗口类不提供实色背景刷，局部可见底色全部交给前端
+    // 导航/卡片/控件分块绘制；否则 GDI 会先把整个窗口铺成深色，遮住桌面。
     wc.hIcon          = g_appIconLarge ? g_appIconLarge : LoadIconW(nullptr, IDI_APPLICATION);
     wc.hIconSm        = g_appIconSmall ? g_appIconSmall : wc.hIcon;
     RegisterClassExW(&wc);
 
     // Keep the standard overlapped window semantics even in frameless mode.
     // WM_NCCALCSIZE removes the visible chrome, while DWM keeps native animations.
-    // WS_EX_TOOLWINDOW keeps the window out of the main taskbar: the app lives
-    // only in the notification-area tray icon, which is the desired behavior.
+    // 默认不常驻任务栏：窗口以 WS_EX_APPWINDOW 创建，再由 applyResidentMode() 调
+    // ITaskbarList::DeleteTab 隐藏任务栏按钮（等价于“不存在于任务栏”）。
+    // 注意：绝不能用 WS_EX_TOOLWINDOW 隐藏任务栏按钮——该样式会让 DWM 忽略
+    // SystemBackdrop 属性，磨砂玻璃整片失效（灰块根因）。任务栏常驻开启时由
+    // applyResidentMode() AddTab 显示按钮；默认仅靠托盘入口。
     DWORD style = WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN;
 
-    DWORD exStyle = WS_EX_TOOLWINDOW;
+    DWORD exStyle = WS_EX_APPWINDOW;
     int windowWidth = width;
     int windowHeight = height;
     if (!g_frameless) {
@@ -4832,6 +5603,19 @@ int WINAPI wWinMain(HINSTANCE hi, HINSTANCE, LPWSTR, int ns) {
     if (g_hwnd) {
         if (g_appIconLarge) SendMessageW(g_hwnd, WM_SETICON, ICON_BIG, (LPARAM)g_appIconLarge);
         if (g_appIconSmall) SendMessageW(g_hwnd, WM_SETICON, ICON_SMALL, (LPARAM)g_appIconSmall);
+
+        // 透明基线：普通 WebView2 客户区 + CSS 分块底板。
+        // WebView2 DefaultBackgroundColor alpha=0（透明根）+ WS_EX_LAYERED
+        // 是 WebView2 官方逐像素透明组合：空白像素透桌面、底板按 rgba
+        // 半透明、文字/图标按自身 alpha 合成。
+        // 整窗 alpha=255：整窗不淡化（不透明最小值）。透明观感完全由
+        // 前端分块底板的 rgba 逐像素提供（空白区 alpha=0 透桌面、
+        // 底板近实体 97-98%）。鼠标命中由前端 zoom 缩放修正。
+        if (g_frameless) {
+            LONG_PTR exStyle = GetWindowLongPtrW(g_hwnd, GWL_EXSTYLE);
+            SetWindowLongPtrW(g_hwnd, GWL_EXSTYLE, exStyle | WS_EX_LAYERED);
+            SetLayeredWindowAttributes(g_hwnd, 0, 255, LWA_ALPHA);
+        }
     }
     enableWindowTransitions(g_hwnd);
 
@@ -4922,8 +5706,12 @@ int WINAPI wWinMain(HINSTANCE hi, HINSTANCE, LPWSTR, int ns) {
     reg_clipboard();
     reg_shell_app();
     reg_tray();
-    // 常驻任务栏：启动即创建通知区域（系统托盘）图标，窗口开/最小化都一直存在
-    trayCreate(L"野蛮控制中心");
+    // 应用「任务栏常驻」偏好（默认不常驻）：默认仅托盘、无任务栏按钮。
+    // 前端 App.vue 启动期会按 C:\SOFT\YeMan\PowerControl\tray_resident.json 再同步一次，
+    // 但此处先保证即使前端未就绪窗口也可经托盘唤回。
+    applyResidentMode();
+    // 内存变色托盘图标：30 s 定时刷新，仅托盘模式生效（resident 模式无托盘则跳过）
+    SetTimer(g_hwnd, MEM_TRAY_TIMER_ID, 30000, nullptr);
     reg_env();
     reg_hotkey();
     reg_notification();

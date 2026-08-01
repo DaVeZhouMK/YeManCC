@@ -12,7 +12,7 @@
 //   X(2)           → 下拉选择循环
 //   Start(9)       → 调试面板
 //   D-pad/左摇杆   → 页面内焦点移动（空间导航）
-//   LT(6)/RT(7)/←→ → 滑块微调
+//   LT(6)/RT(7)/←→ → 滑块微调（仅 A 进入“编辑模式”后；未进入时方向键只移动焦点）
 import { ROUTES } from '@/router';
 import type { Router } from 'vue-router';
 import { summonGet, type GamepadSettings } from '@/bridge/yeman';
@@ -30,10 +30,15 @@ const FOCUSABLE =
 let rafId = 0;
 let prevButtons: boolean[] = [];
 let prevAxes: number[] = [];
-let holdStart = 0;
 let lastNav = 0;
 let lastPageSwitch = 0; // 切页冷却（防止连按卡顿）
-const PAGE_SWITCH_COOLDOWN = 400; // ms，防止快速连击导致多页跳转+渲染堆积
+const PAGE_SWITCH_COOLDOWN = 100; // ms，原 400ms 过严致连按 LB/RB 丢按；降到 100ms 使快速切页（含切到 TDP）每次都生效
+// 滑块线性加速：按住越久步长越大、间隔越短
+let sliderAccelStart = 0;  // 本次按住起始时间（用于线性加速）
+let sliderLastApply = 0;   // 上次应用加速步进的时间
+const SLIDER_ACCEL_DELAY = 350; // ms：起跳后多久才开始加速
+const SLIDER_ACCEL_STEP  = 280; // ms：每过这么久步长 +1
+const SLIDER_ACCEL_CAP   = 20;  // 单帧最大步长（避免一步跨太多）
 let gamepadConnected = false; // 追踪手柄连接状态
 let lastPadTs = 0;   // 上一帧手柄读数时间戳（用于检测唤醒后冻结快照）
 let stuckSince = 0;  // 读数停滞起始时间
@@ -44,15 +49,69 @@ let gpSettings: GamepadSettings = {
   bDoubleMinimize: true,
   tdpShortcut: false,
   fpsShortcut: false,
+  killGame: false,
+  openKeyboard: false,
 };
 let startUsedAsModifier = false; // Start 键是否在本轮按住中被用作快捷调节修饰键
 
+let engineOpts: GamepadEngineOptions | null = null; // 供连接/可见/唤醒事件重启循环使用
+let noPadStreak = 0;       // 连续无手柄帧计数（Grace 防瞬时断连误杀）
+const NO_PAD_GRACE = 30;   // 约 0.5s@60fps：连续这么多帧无手柄才停止循环
+let summonActive = false;  // 呼出后置 true：强制视为可见，直到窗口再次隐藏（绕开 WebView2 可见态未及时刷新）
+
+// 是否有任意已连接手柄
+function hasConnectedPad(): boolean {
+  try {
+    const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+    for (const p of pads) if (p && p.connected) return true;
+  } catch { /* 某些 WebView2 版本 getGamepads() 可能抛异常 */ }
+  return false;
+}
+
+// 若循环未运行则启动（幂等）：用于连接/可见/唤醒事件拉起
+function ensureLoop(opts: GamepadEngineOptions) {
+  if (rafId) return;
+  noPadStreak = 0;
+  rafId = requestAnimationFrame(() => tick(opts));
+}
+
 // 监听手柄连接/断开事件（某些 WebView2 版本需要此触发轮询）
 if (typeof window !== 'undefined') {
-  window.addEventListener('gamepadconnected', () => { gamepadConnected = true; });
-  window.addEventListener('gamepaddisconnected', () => { gamepadConnected = false; });
-  // 睡眠守护唤醒后，native 通知重启手柄引擎：重置边沿/时间戳状态，使下一次真实输入被当作新边沿
-  window.addEventListener('ipc:gamepad.restart', () => { restartGamepadState(); });
+  // 插入/切换手柄 → 立即重启循环
+  window.addEventListener('gamepadconnected', () => {
+    gamepadConnected = true;
+    if (engineOpts) ensureLoop(engineOpts);
+  });
+  // 断开 → 若已无任何手柄仍连着，停止循环（省 CPU）；仍有其他手柄则保留
+  window.addEventListener('gamepaddisconnected', () => {
+    if (!hasConnectedPad()) {
+      gamepadConnected = false;
+      stopGamepad();
+    }
+  });
+  // 睡眠守护唤醒后，native 通知重启手柄引擎：重置边沿/时间戳状态，并尝试重启循环
+  window.addEventListener('ipc:gamepad.restart', () => {
+    restartGamepadState();
+    if (engineOpts && hasConnectedPad()) ensureLoop(engineOpts);
+  });
+  // R1L1 呼出（native 后台线程 bringToFront 后发出）：强制接管手柄导航。
+  // ① 置 summonActive 让循环即便 WebView2 可见态未刷新也照常处理输入；
+  // ② 重置边沿基线，避免呼出瞬间把“仍按住的 R1L1”误判成新的按下边沿（误切页）；
+  // ③ 重启循环（若此前因无手柄被停 / 隐藏态未运行，现在必定拉起）。
+  window.addEventListener('ipc:gamepad.summon', () => {
+    summonActive = true;
+    restartGamepadState();
+    if (engineOpts) ensureLoop(engineOpts);
+  });
+  // 回到可见（含系统唤醒窗口恢复可见）：兜底探测手柄并启动循环
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      if (engineOpts && hasConnectedPad()) ensureLoop(engineOpts);
+    } else {
+      // 窗口再次隐藏：清除呼出强制态，循环回到隐藏行为（仍保持运行以记录边沿）
+      summonActive = false;
+    }
+  });
   // 设置页实时同步手柄快捷开关
   window.addEventListener('ipc:gamepad.settings', ((e: CustomEvent<GamepadSettings>) => {
     if (e.detail) gpSettings = { ...gpSettings, ...e.detail };
@@ -128,26 +187,61 @@ function moveFocus(dx: number, dy: number) {
   const bx = br.left + br.width / 2;
   const by = br.top + br.height / 2;
   let best: HTMLElement | null = null;
-  let bestScore = Infinity;
-  for (const el of els) {
-    if (el === base) continue;
-    const r = el.getBoundingClientRect();
-    const ex = r.left + r.width / 2;
-    const ey = r.top + r.height / 2;
-    const ddx = ex - bx;
-    const ddy = ey - by;
-    // 投影必须为正（朝目标方向移动）
-    const proj = ddx * dx + ddy * dy;
-    if (proj <= 0) continue;
-    // 垂直偏离惩罚
-    const perp = Math.abs(ddx * dy - ddy * dx);
-    // 综合得分：投影距离 + 垂直偏离 × 2
-    const score = proj + perp * 2;
-    if (score < bestScore) {
-      bestScore = score;
-      best = el;
+
+  if (dy !== 0) {
+    // ── 上下导航：行优先 ──
+    // 用户希望方向键按“内容行”移动。例如从“帧数目标 30”按上，应跳到
+    // 同一卡片内上一行的“使用电池”下拉，而不是跳到更靠左的“野蛮系统电源”。
+    const ROW_BAND = 28; // 同一行内 center-y 容差（px）
+    type Cand = { el: HTMLElement; y: number; x: number; dyAbs: number };
+    const cands: Cand[] = [];
+    for (const el of els) {
+      if (el === base) continue;
+      const r = el.getBoundingClientRect();
+      const ey = r.top + r.height / 2;
+      const ddy = ey - by;
+      if (dy > 0 && ddy <= 0) continue;
+      if (dy < 0 && ddy >= 0) continue;
+      cands.push({ el, y: ey, x: r.left + r.width / 2, dyAbs: Math.abs(ddy) });
+    }
+    if (cands.length === 0) return;
+    // 先找垂直最近的元素，再用它的 y 定义“目标行”
+    cands.sort((a, b) => a.dyAbs - b.dyAbs);
+    const targetY = cands[0].y;
+    const rowCands = cands.filter((c) => Math.abs(c.y - targetY) <= ROW_BAND);
+    // 在目标行里选 x 最近的，保持水平落点一致
+    let bestXDist = Infinity;
+    for (const c of rowCands) {
+      const xDist = Math.abs(c.x - bx);
+      if (xDist < bestXDist) {
+        bestXDist = xDist;
+        best = c.el;
+      }
+    }
+  } else {
+    // ── 左右导航：沿用空间优先（同行内移动）──
+    let bestScore = Infinity;
+    for (const el of els) {
+      if (el === base) continue;
+      const r = el.getBoundingClientRect();
+      const ex = r.left + r.width / 2;
+      const ey = r.top + r.height / 2;
+      const ddx = ex - bx;
+      const ddy = ey - by;
+      // 投影必须为正（朝目标方向移动）
+      const proj = ddx * dx + ddy * dy;
+      if (proj <= 0) continue;
+      // 垂直偏离惩罚
+      const perp = Math.abs(ddx * dy - ddy * dx);
+      // 综合得分：投影距离 + 垂直偏离 × 2
+      const score = proj + perp * 2;
+      if (score < bestScore) {
+        bestScore = score;
+        best = el;
+      }
     }
   }
+
   if (best) {
     best.focus({ preventScroll: false });
     best.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' });
@@ -217,20 +311,41 @@ function commitSlider() {
   }
 }
 
+// ── 滑块微调（线性加速）：按住越久，单步跨度越大、触发越密 ──
+// 仅当焦点在滑块（engine 调用前已判定）时由调用方传入左右/LT/RT 状态。
+function microAdjustSlider(now: number, heldL: boolean, heldR: boolean, lt: boolean, rt: boolean) {
+  if (!(heldL || heldR || lt || rt)) { sliderAccelStart = 0; sliderLastApply = 0; return; }
+  const dir = heldR || rt ? 1 : -1;
+  if (sliderAccelStart === 0) sliderAccelStart = now;
+  const held = now - sliderAccelStart;
+  let step = 1;
+  let interval = 45; // 基础重复间隔（ms），加速后变密
+  if (held > SLIDER_ACCEL_DELAY) {
+    step = Math.min(1 + Math.floor((held - SLIDER_ACCEL_DELAY) / SLIDER_ACCEL_STEP), SLIDER_ACCEL_CAP);
+    interval = Math.max(16, 45 - Math.floor(held / 300) * 8);
+  }
+  if (now - sliderLastApply >= interval) {
+    adjustSlider(dir * step);
+    sliderLastApply = now;
+  }
+}
+
 // ── 主循环 ──
 function tick(opts: GamepadEngineOptions) {
   const now = performance.now();
   const pad = getPad();
   // 窗口隐藏（在托盘）时不处理手柄输入：避免后台空转，也避免“非活动窗口仍监听”
-  if (document.visibilityState !== 'visible') {
+  // 呼出期间 (summonActive) 强制视为可见，绕开 WebView2 可见态未及时刷新的窗口
+  if (document.visibilityState !== 'visible' && !summonActive) {
     if (pad) { prevButtons = pad.buttons.map((x) => x.pressed); prevAxes = Array.from(pad.axes); }
     rafId = requestAnimationFrame(() => tick(opts));
     return;
   }
   if (pad) {
+    noPadStreak = 0;
     if (!gamepadConnected) {
       gamepadConnected = true;
-      log(opts, `🎮 手柄已连接: ${pad.id || 'unknown'}`);
+      log(opts, `手柄已连接: ${pad.id || 'unknown'}`);
     }
     // 唤醒后读数为冻结快照：若 timestamp 长时间停滞，重置边沿状态，
     // 待浏览器恢复轮询后下一次真实输入即被识别为新边沿（避免卡死在"无任何输入"状态）
@@ -246,6 +361,13 @@ function tick(opts: GamepadEngineOptions) {
     }
     const b = pad.buttons.map((x) => x.pressed);
     const a = Array.from(pad.axes);
+
+    // 状态重置后首帧（呼出/唤醒/连接后边沿基线被清空）：仅重建基线，不触发边沿，避免误触
+    if (prevButtons.length !== b.length) {
+      prevButtons = b; prevAxes = a;
+      rafId = requestAnimationFrame(() => tick(opts));
+      return;
+    }
 
     // 测试模式：仅保留状态轮询，不执行任何 UI 操作
     if (testMode) {
@@ -279,10 +401,13 @@ function tick(opts: GamepadEngineOptions) {
     // ── 面包按钮 ──
     if (pressed(0)) { activate(opts); log(opts, 'A · 确认'); }
     if (pressed(1)) {
-      // 单按 B = 返回/失焦（仅窗口聚焦、Web Gamepad 可读时生效）。
-      // 双击 B 最小化到托盘已移到 native 后台 XInput 线程（gamepadSummonThread），
-      // 全局免点击；此处不再处理，避免与 native 双触发。
-      if (sliderEditMode) {
+      // 先给当前页面/弹层一个拦截机会：例如快捷应用菜单打开时，B 只执行取消。
+      // 未被拦截时再走通用返回/失焦逻辑，避免弹层和全局返回双重响应。
+      const backEvent = new CustomEvent('ipc:gamepad-back', { cancelable: true });
+      window.dispatchEvent(backEvent);
+      if (backEvent.defaultPrevented) {
+        log(opts, 'B · 当前页面处理');
+      } else if (sliderEditMode) {
         sliderEditMode = false;
         log(opts, 'B · 退出滑块编辑');
       } else {
@@ -320,59 +445,56 @@ function tick(opts: GamepadEngineOptions) {
       startUsedAsModifier = gpSettings.tdpShortcut || gpSettings.fpsShortcut;
       lastNav = now;
     } else if (sliderEditMode && isRangeInput(document.activeElement as HTMLElement)) {
-      // 滑块编辑模式：左右调整数值，上下/B退出（B 在上方处理）
-      if (pressed(14) || pressed(15) || pressed(6) || pressed(7)) {
-        const d = (pressed(6) || pressed(15)) ? 1 : -1;
-        if (d !== 0) { adjustSlider(d); holdStart = now; }
-      }
-      if ((heldLeft || heldRight || b[6] || b[7]) && !(heldUp || heldDown) && now - holdStart > 200) {
-        adjustSlider(heldRight || b[6] ? 1 : -1);
-        holdStart = now;
-      }
+      // 滑块编辑模式：左右调整数值（线性加速），上下/B退出（B 在上方处理）
+      microAdjustSlider(now, heldLeft, heldRight, b[6], b[7]);
       if (pressed(12) || pressed(13)) {
         sliderEditMode = false;
         log(opts, '方向键 · 退出滑块编辑');
       }
       lastNav = now;
-    } else {
-      // ── D-pad / 左摇杆 → 焦点移动（220ms 冷却防连跳）──
-      const dirX = heldRight ? 1 : heldLeft ? -1 : 0;
-      const dirY = heldDown ? 1 : heldUp ? -1 : 0;
-      if ((dirX !== 0 || dirY !== 0) && now - lastNav > 220) {
-        if (dirX !== 0 && dirY === 0) moveFocus(dirX, 0);
-        else if (dirY !== 0 && dirX === 0) moveFocus(0, dirY);
-        else if (dirX !== 0 && dirY !== 0) {
-          // 对角线优先水平
-          moveFocus(dirX, 0);
+      } else {
+        // 非编辑模式：方向键一律用于页面内焦点移动——即使焦点停在滑块上，也只移动焦点，
+        // 不再微调数值。滑块只有按 A（确认/点击）进入“编辑模式”后，方向键/LT/RT 才调整数值
+        // （见上方 sliderEditMode 分支）。这修复了“焦点一上滑块、左右就被吃掉、无法选后续元素”。
+        const dirX = heldRight ? 1 : heldLeft ? -1 : 0;
+        const dirY = heldDown ? 1 : heldUp ? -1 : 0;
+        if ((dirX !== 0 || dirY !== 0) && now - lastNav > 220) {
+          if (dirX !== 0 && dirY === 0) moveFocus(dirX, 0);
+          else if (dirY !== 0 && dirX === 0) moveFocus(0, dirY);
+          else if (dirX !== 0 && dirY !== 0) {
+            // 对角线优先水平
+            moveFocus(dirX, 0);
+          }
+          lastNav = now;
         }
-        lastNav = now;
       }
-
-      // ── 滑块微调：LT/RT(±1 step) 或 ←→(±1 step) ──
-      if (pressed(14) || pressed(15) || pressed(6) || pressed(7)) {
-        const d = (pressed(6) || pressed(15)) ? 1 : (pressed(7) || pressed(14)) ? -1 : 0;
-        if (d !== 0) { adjustSlider(d); holdStart = now; }
-      }
-      // 按住 ←→ 或 LT/RT 重复微调（200ms 间隔）
-      if ((heldLeft || heldRight || b[6] || b[7]) && !(heldUp || heldDown) && now - holdStart > 200) {
-        adjustSlider(heldRight || b[6] ? 1 : -1);
-        holdStart = now;
-      }
-    }
 
     prevButtons = b;
     prevAxes = a;
+  } else {
+    // 无手柄：连续若干帧后停止循环（Grace 防瞬时断连误杀），省 CPU
+    noPadStreak++;
+    if (noPadStreak >= NO_PAD_GRACE) {
+      rafId = 0; // 标记停止；本帧不再重排，待连接/可见/唤醒事件重启
+      return;
+    }
   }
   rafId = requestAnimationFrame(() => tick(opts));
 }
 
 export function startGamepad(opts: GamepadEngineOptions): () => void {
+  engineOpts = opts;
   if (rafId) return () => stopGamepad();
   prevButtons = [];
   prevAxes = [];
   summonGet().then((s) => { gpSettings = { ...gpSettings, ...s }; });
-  log(opts, '手柄引擎已启动');
-  rafId = requestAnimationFrame(() => tick(opts));
+  // 仅检测到手柄时才启动 60fps 循环；无手柄保持停止，由连接/可见/唤醒事件拉起（省 CPU）
+  if (hasConnectedPad()) {
+    log(opts, '手柄引擎已启动（检测到手柄）');
+    ensureLoop(opts);
+  } else {
+    log(opts, '手柄引擎就绪（无手柄，待连接）');
+  }
   return () => stopGamepad();
 }
 export function stopGamepad() {

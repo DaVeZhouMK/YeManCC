@@ -4,6 +4,8 @@ import { useDebugStore } from '@/stores/debug';
 import { fs, shell } from '@/bridge/api';
 import { isNativeRuntime } from '@/bridge/ipc';
 import * as yeman from '@/bridge/yeman';
+import InlineIcon from '@/components/InlineIcon.vue';
+import AppIcon from '@/components/AppIcon.vue';
 
 const emit = defineEmits<{ (e: 'close'): void }>();
 const store = useDebugStore();
@@ -46,7 +48,7 @@ async function taskQuery() {
   taskResult.value = '查询中...';
   try {
     const exists = await yeman.taskExists(taskName.value);
-    taskResult.value = exists ? '✅ 任务存在' : '⬜ 任务不存在';
+    taskResult.value = exists ? '任务存在' : '任务不存在';
   } catch (e) {
     taskResult.value = '查询失败: ' + (e as Error).message;
   }
@@ -55,7 +57,7 @@ async function taskDelete() {
   taskResult.value = '删除中...';
   try {
     const ok = await yeman.deleteTask(taskName.value);
-    taskResult.value = ok ? '🗑 已删除' : '删除失败';
+    taskResult.value = ok ? '已删除' : '删除失败';
   } catch (e) {
     taskResult.value = '删除失败: ' + (e as Error).message;
   }
@@ -67,7 +69,7 @@ const logsText = computed(() =>
     .reverse()
     .map((l) => {
       const t = new Date(l.ts).toLocaleTimeString('zh-CN', { hour12: false });
-      const ok = l.ok ? '✓' : '✗';
+      const ok = l.ok ? 'OK' : 'ERR';
       const res = l.ok ? JSON.stringify(l.result) : l.error;
       return `${t} ${ok} ${l.cmd} ${JSON.stringify(l.args)} => ${res}`;
     })
@@ -83,11 +85,11 @@ onMounted(() => {
   <div class="debug-overlay">
     <div class="debug-panel">
       <header class="db-head app-region-drag">
-        <span>🛠 调试面板</span>
+        <span><InlineIcon name="wrench" /> 调试面板</span>
         <span class="db-runtime" :class="isNativeRuntime ? 'ok' : 'warn'">
           {{ isNativeRuntime ? '原生运行时' : '非原生(浏览器)' }}
         </span>
-        <button class="db-close app-region-no-drag" @click="emit('close')">✕</button>
+        <button class="db-close app-region-no-drag" @click="emit('close')"><AppIcon name="close" /></button>
       </header>
 
       <nav class="db-tabs app-region-no-drag">

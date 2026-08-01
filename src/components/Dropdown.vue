@@ -87,6 +87,8 @@ function toggle() {
   else openMenu();
 }
 
+defineExpose({ openMenu, closeMenu, toggle });
+
 function select(i: number) {
   const o = props.options[i];
   if (!o || o.disabled) return;

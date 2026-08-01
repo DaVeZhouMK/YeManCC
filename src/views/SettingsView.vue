@@ -3,10 +3,12 @@ import { ref, onMounted, onBeforeUnmount, computed } from 'vue';
 import Toggle from '@/components/Toggle.vue';
 import GamepadVisualizer from '@/components/GamepadVisualizer.vue';
 import { summonGet, summonSet, toggleTask, taskExists, autocloseGet, autocloseSet, updateAccelGet, updateAccelToggle, type GamepadSettings, type AutoCloseConfig, type UpdateAccelState, checkUpdate, downloadUpdate, installUpdate, compareVersions, UPDATE_MANIFEST_URL, updatePackageUrl } from '@/bridge/yeman';
-import { shell } from '@/bridge/api';
+import { shell, fs } from '@/bridge/api';
 import { APP_VERSION } from '@/version';
+import InlineIcon from '@/components/InlineIcon.vue';
 
 const BOOT_TASK = '野蛮控制中心-开机启动';
+const BOOT_CFG = 'C:\\SOFT\\YeMan\\PowerControl\\boot_config.json';
 
 const bootMinOn = ref(false);
 const busy = ref(false);
@@ -20,7 +22,7 @@ const gp = ref<GamepadSettings>({
 });
 const errMsg = ref('');
 
-// ── 掌机前端自动关闭：总开关 + 可编辑进程名列表 ──
+// ── 冲突软件自动关闭：总开关 + 可编辑进程名列表 ──
 const autoClose = ref<AutoCloseConfig>({ enabled: false, procs: [] });
 const acBusy = ref(false);
 
@@ -49,7 +51,8 @@ const appVersion = APP_VERSION;
 // ── 自动更新（检查 / 下载 / 安装）──
 type UpdateState = 'idle' | 'checking' | 'has' | 'latest' | 'downloading' | 'error';
 const updateState = ref<UpdateState>('idle');
-const updateInfo = ref<{ version: string; notes?: string } | null>(null);
+const updateBusy = computed(() => updateState.value === 'downloading');
+const updateInfo = ref<{ version: string; notes?: string; sha256?: string } | null>(null);
 const updateErr = ref('');
 async function onCheckUpdate() {
   updateErr.value = '';
@@ -57,7 +60,7 @@ async function onCheckUpdate() {
   try {
     const info = await checkUpdate(UPDATE_MANIFEST_URL);
     if (compareVersions(info.version, appVersion) > 0) {
-      updateInfo.value = { version: info.version, notes: info.notes };
+      updateInfo.value = { version: info.version, notes: info.notes, sha256: info.sha256 };
       updateState.value = 'has';
     } else {
       updateState.value = 'latest';
@@ -72,7 +75,7 @@ async function onUpdate() {
   updateErr.value = '';
   updateState.value = 'downloading';
   try {
-    await downloadUpdate(updatePackageUrl(updateInfo.value.version));
+    await downloadUpdate(updatePackageUrl(updateInfo.value.version), updateInfo.value.sha256);
     // 下载完成后请求 native 安装（会解压、合并覆盖、重启，本进程随后退出）
     await installUpdate();
   } catch (e) {
@@ -135,7 +138,15 @@ const hintSegments = computed(() => (activeShortcut.value ? segmentHint(activeSh
 async function load() {
   errMsg.value = '';
   try {
-    bootMinOn.value = await taskExists(BOOT_TASK);
+    // 优先读配置真相源 boot_config.json（用户意图），其次检查计划任务是否存在
+    try {
+      const txt = await fs.readTextFile(BOOT_CFG);
+      const j = JSON.parse(txt) as { bootOn?: boolean };
+      bootMinOn.value = j.bootOn === true;
+    } catch {
+      // 配置文件不存在 → 回退计划任务探测
+      bootMinOn.value = await taskExists(BOOT_TASK);
+    }
   } catch (e) {
     errMsg.value = '读取开机启动状态失败：' + (e as Error).message;
   }
@@ -223,10 +234,13 @@ async function onBootMin(v: boolean) {
   const prev = bootMinOn.value;
   bootMinOn.value = v; // 乐观更新
   try {
+    // 先写配置真相源（不受权限影响，保证重启后记忆不丢）
+    await fs.writeTextFile(BOOT_CFG, JSON.stringify({ bootOn: v })).catch(() => {});
+    // 再操作计划任务（需管理员权限）
     await toggleTask(BOOT_TASK, v);
   } catch (e) {
     bootMinOn.value = prev; // 失败回滚
-    errMsg.value = '设置失败：' + (e as Error).message + '（创建开机任务需管理员权限，请右键以管理员身份运行 YeManCC）';
+    errMsg.value = '设���失败：' + (e as Error).message + '（创建开机任务需管理员权限，请右键以管理员身份运行 YeManCC）';
   } finally {
     busy.value = false;
   }
@@ -264,6 +278,14 @@ async function openHome() {
   }
 }
 
+async function openGithub() {
+  try {
+    await shell.open('https://github.com/DaVeZhouMK/YeManCC');
+  } catch {
+    /* ignore */
+  }
+}
+
 onMounted(() => {
   load();
 });
@@ -273,7 +295,7 @@ onBeforeUnmount(() => {});
 <template>
   <div class="page">
     <section class="card">
-      <h3 class="card-title">⚙ 开机启动</h3>
+      <h3 class="card-title"><InlineIcon name="power" /> 开机启动</h3>
       <Toggle
         v-model="bootMinOn"
         label="开机最小化启动"
@@ -286,22 +308,18 @@ onBeforeUnmount(() => {});
     </section>
 
     <section class="card">
-      <h3 class="card-title">🔒 掌机前端自动关闭</h3>
-      <Toggle
-        v-model="autoClose.enabled"
-        label="自动关闭掌机前端"
-        description="开启后每 5 秒检测，发现列表中的进程即温和关闭（发关闭信号，非强杀）"
-        color="accent"
-        :disabled="acBusy"
-        @update:model-value="onAutoCloseToggle"
-      />
-      <p v-if="!autoClose.enabled" class="muted body ac-collapsed">
-        已关闭 —— 开启开关后展开下方进程名列表
-      </p>
-      <template v-else>
+      <div class="card-header-row">
+        <h3 class="card-title"><InlineIcon name="lock" /> 冲突软件自动关闭</h3>
+        <Toggle
+          v-model="autoClose.enabled"
+          color="accent"
+          :disabled="acBusy"
+          @update:model-value="onAutoCloseToggle"
+        />
+      </div>
+      <template v-if="autoClose.enabled">
         <p class="muted body ac-sub">
-          目标进程名（可带或不带 .exe；支持 <code>*</code> 前缀通配，如 <code>AYA*</code>）。
-          默认预填 一号本/AYA/GPD，KO助手、NewKO 等请在此自行补充。
+          开启后每 5 秒检测，发现列表中的进程即温和关闭（发关闭信号，非强杀）
         </p>
         <div class="ac-list">
           <div v-for="(p, i) in autoClose.procs" :key="i" class="ac-row">
@@ -314,7 +332,7 @@ onBeforeUnmount(() => {});
               @input="onAcProcInput(i, ($event.target as HTMLInputElement).value)"
               @change="saveAutoClose()"
             />
-            <button class="ac-del" :disabled="acBusy" title="移除" @click="onAcProcRemove(i)">✕</button>
+            <button class="ac-del" :disabled="acBusy" title="移除" @click="onAcProcRemove(i)"><InlineIcon name="close" /></button>
           </div>
           <button class="ac-add" :disabled="acBusy" @click="onAcProcAdd">＋ 添加进程名</button>
         </div>
@@ -322,7 +340,7 @@ onBeforeUnmount(() => {});
     </section>
 
     <section class="card">
-      <h3 class="card-title">⌨ 快捷键</h3>
+      <h3 class="card-title"><InlineIcon name="keyboard" /> 快捷键</h3>
       <div class="gp-toggles">
         <button
           v-for="s in shortcuts"
@@ -350,14 +368,15 @@ onBeforeUnmount(() => {});
 
     <!-- ── 以下内容原属「支持」页面，已合并至设置下方 ── -->
     <section class="card">
-      <h3 class="card-title">🌐 野蛮系统支持</h3>
+      <h3 class="card-title"><InlineIcon name="globe" /> 野蛮系统支持</h3>
       <p class="muted body">此控制台处于早期测试阶段</p>
-      <button class="action-btn outline" @click="openSupport">🚀 支持和软件官网 ↗</button>
-      <button class="action-btn outline" @click="openHome">🏠 野蛮系统主页 ↗</button>
+      <button class="action-btn outline" @click="openSupport"><InlineIcon name="rocket" /> 支持和软件官网 ↗</button>
+      <button class="action-btn outline" @click="openHome"><InlineIcon name="home" /> 野蛮系统主页 ↗</button>
+      <button class="action-btn outline" @click="openGithub"><InlineIcon name="link" /> github免费开源地址 ↗</button>
     </section>
 
     <section class="card">
-      <h3 class="card-title">📦 版本和更新</h3>
+      <h3 class="card-title"><InlineIcon name="package" /> 版本和更新</h3>
       <p class="muted body">当前版本：<b class="ac-name">{{ appVersion }}</b></p>
       <div class="upd-row">
         <button class="ac-add" :disabled="updateState === 'checking' || updateState === 'downloading'" @click="onCheckUpdate">
@@ -375,8 +394,8 @@ onBeforeUnmount(() => {});
       <div v-if="updateState === 'has' && updateInfo" class="upd-has">
         <p class="upd-line">发现新版本 <b class="ac-name">{{ updateInfo.version }}</b></p>
         <p v-if="updateInfo.notes" class="muted body upd-notes">{{ updateInfo.notes }}</p>
-        <button class="ac-add upd-install" :disabled="updateState === 'downloading'" @click="onUpdate">
-          {{ updateState === 'downloading' ? '下载并安装中…' : '下载并安装' }}
+        <button class="ac-add upd-install" :disabled="updateBusy" @click="onUpdate">
+          {{ updateBusy ? '下载并安装中…' : '下载并安装' }}
         </button>
       </div>
     </section>
@@ -386,6 +405,15 @@ onBeforeUnmount(() => {});
 <style scoped>
 .page {
   padding-bottom: 20px;
+}
+.card-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.card-header-row .card-title {
+  margin: 0;
 }
 .body {
   font-size: 12px;

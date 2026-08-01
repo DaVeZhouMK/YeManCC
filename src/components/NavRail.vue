@@ -1,20 +1,15 @@
 <script setup lang="ts">
 import { ROUTES } from '@/router';
 import { useRouter, useRoute } from 'vue-router';
-import { inject, ref } from 'vue';
+import { ref } from 'vue';
 import { shell, windowApi } from '@/bridge/api';
+import AppIcon from '@/components/AppIcon.vue';
 
 const router = useRouter();
 const route = useRoute();
 
-// 全局刷新触发器
-const globalRefreshKey = inject<Ref<number>>('globalRefreshKey');
-
 function go(path: string) {
   router.push(path);
-}
-function refreshAll() {
-  if (globalRefreshKey) globalRefreshKey.value++;
 }
 async function openHome() {
   try {
@@ -43,7 +38,7 @@ async function quit() {
 <template>
   <nav class="navrail">
     <div class="nav-brand app-region-drag">
-      <span class="nb-bolt">⚡</span>
+      <AppIcon name="yeman" class="nb-bolt" />
       <div class="nb-titles">
         <span class="nb-title">YeManCC</span>
         <span class="nb-sub">野蛮系统控制中心</span>
@@ -58,17 +53,13 @@ async function quit() {
         :class="{ active: route.path === r.path }"
         @click="go(r.path)"
       >
-        <span class="nav-icon">{{ r.icon }}</span>
+        <span class="nav-icon"><AppIcon :name="r.icon" /></span>
         <span class="nav-label">{{ r.title }}</span>
       </button>
     </div>
     <div class="nav-foot app-region-no-drag">
-      <button class="nav-item nav-foot-btn" data-gp-ignore @click="refreshAll">
-        <span class="nav-icon">🔄</span>
-        <span class="nav-label">手动刷新</span>
-      </button>
       <button class="nav-item nav-foot-btn" data-gp-ignore @click="minimize">
-        <span class="nav-icon">➖</span>
+        <span class="nav-icon"><AppIcon name="minimize" /></span>
         <span class="nav-label">最小化</span>
       </button>
       <button class="nav-quit" data-gp-ignore @click="quit">退出</button>
@@ -80,41 +71,49 @@ async function quit() {
 .nav-brand {
   display: flex;
   align-items: center;
-  gap: 7px;
-  padding: 6px 6px 10px;
+  gap: 4px;
+  padding: 6px 3px 10px;
   margin-bottom: 6px;
   border-bottom: 1px solid #1c2533;
+  min-width: 0;
+  overflow: hidden;
 }
 .nb-bolt {
+  flex: 0 0 auto;
   color: var(--accent-2);
-  font-size: 18px;
+  font-size: 16px;
   line-height: 1;
 }
 .nb-titles {
   display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
   flex-direction: column;
   line-height: 1.15;
+  white-space: nowrap;
 }
 .nb-title {
-  font-size: 13px;
+  font-size: 11.7px;
   font-weight: 700;
-  letter-spacing: 0.5px;
+  letter-spacing: 0;
   color: var(--text);
+  white-space: nowrap;
 }
 .nb-sub {
-  font-size: 9px;
+  font-size: 8px;
   font-weight: 500;
-  letter-spacing: 0.5px;
+  letter-spacing: 0;
   color: var(--text-dim);
+  white-space: nowrap;
 }
 .navrail {
   width: var(--nav-w);
   flex: 0 0 var(--nav-w);
-  background: #0c111a;
+  background: var(--bg-nav); /* 局部导航底板，不影响前景控件 */
   border-right: 1px solid #1c2533;
   display: flex;
   flex-direction: column;
-  padding: 8px 6px;
+  padding: 8px 4px;
 }
 .nav-items {
   flex: 1 1 auto;
@@ -126,14 +125,15 @@ async function quit() {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
-  padding: 10px 4px;
+  gap: 3px;
+  padding: 9px 2px;
   border: 1px solid transparent;
   border-radius: var(--radius-ctrl);
   background: transparent;
   color: var(--text-dim);
   cursor: pointer;
   transition: background 0.12s, color 0.12s;
+  white-space: nowrap;
 }
 .nav-item:hover {
   background: #131c28;
@@ -148,12 +148,13 @@ async function quit() {
   box-shadow: var(--focus-ring);
 }
 .nav-icon {
-  font-size: 18px;
+  font-size: 17px;
   line-height: 1;
 }
 .nav-label {
-  font-size: 11px;
+  font-size: 10px;
   text-align: center;
+  white-space: nowrap;
 }
 .nav-foot {
   flex: 0 0 auto;

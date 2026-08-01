@@ -1,0 +1,19 @@
+=== YeManCC 启动 IPC 采样（窗口 10000ms） ===
+采样触发时刻：起始后 2675ms
+前端总启动耗时（模块加载 → 内容可见）：2066ms
+
+命令                                     调用     总ms    最大ms
+shell.run                               2     267     134
+fs.exists                              31     244      12
+fs.readTextFile                        23     134      40
+sys.info                                9      66      14
+registry.read                          19      57      14
+summon.get                              2      38      37
+proc.running                            2      15       8
+smt.get                                 1      14      14
+power.activeScheme                      1      14      14
+cpu.topology                            1      10      10
+sleepGuard.get                          1       6       6
+updateAccel.get                         1       6       6
+tray.setResident                        1       4       4
+autoclose.get                           1       0       0

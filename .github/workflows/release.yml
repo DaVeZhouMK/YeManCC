@@ -47,7 +47,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           if (-not (Test-Path YeManCC.exe)) { exit 1 }
 
-      - name: Package YeManCC.zip (exe + index.html + assets + app.config.json + version.json)
+      - name: Package YeManCC.zip (exe + index.html + assets + app.config.json + version.json + PowerControl)
         shell: pwsh
         run: |
           $root = $env:GITHUB_WORKSPACE
@@ -58,6 +58,10 @@ jobs:
           Copy-Item (Join-Path $root 'app.config.json') $pkg
           Copy-Item (Join-Path $root 'version.json') $pkg
           Copy-Item (Join-Path $root 'dist\assets') (Join-Path $pkg 'assets') -Recurse -Force
+          # 依赖包 PowerControl（仓库内已用 .gitignore 排除用户运行时数据，仅含代码/资产）
+          if (Test-Path (Join-Path $root 'PowerControl')) {
+            Copy-Item (Join-Path $root 'PowerControl') (Join-Path $pkg 'PowerControl') -Recurse -Force
+          }
           Compress-Archive -Path (Join-Path $pkg '*') -DestinationPath (Join-Path $root 'YeManCC.zip') -Force
 
       - name: 计算 sha256 并写回 version.json

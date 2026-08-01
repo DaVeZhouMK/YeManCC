@@ -40,6 +40,28 @@ function onInput(e: Event) {
 function onChange(e: Event) {
   emit('commit', Number((e.target as HTMLInputElement).value));
 }
+// 键盘左右/上下：加快100%（基础×2）+ 线性加速；仅在滑块聚焦时生效（@keydown 仅对聚焦元素触发）
+let keyAccelStart = 0;
+function onKeydown(e: KeyboardEvent) {
+  const dir =
+    e.key === 'ArrowRight' || e.key === 'ArrowUp' ? 1 :
+    e.key === 'ArrowLeft' || e.key === 'ArrowDown' ? -1 : 0;
+  if (!dir) return;
+  e.preventDefault();
+  const step = props.step || 1;
+  const now = performance.now();
+  if (keyAccelStart === 0) keyAccelStart = now;
+  const elapsed = (now - keyAccelStart) / 1000;
+  const steps = Math.min(12, 2 + Math.floor(elapsed * 4)); // 基础2步，每秒+4，上限12
+  let v = props.modelValue + dir * step * steps;
+  v = Math.max(props.min, Math.min(props.max, v));
+  emit('update:modelValue', v);
+}
+function onKeyup(e: KeyboardEvent) {
+  if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft' && e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+  keyAccelStart = 0;
+  emit('commit', props.modelValue);
+}
 </script>
 
 <template>
@@ -62,6 +84,8 @@ function onChange(e: Event) {
         :disabled="disabled"
         @input="onInput"
         @change="onChange"
+        @keydown="onKeydown"
+        @keyup="onKeyup"
       />
     </div>
     <div class="slider-hint muted" v-if="hint">{{ hint }}</div>

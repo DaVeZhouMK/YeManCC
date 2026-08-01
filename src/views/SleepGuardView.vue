@@ -3,6 +3,7 @@ import { ref, reactive, computed, inject, type Ref } from 'vue';
 import Toggle from '@/components/Toggle.vue';
 import Slider from '@/components/Slider.vue';
 import SegButton from '@/components/SegButton.vue';
+import InlineIcon from '@/components/InlineIcon.vue';
 import {
   sleepGuardGet,
   sleepGuardSet,
@@ -185,7 +186,7 @@ async function onPwrBtn(ac: boolean, idx: PowerBtnIdx) {
         hibernateOn.value = true;
         await setHibernateSize(hibSize.value);
       } else if (hibernateOn.value === null) {
-        msg.value = '⚠ 休眠状态未知（检测失败），本次未自动开启休眠。请点击「刷新」重新检测后重试。';
+        msg.value = '休眠状态未知（检测失败），本次未自动开启休眠。请点击「刷新」重新检测后重试。';
       }
     }
     schedulePwrActivate();
@@ -275,9 +276,9 @@ refresh();
   <div class="sleep-guard">
     <!-- 顶部：电源按钮与系统休眠 合并为一个气泡 -->
     <div class="card">
-      <h3 class="card-title">🔌 电源按钮与系统休眠</h3>
+      <h3 class="card-title"><InlineIcon name="plug" /> 电源按钮与系统休眠</h3>
       <div class="pwr-row">
-        <span class="pwr-label">⚡ AC 插电</span>
+        <span class="pwr-label"><InlineIcon name="bolt" /> AC 插电</span>
         <SegButton
           :model-value="acBtnIdx"
           :options="[
@@ -291,7 +292,7 @@ refresh();
         />
       </div>
       <div class="pwr-row">
-        <span class="pwr-label">🔋 DC 离电</span>
+        <span class="pwr-label"><InlineIcon name="battery" /> DC 离电</span>
         <SegButton
           :model-value="dcBtnIdx"
           :options="[
@@ -335,7 +336,7 @@ refresh();
 
     <!-- 睡眠操作（总开关已移除，子项直接驱动 guard，始终显示） -->
     <div class="card">
-      <h3 class="card-title">🛌 睡眠操作</h3>
+      <h3 class="card-title"><InlineIcon name="sleep" /> 睡眠操作</h3>
       <Toggle
         :model-value="cfg.pauseResume"
         label="睡眠时暂停游戏"
@@ -363,10 +364,10 @@ refresh();
       />
       <div class="btn-row">
         <button class="action-btn" :disabled="busy" @click="suspendCurrent">
-          ⏸️ 暂停游戏
+          <InlineIcon name="pause" /> 暂停游戏
         </button>
         <button class="action-btn" :disabled="busy || cfg.suspended === 0" @click="recoverAll">
-          ▶️ 恢复全部游戏
+          <InlineIcon name="play" /> 恢复全部游戏
         </button>
       </div>
     </div>
@@ -382,14 +383,20 @@ refresh();
 .muted { color: var(--text-dim); }
 
 .card {
-  background: var(--bg-panel, #121722);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: var(--radius, 12px);
-  padding: 14px 16px;
-  margin-bottom: 14px;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+  background: var(--bg-panel);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  margin-bottom: 10px;
 }
-.card-title { font-size: 13px; margin: 0 0 10px; }
+.card-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  margin: 0 0 10px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
 
 .btn-row { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
 .btn-row .action-btn { flex: 1 1 auto; }

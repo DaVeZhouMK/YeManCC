@@ -22,7 +22,7 @@ function reportError(where: string, err: unknown) {
   // eslint-disable-next-line no-console
   console.error(`[YeManCC] ${where}:`, msg);
   try {
-    useDebugStore().pushLog({ dir: 'err', kind: where, raw: msg });
+    useDebugStore().pushLog({ cmd: 'window.error', args: { where }, ok: false, error: msg });
   } catch {
     /* 护栏自身不得再抛错 */
   }

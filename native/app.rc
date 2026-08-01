@@ -1,7 +1,7 @@
 #include "resource.h"
 #include "version.h"
 
-// App icon (闪电黄标) — loaded by main.cpp loadAppIcon() via IDI_APP
+// App icon (Y 字符徽标) — loaded by main.cpp loadAppIcon() via IDI_APP
 IDI_APP ICON "app.ico"
 
 // 版本资源（exe 属性页可见；由 scripts/write-version.mjs 生成的 version.h 注入）

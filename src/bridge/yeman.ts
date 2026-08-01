@@ -1,7 +1,7 @@
 // yeman.ts — 语义化后端桥层（强强壳 shell.run / fs 封装）
 //
 // 所有 powercfg GUID、任务计划名、bat/vbs/ps1 路径、厂商识别逻辑都收在这里，
-// 前端只调语义化方法：setTdp('ac', 300) / toggleTask('TDP-插电AC模式TDP调节', true) / ...
+// 前端只调语义化方法：setTdp('ac', 200) / toggleTask('TDP-插电AC模式TDP调节', true) / ...
 //
 // 配置真相源 = C:\SOFT\YeMan\PowerControl\ 下的 txt（与旧 HTA 共用）。
 // 任务计划只识别状态、不解析内容（schtasks 创建，/Query 判断存在即=开关状态）。
@@ -21,9 +21,9 @@ function join(...parts: string[]): string {
 }
 
 // ── TDP 常量（对齐 HTA：TDP_CEILINGS / TDP_MIN） ──
-export const TDP_CEILINGS = [20, 35, 55, 75, 120, 300];
+export const TDP_CEILINGS = [20, 35, 55, 75, 120, 200];
 export const TDP_MIN = 2;
-export const TDP_MAX = 300;
+export const TDP_MAX = 200;
 export function clampTdp(w: number): number {
   return Math.max(TDP_MIN, Math.min(TDP_MAX, Math.round(w)));
 }
@@ -71,6 +71,8 @@ export async function readTdp(mode: 'ac' | 'dc'): Promise<number | null> {
   const n = Number(s);
   return Number.isFinite(n) ? clampTdp(n) : null;
 }
+
+
 export async function saveFps(mode: 'ac' | 'dc', fps: number): Promise<void> {
   await fs.writeTextFile(join(PC_DIR, `FPS-${mode}.txt`), String(Math.max(0, Math.round(fps))));
 }
@@ -129,9 +131,26 @@ export async function createTask(name: string): Promise<boolean> {
   if (!(await fs.exists(xml))) {
     throw new Error(`XML 模板不存在: ${xml}`);
   }
-  // 需要管理员权限写入任务计划（UAC 保护）；失败时 exitCode 非 0，调用方应提示用户以管理员运行。
+  // 任务底层文件预检：仅当 TaskDef.asset 给出绝对路径时验证（相对路径可能由 schtasks 解析时定位，避免误判）
+  // 例如 AMD395 任务依赖 C:\SOFT\3DMark\YeMan-3DMark.bat，若该 bat 不存在则 schtasks 创建的任务在运行时仍会失败，
+  // 故在此处直接给出明确错误，避免用户看到一个晦涩的 "创建任务失败（需管理员）" 却找不到根因。
+  if (def.asset) {
+    const assetPath = resolveAssetAbsolutePath(def.asset);
+    if (assetPath && !(await fs.exists(assetPath))) {
+      throw new Error(`任务底层文件不存在: ${assetPath}`);
+    }
+  }
   const r = await shell.run('schtasks', ['/Create', '/TN', taskPath(name), '/XML', xml, '/F']);
   return r.exitCode === 0;
+}
+// 从 TaskDef.asset 中提取绝对路径：取第一个空白符前的 token；只有显式绝对路径（C:\ 或 \\UNC\）才返回
+function resolveAssetAbsolutePath(asset: string): string | null {
+  const raw = asset.trim();
+  if (!raw || raw.startsWith('(')) return null; // (内置) 等说明文字
+  const firstToken = raw.split(/\s+/)[0];
+  if (!firstToken) return null;
+  if (/^[A-Za-z]:[\\/]/.test(firstToken) || firstToken.startsWith('\\\\')) return firstToken;
+  return null;
 }
 // 依赖野蛮系统电源方案的任务（开机/唤醒任务会执行 powercfg -setactive YEMAN）
 const SCHEME_DEPENDENT_TASKS = new Set([
@@ -156,6 +175,40 @@ export async function toggleTask(name: string, on: boolean): Promise<boolean> {
     if (await taskExists(name)) await deleteTask(name);
     return false;
   }
+}
+
+// 批量删除「\\野蛮优化整合系统」任务目录中的全部计划任务。
+// 使用任务计划原生目录查询，不依赖前端已知任务列表，确保补充任务也会一并删除。
+export async function deleteAllYemanTasks(): Promise<void> {
+  const taskPathPrefix = `\\${TASK_FOLDER}\\`;
+  const command = `$p='${taskPathPrefix.replace(/'/g, "''")}'; Get-ScheduledTask -TaskPath $p -ErrorAction SilentlyContinue | Unregister-ScheduledTask -Confirm:$false`;
+  const r = await shell.run('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', command]);
+  if (r.exitCode !== 0) {
+    throw new Error((r.stderr || r.stdout || '删除任务计划失败').trim());
+  }
+}
+
+// 从 PowerControl 根目录的全部 XML 恢复任务计划，任务名按 XML 文件名（去掉 .xml）导入到统一目录。
+// 返回成功/失败数量，便于 UI 给出准确提示；失败任务不会阻止其它 XML 继续导入。
+export async function restoreAllYemanTasks(): Promise<{ imported: number; failed: string[] }> {
+  const entries = await fs.readDir(PC_DIR);
+  const xmlFiles = entries
+    .filter((entry: any) => entry?.isFile && /\\.xml$/i.test(String(entry?.name ?? '')))
+    .map((entry: any) => String(entry.name));
+  let imported = 0;
+  const failed: string[] = [];
+  for (const fileName of xmlFiles) {
+    const name = fileName.replace(/\\.xml$/i, '');
+    const xml = join(PC_DIR, fileName);
+    try {
+      const r = await shell.run('schtasks', ['/Create', '/TN', taskPath(name), '/XML', xml, '/F']);
+      if (r.exitCode === 0) imported++;
+      else failed.push(name);
+    } catch {
+      failed.push(name);
+    }
+  }
+  return { imported, failed };
 }
 
 // 手柄/快捷键设置（后台手柄 LB+RB 呼出、双击B最小化、Start+D-pad 快捷调节）
@@ -188,7 +241,7 @@ export async function summonSet(settings: Partial<GamepadSettings>): Promise<Gam
   return { ...DEFAULT_GAMEPAD_SETTINGS, ...r };
 }
 
-// ── 掌机前端自动关闭：可编辑进程名列表 + 总开关 ──
+// ── 冲突软件自动关闭：可编辑进程名列表 + 总开关 ──
 export interface AutoCloseConfig {
   enabled: boolean;
   procs: string[];
@@ -386,21 +439,28 @@ export async function detectCpuName(): Promise<string> {
 // ── TDP 下发（写 txt + 调 YeManTdpCtl.exe set <W> --vendor <vendor>） ──
 // opts.apply=false 时仅存档不写硬件（如改动的是非当前电源模式）。
 export interface SetTdpOpts {
-  apply?: boolean;
+  apply?: boolean;   // 是否实时下发硬件（调 YeManTdpCtl.exe）
   vendor?: Vendor;
+  save?: boolean;    // 是否写 tdp-{mode}.txt（持久化配置）；默认 true。false=只下发不记忆（快速切换/手柄）
 }
 export async function setTdp(
   mode: 'ac' | 'dc',
   watts: number,
   opts: SetTdpOpts = {}
 ): Promise<void> {
+  // 两个独立动作：save=写 tdp-{mode}.txt（持久化配置）；apply=实时下发硬件。
+  // 顶部「快速切换」/手柄用 { apply:true, save:false }（即时调当前 TDP，不记忆）；
+  // AC/DC 浮动上限滑块用 { apply:false, save:true }（纯后台写配置，靠开机/计划任务应用）。
   const w = clampTdp(watts);
-  await saveTdp(mode, w); // 写 tdp-{mode}.txt（HTA 的 defaultAC/DCFile）
+  if (opts.save !== false) {
+    await saveTdp(mode, w); // 写 tdp-{mode}.txt（HTA 的 defaultAC/DCFile）
+  }
   if (opts.apply) {
     const vendor = opts.vendor ?? (await detectVendor());
     if (vendor !== 'unknown') {
       const exe = join(PC_DIR, 'pawnio', 'YeManTdpCtl.exe');
-      await shell.run(exe, ['set', String(w), '--vendor', vendor]);
+      const args = ['set', String(w), '--vendor', vendor];
+      await shell.run(exe, args);
     }
   }
 }
@@ -413,7 +473,7 @@ export async function adjustTdp(delta: number): Promise<number | null> {
   if (cur === null) return null;
   const next = clampTdp(cur + delta);
   if (next === cur) return cur;
-  await setTdp(mode, next, { apply: true });
+  await setTdp(mode, next, { apply: true, save: false }); // 手柄即时调当前 TDP，不记忆
   return next;
 }
 
@@ -422,7 +482,7 @@ export async function setTdpCurrentMode(watts: number): Promise<number | null> {
   const mode = await detectPowerMode().catch(() => null as 'ac' | 'dc' | null);
   if (!mode) return null;
   const next = clampTdp(watts);
-  await setTdp(mode, next, { apply: true });
+  await setTdp(mode, next, { apply: true, save: false }); // 手柄即时调当前 TDP，不记忆
   return next;
 }
 
@@ -739,10 +799,14 @@ export async function readSmt(): Promise<SmtInfo | null> {
   }
   return null;
 }
-export async function setSmt(on: boolean): Promise<{ ok: boolean; error?: string }> {
+export async function setSmt(on: boolean): Promise<{ ok: boolean; error?: string; info?: unknown }> {
   try {
     const r = (await invoke('smt.set', { on })) as any;
-    return { ok: !!(r && r.ok), error: r && r.error ? String(r.error) : undefined };
+    return {
+      ok: !!(r && r.ok),
+      error: r && r.error ? String(r.error) : undefined,
+      info: r?.info,
+    };
   } catch (e: any) {
     return { ok: false, error: e?.message ? String(e.message) : '调用失败' };
   }
@@ -803,10 +867,10 @@ export async function readPowerParams(): Promise<PowerParams | null> {
 
 // 重制电源（六档，运行 TPD 下对应 VBS，VBS 内部静默调用 BAT 修改电源）
 export const RESET_PROFILES = [
-  { name: '🔥 Extreme极致性能', sub: '猛吃CPU-注意过热', path: 'C:\\SOFT\\YeMan\\PowerControl\\TPD\\Extreme.vbs' },
-  { name: '⚡ Elite精睿性能', sub: '笔记本推荐', path: 'C:\\SOFT\\YeMan\\PowerControl\\TPD\\Elite.vbs' },
-  { name: '🎮 Turbo高性能', sub: '掌机推荐', path: 'C:\\SOFT\\YeMan\\PowerControl\\TPD\\Turbo.vbs' },
-  { name: '⚖️ Performance平衡', sub: 'SteamDeck推荐', path: 'C:\\SOFT\\YeMan\\PowerControl\\TPD\\Performance.vbs' },
+  { name: 'Extreme极致性能', sub: '猛吃CPU-注意过热', path: 'C:\\SOFT\\YeMan\\PowerControl\\TPD\\Extreme.vbs' },
+  { name: 'Elite精睿性能', sub: '笔记本推荐', path: 'C:\\SOFT\\YeMan\\PowerControl\\TPD\\Elite.vbs' },
+  { name: 'Turbo高性能', sub: '掌机推荐', path: 'C:\\SOFT\\YeMan\\PowerControl\\TPD\\Turbo.vbs' },
+  { name: 'Performance平衡', sub: 'SteamDeck推荐', path: 'C:\\SOFT\\YeMan\\PowerControl\\TPD\\Performance.vbs' },
 ] as const;
 export async function runResetProfile(path: string): Promise<void> {
   // 用 cscript.exe（控制台模式）执行 VBS —— 不弹 GUI 对话框、无"内存资源不足"问题
@@ -820,7 +884,7 @@ export async function runResetProfile(path: string): Promise<void> {
 const RTSS_DIR = 'C:\\Program Files (x86)\\RivaTuner Statistics Server';
 const RTSS_GLOBAL = `${RTSS_DIR}\\Profiles\\Global`;
 const RTSS_OVERLAY_CFG = `${RTSS_DIR}\\Plugins\\Client\\OverlayEditor.cfg`;
-export const FPS_CEILINGS = [60, 90, 120, 200];
+export const FPS_CEILINGS = [30, 60, 90, 120, 200, 300];
 export const FPS_MIN = 20;
 export const FPS_MAX_DEFAULT = 200;
 
@@ -851,10 +915,11 @@ export async function setRtssLimit(fps: number): Promise<void> {
     .split(/\r?\n/)
     .map((l) => (l.match(/^Limit=\d+/) ? `Limit=${Math.max(0, Math.round(fps))}` : l))
     .join('\r\n');
-  await fs.writeTextFile(RTSS_GLOBAL, out);
-  // 重载配置（对齐 HTA：rundll32 RTSSHooks64.dll LoadProfile/SaveProfile/UpdateProfiles）
+  await fs.writeTextFileAtomic(RTSS_GLOBAL, out);
+  // 重载配置：外部改完文件后只 LoadProfile(重新载入磁盘) + UpdateProfiles(套用到运行中的游戏)。
+  // ⚠ 不要 SaveProfile —— 它会把 RTSS 内存里的旧状态写回磁盘，覆盖刚改的内容甚至写坏（损坏根因）。
   await shell.run('rundll32', [`${RTSS_DIR}\\RTSSHooks64.dll`, 'LoadProfile']);
-  await shell.run('rundll32', [`${RTSS_DIR}\\RTSSHooks64.dll`, 'SaveProfile']);
+  await new Promise<void>((r) => setTimeout(r, 200)); // 等 RTSS 异步载入刚写的文件
   await shell.run('rundll32', [`${RTSS_DIR}\\RTSSHooks64.dll`, 'UpdateProfiles']);
 }
 
@@ -906,10 +971,10 @@ export async function setRtssZoom(ratio: number): Promise<void> {
     }
   }
   if (!done) lines.push(`ZoomRatio=${z}`);
-  await fs.writeTextFile(RTSS_GLOBAL, lines.join('\r\n'));
-  // 强制 RTSS 重载配置（同 setRtssLimit 的 rundll32 三连）：OSD 缩放在运行中的 RTSS 实时读取，重载后即时生效（无需重启）
+  await fs.writeTextFileAtomic(RTSS_GLOBAL, lines.join('\r\n'));
+  // 强制 RTSS 重载配置：LoadProfile(重新载入磁盘) + UpdateProfiles(套用)。同样不要 SaveProfile（会把内存旧状态写回磁盘）。
   await shell.run('rundll32', [`${RTSS_DIR}\\RTSSHooks64.dll`, 'LoadProfile']);
-  await shell.run('rundll32', [`${RTSS_DIR}\\RTSSHooks64.dll`, 'SaveProfile']);
+  await new Promise<void>((r) => setTimeout(r, 200));
   await shell.run('rundll32', [`${RTSS_DIR}\\RTSSHooks64.dll`, 'UpdateProfiles']);
 }
 
@@ -1268,7 +1333,7 @@ export const STEAM_ADDONS = [
   { key: 'steamnet', name: '网络加速（steamcommunity）', exe: 'C:\\SOFT\\steamcommunity\\steamcommunity_302.cli.exe', url: '' },
   { key: 'steamscale', name: '小黄鸭缩放插帧（Lossless Scaling）', exe: 'C:\\SOFT\\Lossless.Scaling\\LosslessScaling.exe', url: '' },
   { key: 'steamcheat', name: '游戏修改器合集（Game-Cheats-Manager）', exe: 'C:\\SOFT\\Game Cheats Manager\\Game Cheats Manager.exe', url: 'https://github.com/dyang886/Game-Cheats-Manager' },
-  { key: 'steamspeed', name: '游戏变速器（OpenSpeedy）', exe: 'C:\\SOFT\\OpenSpeedy\\openspeedy.exe', url: '' },
+  { key: 'steamspeed', name: '游戏变速器（OpenSpeedy）', exe: 'C:\\SOFT\\YeMan\\PowerControl\\OpenSpeedy\\openspeedy.exe', url: '' },
 ] as const;
 export type SteamAddonKey = (typeof STEAM_ADDONS)[number]['key'];
 function addonTxtName(exe: string): string {
@@ -1300,6 +1365,66 @@ export async function steamExeExists(key: SteamAddonKey): Promise<boolean> {
   return cfg ? fs.exists(cfg.exe) : false;
 }
 
+export interface SteamCustomAddon {
+  id: string;
+  name: string;
+  exe: string;
+  enabled: boolean;
+}
+
+const STEAM_CUSTOM_DISABLED_SUFFIX = '.disabled';
+function customAddonTxtPath(id: string, enabled: boolean): string {
+  const safe = id.replace(/[^a-zA-Z0-9_-]/g, '_');
+  return `${STEAM_DIR}\\custom-${safe}.txt${enabled ? '' : STEAM_CUSTOM_DISABLED_SUFFIX}`;
+}
+function customAddonId(exe: string): string {
+  let h = 2166136261;
+  for (let i = 0; i < exe.length; i++) h = Math.imul(h ^ exe.charCodeAt(i), 16777619);
+  return (h >>> 0).toString(16);
+}
+export async function steamCustomAddons(): Promise<SteamCustomAddon[]> {
+  const entries = await fs.readDir(STEAM_DIR).catch(() => [] as any[]);
+  const result: SteamCustomAddon[] = [];
+  for (const entry of entries) {
+    const fileName = String(entry?.name ?? '');
+    if (!entry?.isFile || !/^custom-[a-zA-Z0-9_-]+\.txt(?:\.disabled)?$/i.test(fileName)) continue;
+    const enabled = !fileName.endsWith(STEAM_CUSTOM_DISABLED_SUFFIX);
+    try {
+      const raw = (await fs.readTextFile(`${STEAM_DIR}\\${fileName}`, 8192)).trim();
+      if (!raw) continue;
+      const exe = raw.split(/\r?\n/, 1)[0].trim();
+      if (!exe) continue;
+      result.push({ id: fileName.replace(/^custom-/, '').replace(/\.txt(?:\.disabled)?$/i, ''), name: basenamePath(exe), exe, enabled });
+    } catch { /* ignore malformed custom entry */ }
+  }
+  return result.sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'));
+}
+function basenamePath(p: string): string {
+  const m = p.match(/[^\\/]+$/);
+  return m ? m[0] : p;
+}
+export async function steamCustomAddonAdd(exe: string): Promise<SteamCustomAddon> {
+  const path = exe.trim();
+  if (!path) throw new Error('未选择程序');
+  const id = customAddonId(path);
+  const existing = (await steamCustomAddons()).find((a) => a.exe.toLowerCase() === path.toLowerCase());
+  if (existing) return existing;
+  await fs.mkdir(STEAM_DIR);
+  await fs.writeTextFile(customAddonTxtPath(id, true), path + '\r\n');
+  return { id, name: basenamePath(path), exe: path, enabled: true };
+}
+export async function steamCustomAddonSet(addon: SteamCustomAddon, enabled: boolean): Promise<void> {
+  const from = customAddonTxtPath(addon.id, !enabled);
+  const to = customAddonTxtPath(addon.id, enabled);
+  if (from !== to && await fs.exists(from)) await fs.rename(from, to);
+}
+export async function steamCustomAddonRemove(addon: SteamCustomAddon): Promise<void> {
+  for (const enabled of [true, false]) {
+    const path = customAddonTxtPath(addon.id, enabled);
+    if (await fs.exists(path)) await fs.remove(path);
+  }
+}
+
 // .earlystart 主开关
 export async function steamEarlyStartFile(): Promise<string> {
   // 优先 native USERPROFILE 直读；兜底 PowerShell（旧 exe 兼容）
@@ -1325,6 +1450,9 @@ export async function steamRunning(): Promise<boolean> {
   if (p) return !!p['steam'];
   const r = await shell.run('powershell', ['-NoProfile', '-Command', "((Get-Process steam -EA 0).Count -gt 0)"]);
   return (r.stdout || '').trim().toLowerCase() === 'true';
+}
+export async function steamStop(): Promise<void> {
+  await shell.run('taskkill', ['/F', '/IM', 'Steam.exe']);
 }
 export async function launchSteam(): Promise<void> {
   // 用 cscript.exe 执行 VBS（同 RTSS 热重载/重制电源，避免 cmd/start "" 路径解析错误）

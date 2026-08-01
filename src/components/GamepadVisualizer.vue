@@ -175,17 +175,29 @@ function cls(i: number): Record<string, boolean> {
         </g>
 
         <!-- Back / Guide / Start（中间水平排列，累计上移 15px） -->
+        <!-- 左：Select/Back — 圆形 + 两道横条 -->
         <g class="pad-btn small" :class="cls(8)">
           <circle cx="187" cy="140" r="7" />
-          <text x="187" y="140">≡</text>
+          <g class="pad-glyph">
+            <rect x="184.2" y="138.4" width="5.6" height="1.4" rx="0.65" />
+            <rect x="184.2" y="140.6" width="5.6" height="1.4" rx="0.65" />
+          </g>
         </g>
+        <!-- 中：Home — 圆形 + 小房子（沿用上一版 outline） -->
         <g class="pad-btn guide" :class="cls(16)">
           <circle cx="211" cy="140" r="8" />
-          <text x="211" y="140">◆</text>
+          <g class="pad-glyph outline">
+            <path d="M208.5 139.5 211 136.8 213.5 139.5V142.5H208.5Z" />
+          </g>
         </g>
+        <!-- 右：Start/Menu — 圆形 + 三道横线 -->
         <g class="pad-btn small" :class="cls(9)">
           <circle cx="235" cy="140" r="7" />
-          <text x="235" y="140">⏻</text>
+          <g class="pad-glyph">
+            <line x1="233" y1="137.6" x2="237" y2="137.6" />
+            <line x1="233" y1="140" x2="237" y2="140" />
+            <line x1="233" y1="142.4" x2="237" y2="142.4" />
+          </g>
         </g>
       </svg>
     </div>
@@ -289,9 +301,21 @@ function cls(i: number): Record<string, boolean> {
 .pad-btn.small text {
   font-size: 7px;
 }
-.pad-btn.guide text {
-  font-size: 8px;
+.pad-btn .pad-glyph {
+  fill: #0b0d11;
+  stroke: #0b0d11;
+  stroke-width: 1.3;
+  stroke-linecap: round;
+  pointer-events: none;
+  transition: fill 0.08s, stroke 0.08s;
 }
+.pad-btn.mapped .pad-glyph { fill: #06203a; stroke: #06203a; }
+.pad-btn.live .pad-glyph { fill: #06210f; stroke: #06210f; }
+
+/* 描边型 glyph（小房子 / 电源环）：灰色空心，不实心 */
+.pad-btn .pad-glyph.outline { fill: none; stroke: #aabbd0; }
+.pad-btn.mapped .pad-glyph.outline { fill: none; stroke: #06203a; }
+.pad-btn.live .pad-glyph.outline { fill: none; stroke: #06210f; }
 
 /* 快捷键关联高亮：蓝色 + 闪烁动画（选中态从琥珀改为蓝，与开关/选中一致） */
 @keyframes gpBlink {

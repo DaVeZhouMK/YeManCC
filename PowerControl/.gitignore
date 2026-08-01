@@ -1,0 +1,25 @@
+# PowerControl 运行时用户数据：由程序生成，更新时保留、不覆盖、不入库。
+# 安装器（native/main.cpp app.installUpdate）在部署时也会排除这些模式，双保险。
+tdp-*.txt
+FPS-*.txt
+Power.txt
+*.json
+*.log
+*.pid
+*.hb
+hwinfo-ok
+
+# 包内明文解压密码不参与发布（仅为本机手动解压提示，避免上传到公开仓库）
+手动解压密码.txt
+
+# 以下为代码/资产，正常入库（不被上面的通配误伤）
+!*.bat
+!*.vbs
+!*.ps1
+!*.xml
+!*.reg
+!*.exe
+!*.png
+!*.md
+!*.pow
+!*/

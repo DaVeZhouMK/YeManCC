@@ -6,6 +6,7 @@
   "description": "YeManCC — 野蛮系统控制中心 (Vue3 + QiangQiang WebView2 shell)",
   "scripts": {
     "version:write": "node scripts/write-version.mjs",
+    "bump": "node scripts/bump-version.mjs",
     "predev": "node scripts/write-version.mjs",
     "dev": "vite",
     "prebuild": "node scripts/write-version.mjs",

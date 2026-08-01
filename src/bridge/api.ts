@@ -13,10 +13,15 @@ export const fs = {
     invoke<string>('fs.readTextFile', { path, maxBytes }),
   writeTextFile: (path: string, content: string) =>
     invoke<boolean>('fs.writeTextFile', { path, content }),
+  // 原子写：native 端先写临时文件再 MoveFileEx 替换，避免 RTSS 在游戏内读取时被截断式写冲坏
+  writeTextFileAtomic: (path: string, content: string) =>
+    invoke<boolean>('fs.writeTextFileAtomic', { path, content }),
   exists: (path: string) => invoke<boolean>('fs.exists', { path }),
   readDir: (path: string) => invoke<any[]>('fs.readDir', { path }),
   stat: (path: string) => invoke<any>('fs.stat', { path }),
   mkdir: (path: string) => invoke<boolean>('fs.mkdir', { path }),
+  remove: (path: string) => invoke<boolean>('fs.remove', { path }),
+  rename: (from: string, to: string) => invoke<boolean>('fs.rename', { from, to }),
 };
 
 export const shell = {
@@ -25,6 +30,8 @@ export const shell = {
   open: (url: string) => invoke<boolean>('shell.open', { url }),
   execute: (program: string, args: string[] = []) =>
     invoke<boolean>('shell.execute', { program, args }),
+  hidden: (program: string, args: string[] = []) =>
+    invoke<{ ok: boolean }>('shell.hidden', { program, args }),
 };
 
 export const app = {
@@ -48,13 +55,32 @@ export const dialog = {
     invoke<boolean>('dialog.confirm', { title, message }),
   message: (title: string, message: string, type = 'info') =>
     invoke<boolean>('dialog.message', { title, message, type }),
+  openFile: (filters?: { name: string; extensions: string[] }[]) =>
+    invoke<string | null>('dialog.openFile', { filters }),
 };
 
 export const windowApi = {
   startDrag: () => invoke<boolean>('window.startDrag'),
   startResize: (edge: string) => invoke<boolean>('window.startResize', { edge }),
   minimize: () => invoke<boolean>('window.minimize'),
+  show: () => invoke<boolean>('window.show'),
   setTitle: (title: string) => invoke<boolean>('window.setTitle', { title }),
+};
+
+// 任务栏常驻（与 native/main.cpp 的 ipc_on("tray.*") 对应）
+// resident=true  → 显示任务栏按钮（并移除托盘）；false → 仅托盘（默认）
+export const tray = {
+  setResident: (resident: boolean) => invoke<boolean>('tray.setResident', { resident }),
+  setTooltip: (tip: string) => invoke<boolean>('tray.setTooltip', { tip }),
+};
+
+// Xbox 大屏游戏模式 = 总闸：开启才启动全屏检测线程并确保托盘在位
+export const xbox = {
+  setActive: (on: boolean) => invoke<boolean>('xbox.setActive', { on }),
+};
+
+export const proc = {
+  running: (names: string[]) => invoke<Record<string, boolean>>('proc.running', { names }),
 };
 
 export const registry = {

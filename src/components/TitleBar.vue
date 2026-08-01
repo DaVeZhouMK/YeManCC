@@ -1,10 +1,11 @@
 <script setup lang="ts">
+import InlineIcon from './InlineIcon.vue';
 </script>
 
 <template>
   <header class="titlebar app-region-drag">
     <div class="tb-brand">
-      <span class="tb-bolt">⚡</span>
+      <span class="tb-bolt"><InlineIcon name="yeman" /></span>
       <div class="tb-titles">
         <span class="tb-title">YeMan Control Center</span>
         <span class="tb-sub">野蛮系统控制中心</span>
@@ -21,7 +22,8 @@
   align-items: center;
   justify-content: space-between;
   padding: 0 8px 0 12px;
-  background: linear-gradient(180deg, #141b27, #0e131c);
+  /* 磨砂玻璃：Steam 大屏黑蓝色，82% 可见 */
+  background: linear-gradient(180deg, rgba(11, 16, 24, 0.82), rgba(11, 16, 24, 0.82));
   border-bottom: 1px solid #1c2533;
 }
 .tb-brand {
