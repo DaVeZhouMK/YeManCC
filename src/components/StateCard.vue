@@ -16,13 +16,13 @@ const dotColor: Record<State, string> = {
   on: 'var(--ok)',
   off: '#46506280',
   ac: 'var(--accent)',
-  dc: 'var(--accent-2)',
+  dc: 'var(--dc-accent)',
   warn: 'var(--danger)',
 };
 </script>
 
 <template>
-  <div class="state-card">
+  <div class="state-card" tabindex="0">
     <span class="dot" :style="{ background: dotColor[state] }"></span>
     <div class="sc-body">
       <div class="sc-title" v-if="title || icon">

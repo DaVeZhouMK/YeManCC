@@ -1,12 +1,43 @@
 <script setup lang="ts">
 import { ROUTES } from '@/router';
 import { useRouter, useRoute } from 'vue-router';
-import { ref } from 'vue';
+import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { shell, windowApi } from '@/bridge/api';
 import AppIcon from '@/components/AppIcon.vue';
+import {
+  loadPerformanceSchedule,
+  onPerformanceScheduleChanged,
+} from '@/bridge/performanceSchedule';
 
 const router = useRouter();
 const route = useRoute();
+const quickModeEnabled = ref(false);
+let stopScheduleWatch: (() => void) | null = null;
+
+const visibleRoutes = computed(() => ROUTES.filter((item) => {
+  if (!quickModeEnabled.value) return true;
+  return item.path !== '/tdp' && item.path !== '/cpu';
+}));
+
+onMounted(async () => {
+  const config = await loadPerformanceSchedule().catch(() => null);
+  quickModeEnabled.value = config?.enabled === true;
+  window.dispatchEvent(new CustomEvent('performance-schedule:visibility', { detail: { enabled: quickModeEnabled.value } }));
+  if (quickModeEnabled.value && (route.path === '/tdp' || route.path === '/cpu')) {
+    void router.replace('/schedule');
+  }
+  stopScheduleWatch = onPerformanceScheduleChanged((next) => {
+    quickModeEnabled.value = next.enabled;
+    window.dispatchEvent(new CustomEvent('performance-schedule:visibility', { detail: { enabled: next.enabled } }));
+    if (next.enabled && (route.path === '/tdp' || route.path === '/cpu')) {
+      void router.replace('/schedule');
+    }
+  });
+});
+
+onUnmounted(() => {
+  stopScheduleWatch?.();
+});
 
 function go(path: string) {
   router.push(path);
@@ -46,7 +77,7 @@ async function quit() {
     </div>
     <div class="nav-items">
       <button
-        v-for="r in ROUTES"
+        v-for="r in visibleRoutes"
         :key="r.path"
         class="nav-item"
         data-gp-ignore
@@ -109,7 +140,9 @@ async function quit() {
 .navrail {
   width: var(--nav-w);
   flex: 0 0 var(--nav-w);
-  background: var(--bg-nav); /* 局部导航底板，不影响前景控件 */
+  background: color-mix(in srgb, var(--bg-nav) 70%, transparent);
+  position: relative;
+  z-index: 1;
   border-right: 1px solid #1c2533;
   display: flex;
   flex-direction: column;

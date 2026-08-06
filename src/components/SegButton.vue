@@ -2,6 +2,7 @@
 interface Opt {
   value: string | number;
   label: string;
+  detail?: string;
 }
 const props = withDefaults(
   defineProps<{
@@ -18,7 +19,7 @@ function pick(v: string | number) {
   if (props.disabled) return;
   emit('update:modelValue', v);
 }
-const accentVar = props.color === 'dc' ? 'var(--accent-2)' : 'var(--accent)';
+const accentVar = props.color === 'dc' ? 'var(--dc-accent)' : 'var(--accent)';
 </script>
 
 <template>
@@ -32,7 +33,8 @@ const accentVar = props.color === 'dc' ? 'var(--accent-2)' : 'var(--accent)';
       :disabled="disabled"
       @click="pick(o.value)"
     >
-      {{ o.label }}
+      <span class="seg-main">{{ o.label }}</span>
+      <span v-if="o.detail" class="seg-detail">{{ o.detail }}</span>
     </button>
   </div>
 </template>
@@ -53,6 +55,7 @@ const accentVar = props.color === 'dc' ? 'var(--accent-2)' : 'var(--accent)';
 .seg.full .seg-btn {
   flex: 1 1 0;
   justify-content: center;
+  min-width: 0;
   padding-left: 4px;
   padding-right: 4px;
 }
@@ -60,14 +63,36 @@ const accentVar = props.color === 'dc' ? 'var(--accent-2)' : 'var(--accent)';
   border: none;
   background: transparent;
   color: var(--text);
-  font-size: 12px;
-  padding: 6px 10px;
+  font-size: var(--btn-font-size);
+  line-height: var(--btn-line-height);
+  padding: var(--btn-py) 10px;
+  min-height: var(--btn-min-h);
   border-radius: 6px;
   cursor: pointer;
   transition: background 0.12s, color 0.12s;
   white-space: nowrap;
   display: inline-flex;
+  flex-direction: column;
   align-items: center;
+  justify-content: center;
+  gap: 2px;
+}
+.seg-main {
+  line-height: 1.15;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+.seg-detail {
+  max-width: 100%;
+  font-size: 10px;
+  line-height: 1.15;
+  font-weight: 500;
+  opacity: 0.78;
+  text-align: center;
+  white-space: normal;
+  font-variant-numeric: tabular-nums;
 }
 .seg-btn:hover {
   color: var(--text);

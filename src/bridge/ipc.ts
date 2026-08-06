@@ -60,60 +60,7 @@ const hasWebView =
 
 export const isNativeRuntime = hasWebView;
 
-// ── 启动性能采样（仅用于诊断启动慢；固定窗口内记录每次原生 IPC 耗时，采样后写文件一次）──
-const STARTUP_PROFILE_MS = 10000;
-const TRACE_PATH = 'C:\\SOFT\\YeMan\\PowerControl\\startup_trace.txt';
-const profileStart = performance.now();
-let profileSamples: { cmd: string; ms: number; ok: boolean; args: unknown }[] = [];
-let profileFlushed = false;
-function recordProfile(cmd: string, ms: number, ok: boolean, args: unknown) {
-  if (profileFlushed) return;
-  if (cmd === 'fs.writeTextFile') return; // 避免自递归（写文件本身不计入）
-  profileSamples.push({ cmd, ms, ok, args });
-  if (performance.now() - profileStart >= STARTUP_PROFILE_MS) flushProfile();
-}
-function flushProfile() {
-  if (profileFlushed) return;
-  profileFlushed = true;
-  const map = new Map<string, { count: number; total: number; max: number }>();
-  for (const s of profileSamples) {
-    const e = map.get(s.cmd) ?? { count: 0, total: 0, max: 0 };
-    e.count++; e.total += s.ms; if (s.ms > e.max) e.max = s.ms;
-    map.set(s.cmd, e);
-  }
-  const lines: string[] = [];
-  lines.push(`=== YeManCC 启动 IPC 采样（窗口 ${STARTUP_PROFILE_MS}ms） ===`);
-  lines.push(`采样触发时刻：起始后 ${Math.round(performance.now() - profileStart)}ms`);
-  const total = (window as any).__startupTotalMs;
-  if (typeof total === 'number') lines.push(`前端总启动耗时（模块加载 → 内容可见）：${Math.round(total)}ms`);
-  lines.push('');
-  lines.push('命令'.padEnd(36) + '调用'.padStart(5) + '总ms'.padStart(8) + '最大ms'.padStart(8));
-  for (const [cmd, e] of [...map.entries()].sort((a, b) => b[1].total - a[1].total)) {
-    lines.push(
-      cmd.padEnd(36) +
-      String(e.count).padStart(5) +
-      String(Math.round(e.total)).padStart(8) +
-      String(Math.round(e.max)).padStart(8)
-    );
-  }
-  // 慢调用明细（> 300ms）
-  const slow = profileSamples.filter((s) => s.ms > 300).sort((a, b) => b.ms - a.ms);
-  if (slow.length) {
-    lines.push('');
-    lines.push('慢调用明细（>300ms）：');
-    for (const s of slow) {
-      let argStr = '';
-      try { argStr = JSON.stringify(s.args); } catch { argStr = String(s.args); }
-      if (argStr.length > 120) argStr = argStr.slice(0, 120) + '…';
-      lines.push(`  ${String(Math.round(s.ms)).padStart(6)}ms  ${s.cmd}  ${argStr}`);
-    }
-  }
-  const text2 = lines.join('\n');
-  try {
-    webview?.postMessage({ id: -1, cmd: 'fs.writeTextFile', args: { path: TRACE_PATH, content: text2 } });
-  } catch { /* ignore */ }
-}
-(window as any).__flushStartupProfile = flushProfile;
+// ── 启动性能采样已按用户要求停用（不再写 startup_trace.txt）──
 
 if (hasWebView) {
   webview.addEventListener('message', (e: MessageEvent<unknown>) => {
@@ -139,7 +86,6 @@ export function invoke<T = unknown>(
   args: object = {},
   options: InvokeOptions = {}
 ): Promise<T> {
-  const t0 = performance.now();
   return new Promise<T>((resolve, reject) => {
     if (!hasWebView) {
       const e = new Error('Not running in WebView2');
@@ -169,12 +115,10 @@ export function invoke<T = unknown>(
     }
   }).then(
     (res) => {
-      recordProfile(cmd, performance.now() - t0, true, args);
       logSink?.({ cmd, args, ok: true, result: res });
       return res as T;
     },
     (err) => {
-      recordProfile(cmd, performance.now() - t0, false, args);
       logSink?.({ cmd, args, ok: false, error: err.message });
       throw err;
     }

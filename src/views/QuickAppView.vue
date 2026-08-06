@@ -1,8 +1,6 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, onDeactivated, nextTick } from 'vue';
+import { ref, computed, onMounted, onUnmounted, onActivated, onDeactivated } from 'vue';
 import {
-  type GameProc,
-  detectForegroundGame,
   oneClickFrameGen,
   optiscalerStatus,
   oneClickOptiScaler,
@@ -10,30 +8,159 @@ import {
   LS_PRIMARY,
 } from '@/bridge/quickapp';
 import {
+  subscribeGameStatus,
+  detectedGameName,
+  type DetectedGame,
+} from '@/bridge/gamedetect';
+import {
   SPEED_PRESETS,
   applyGameSpeed,
   clearGameSpeed,
 } from '@/bridge/speedhack';
 import {
   closeGame,
-  isJoyxoffRunning,
-  toggleJoyxoff,
-  hasSuspendedState,
 } from '@/bridge/gameproc';
-import { sleepGuardSuspendCurrent, sleepGuardRecoverAll } from '@/bridge/yeman';
-import { fs, shell, dialog } from '@/bridge/api';
+import { fs, shell, dialog, display, registry, type DisplayMode, type DisplayTopology } from '@/bridge/api';
+import {
+  folder,
+  baseUrl,
+  tracks,
+  index,
+  playing,
+  mode,
+  error as musicError,
+  currentName,
+  hasFolder,
+  chooseFolder,
+  scanFolder,
+  togglePlay,
+  playNext,
+  playPrev,
+  setMode,
+  volume,
+  muted,
+  setVolume,
+  persistVolume,
+  toggleMute,
+} from '@/bridge/music';
 import InlineIcon from '@/components/InlineIcon.vue';
+import Dropdown from '@/components/Dropdown.vue';
 
 const busy = ref(false);
 const errMsg = ref('');
 const statusMsg = ref('');
 
-const game = ref<GameProc | null>(null);
+const displayModes = ref<DisplayMode[]>([]);
+const displayCurrent = ref('');
+const displayBusy = ref(false);
+const scaleBusy = ref(false);
+const scalePct = ref(100);
+const scaleOptions = [100, 125, 150, 175, 200, 225, 250, 300].map((value) => ({
+  value,
+  label: `${value}%`,
+}));
+const displayOptions = computed(() => displayModes.value.map((m) => ({
+  value: m.id,
+  label: `${m.width} × ${m.height} · ${m.refresh}Hz${m.orientation === 1 || m.orientation === 3 ? ' · 竖屏' : ''}`,
+})));
+const displayTopology = ref<DisplayTopology | null>(null);
+const displayTopologyOptions: Array<{ value: DisplayTopology; label: string; detail: string }> = [
+  { value: 'internal', label: '仅显示 1', detail: '关闭外接显示器' },
+  { value: 'external', label: '仅显示 2', detail: '只使用外接显示器' },
+  { value: 'clone', label: '复制', detail: '两个屏幕显示相同内容' },
+  { value: 'extend', label: '扩展', detail: '扩展桌面到两个屏幕' },
+];
 
-// ── 游戏控制状态 ──
-const ctrlBusy = ref(false);
-const paused = ref(false); // 当前游戏是否已暂停（与 native Sleep\\suspended\\<pid>.txt 标记同步）
-const mouseOn = ref(false); // JoyXoff 模拟鼠标是否开启
+async function refreshScale() {
+  try {
+    const v = await registry.read('HKCU', 'Control Panel\\Desktop', 'LogPixels');
+    const raw = Number(v) || 96;
+    scalePct.value = scaleOptions.reduce((best, option) =>
+      Math.abs(option.value * 96 / 100 - raw) < Math.abs(best * 96 / 100 - raw) ? option.value : best,
+    100);
+  } catch {
+    scalePct.value = 100;
+  }
+}
+
+async function applyScale(value: string | number) {
+  const pct = Number(value);
+  if (!scaleOptions.some((option) => option.value === pct)) return;
+  scaleBusy.value = true;
+  errMsg.value = '';
+  try {
+    const ok = await registry.write('HKCU', 'Control Panel\\Desktop', 'LogPixels', Math.round(pct * 96 / 100));
+    if (!ok) throw new Error('注册表写入失败');
+    await registry.write('HKCU', 'Control Panel\\Desktop', 'Win8DpiScaling', 1);
+    scalePct.value = pct;
+    statusMsg.value = `Windows缩放已设置为 ${pct}%，注销或重启后完全生效`;
+  } catch (e) {
+    errMsg.value = 'Windows缩放设置失败：' + (e as Error).message;
+    await refreshScale();
+  } finally {
+    scaleBusy.value = false;
+  }
+}
+
+async function refreshDisplayModes() {
+  displayBusy.value = true;
+  try {
+    const r = await display.getModes();
+    displayModes.value = Array.isArray(r.modes) ? r.modes : [];
+    displayCurrent.value = r.current || displayModes.value[0]?.id || '';
+  } catch (e) {
+    errMsg.value = '读取当前显示器分辨率失败：' + (e as Error).message;
+  } finally {
+    displayBusy.value = false;
+  }
+}
+
+async function applyDisplayMode(id: string | number) {
+  const selected = displayModes.value.find((m) => m.id === String(id));
+  if (!selected || selected.id === displayCurrent.value) return;
+  displayBusy.value = true;
+  errMsg.value = '';
+  try {
+    const applied = await display.setMode(selected);
+    displayCurrent.value = applied.id;
+    statusMsg.value = `已切换当前显示器：${applied.width} × ${applied.height} · ${applied.refresh}Hz`;
+  } catch (e) {
+    errMsg.value = '分辨率切换失败：' + (e as Error).message;
+    await refreshDisplayModes();
+  } finally {
+    displayBusy.value = false;
+  }
+}
+
+async function applyDisplayTopology(topology: DisplayTopology) {
+  displayBusy.value = true;
+  errMsg.value = '';
+  try {
+    await display.setTopology(topology);
+    displayTopology.value = topology;
+    const label = displayTopologyOptions.find((o) => o.value === topology)?.label || topology;
+    statusMsg.value = `已切换显示器模式：${label}`;
+  } catch (e) {
+    errMsg.value = '显示器切换失败：' + (e as Error).message;
+  } finally {
+    displayBusy.value = false;
+  }
+}
+
+const game = ref<DetectedGame | null>(null);
+
+// ── 全局游戏状态订阅：页面激活期间跟随游戏退出/切换自动更新 ──
+let unsubGame: (() => void) | null = null;
+
+// 全局状态变化 → 同步本页（游戏退出时自动归零，不再需要手动刷新）
+function applyGameStatus(g: DetectedGame | null) {
+  game.value = g;
+  if (!g) {
+    // 游戏已退出：变速目标一并归零
+    activeSpeed.value = null;
+    return;
+  }
+}
 
 // ── 游戏加速状态 ──
 const speedBusy = ref(false);
@@ -52,7 +179,7 @@ async function onSpeedApply(factor: number) {
     const r = await applyGameSpeed(game.value.pid, factor);
     if (r.ok) {
       activeSpeed.value = factor;
-      statusMsg.value = `已对 ${game.value.name} 应用 ${factor}× 变速`;
+      statusMsg.value = `已对 ${detectedGameName(game.value) || game.value.name} 应用 ${factor}× 变速`;
     } else {
       errMsg.value = '变速失败：' + (r.msgs.join('; ') || '未知错误');
       activeSpeed.value = null;
@@ -88,113 +215,6 @@ async function onSpeedOff() {
   }
 }
 
-async function onDetect() {
-  errMsg.value = '';
-  statusMsg.value = '';
-  busy.value = true;
-  try {
-    const g = await detectForegroundGame();
-    if (!g) {
-      errMsg.value = '未检测到前台游戏窗口，请切换到游戏后重试。';
-      game.value = null;
-      return;
-    }
-    game.value = g;
-    statusMsg.value = '已识别：' + (g.title || g.name);
-    // 同步暂停状态（跨刷新 / 跨页面保持）
-    try {
-      paused.value = (await hasSuspendedState()).suspended;
-    } catch {
-      paused.value = false;
-    }
-  } catch (e) {
-    errMsg.value = '识别失败：' + (e as Error).message;
-    game.value = null;
-  } finally {
-    busy.value = false;
-  }
-}
-
-// ── 游戏控制：暂停 / 继续 / 关闭 / 模拟鼠标 ──
-// 暂停/继续改为复用 native 睡眠守护的 NtSuspend 枚举（取最大工作集进程），
-// 与「睡眠优化」页手动暂停效果完全一致；避免 detectForegroundGame 识别的根 pid
-// 已退出/是 launcher 导致暂停失败。
-async function onPause() {
-  if (paused.value || ctrlBusy.value) return;
-  ctrlBusy.value = true;
-  errMsg.value = '';
-  statusMsg.value = '';
-  try {
-    const r = await sleepGuardSuspendCurrent();
-    if (r.paused) {
-      paused.value = true;
-      statusMsg.value = '已暂停 ' + (r.name || '当前游戏') + (r.pid ? '（PID ' + r.pid + '）' : '');
-    } else {
-      errMsg.value = '暂停失败：没有可暂停的游戏进程';
-    }
-  } catch (e) {
-    errMsg.value = '暂停失败：' + (e as Error).message;
-  } finally {
-    ctrlBusy.value = false;
-  }
-}
-
-async function onResume() {
-  if (!paused.value || ctrlBusy.value) return;
-  ctrlBusy.value = true;
-  errMsg.value = '';
-  statusMsg.value = '';
-  try {
-    const r = await sleepGuardRecoverAll();
-    paused.value = false;
-    if (r.resumed > 0) {
-      statusMsg.value = '已继续 ' + r.resumed + ' 个被冻结的进程';
-    } else {
-      statusMsg.value = '没有待恢复的进程';
-    }
-  } catch (e) {
-    paused.value = false;
-    errMsg.value = '继续失败：' + (e as Error).message;
-  } finally {
-    ctrlBusy.value = false;
-  }
-}
-
-async function onClose() {
-  if (!game.value || ctrlBusy.value) return;
-  ctrlBusy.value = true;
-  errMsg.value = '';
-  statusMsg.value = '';
-  try {
-    const r = await closeGame(game.value.pid, game.value.name);
-    paused.value = false;
-    if (r.ok) {
-      statusMsg.value = '已关闭 ' + game.value.name;
-    } else {
-      errMsg.value = '关闭失败：' + (r.msgs.join('；') || '未找到可关闭的游戏');
-    }
-  } catch (e) {
-    errMsg.value = '关闭失败：' + (e as Error).message;
-  } finally {
-    ctrlBusy.value = false;
-  }
-}
-
-async function onToggleMouse() {
-  if (ctrlBusy.value) return;
-  ctrlBusy.value = true;
-  errMsg.value = '';
-  statusMsg.value = '';
-  try {
-    const on = await toggleJoyxoff();
-    mouseOn.value = on;
-    statusMsg.value = on ? '模拟鼠标已开启' : '模拟鼠标已关闭';
-  } catch (e) {
-    errMsg.value = '模拟鼠标切换失败：' + (e as Error).message;
-  } finally {
-    ctrlBusy.value = false;
-  }
-}
 
 async function onLaunchLs() {
   errMsg.value = '';
@@ -490,22 +510,50 @@ function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+// ── 音乐播放：顺序/随机切换 ──
+async function toggleMusicMode() {
+  await setMode(mode.value === 'sequential' ? 'random' : 'sequential');
+}
+
+// ── 音量：拖动实时调（不落盘），松手落盘 ──
+function onVolumeInput(e: Event) {
+  const el = e.target as HTMLInputElement;
+  setVolume(Number(el.value) / 100);
+}
+function onVolumeChange() {
+  persistVolume();
+}
+
 onMounted(async () => {
   window.addEventListener('ipc:gamepad-back', onGamepadBack);
-  await nextTick(onDetect);
   await loadLaunchApps();
-  try {
-    mouseOn.value = await isJoyxoffRunning();
-  } catch {
-    mouseOn.value = false;
+  await refreshDisplayModes();
+  await refreshScale();
+});
+
+// KeepAlive：每次进入本页订阅全局游戏状态（立即检测 + 3 秒轮询），退出游戏自动更新
+onActivated(() => {
+  void refreshDisplayModes();
+  void refreshScale();
+  if (!unsubGame) {
+    unsubGame = subscribeGameStatus(applyGameStatus);
   }
 });
 
 onDeactivated(() => {
+  // 离开本页退订，停止轮询（避免后台空转 PowerShell）
+  if (unsubGame) {
+    unsubGame();
+    unsubGame = null;
+  }
   closeMenu();
 });
 
 onUnmounted(() => {
+  if (unsubGame) {
+    unsubGame();
+    unsubGame = null;
+  }
   window.removeEventListener('ipc:gamepad-back', onGamepadBack);
 });
 </script>
@@ -515,74 +563,80 @@ onUnmounted(() => {
     <div v-if="errMsg" class="err-bar">{{ errMsg }}</div>
     <div v-if="statusMsg" class="ok-bar">{{ statusMsg }}</div>
 
-    <!-- 顶部：游戏控制识别（识别 + 4 个控制按钮融合在同一卡片） -->
-    <section class="card detect-card">
-      <h3 class="card-title"><InlineIcon name="gamepad" /> 游戏控制识别</h3>
-      <div class="detect-body">
-        <div class="detect-info">
-          <span class="detect-name">{{ game ? (game.title || game.name) : '未识别' }}</span>
-          <span v-if="game" class="detect-path">{{ game.path }}</span>
-        </div>
-        <button class="action-btn" :disabled="busy" @click="onDetect">
-          {{ busy ? '识别中…' : '刷新当前识别游戏' }}
+    <!-- 第一排：音乐播放器 -->
+    <section class="card">
+      <h3 class="card-title"><InlineIcon name="music" /> 音乐播放</h3>
+
+      <div v-if="!hasFolder" class="music-empty">
+        <button class="quick-btn" :disabled="busy" @click="chooseFolder">
+          <InlineIcon name="folder" /> 选择音乐文件夹
+          <span class="quick-sub">播放该目录内的音乐文件（MP3/M4A/WAV/OGG/FLAC）</span>
         </button>
       </div>
 
-      <!-- 4 个并排控制按钮 -->
-      <div class="ctrl-grid">
-        <button
-          class="ctrl-btn"
-          :disabled="paused || ctrlBusy || busy"
-          @click="onPause"
-        >
-          <span class="ctrl-icon"><InlineIcon name="pause" /></span>
-          <span class="ctrl-label">暂停游戏</span>
-        </button>
-        <button
-          class="ctrl-btn"
-          :disabled="!paused || ctrlBusy || busy"
-          @click="onResume"
-        >
-          <span class="ctrl-icon"><InlineIcon name="play" /></span>
-          <span class="ctrl-label">继续游戏</span>
-        </button>
-        <button
-          class="ctrl-btn ctrl-danger"
-          :disabled="!game || ctrlBusy || busy"
-          @click="onClose"
-        >
-          <span class="ctrl-icon"><InlineIcon name="close" /></span>
-          <span class="ctrl-label">关闭游戏</span>
-        </button>
-        <button
-          class="ctrl-btn"
-          :class="{ on: mouseOn }"
-          :disabled="ctrlBusy"
-          @click="onToggleMouse"
-        >
-          <span class="ctrl-icon"><InlineIcon name="mouse" /></span>
-          <span class="ctrl-label">{{ mouseOn ? '模拟鼠标已开启' : '模拟鼠标已关闭' }}</span>
-        </button>
-      </div>
+      <template v-else>
+        <div class="music-now">
+          <span class="music-name">{{ currentName || '未选择曲目' }}</span>
+          <span class="music-folder">{{ folder }}</span>
+        </div>
+        <div class="music-ctrl">
+          <button class="music-btn" @click="playPrev" title="上一首"><InlineIcon name="prev" /></button>
+          <button class="music-btn play" @click="togglePlay" :title="playing ? '暂停' : '播放'"><InlineIcon :name="playing ? 'pause' : 'play'" /></button>
+          <button class="music-btn" @click="playNext" title="下一首"><InlineIcon name="next" /></button>
+          <button class="music-btn mode" :class="{ on: mode === 'random' }" @click="toggleMusicMode" title="播放模式">{{ mode === 'random' ? '随机' : '顺序' }}</button>
+        </div>
+        <div class="music-volume">
+          <button class="vol-btn" @click="toggleMute" :title="muted || volume === 0 ? '取消静音' : '静音'"><InlineIcon :name="muted || volume === 0 ? 'mute' : 'volume'" /></button>
+          <input class="vol-slider" type="range" min="0" max="100" step="1" :value="Math.round(volume * 100)" @input="onVolumeInput" @change="onVolumeChange" />
+          <span class="vol-num">{{ Math.round(volume * 100) }}%</span>
+        </div>
+        <div class="music-actions">
+          <button class="quick-btn slim" @click="chooseFolder"><InlineIcon name="folder" /> 更换文件夹</button>
+          <button class="quick-btn slim" :disabled="busy" @click="scanFolder"><InlineIcon name="refresh" /> 重新扫描</button>
+        </div>
+      </template>
+      <div v-if="musicError" class="music-err">{{ musicError }}</div>
     </section>
 
-    <!-- 快捷功能（横向紧凑，对齐整体风格） -->
+    <!-- 第二排：显示设置，分辨率和多显示器各自独立气泡 -->
+    <div class="display-bubbles">
+      <section class="card display-block">
+        <div class="sub-head">
+          <span class="sub-title"><InlineIcon name="fullscreen" /> 屏幕分辨率调节</span>
+          <button class="add-app-btn" :disabled="displayBusy" @click="refreshDisplayModes">刷新</button>
+        </div>
+        <div class="display-row">
+          <div class="display-control">
+            <span class="display-control-label">分辨率</span>
+            <Dropdown :model-value="displayCurrent" :options="displayOptions" :disabled="displayBusy || displayOptions.length === 0" color="accent" aria-label="当前显示器分辨率" @change="applyDisplayMode" />
+          </div>
+          <div class="display-control">
+            <span class="display-control-label">缩放和布局</span>
+            <Dropdown :model-value="scalePct" :options="scaleOptions" :disabled="scaleBusy" color="accent" aria-label="Windows缩放和布局" @change="applyScale" />
+          </div>
+        </div>
+        <span class="quick-sub display-tip">只调整本程序所在显示器，支持横屏/竖屏模式</span>
+      </section>
+
+      <section class="card display-block monitor-switch-block">
+        <div class="sub-head">
+          <span class="sub-title"><InlineIcon name="monitor" /> 多显示器切换</span>
+        </div>
+        <div class="topology-grid">
+          <button v-for="option in displayTopologyOptions" :key="option.value" class="topology-btn" :class="{ on: displayTopology === option.value }" :disabled="displayBusy" @click="applyDisplayTopology(option.value)">
+            <strong>{{ option.label }}</strong><small>{{ option.detail }}</small>
+          </button>
+        </div>
+      </section>
+    </div>
+
+    <!-- 剩余快捷功能：插帧并排，随后游戏加速，最后应用启动 -->
     <section class="card">
       <h3 class="card-title"><InlineIcon name="settings" /> 快捷功能</h3>
-
-      <button class="quick-btn" :disabled="busy" @click="onLaunchLs">
-        <InlineIcon name="rocket" /> 小黄鸭一键插帧　<span class="quick-sub">写入 LS 插帧预设并启动</span>
-      </button>
-
-      <!-- 参考上方识别到的真实进程路径，选择该游戏 exe 安装/卸载 -->
-      <button
-        class="quick-btn opti-btn opti-any"
-        :disabled="busy"
-        @click="onOptiScalerAny"
-      >
-        <InlineIcon name="bolt" /> 一键安装FSR4.1插帧
-        <span class="quick-sub">参考识别真实exe路径，游戏内选择DLSS开启即可</span>
-      </button>
+      <div class="frame-actions">
+        <button class="quick-btn" :disabled="busy" @click="onLaunchLs"><InlineIcon name="rocket" /> 小黄鸭一键插帧<span class="quick-sub">写入 LS 插帧预设并启动</span></button>
+        <button class="quick-btn opti-btn opti-any" :disabled="busy" @click="onOptiScalerAny"><InlineIcon name="bolt" /> 一键安装FSR4.1<span class="quick-sub">选择游戏 exe 后安装</span></button>
+      </div>
 
       <div class="sub-block">
         <div class="sub-head">
@@ -636,6 +690,7 @@ onUnmounted(() => {
         </Teleport>
       </div>
     </section>
+
   </div>
 </template>
 
@@ -664,7 +719,7 @@ onUnmounted(() => {
   line-height: 1.4;
 }
 .card {
-  background: var(--bg-panel);
+  background: color-mix(in srgb, var(--bg-panel) 72%, transparent);
   border-radius: var(--radius);
   padding: 12px 14px;
   margin-bottom: 10px;
@@ -677,47 +732,6 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 6px;
-}
-.detect-body {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.detect-info {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-.detect-name {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text);
-  word-break: break-all;
-}
-.detect-path {
-  font-size: 10px;
-  color: var(--text-dim);
-  word-break: break-all;
-}
-.action-btn {
-  flex: 0 0 auto;
-  background: var(--accent);
-  color: #06121d;
-  border: none;
-  border-radius: var(--radius-ctrl);
-  padding: 10px 14px;
-  font-weight: 700;
-  font-size: 12px;
-  cursor: pointer;
-}
-.action-btn:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-}
-.action-btn:focus-visible {
-  box-shadow: var(--focus-ring);
 }
 /* ── 一键插帧等整行按钮 ── */
 .quick-btn {
@@ -772,6 +786,54 @@ onUnmounted(() => {
 .opti-btn.opti-any:hover:not(:disabled) {
   background: rgba(167, 139, 250, 0.18);
 }
+.frame-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.frame-actions .quick-btn {
+  min-width: 0;
+  min-height: 54px;
+}
+.display-bubbles {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+}
+.display-bubbles .card {
+  min-width: 0;
+}
+.monitor-switch-block .sub-head {
+  margin-bottom: 8px;
+}
+.topology-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+.topology-btn {
+  min-width: 0;
+  min-height: 46px;
+  padding: 6px 4px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  border: 1px solid #2a3342;
+  border-radius: var(--radius-ctrl);
+  background: var(--bg-input);
+  color: var(--text);
+  cursor: pointer;
+}
+.topology-btn strong { font-size: 11px; }
+.topology-btn small { font-size: 9px; color: var(--text-dim); white-space: nowrap; }
+.topology-btn:hover:not(:disabled),
+.topology-btn.on {
+  border-color: var(--accent);
+  background: rgba(46, 166, 255, 0.14);
+}
+.topology-btn:disabled { opacity: 0.45; cursor: not-allowed; }
 /* ── 子块（游戏加速 / 启动应用） ── */
 .sub-block {
   margin-top: 12px;
@@ -939,53 +1001,121 @@ onUnmounted(() => {
 .pop-leave-active { transition: opacity 0.12s ease, transform 0.12s ease; }
 .pop-enter-from,
 .pop-leave-to { opacity: 0; transform: scale(0.95); }
-/* ── 游戏控制（识别卡片内 4 个并排按钮） ── */
-.ctrl-grid {
+/* ── 音乐播放 ── */
+.display-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.display-control { min-width: 0; }
+.display-control-label { display: block; margin: 0 0 5px; font-size: 11px; color: var(--text-dim); }
+.display-tip { display: block; margin-top: 6px; line-height: 1.35; }
+.music-empty { margin-top: 4px; }
+.music-now {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 4px 0 10px;
+}
+.music-name {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+  word-break: break-all;
+}
+.music-folder {
+  font-size: 10px;
+  color: var(--text-dim);
+  word-break: break-all;
+}
+.music-ctrl {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 8px;
-  margin-top: 12px;
 }
-.ctrl-btn {
+.music-btn {
   display: flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 3px;
+  gap: 4px;
   padding: 11px 4px;
   border-radius: var(--radius-ctrl, 8px);
   border: 1px solid var(--border, #1c2533);
   background: var(--bg-input, #0e1622);
   color: var(--text);
-  font-size: 11px;
-  font-weight: 600;
+  font-size: 12px;
+  font-weight: 700;
   cursor: pointer;
   transition: border-color 0.12s, background 0.12s, color 0.12s;
 }
-.ctrl-btn:hover:not(:disabled) {
+.music-btn:hover:not(:disabled) {
   border-color: var(--accent);
   background: rgba(46, 166, 255, 0.12);
 }
-.ctrl-btn:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-.ctrl-btn.on {
+.music-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.music-btn.play { font-size: 16px; }
+.music-btn.mode.on {
   border-color: rgba(245, 185, 61, 0.5);
   background: rgba(245, 185, 61, 0.15);
   color: #f5b93d;
 }
-.ctrl-danger:hover:not(:disabled) {
-  border-color: rgba(229, 72, 77, 0.5);
-  background: rgba(229, 72, 77, 0.12);
+.music-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 10px;
 }
-.ctrl-icon {
-  font-size: 18px;
+.music-actions .quick-btn.slim {
+  padding: 9px 10px;
+  font-size: 12px;
+  justify-content: center;
   line-height: 1;
 }
-.ctrl-label {
+/* ── 音量 ── */
+.music-volume {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+}
+.vol-btn {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  border: 1px solid var(--border, #1c2533);
+  background: var(--bg-input, #0e1622);
+  color: var(--text);
+  cursor: pointer;
+  transition: border-color 0.12s, background 0.12s;
+}
+.vol-btn:hover { border-color: var(--accent); background: rgba(46, 166, 255, 0.12); }
+.vol-slider {
+  flex: 1 1 auto;
+  min-width: 0;
+  accent-color: var(--accent);
+  height: 4px;
+  cursor: pointer;
+}
+.vol-slider:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+.vol-num {
+  flex: 0 0 auto;
+  width: 38px;
+  text-align: right;
   font-size: 11px;
-  line-height: 1.25;
-  text-align: center;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+.music-err {
+  margin-top: 10px;
+  background: rgba(229, 72, 77, 0.12);
+  border: 1px solid rgba(229, 72, 77, 0.4);
+  color: #ff9ea1;
+  border-radius: var(--radius-ctrl);
+  padding: 7px 10px;
+  font-size: 11px;
+  line-height: 1.4;
 }
 </style>

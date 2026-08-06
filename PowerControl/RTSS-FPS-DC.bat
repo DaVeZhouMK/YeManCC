@@ -2,29 +2,6 @@
 @chcp 65001 >nul
 setlocal enabledelayedexpansion
 
-REM ===== elevation: test write to RTSS Profiles dir; if fail, relaunch as admin =====
-if "%1"=="Elevated" goto :MainCode
-set "PROF=%ProgramFiles(x86)%\RivaTuner Statistics Server\Profiles"
-set "TESTF=%PROF%\.writetest"
-(echo.>"%TESTF%") 2>nul
-if exist "%TESTF%" (
-    del "%TESTF%" >nul 2>&1
-    goto :MainCode
-)
-PowerShell -Command "Start-Process -FilePath '%~f0' -ArgumentList 'Elevated' -Verb RunAs"
-exit /b
-
-:MainCode
-REM ===== DC lock: read FPS-dc.txt =====
-set "SRC=C:\SOFT\YeMan\PowerControl\FPS-dc.txt"
-set "FPS=0"
-if exist "%SRC%" (
-    set "RAW="
-    for /f "usebackq eol=# delims=" %%a in ("%SRC%") do if not defined RAW set "RAW=%%a"
-    if defined RAW (
-        for /f "tokens=1 delims=abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ " %%n in ("!RAW!") do set "FPS=%%n"
-    )
-)
-
-REM ===== call RTSS lock (Limit=0 means disabled) =====
-powershell -NoProfile -ExecutionPolicy Bypass -File "C:\SOFT\YeMan\PowerControl\RTSS-FPS.ps1" -Limit %FPS%
+REM 旧 DC 锁帧计划脚本已停用；FPS 统一由 control-config.json 与 RTSS 前端流程管理。
+REM 保留文件仅用于兼容旧任务，禁止新建/恢复对应任务。
+exit /b 0

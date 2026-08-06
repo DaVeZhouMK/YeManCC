@@ -1,4 +1,4 @@
-// autofloat.ts — 自动CPU浮动优化 桥层
+// autofloat.ts — 自动浮动优化桥层（CPU主频调度 + TDP节能联动）
 //
 // 架构：后台 PowerShell 守护 (FPS-Monitor.ps1)
 //   · 有真实游戏时：每 1 秒把 { ts, fps, fps1, game, pid } 写入 fps-status.json；
@@ -9,10 +9,11 @@
 // 通过既有 applyPowerParams 写入 —— 原有全部联动（最小CPU三联动跟积极性、
 // EPP、节流状态等）自动一起生效。
 //
-// 调度主要看帧率（目标 vs 实际 avg），并叠加两个 HWiNFO 信号：
-//   · 1% Low（Framerate Presented (1%)）：1%Low 低于「目标帧率 × 50%」→ 帧时间抖动(卡顿) → 立即升压平滑（不看 avg，避免稳定场误判）
-//   · GPU 3D 负载（多 GPU 取最大值）：GPU 越忙越可能是瓶颈 → 钳低 CPU 调度积极性上限（免得白费电也救不了帧率）
-// 以上三路数据全部来自 HWiNFO 共享内存（守护内读取），不再用 RTSS / Win32_Perf（易崩/不准）。
+// 调度主要看帧率（目标 vs 实际 avg），并叠加 HWiNFO 信号：
+//   · 1% Low：低于「目标帧率 × 50%」→ 帧时间抖动 → 立即升压平滑
+//   · GPU 3D 负载：限制 TDP 向下调节速度，GPU 越忙越慢降，避免瓶颈场景过快降功耗
+//   · CPU Package Power：仅用于显示和实际功耗监测；TDP 目标按电源方案的 TDP 最大值计算
+// 以上数据全部来自 HWiNFO 共享内存，不再用 RTSS / Win32_Perf（易崩/不准）。
 // 真实游戏识别（守护内完成）＝ 工作集 > 500MB ＋ 黑名单(内置+exclude.txt) ＋ HWiNFO 帧率>0。
 //
 // 守护生命周期：
@@ -20,8 +21,24 @@
 //   stop  = 写 fps-monitor.stop 标志文件，守护自清理退出
 
 import { shell, fs } from './api';
-import { applyPowerParams, readPowerParams, setActiveScheme, PW, type PowerParams, detectPowerMode } from './yeman';
-import { applyCpuLock } from './cpulock';
+import {
+  applyPowerParams,
+  readPowerParams,
+  setActiveScheme,
+  PW,
+  type PowerParams,
+  detectPowerMode,
+  readTdp,
+  setTdp,
+  detectVendor,
+  readRtssLimit,
+  setRtssLimit,
+  clampTdp,
+  type Vendor,
+  ensureTdpDaemon,
+  stopTdpDaemon,
+  hwiNfoRunning,
+} from './yeman';
 
 const PC_DIR = 'C:\\SOFT\\YeMan\\PowerControl';
 const PS1  = PC_DIR + '\\FPS-Monitor.ps1';
@@ -30,57 +47,174 @@ const HB   = PC_DIR + '\\fps-monitor.hb';
 const STOPFLAG = PC_DIR + '\\fps-monitor.stop';
 // HWiNFO 健康标记（守护每轮写入，前端据此判断 HWiNFO 共享内存是否可用）
 const HWINFO_OK = PC_DIR + '\\hwinfo-ok';
-const YEMAN_RTSS_VBS = PC_DIR + '\\YeManRTSS.vbs';
-// 持久化配置：记住「帧数目标 + 调度档位」，跨重启保留上次选择
+const HWINFO_EXE = 'C:\\Program Files\\HWiNFO64\\HWiNFO64.exe';
+const HWINFO_CFG_DIR = 'C:\\Program Files\\HWiNFO64\\YeMan';
+// HWiNFO 强制补救脚本：除必要文件缺失外，任何进程/共享内存异常都自动修复。
+const YEMAN_HWINFO_BAT = PC_DIR + '\\YeManHWiNFO.bat';
+// 持久化配置：记住「帧数目标 + 调度档位 + TDP向下浮动策略」，跨重启保留上次选择
 const CONFIG = PC_DIR + '\\autofloat.json';
+// 浮动运行标志：native 手柄后台（Start+方向）据此判断浮动是否接管，运行时只转发按键事件
+const FLOAT_ACTIVE = PC_DIR + '\\float-active';
 
 function safeProfile(p: string): FloatProfile {
-  return p === 'eco' || p === 'bal' || p === 'perf' || p === 'aggressive' ? p : 'bal';
+  return p === 'none' || p === 'eco' || p === 'bal' || p === 'perf' || p === 'aggressive' ? p : 'bal';
 }
 function safeTarget(t: number): FpsTarget {
-  return (FPS_TARGETS as readonly number[]).includes(t) ? (t as FpsTarget) : 0;
+  if (!Number.isFinite(Number(t)) || Number(t) === 0) return 0;
+  const v = Math.round(Number(t) / 5) * 5;
+  return v >= FPS_TARGET_MIN && v <= FPS_TARGET_MAX ? v : 0;
 }
 
-// 读取持久化配置（失败回退默认 关闭/平衡）
-async function readConfig(): Promise<{ target: FpsTarget; profile: FloatProfile }> {
-  try {
-    const txt = await fs.readTextFile(CONFIG);
-    const j = JSON.parse(txt) as { target?: number; profile?: string };
-    return { target: safeTarget(Number(j.target)), profile: safeProfile(String(j.profile)) };
-  } catch {
-    return { target: 0, profile: 'bal' };
-  }
-}
-
-// 写入当前 帧数目标 + 调度档位（不阻塞主流程）
-async function writeConfig(): Promise<void> {
-  try {
-    await fs.writeTextFile(CONFIG, JSON.stringify({ target: curTarget, profile: curProfile }));
-  } catch {
-    /* 忽略写入失败 */
-  }
-}
-
-// ── 档位：CPU 最大主频的调度上限范围（MHz）──
-export type FloatProfile = 'eco' | 'bal' | 'perf' | 'aggressive';
-export const FLOAT_PROFILES: Record<FloatProfile, { name: string; min: number; max: number; minAggr?: number }> = {
-  eco: { name: '最小CPU', min: 1500, max: 3000 },
-  bal: { name: '平衡CPU', min: 2000, max: 3500 },
-  perf: { name: '高性能CPU', min: 2500, max: 4500 },
-  aggressive: { name: '激进CPU', min: 4500, max: 7000, minAggr: 80 },
+export type TdpFloatStrategy = 'none' | 'small' | 'medium' | 'large' | 'aggressive';
+export const TDP_FLOAT_STRATEGIES: Record<TdpFloatStrategy, { name: string; minDrop: number; ratio: number }> = {
+  none: { name: '无下降', minDrop: 0, ratio: 0 },
+  small: { name: '小幅度', minDrop: 5, ratio: 0.2 },
+  medium: { name: '中幅度', minDrop: 7, ratio: 0.3 },
+  large: { name: '大幅度', minDrop: 10, ratio: 0.4 },
+  aggressive: { name: '激进幅度', minDrop: 15, ratio: 0.5 },
 };
 
-// ── 帧数目标选项（0 = 关闭，仅内部使用；UI 下拉只展示 >0 的值）──
-export const FPS_TARGETS = [0, 30, 45, 60, 90] as const;
-export type FpsTarget = (typeof FPS_TARGETS)[number];
+function safeTdpStrategy(v: string): TdpFloatStrategy {
+  return v === 'none' || v === 'small' || v === 'medium' || v === 'large' || v === 'aggressive' ? v : 'small';
+}
+
+// 读取持久化配置（失败回退默认 关闭/平衡/小幅度）
+async function readConfig(): Promise<{ target: FpsTarget; profile: FloatProfile; tdpStrategy: TdpFloatStrategy }> {
+  try {
+    const txt = await fs.readTextFile(CONFIG);
+    const j = JSON.parse(txt) as { target?: number; profile?: string; tdpStrategy?: string };
+    return {
+      target: safeTarget(Number(j.target)),
+      profile: safeProfile(String(j.profile)),
+      tdpStrategy: safeTdpStrategy(String(j.tdpStrategy)),
+    };
+  } catch {
+    return { target: 0, profile: 'bal', tdpStrategy: 'small' };
+  }
+}
+
+// 写入当前 帧数目标 + 调度档位 + TDP 策略：同一路径串行原子保存，后提交值不会被旧请求反向覆盖。
+let configWriteQueue: Promise<void> = Promise.resolve();
+function writeConfig(): Promise<void> {
+  const snapshot = JSON.stringify({ target: curTarget, profile: curProfile, tdpStrategy: curTdpStrategy });
+  const next = configWriteQueue.then(() => fs.writeTextFileAtomic(CONFIG, snapshot));
+  configWriteQueue = next.catch(() => {});
+  return next;
+}
+
+// ── 档位：CPU 性能压制档（左→右压制递增，与 TDP 向下策略同方向：小/中/大/激进）──
+// 频率范围整体反转：小幅度=压制最轻（主频上限最高），激进幅度=压制最狠（主频上限最低）
+export type FloatProfile = 'none' | 'eco' | 'bal' | 'perf' | 'aggressive';
+type FloatProfileSpec = { name: string; min: number; max: number; minAggr?: number; noAdjust?: boolean };
+export const FLOAT_PROFILES: Record<FloatProfile, FloatProfileSpec> = {
+  none: { name: '无压制', min: 0, max: 0, minAggr: 100, noAdjust: true },
+  eco: { name: '小幅度', min: 4500, max: 7000, minAggr: 80 },   // 压制最小（性能最高）
+  bal: { name: '中幅度', min: 2500, max: 4500 },
+  perf: { name: '大幅度', min: 2000, max: 3500 },
+  aggressive: { name: '激进幅度', min: 1500, max: 3000 },        // 压制最狠（性能最低）
+};
+function floatProfileSpec(profile: FloatProfile): FloatProfileSpec {
+  return FLOAT_PROFILES[profile];
+}
+
+// ── 帧数目标：连续值，30–120、5 帧步进（0 仅在内部表示"关闭"）──
+export const FPS_TARGET_MIN = 30;
+// 性能调度帧数目标/RTSS 锁帧/浮动目标统一上限 300FPS（2026-08-04 起由 200 放开；0 表示不锁帧）。
+export const FPS_TARGET_MAX = 300;
+export const FPS_TARGET_STEP = 5;
+export type FpsTarget = number;
+export function clampFpsTarget(t: number): number {
+  if (Number(t) === 0) return 0; // 0 = 不锁帧
+  const v = Math.round(Number(t) / FPS_TARGET_STEP) * FPS_TARGET_STEP;
+  return Math.max(FPS_TARGET_MIN, Math.min(FPS_TARGET_MAX, v));
+}
+
+const AUTO_TDP_MIN = 5;
+// 固定基础步进（原值）：降档每次 -1W、回调每次 +5W
+const TDP_DOWN_BASE = 1;
+const TDP_RECOVER_BASE = 5;
+// TDP 回调冷却：与「CPU 连续达标降档判定 DOWN_STABLE_N」解耦，避免调整降档稳定性时
+// 意外拖慢 TDP 回调速度（2026-08-05 拆分语义劫持）。
+const TDP_RECOVER_COOLDOWN_MS = 3000;
+// 动态加速量：以【当前 TDP 实际值 tdpLimit】为基准 * 0.03 取整（舍小数），结果 < 1 时抛弃
+// （加速量记为 0，只走基础步进），叠加在基础步进之上；提升与下降共用同一加速量。
+// ⚠️ 必须用当前实际值 tdpLimit 而非 tdpMax：200W 机器压到 30W 时若按 tdpMax 算，加速量仍 = 6，
+// 回调一步就 +11W、降档一步 -7W，低瓦数跳变过大出 bug。按实际值则低瓦数加速量自动归 0。
+// 例（按当前实际值）：200W→6(降7/回11)、100W→3(降4/回8)、50W→1.5→1(降2/回6)、30W→0.9→0(抛弃: 降1/回5)。
+function tdpStepW(): number {
+  const v = Math.floor(tdpLimit * 0.03);
+  return v < 1 ? 0 : v;
+}
+
+export function getTdpTarget(tdpMax: number, strategy: TdpFloatStrategy): number {
+  if (!Number.isFinite(tdpMax) || tdpMax <= 0) return 0;
+  if (strategy === 'none') return Math.floor(tdpMax);
+  const p = TDP_FLOAT_STRATEGIES[strategy];
+  const drop = Math.max(p.minDrop, Math.ceil(tdpMax * p.ratio));
+  return Math.max(AUTO_TDP_MIN, Math.floor(tdpMax - drop));
+}
+
+function gpuTdpDownIntervalMs(gpu: number): number {
+  if (gpu > 90) return 8000;
+  if (gpu > 70) return 5000;
+  if (gpu > 50) return 3000;
+  if (gpu > 30) return 3000;
+  return 3000;
+}
+
+async function applyTdpLimit(next: number): Promise<number> {
+  const value = Math.max(AUTO_TDP_MIN, Math.round(next));
+  if (value <= 0 || value === tdpLimit) return tdpLimit;
+  const vendor = tdpVendor !== 'unknown' ? tdpVendor : await detectVendor().catch(() => 'unknown' as Vendor);
+  if (vendor === 'unknown') return tdpLimit;
+  // 与顶部 TDP 滑块共用 setTdp 的实际下发路径；save:false 保证只改硬件临时值，不改 TDP最大值配置。
+  // 常驻 daemon 方案已生效：setTdp → ensureTdpDaemon（心跳新鲜直接复用）→ 写命令文件（毫秒级），
+  // 不再每几秒 CreateProcess(YeManTdpCtl.exe)，根治 IDC_APPSTARTING 转圈。
+  await setTdp(tdpMode, value, { apply: true, save: false, vendor });
+  tdpVendor = vendor;
+  tdpLimit = value;
+  notify();
+  return value;
+}
+
+function shouldRecoverTdp(st: FloatStatus): boolean {
+  if (curTarget <= 0) return false;
+  const fpsLow = st.fps > 0 && st.fps < curTarget * 0.8;
+  const lowOnePercent = st.fps1 > 0 && st.fps1 < curTarget * 0.5;
+  return fpsLow || lowOnePercent;
+}
+
+async function recoverTdp(): Promise<boolean> {
+  if (tdpLimit <= 0 || tdpOriginal <= tdpLimit || Date.now() - lastTdpRecoverTs < TDP_RECOVER_COOLDOWN_MS) return false;
+  const next = Math.min(tdpOriginal, tdpLimit + TDP_RECOVER_BASE + tdpStepW());
+  const applied = await applyTdpLimit(next);
+  lastTdpRecoverTs = Date.now();
+  // 用实际下发值比较：applyTdpLimit 内部会 Math.round + 钳 AUTO_TDP_MIN，
+  // 原 tdpLimit===next 在浮点/钳制时误报失败（2026-08-05 修复）。
+  return applied === Math.max(AUTO_TDP_MIN, Math.round(next));
+}
+
+async function lowerTdp(st: FloatStatus): Promise<boolean> {
+  if (tdpMax <= 0 || tdpLimit <= AUTO_TDP_MIN) return false;
+  if (Date.now() - lastTdpDownTs < gpuTdpDownIntervalMs(st.gpu)) return false;
+  const target = getTdpTarget(tdpMax, curTdpStrategy);
+  if (target <= 0 || target >= tdpLimit) return false;
+  // 按 GPU 占用间隔、以（基础 1W + 动态加速量：当前实际 TDP值*0.03 取整，<1 抛弃）逐步逼近策略目标（目标 = TDP最大值按策略计算的下限）
+  const next = Math.max(target, tdpLimit - (TDP_DOWN_BASE + tdpStepW()));
+  const applied = await applyTdpLimit(next);
+  lastTdpDownTs = Date.now();
+  return applied === Math.max(AUTO_TDP_MIN, Math.round(next));
+}
 
 export interface FloatStatus {
   ts: number;
   fps: number; // HWiNFO Framerate Presented (avg) —— 主要调度系数
   fps1: number; // HWiNFO Framerate Presented (1%) —— 1% Low
   gpu: number; // HWiNFO GPU 3D 负载最大值%（多 GPU 取最大，比 Win32_Perf 准）
+  packagePower: number; // HWiNFO CPU Package Power，单位 W；0=未读取到
   game: string | null;
   pid: number;
+  idle?: boolean; // 仅守护心跳，无真实游戏帧率数据
 }
 
 // 启动守护（shell.hidden 隐藏窗口直接拉起 ps1，无 VBS 中转，避免 LOLBin 拦截）
@@ -91,11 +225,13 @@ export async function startMonitor(): Promise<void> {
     '-NoProfile', '-ExecutionPolicy', 'Bypass',
     '-WindowStyle', 'Hidden', '-File', PS1,
   ]);
+  monitorLaunched = true; // 标记已拉起；tick 失联重拉前先看此标志，避免反复重启抖动
 }
 
 // 停止守护（写停止标志，守护 1 秒内自清理退出）
 export async function stopMonitor(): Promise<void> {
   await fs.writeTextFile(STOPFLAG, '1').catch(() => {});
+  monitorLaunched = false; // 显式停止 → 允许后续按需重拉
 }
 
 // 读取最新状态；逻辑：
@@ -106,7 +242,16 @@ export async function stopMonitor(): Promise<void> {
 export async function readStatus(): Promise<FloatStatus | null> {
   try {
     const txt = await fs.readTextFile(STATUS);
-    const st = JSON.parse(txt) as FloatStatus;
+    const raw = JSON.parse(txt) as Partial<FloatStatus>;
+    const st: FloatStatus = {
+      ts: Number(raw.ts) || 0,
+      fps: Number(raw.fps) || 0,
+      fps1: Number(raw.fps1) || 0,
+      gpu: Number(raw.gpu) || 0,
+      packagePower: Number(raw.packagePower) || 0,
+      game: typeof raw.game === 'string' ? raw.game : null,
+      pid: Number(raw.pid) || 0,
+    };
     if (typeof st.ts === 'number' && Date.now() - st.ts <= 5000 && st.game) return st;
   } catch {
     /* 无状态文件 / JSON 损坏 */
@@ -115,7 +260,7 @@ export async function readStatus(): Promise<FloatStatus | null> {
     const hbTxt = await fs.readTextFile(HB);
     const hb = JSON.parse(hbTxt) as { ts?: number };
     if (typeof hb.ts === 'number' && Date.now() - hb.ts < 15000) {
-      return { ts: hb.ts, fps: 0, fps1: 0, gpu: 0, game: null, pid: 0 };
+      return { ts: hb.ts, fps: 0, fps1: 0, gpu: 0, packagePower: 0, game: null, pid: 0, idle: true };
     }
   } catch {
     /* 无心跳 */
@@ -124,46 +269,87 @@ export async function readStatus(): Promise<FloatStatus | null> {
 }
 
 // ── HWiNFO 健壮性：检测共享内存是否可用 ──
-// 守护每轮写入 hwinfo-ok（文件时间戳），前端据此判断 HWiNFO 是否已启动且共享内存可读
+// HWiNFO 是强制底层数据源：除必要文件缺失外，不接受用户关闭/暂时失败，必须自动修复。
 async function hwinfoStatus(): Promise<boolean> {
   try {
     const txt = await fs.readTextFile(HWINFO_OK);
     const ts = Number(txt.trim());
-    return !isNaN(ts) && Date.now() - ts < 30000; // 30 秒内有效（守护心跳 10s 一次）
+    return Number.isFinite(ts) && Date.now() - ts < 6000;
   } catch {
     return false;
   }
 }
 
-// 尝试修复 HWiNFO：运行 YeManRTSS.vbs（启动 HWiNFO + 修复共享内存），然后轮询 10 秒
-// 返回 true=已恢复，false=仍不可用
+let hwinfoRecoveryInFlight: Promise<boolean> | null = null;
+let hwinfoPrereqMissing = false;
+const HWINFO_RECOVERY_POLL_MS = 100;
+const HWINFO_RECOVERY_POLL_COUNT = 60; // 最多 6 秒，只等待共享内存重新出现
+
+// 强制恢复事务：单实例执行，避免 autofloat/TopMonitor 同时杀拉 HWiNFO。
+// 有进程但无共享内存走 restart；无进程走 start；事务脚本会先复制配置再启动。
 async function ensureHwiNfo(): Promise<boolean> {
   if (await hwinfoStatus()) {
     hwinfoDown = false;
+    hwinfoErr = false;
+    hwinfoNoExe = false;
     hwinfoRecoveryAttempted = false;
+    hwinfoPrereqMissing = false;
     return true;
   }
-  // 避免重复尝试（60 秒冷却，用独立变量不受 tick() 干扰）
-  if (hwinfoRecoveryAttempted && Date.now() - hwinfoRecoveryTs < 60000) {
-    hwinfoDown = true;
+  hwinfoDown = true;
+  notify();
+
+  if (hwinfoPrereqMissing) {
+    hwinfoErr = true;
     return false;
   }
-  hwinfoRecoveryAttempted = true;
-  hwinfoRecoveryTs = Date.now();
-  try {
-    await shell.run('cscript.exe', ['//nologo', YEMAN_RTSS_VBS]);
-  } catch { /* 忽略 cscript 启动错误 */ }
-  // 轮询 10 秒（每 500ms 检测一次）
-  for (let i = 0; i < 20; i++) {
-    await new Promise((r) => setTimeout(r, 500));
-    if (await hwinfoStatus()) {
-      hwinfoDown = false;
-      hwinfoRecoveryAttempted = false; // 成功后重置，允许后续再次自动修复
-      return true;
+  if (hwinfoRecoveryInFlight) return hwinfoRecoveryInFlight;
+
+  hwinfoRecoveryInFlight = (async () => {
+    hwinfoRecoveryAttempted = true;
+    hwinfoRecoveryTs = Date.now();
+    const exeOk = await fs.exists(HWINFO_EXE).catch(() => false);
+    const cfgOk = await fs.exists(HWINFO_CFG_DIR).catch(() => false);
+    if (!exeOk || !cfgOk) {
+      hwinfoPrereqMissing = true;
+      hwinfoErr = true;
+      notify();
+      return false;
     }
+
+    const hwRunning = await hwiNfoRunning().catch(() => false);
+    hwinfoNoExe = !hwRunning;
+    const mode = hwRunning ? 'restart' : 'start';
+    try {
+      // 后台脱离启动：不等待 bat 返回，避免 shell.run 的原生等待无法被前端超时取消。
+      // 必要文件已在事务前校验，最终成功标准只看共享内存健康标记。
+      await shell.hidden('cmd.exe', ['/c', YEMAN_HWINFO_BAT, mode]);
+    } catch {
+      // 事务脚本可能被另一个守护实例占用；继续快速轮询共享内存，不重复杀进程。
+    }
+
+    for (let i = 0; i < HWINFO_RECOVERY_POLL_COUNT; i++) {
+      if (await hwinfoStatus()) {
+        hwinfoDown = false;
+        hwinfoErr = false;
+        hwinfoNoExe = false;
+        hwinfoRecoveryAttempted = false;
+        notify();
+        return true;
+      }
+      await new Promise((resolve) => setTimeout(resolve, HWINFO_RECOVERY_POLL_MS));
+    }
+    hwinfoDown = true;
+    hwinfoErr = true;
+    notify();
+    return false;
+  })();
+
+  try {
+    return await hwinfoRecoveryInFlight;
+  } finally {
+    hwinfoRecoveryInFlight = null;
   }
-  hwinfoDown = true;
-  return false;
 }
 
 /* ── 控制状态机（纯函数，便于测试）─────────────────────────────
@@ -188,12 +374,15 @@ const FREQ_STEP_DOWN = 300;   // 降频步长加大（原 100）
 const FREQ_STEP_UP = 500;     // 升频步长 +0.5GHz（原 300），大幅度回血
 
 // 按当前档位把积极性钳到合法区间。
-// 对 aggressive 档位，minAggr=80 是绝对下限：即使 GPU 占用触发压低也无效。
+// 带 minAggr 的档位（eco=80）表示积极性「绝对下限」：即使 GPU 占用触发压低也不得低于该值
+// （性能优先档位，牺牲一点节能保住帧率）；无 minAggr 的档位（bal/perf/aggressive）按 GPU
+// 占用受上限钳制（GPU 越忙 → 上限越低，省电优先）。（2026-08-05 修正注释与实现对齐）
 function clampAggr(aggr: number, profile: FloatProfile): number {
-  const p = FLOAT_PROFILES[profile];
+  const p = floatProfileSpec(profile);
+  if (p.noAdjust) return 100;
   const floor = p.minAggr ?? AGGR_FLOOR;
   let v = Math.max(floor, Math.min(100, aggr));
-  // 非 aggressive 档位仍受 GPU 占用上限钳制；aggressive 忽略 GPU 压低。
+  // 带 minAggr（绝对下限）的档位不受 GPU 占用压低；其余档位仍受 GPU 上限钳制
   if (p.minAggr === undefined) v = Math.min(v, gpuCap);
   return v;
 }
@@ -212,10 +401,11 @@ export function gpuAggrCap(gpu: number): number {
   return 100;
 }
 
-export type CtlAction = 'down-aggr' | 'down-freq' | 'up-freq' | 'up-aggr' | 'hold';
+export type CtlAction = 'down-aggr' | 'down-freq' | 'down-tdp' | 'up-freq' | 'up-aggr' | 'up-tdp' | 'hold';
 
 export function stepDown(s: CtlState, profile: FloatProfile): { next: CtlState; action: CtlAction } {
-  const p = FLOAT_PROFILES[profile];
+  const p = floatProfileSpec(profile);
+  if (p.noAdjust) return { next: s, action: 'hold' };
   const floor = p.minAggr ?? AGGR_FLOOR;
   if (s.aggr > floor) {
     return { next: { freq: s.freq, aggr: clampAggr(s.aggr - AGGR_STEP_DOWN, profile) }, action: 'down-aggr' };
@@ -227,7 +417,8 @@ export function stepDown(s: CtlState, profile: FloatProfile): { next: CtlState; 
 }
 
 export function stepUp(s: CtlState, profile: FloatProfile): { next: CtlState; action: CtlAction } {
-  const p = FLOAT_PROFILES[profile];
+  const p = floatProfileSpec(profile);
+  if (p.noAdjust) return { next: s, action: 'hold' };
   if (s.freq < p.max) {
     return { next: { freq: Math.min(p.max, s.freq + FREQ_STEP_UP), aggr: s.aggr }, action: 'up-freq' };
   }
@@ -239,7 +430,8 @@ export function stepUp(s: CtlState, profile: FloatProfile): { next: CtlState; ac
 
 // 把任意状态钳到档位范围内（切换档位时用）
 export function clampToProfile(s: CtlState, profile: FloatProfile): CtlState {
-  const p = FLOAT_PROFILES[profile];
+  const p = floatProfileSpec(profile);
+  if (p.noAdjust) return s;
   return { freq: Math.max(p.min, Math.min(p.max, s.freq)), aggr: clampAggr(s.aggr, profile) };
 }
 
@@ -269,10 +461,17 @@ export interface FloatInfo {
   enabled: boolean;
   target: FpsTarget;
   profile: FloatProfile;
+  tdpStrategy: TdpFloatStrategy;
+  tdpMax: number;
+  tdpTarget: number;
+  tdpApplied: number;
   status: FloatStatus | null; // 守护最新状态（null=无数据/守护未就绪）
   state: CtlState; // 当前控制量（主频上限 + 积极性）
   lastAction: CtlAction | 'idle' | 'wait';
+  tdpState: CtlAction | 'idle' | 'wait'; // TDP 这一排专用的状态标注（降TDP/回调TDP/稳定）
   hwinfoDown: boolean; // HWiNFO 共享内存不可用（未开启/传感器缺失/内存共享未启用）
+  hwinfoErr: boolean;  // 一次完整自动修复尝试（10 秒轮询）结束仍不可用 → UI 才弹提示
+  hwinfoNoExe: boolean; // 补救时 HWiNFO 进程不在（未装/未启动）→ 两套逻辑之「无 HW」
 }
 
 let timer: ReturnType<typeof setInterval> | null = null;
@@ -280,16 +479,39 @@ let ctl: CtlState = { freq: 0, aggr: 100 };
 let snapshot: PowerParams | null = null; // 开启前的面板参数，关闭时恢复
 let curTarget: FpsTarget = 0;
 let curProfile: FloatProfile = 'bal';
+let curTdpStrategy: TdpFloatStrategy = 'small';
 let downCount = 0;
+let lastTdpDownTs = 0;
+let lastTdpRecoverTs = 0;
+let tdpMax = 0; // 当前电源方案配置的 TDP 最大值，单位 W；策略目标固定以此为基准
+let tdpLimit = 0; // 当前实际下发到 YeManTdpCtl 的临时目标上限，单位 W
+let tdpOriginal = 0; // 当前电源模式启用前读到的 TDP 配置，关闭时恢复
+let tdpMode: 'ac' | 'dc' = 'ac';
+let tdpVendor: Vendor = 'unknown';
 let lastAction: FloatInfo['lastAction'] = 'idle';
+let lastTdpAction: FloatInfo['lastAction'] = 'idle';
 let lastStatus: FloatStatus | null = null;
+let lastFloatActiveTs = 0; // 浮动标志刷新时间戳（每 5 秒刷新，供 native 按 30s 新鲜度判定）
 let restartCooldown = 0; // 守护失联重拉冷却
+let monitorLaunched = false; // 守护已被前端拉起（未显式停止）→ 失联时先不重拉，避免瞬读抖动把健康守护误杀重启
+let deadStreak = 0; // 连续失联轮数，达阈值才强制重拉（区分"瞬读抖动"与"守护真死"）
+let restartBurst = 0; // 连续重拉计数：每次重拉后递增、读到有效状态归零；超过阈值进入退避冷却
+const RESTART_BURST_MAX = 6; // 连续 6 次重拉仍无状态 → 冷却拉长到 30s，避免守护持续故障时 5s 一次的进程风暴
 let starting = false;    // 启用流程进行中标志（防并发双启动守护 + 双控制循环）
+let stopping = false;    // disableFloat 在 enableFloat 启动期间被调用 → 等启动完成后自动关闭
+let tickRunning = false; // 控制循环重入锁：tick 内含多个 await（读状态/电源模式/下发硬件），
+                         // 防止 setInterval 重叠触发多个 tick 交错争抢 UI 线程消息泵与进程池
+                         // （鼠标旁转圈 IDC_APPSTARTING 的根因之一）。
+let ctlApplyQueue: Promise<void> = Promise.resolve(); // tick 与外部热切档共用 CPU 参数写入队列
 let gpuCap = 100;       // 当前 GPU 上限钳制值（每轮按 st.gpu 刷新；守护失联→100）
 let hwinfoDown = false;                  // HWiNFO 共享内存不可用
-let hwinfoRecoveryAttempted = false;     // 已尝试运行 YeManRTSS.vbs 修复（避免重复弹窗）
+let hwinfoErr = false;                   // 完整修复尝试（10 秒轮询）结束仍不可用
+let hwinfoRecoveryAttempted = false;     // 已尝试运行 YeManHWiNFO.bat 修复（避免重复弹窗）
 let hwinfoRecoveryTs = 0;                // 上次尝试修复的时间戳（60s 冷却）
+let hwinfoNoExe = false;                 // 补救时 HWiNFO 进程不在（未装/未启动）→ 两套逻辑之「无 HW」
 let hwinfoPollTs = 0;                    // 上次 HWiNFO 健康轮询时间戳（2s 间隔）
+let tdpModeCheckTs = 0;                  // 上次 AC/DC 电源模式探测时间戳（15s 间隔，插拔电源后跟随）
+const TDP_MODE_CHECK_MS = 15000;
 const listeners = new Set<(info: FloatInfo) => void>();
 
 function notify() {
@@ -298,7 +520,22 @@ function notify() {
 }
 
 export function getFloatInfo(): FloatInfo {
-  return { enabled: timer !== null, target: curTarget, profile: curProfile, status: lastStatus, state: { ...ctl }, lastAction, hwinfoDown };
+  return {
+    enabled: timer !== null || starting,
+    target: curTarget,
+    profile: curProfile,
+    tdpStrategy: curTdpStrategy,
+    tdpMax,
+    tdpTarget: getTdpTarget(tdpMax, curTdpStrategy), // 策略目标（一次性下限，不随已下发值漂移）
+    tdpApplied: tdpLimit, // 当前实际下发的临时值（逐步逼近中）
+    status: lastStatus,
+    state: { ...ctl },
+    lastAction,
+    tdpState: lastTdpAction,
+    hwinfoDown,
+    hwinfoErr,
+    hwinfoNoExe,
+  };
 }
 
 // 开启浮动优化前的「用户面板参数」快照（锁定功能要锁的就是这套，而不是浮动中的动态值）
@@ -314,18 +551,21 @@ export async function reapplyFloat(): Promise<void> {
 // 根据 cpu_auto_enable.json 的 mode + 当前电源状态，自动启用/禁用浮动优化。
 // 调用点：CpuView 下拉变更、App.vue 启动、AC/DC 插拔事件。
 const AUTO_ENABLE_FILE = 'C:\\SOFT\\YeMan\\PowerControl\\cpu_auto_enable.json';
-export async function applyCpuAutoEnable(): Promise<void> {
-  let mode = 'never';
-  try {
-    const raw = await fs.readTextFile(AUTO_ENABLE_FILE);
-    mode = (JSON.parse(raw) as { mode?: string }).mode ?? 'never';
-  } catch { /* 文件不存在或损坏 → 按 never 处理 */ }
+export async function applyCpuAutoEnable(modeOverride?: string): Promise<void> {
+  let mode = modeOverride ?? 'never';
+  if (modeOverride === undefined) {
+    try {
+      const raw = await fs.readTextFile(AUTO_ENABLE_FILE);
+      mode = (JSON.parse(raw) as { mode?: string }).mode ?? 'never';
+    } catch { /* 文件不存在或损坏 → 按 never 处理 */ }
+  }
 
   // 始终从 config 恢复「帧数目标 + 调度档位」供 UI 回显（仅读盘、不写盘、不拉守护）。
   // 这是「记忆」的关键：即便当前电源态不需要启用浮动，下拉里也应正确高亮上次选中的 30/45/60/90 与挡位。
   const c = await readConfig();
   curTarget = c.target;
   curProfile = c.profile;
+  curTdpStrategy = c.tdpStrategy;
 
   if (mode === 'never') {
     if (timer !== null) await disableFloat();
@@ -337,7 +577,7 @@ export async function applyCpuAutoEnable(): Promise<void> {
   if (shouldEnable) {
     if (timer === null) {
       const target = c.target > 0 ? c.target : 60;
-      await enableFloat(target, c.profile);
+      await enableFloat(target, c.profile, c.tdpStrategy);
     }
   } else {
     if (timer !== null) await disableFloat();
@@ -349,42 +589,92 @@ export function onFloatUpdate(cb: (info: FloatInfo) => void): () => void {
   return () => listeners.delete(cb);
 }
 
-// 把当前控制量写入电源方案（AC/DC 同值；睿频保持快照原状），并延迟激活生效
+// 把当前控制量写入 AC/DC 电源方案，并延迟激活生效
 let activateTimer: ReturnType<typeof setTimeout> | null = null;
+// CPU 调度写入节流：控制循环每 1 秒决策，但硬件写入（applyCtl → 2~cmd + powercfg）
+// 合并到每 CTL_FLUSH_MS 落地一次。避免每秒密集起子进程持续占满消息泵/线程池，
+// 否则 OS 在 C++ UI 线程判定"持续忙" → 鼠标旁 IDC_APPSTARTING 转圈
+// （手动调 CPU/TDP 只写一次不转，正是此差异）。仅 HWiNFO 提供真帧率时才进控制循环，
+// 故「只有浮动 + HWiNFO 开才转圈」的根因在此。
+let ctlDirty = false;
+let lastCtlFlush = 0;
+const CTL_FLUSH_MS = 2000;
 async function applyCtl(): Promise<void> {
-  // 优先级：自动CPU浮动优化开启 = 最高优先。锁定不影响浮动，浮动照常联动改写 AC/DC。
-  // （锁定值只在浮动关闭时生效：见 disableFloat / applyCpuLock）
+  // CPU 浮动统一使用当前 ctl 同步写入 AC/DC；不再存在锁定值覆盖浮动值的旁路。
   const t = snapshot ?? { acTurbo: true, dcTurbo: true, acFreq: 0, dcFreq: 0, acAggr: 100, dcAggr: 100 };
-  await applyPowerParams({
-    acFreq: ctl.freq,
-    dcFreq: ctl.freq,
-    acTurbo: t.acTurbo,
-    dcTurbo: t.dcTurbo,
-    acAggr: ctl.aggr,
-    dcAggr: ctl.aggr,
-  });
-  if (activateTimer !== null) clearTimeout(activateTimer);
-  activateTimer = setTimeout(() => {
-    activateTimer = null;
-    setActiveScheme(PW.YEMAN).catch(() => {});
-  }, 1500);
+  const acFreq = ctl.freq;
+  const dcFreq = ctl.freq;
+  const acAggr = ctl.aggr;
+  const dcAggr = ctl.aggr;
+  const acTurbo = t.acTurbo;
+  const dcTurbo = t.dcTurbo;
+  const sides: Array<'ac' | 'dc'> = ['ac', 'dc'];
+  const run = ctlApplyQueue.then(() => applyPowerParams({ acFreq, dcFreq, acTurbo, dcTurbo, acAggr, dcAggr, sides }));
+  ctlApplyQueue = run.catch(() => {});
+  await run;
+  // 去重：仅在尚未排程时才安排一次激活；连续多轮 applyCtl（如掉帧升压）不会叠加多个
+  // powercfg /setactive 子进程，避免进程池被打满（鼠标转圈的根因之一）。
+  if (activateTimer === null) {
+    activateTimer = setTimeout(() => {
+      activateTimer = null;
+      setActiveScheme(PW.YEMAN).catch(() => {});
+    }, 1500);
+  }
 }
 
 async function tick(): Promise<void> {
+  // 重入锁：丢弃与上一轮尚未结束的 tick 重叠的调用，避免多 tick 交错把 UI 线程
+  // 消息泵与 3 线程进程池同时打满（鼠标旁转圈的根因）。
+  if (tickRunning) return;
+  tickRunning = true;
+  try {
+  // 每 5 秒刷新浮动运行标志时间戳（native 按 30 秒新鲜度判定，防残留误判）
+  if (Date.now() - lastFloatActiveTs > 5000) {
+    lastFloatActiveTs = Date.now();
+    await fs.writeTextFile(FLOAT_ACTIVE, '1').catch(() => {});
+  }
+  // 状态读取（浮动按 AC/DC 锁定状态分别写入 CPU；TDP 按当前电源模式读取并独立浮动，
+  // 不 per-tick 探测 AC/DC，避免每轮 IPC/powershell 阻塞；改为 15s 周期探测，插拔电源后跟随）。
   const st = await readStatus();
   lastStatus = st;
   gpuCap = st ? gpuAggrCap(st.gpu ?? 0) : 100; // 每轮刷新 GPU 上限（守护失联→不限）
+  // 周期性刷新电源模式：15s 一次。检测到切换后更新 tdpMode，后续 TDP 写入跟随新寄存器；
+  // 单真相源下 tdpMax/tdpOriginal 与电源侧无关，无需重读（2026-08-05 修复插拔电源 TDP 失效）。
+  if (Date.now() - tdpModeCheckTs > TDP_MODE_CHECK_MS) {
+    tdpModeCheckTs = Date.now();
+    const pm = await detectPowerMode().catch(() => null);
+    if (pm === 'ac' || pm === 'dc') tdpMode = pm;
+  }
   if (!st) {
-    // 守护失联（未启动/被杀）：每 5 秒尝试重拉一次
+    // 守护失联（未启动/被杀/瞬读抖动）：每 5 秒尝试重拉一次
     lastAction = 'wait';
+    lastTdpAction = 'wait';
+    deadStreak++;
     if (--restartCooldown <= 0) {
-      restartCooldown = 5;
-      await startMonitor().catch(() => {});
+      // 重拉退避：连续失败（restartBurst 达上限）后冷却从 5s 拉长到 30s，防进程风暴
+      restartCooldown = restartBurst >= RESTART_BURST_MAX ? 30 : 5;
+      // 我们已拉起且未显式停止（monitorLaunched=true）→ 先不重拉，可能是前端读 hb/status 的
+      // 瞬读抖动（PS1 改原子写后应消失）；连续多轮（deadStreak>=3，约 3 秒）仍失联才强制重拉，
+      // 避免把健康守护误杀重启造成抖动。monitorLaunched=false（显式停止后）= 直接重拉。
+      if (!monitorLaunched) {
+        await startMonitor().catch(() => {});
+      } else if (deadStreak >= 3) {
+        monitorLaunched = false;
+        await startMonitor().catch(() => {});
+      }
+      // 每次重拉后重置连失计数，给守护全新的宽限期；读到有效状态（下方）再清零 restartBurst
+      deadStreak = 0;
+      restartBurst++;
     }
     notify();
     return;
   }
   restartCooldown = 0;
+  monitorLaunched = true; // 读到有效状态（含空闲心跳）→ 守护确实活着
+  deadStreak = 0;
+  restartBurst = 0; // 守护恢复 → 连续重拉计数归零
+  // 顶部 TDP 最大值滑块在浮动运行期间变更时，由 TdpView.applyTdp → notifyTdpMaxChanged
+  // 直接更新内存基准（tdpMax/tdpOriginal），不再每轮读取 tdp.txt，避免每秒 fs 读与守护写争用（鼠标转圈）。
 
   // 每 2 秒检测 HWiNFO 健康状态（守护存活时轮询；恢复成功自动清除 err-bar）
   if (Date.now() - hwinfoPollTs > 2000) {
@@ -395,12 +685,18 @@ async function tick(): Promise<void> {
   if (st.fps <= 0 || !st.game) {
     // 无真实游戏：回档位上限 + 积极性满（受档位 floor/GPU 上限钳制），待机不再调节
     downCount = 0;
-    const idle: CtlState = { freq: FLOAT_PROFILES[curProfile].max, aggr: clampAggr(100, curProfile) };
+    lastTdpDownTs = 0;
+    if (tdpOriginal > 0 && tdpLimit !== tdpOriginal) await applyTdpLimit(tdpOriginal).catch(() => {});
+    const idleSpec = floatProfileSpec(curProfile);
+    const idle: CtlState = idleSpec.noAdjust
+      ? ctl
+      : { freq: idleSpec.max, aggr: clampAggr(100, curProfile) };
     if (idle.freq !== ctl.freq || idle.aggr !== ctl.aggr) {
       ctl = idle;
-      await applyCtl().catch(() => {});
+      ctlDirty = true; // 合并到节流窗口统一落盘（见 finally）
     }
     lastAction = 'idle';
+    lastTdpAction = 'idle';
     notify();
     return;
   }
@@ -408,10 +704,35 @@ async function tick(): Promise<void> {
   // 1% Low 卡顿信号：1%Low 明显低于「目标帧率 × LOW_WARN_RATIO」→ 帧时间抖动 → 升压平滑
   // 单纯看 Low（不掺 avg）：目标=60 时阈值 30；Low≥30 视为流畅（即便 avg 抖动也不误判）
   const stutter = st.fps1 > 0 && curTarget > 0 && st.fps1 < curTarget * LOW_WARN_RATIO;
+  let tdpActed = false;
+  const tdpNeedsRecovery = shouldRecoverTdp(st);
+  if (tdpNeedsRecovery && await recoverTdp().catch(() => false)) {
+    lastAction = 'up-tdp';
+    lastTdpAction = 'up-tdp';
+    tdpActed = true;
+  }
+  const tdpReadyToLower = !tdpNeedsRecovery && st.fps > 0 && st.fps1 > 0 &&
+    st.fps >= curTarget * 0.8 && st.fps1 >= curTarget * 0.5;
+  if (tdpReadyToLower) {
+    const lowered = await lowerTdp(st).catch(() => false);
+    if (lowered) {
+      lastAction = 'down-tdp';
+      lastTdpAction = 'down-tdp';
+      tdpActed = true;
+    }
+  }
+  if (!tdpActed) lastTdpAction = 'hold';
+  // 无压制：保留 RTSS 与 TDP 状态监控，但不参与 CPU 降频/积极性调节。
+  if (curProfile === 'none') {
+    downCount = 0;
+    lastAction = 'hold';
+    notify();
+    return;
+  }
   const verdict = judge(st.fps, curTarget, stutter);
   if (verdict === 'up') {
     downCount = 0;
-    const p = FLOAT_PROFILES[curProfile];
+    const p = floatProfileSpec(curProfile);
     let next: CtlState;
     let action: CtlAction;
     if (stutter && st.fps >= curTarget) {
@@ -448,17 +769,17 @@ async function tick(): Promise<void> {
     lastAction = action;
     if (next.freq !== ctl.freq || next.aggr !== ctl.aggr) {
       ctl = next;
-      await applyCtl().catch(() => {});
+      ctlDirty = true; // 合并到节流窗口统一落盘（见 finally）
     }
   } else if (verdict === 'down') {
     downCount++;
     if (downCount >= DOWN_STABLE_N) {
       downCount = 0;
       const r = stepDown(ctl, curProfile);
-      lastAction = r.action;
+      if (r.action !== 'hold') lastAction = r.action;
       if (r.action !== 'hold') {
         ctl = { freq: r.next.freq, aggr: clampAggr(r.next.aggr, curProfile) };
-        await applyCtl().catch(() => {});
+        ctlDirty = true; // 合并到节流窗口统一落盘（见 finally）
       }
     } else {
       lastAction = 'hold';
@@ -467,34 +788,122 @@ async function tick(): Promise<void> {
     downCount = 0;
     lastAction = 'hold';
   }
+  // 本帧若没有发生 TDP 调节动作，标注为「稳定」
+  if (!tdpActed) lastTdpAction = 'hold';
   notify();
+  } finally {
+    // 节流 flush：合并本 tick 内（含 idle/up/down 分支）的 CPU 调度写入，
+    // 每 CTL_FLUSH_MS 才真正落盘一次，避免每秒密集起子进程打满消息泵 → 鼠标转圈。
+    if (ctlDirty && Date.now() - lastCtlFlush >= CTL_FLUSH_MS) {
+      lastCtlFlush = Date.now();
+      ctlDirty = false;
+      await applyCtl().catch(() => {});
+    }
+    tickRunning = false;
+  }
+}
+
+// 帧数目标是固定值：开启（含程序启动自动启用）时立即把 RTSS 锁帧应用到目标值。
+// 无条件应用——即使当前限制为 0（用户原本未锁帧）也启用；关闭时恢复启用前原值。
+let rtssOriginal = 0; // 启用浮动前 RTSS 锁帧值（可为 0），关闭时恢复
+let rtssSyncQueue: Promise<void> = Promise.resolve();
+async function syncRtssLimit(target: number): Promise<void> {
+  const next = rtssSyncQueue.then(async () => {
+    try {
+      await setRtssLimit(target);
+    } catch {
+      /* 忽略：RTSS 不可用不影响其它流程 */
+    }
+  });
+  rtssSyncQueue = next.catch(() => {});
+  await next;
+}
+
+// 目标切换采用短尾随防抖：UI 立即更新，连续切档只重载最后一个 RTSS 目标。
+const RTSS_SYNC_SETTLE_MS = 120;
+let rtssSyncTimer: number | null = null;
+function scheduleRtssSync(target: number): void {
+  if (rtssSyncTimer !== null) window.clearTimeout(rtssSyncTimer);
+  rtssSyncTimer = window.setTimeout(() => {
+    rtssSyncTimer = null;
+    void syncRtssLimit(target).catch(() => {});
+  }, RTSS_SYNC_SETTLE_MS);
 }
 
 // 开启（或调整目标）：target>0 必须
-export async function enableFloat(target: FpsTarget, profile: FloatProfile): Promise<void> {
+export async function enableFloat(target: FpsTarget, profile: FloatProfile, tdpStrategy: TdpFloatStrategy = curTdpStrategy): Promise<void> {
   curTarget = target;
   curProfile = profile;
-  void writeConfig();
+  curTdpStrategy = tdpStrategy;
+  await writeConfig();
   // 重入保护：下方 2s+ 阻塞期间 timer 尚未置位，并发调用会双拉守护 + 双控制循环（CPU 参数互踩）。
   // 用 starting 在进函数即占位，确保同一时刻只有一个启用流程在跑；已在运行(starting/timer)则只更新目标/档位。
   if (timer !== null || starting) return;
   starting = true;
   try {
     snapshot = await readPowerParams().catch(() => null);
-    ctl = { freq: FLOAT_PROFILES[profile].max, aggr: 100 }; // 从档位上限起步，安全第一
+    // 一次性探测 AC/DC：有电池设备区分插电/电池（TDP 按当前电源模式读取）；台式机/探测失败默认 AC。
+    // 不 per-tick 探测，避免每轮 IPC 阻塞（「移除 per-tick AC/DC 检测」教训：写死 AC 会让带电池设备失真）。
+    tdpMode = await detectPowerMode().catch(() => 'ac');
+    const initialSpec = floatProfileSpec(profile);
+    ctl = initialSpec.noAdjust
+      ? snapshot
+        ? {
+            freq: tdpMode === 'ac' ? snapshot.acFreq : snapshot.dcFreq,
+            aggr: tdpMode === 'ac' ? snapshot.acAggr : snapshot.dcAggr,
+          }
+        : { freq: 0, aggr: 100 }
+      : { freq: initialSpec.max, aggr: 100 }; // 从档位上限起步，安全第一
     downCount = 0;
+    lastTdpDownTs = 0;
+    lastTdpRecoverTs = 0;
+    tdpOriginal = await readTdp(tdpMode).catch(() => null) ?? 0;
+    // 读取 TDP 基线失败/无效（control-config.json 缺失或 tdpMax=0）时不能静默空转：
+    // 提前抛错让调用方（CpuView/性能调度）把失败反馈给用户，而不是"看似启用实则无动作"，
+    // 也避免 disableFloat 因 tdpOriginal=0 跳过恢复、CPU 卡在低功耗无法还原（2026-08-05 修复）。
+    if (!(tdpOriginal > 0)) {
+      throw new Error('读取 TDP 最大值失败（control-config.json 缺失或 tdpMax 无效），已取消启用浮动优化');
+    }
+    tdpMax = tdpOriginal;
+    tdpLimit = tdpOriginal;
+    tdpVendor = await detectVendor().catch(() => 'unknown');
     lastAction = 'wait';
     hwinfoRecoveryAttempted = false;
     hwinfoDown = false;
+    hwinfoErr = false;
+    // 记录启用前 RTSS 锁帧值（可能为 0），关闭时恢复原状
+    rtssOriginal = await readRtssLimit().catch(() => 0);
+    // 帧数目标是固定值：打开程序/开启自动浮动时立即应用一次 RTSS 锁帧，不等下一轮 tick
+    await syncRtssLimit(target).catch(() => {});
     await startMonitor().catch(() => {});
+    // 先写入浮动接管标志，再预拉 YeManTdpCtl daemon；这样启动阶段的首次 TDP 下发
+    // 也会走浮动通道，不会被误判为普通低功耗调用。
+    await fs.writeTextFile(FLOAT_ACTIVE, '1').catch(() => {});
+    void ensureTdpDaemon().catch(() => {});
     // 等待守护初始化（2 秒），然后检测 HWiNFO 是否可用；若不可用则尝试自动修复
     await new Promise((r) => setTimeout(r, 2000));
     await ensureHwiNfo().catch(() => {});
+    // 初始化末尾重新读取最新全局目标，覆盖启动期间到达的热切档请求。
+    const latestSpec = floatProfileSpec(curProfile);
+    if (curProfile === 'none' && snapshot) {
+      ctl = {
+        freq: tdpMode === 'ac' ? snapshot.acFreq : snapshot.dcFreq,
+        aggr: tdpMode === 'ac' ? snapshot.acAggr : snapshot.dcAggr,
+      };
+    } else if (!latestSpec.noAdjust) {
+      ctl = clampToProfile(ctl, curProfile);
+    }
+    scheduleRtssSync(curTarget);
     await applyCtl().catch(() => {});
     timer = setInterval(() => void tick(), 1000);
     notify();
   } finally {
     starting = false;
+    // disableFloat 在启动期间被调用 → 启动完成后自动执行关闭，避免启停交叉
+    if (stopping) {
+      stopping = false;
+      void Promise.resolve().then(() => disableFloat());
+    }
   }
 }
 
@@ -503,17 +912,35 @@ export async function enableFloat(target: FpsTarget, profile: FloatProfile): Pro
 // 帧数目标 + 调度档位 是用户「偏好选择」，必须跨开关/跨电源态持久记忆在 autofloat.json。
 // 归零会导致拔插电源 / 切到「从不」时把记住的 45/aggressive 洗成 0，下次启用回退 60（用户实测"没记忆"）。
 export async function disableFloat(): Promise<void> {
+  // enableFloat 正在初始化（starting=true、timer 尚未创建）：标记 stopping，
+  // 等 enableFloat 完成后自动执行关闭，避免在此刻强行停止导致守护/daemon/RTSS 状态交叉。
+  if (starting) {
+    stopping = true;
+    return;
+  }
   if (timer !== null) { clearInterval(timer); timer = null; }
+  // 清除尚未触发的 RTSS 重载（避免关闭后 2 秒又用旧目标重载一次）
+  if (rtssSyncTimer !== null) { window.clearTimeout(rtssSyncTimer); rtssSyncTimer = null; }
+  // 清除浮动运行标志：native 手柄后台恢复原有 TDP/RTSS 直接调节行为
+  await fs.remove(FLOAT_ACTIVE).catch(() => {});
   // 注意：curTarget / curProfile 保持不变，不再写 config（选择未变，也不能洗掉记忆）
   downCount = 0;
+  lastTdpDownTs = 0;
+  lastTdpRecoverTs = 0;
   lastAction = 'idle';
   lastStatus = null;
   hwinfoDown = false;
+  hwinfoErr = false;
+  hwinfoNoExe = false;
   await stopMonitor().catch(() => {});
-  // 锁定优先：关闭自动优化时重新套用锁定值。applyCpuLock 内部会重新读盘并校验 locked，
-  // 不依赖可能过期的模块缓存，避免「isCpuLocked() 读到 false → 漏刷锁定值」的竞态。
-  const appliedLock = await applyCpuLock().catch(() => false);
-  if (!appliedLock && snapshot) {
+  await stopTdpDaemon().catch(() => {});
+  // 恢复启用前 RTSS 锁帧值（含 0=原本未锁帧）
+  await setRtssLimit(rtssOriginal).catch(() => {});
+  if (tdpOriginal > 0 && tdpLimit !== tdpOriginal) await applyTdpLimit(tdpOriginal).catch(() => {});
+  tdpMax = tdpOriginal;
+  tdpLimit = tdpOriginal;
+  // 关闭浮动后恢复启用前的 AC/DC CPU 参数。
+  if (snapshot) {
     await applyPowerParams(snapshot).catch(() => {});
     await setActiveScheme(PW.YEMAN).catch(() => {});
   }
@@ -521,28 +948,127 @@ export async function disableFloat(): Promise<void> {
   notify();
 }
 
+// 性能调度热切档：三项设置作为一个内存事务更新，只落盘一次；
+// 返回前保证 autofloat.json 已提交，避免页面报告成功时监控仍读到旧档位。
+export async function applyFloatSettings(
+  target: FpsTarget,
+  profile: FloatProfile,
+  strategy: TdpFloatStrategy,
+): Promise<void> {
+  curTarget = clampFpsTarget(target);
+  curProfile = profile;
+  curTdpStrategy = safeTdpStrategy(strategy);
+  await writeConfig();
+  // CPU 档位/浮动策略仅在循环运行时即时生效（需 timer），RTSS 锁帧写盘后立即排程重载；
+  // 将 scheduleRtssSync 放到 if 之外，确保页面保存/重启恢复后 FPS 也能真正写进 RTSS。
+  if (timer !== null || starting) {
+    if (profile === 'none') {
+      if (snapshot) {
+        ctl = {
+          freq: tdpMode === 'ac' ? snapshot.acFreq : snapshot.dcFreq,
+          aggr: tdpMode === 'ac' ? snapshot.acAggr : snapshot.dcAggr,
+        };
+        if (timer !== null) await applyCtl().catch(() => {});
+      }
+    } else {
+      ctl = clampToProfile(ctl, profile);
+      if (timer !== null) await applyCtl().catch(() => {});
+    }
+  }
+  scheduleRtssSync(curTarget);
+  notify();
+}
+
 // 切换档位：立即钳到新范围
 export async function setFloatProfile(profile: FloatProfile): Promise<void> {
   curProfile = profile;
   void writeConfig();
-  if (timer !== null) {
-    ctl = clampToProfile(ctl, profile);
-    await applyCtl().catch(() => {});
+  if (timer !== null || starting) {
+    if (profile === 'none') {
+      // 无压制：恢复开启浮动前的当前电源侧 CPU 参数，后续 tick 不再改 CPU。
+      if (snapshot) {
+        ctl = {
+          freq: tdpMode === 'ac' ? snapshot.acFreq : snapshot.dcFreq,
+          aggr: tdpMode === 'ac' ? snapshot.acAggr : snapshot.dcAggr,
+        };
+        if (timer !== null) await applyCtl().catch(() => {});
+      }
+    } else {
+      ctl = clampToProfile(ctl, profile);
+      if (timer !== null) await applyCtl().catch(() => {});
+    }
   }
   notify();
 }
 
+// 已运行时增量切换目标：UI/内存立即更新，RTSS 采用尾随防抖，避免连续切档反复重载。
 export function setFloatTarget(target: FpsTarget): void {
-  curTarget = target;
+  curTarget = clampFpsTarget(target);
+  void writeConfig();
+  if (timer !== null) scheduleRtssSync(curTarget);
+  notify();
+}
+
+export function setTdpFloatStrategy(strategy: TdpFloatStrategy): void {
+  curTdpStrategy = safeTdpStrategy(strategy);
   void writeConfig();
   notify();
 }
 
+// 手柄后台（Start+上/下）浮动运行时：改写程序记录的 TDP 最大值，
+// 自动浮动按新基准实时重算目标并 notify 刷新状态行；不直接下发硬件（由控制循环按新目标继续调节）。
+export async function adjustFloatTdpMax(delta: number): Promise<number> {
+  if (timer === null) return 0;
+  const next = clampTdp(Math.round(tdpMax) + delta);
+  if (next === tdpMax) return tdpMax;
+  tdpMax = next;
+  tdpOriginal = next;
+  // 已下发临时值若超过新最大值则钳制到新上限；等待真实下发后再更新 tdpLimit。
+  if (tdpLimit > tdpMax) {
+    await applyTdpLimit(tdpMax).catch(() => {});
+  }
+  // 只改写最大值配置（save:true 记录到程序配置），不直接下发硬件
+  await setTdp(tdpMode, next, { apply: false, save: true }).catch(() => {});
+  notify();
+  return next;
+}
+
+// 顶部 TDP 最大值滑块在浮动运行期间变更时调用：直接更新内存基准，
+// 不再依赖 tick() 每轮读取 tdp.txt（避免每秒一次 fs 读与守护写争用 → 鼠标转圈）。
+// 写盘由调用方 setTdp 完成；此处仅同步 autofloat 内部基准。
+export async function notifyTdpMaxChanged(watts: number): Promise<void> {
+  if (timer === null && !starting) return; // 浮动未运行/未启动则无需维护内存基准
+  const w = clampTdp(watts);
+  tdpMax = w;
+  tdpOriginal = w;
+  if (tdpLimit !== tdpMax && tdpMax > 0) {
+    // 上下调都立即把当前临时值收敛到新基准，避免 tdpLimit 与 tdpMax 长时间分叉。
+    await applyTdpLimit(tdpMax);
+  }
+  notify();
+}
+
+// 手柄后台（Start+左/右）在浮动运行时：以 ±5 帧步进调节帧数目标（30–90 连续，与 UI 滑块一致），
+// 并立即把 RTSS 锁帧应用到新目标；不再是循环固定档位。
+export async function adjustFloatTarget(dir: 1 | -1): Promise<number> {
+  if (timer === null) return 0;
+  const base = curTarget >= FPS_TARGET_MIN && curTarget <= FPS_TARGET_MAX ? curTarget : 60;
+  let next = Math.round((base + dir * FPS_TARGET_STEP) / FPS_TARGET_STEP) * FPS_TARGET_STEP;
+  next = Math.max(FPS_TARGET_MIN, Math.min(FPS_TARGET_MAX, next));
+  if (next === curTarget) return curTarget;
+  curTarget = next;
+  void writeConfig();
+  notify();
+  scheduleRtssSync(next); // 尾随 2 秒防抖，避免手柄连发时每步重载 RTSS 卡顿
+  return next;
+}
+
 // 恢复上次记忆的 帧数目标 + 调度档位（仅载入选择，不自动拉守护）；
 // 返回记忆值，由调用方（CpuView 挂载时）决定是否按该选择自动接管。
-export async function loadFloatConfig(): Promise<{ target: FpsTarget; profile: FloatProfile }> {
+export async function loadFloatConfig(): Promise<{ target: FpsTarget; profile: FloatProfile; tdpStrategy: TdpFloatStrategy }> {
   const c = await readConfig();
   curTarget = c.target;
   curProfile = c.profile;
+  curTdpStrategy = c.tdpStrategy;
   return c;
 }

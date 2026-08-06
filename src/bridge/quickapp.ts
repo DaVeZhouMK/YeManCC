@@ -2,24 +2,14 @@
 //
 // 设计要点：
 //  - 纯前端实现，不重编译 native 壳。
-//  - 游戏识别沿用「睡眠守护」逻辑：枚举进程 → 跳过黑名单(exclude.txt + 系统内置)
-//    → 只留工作集 > 500MB → 取「剩余最大工作集」作为当前游戏。无需最小化窗口，
-//    因此不会出现黑屏闪烁。
+//  - 游戏识别统一走 `bridge/gamedetect`（原 quickapp 内的逻辑已迁出，RTSS 等共用）。
 //  - 启动 LS：优先 C:\SOFT\Lossless.Scaling\LosslessScaling.exe；缺失时自动回退 Steam 库。
 
 import { fs, shell, registry } from './api';
 
 export const LS_PRIMARY = 'C:\\SOFT\\Lossless.Scaling\\LosslessScaling.exe';
 const LS_APPID = 993090;
-const EXCLUDE_FILE = 'C:\\SOFT\\YeMan\\PowerControl\\Sleep\\exclude.txt';
 const MIN_WORKINGSET = 500 * 1024 * 1024; // 对齐 native SG_MIN_WS = 500MB
-
-export interface GameProc {
-  pid: number;
-  name: string;
-  title: string;
-  path: string;
-}
 
 function joinPath(...parts: string[]): string {
   return parts.join('\\').replace(/\//g, '\\');
@@ -28,98 +18,10 @@ function basename(p: string): string {
   const m = p.match(/[^\\\/]+$/);
   return m ? m[0] : p;
 }
-function normName(s: string): string {
-  return s.replace(/\.exe$/i, '').toLowerCase();
-}
 
-// 系统内置黑名单（与睡眠守护一致，代码硬编码）
-// 系统内置黑名单（对齐 native SG_BLACKLIST + 额外常见非游戏进程）
-const SYSTEM_BLACKLIST = new Set([
-  'system', 'idle', 'csrss', 'winlogon', 'lsass', 'services', 'smss',
-  'dwm', 'explorer', 'shellhost', 'searchui', 'searchhost', 'runtimebroker',
-  'sihost', 'taskhostw', 'fontdrvhost', 'conhost', 'rundll32',
-  'msedgewebview2', 'applicationframehost', 'startmenuexperiencehost',
-  'peopleexperiencehost', 'systemsettings', 'lockapp', 'audiodg',
-  'svchost', 'nvcontainer', 'nvdisplaycontainer', 'nvdisplay',
-  'rtkauduservice64',
-  'yemancc', 'yemantdpctl', 'workbuddy',
-  // 远程/串流工具（UU 远程、向日葵、TeamViewer、AnyDesk 等）
-  'uuremote', 'uuremotefe', 'uur', 'neteaseuu', 'sunloginclient',
-  'teamviewer', 'anydesk', 'todesk',
-]);
-
-let excludeCache: Promise<Set<string>> | null = null;
-function loadExcludeSet(): Promise<Set<string>> {
-  if (!excludeCache) {
-    excludeCache = (async () => {
-      const set = new Set<string>();
-      try {
-        const text = await fs.readTextFile(EXCLUDE_FILE);
-        for (const raw of text.split(/\r?\n/)) {
-          const line = raw.trim();
-          if (!line || line.startsWith('#')) continue;
-          set.add(normName(line));
-        }
-      } catch {
-        /* 文件缺失则用系统内置黑名单 */
-      }
-      return set;
-    })();
-  }
-  return excludeCache;
-}
-
-// ───────────────────────── 游戏识别 ─────────────────────────
-
-// 识别当前游戏：完全照搬 native 睡眠守护 sgEnumProcs / sgSuspendTarget 逻辑——
-// 枚举进程 → 跳过 SG_BLACKLIST + exclude.txt → 仅保留 WS≥500MB → 取最大工作集者。
-// ★ 不用前台窗口优先（会把 UU 远程 / 桌面工具误抓为游戏）。
-export async function detectForegroundGame(): Promise<GameProc | null> {
-  const exclude = await loadExcludeSet();
-  const ps = `$procs = Get-Process | Where-Object { $_.WorkingSet64 -gt ${MIN_WORKINGSET} }
-foreach ($pr in $procs) {
-  try { $p = $pr.Path } catch { $p = '' }
-  if ($p -and $p -like '*.exe') {
-    Write-Output (($pr.Id.ToString()) + '|' + ($pr.ProcessName) + '|' + ($pr.MainWindowTitle) + '|' + $p + '|' + ($pr.WorkingSet64))
-  }
-}`;
-  const tmp = 'C:\\SOFT\\YeMan\\PowerControl\\_lsdetect.ps1';
-  await fs.writeTextFile(tmp, ps);
-  try {
-    const r = await shell.run('powershell', [
-      '-NoProfile',
-      '-ExecutionPolicy',
-      'Bypass',
-      '-File',
-      tmp,
-    ]);
-    const lines = (r.stdout || '')
-      .split('\n')
-      .map((s) => s.trim())
-      .filter(Boolean);
-    let best: GameProc | null = null;
-    let bestWs = -1;
-    for (const line of lines) {
-      const parts = line.split('|');
-      const name = parts[1] || '';
-      const nm = normName(name);
-      if (SYSTEM_BLACKLIST.has(nm) || exclude.has(nm)) continue;
-      const ws = Number(parts[4] || '0') || 0;
-      if (ws > bestWs) {
-        bestWs = ws;
-        best = {
-          pid: Number(parts[0]) || 0,
-          name,
-          title: parts[2] || '',
-          path: parts[3] || '',
-        };
-      }
-    }
-    return best;
-  } finally {
-    await fs.remove(tmp).catch(() => {});
-  }
-}
+// 游戏识别统一在 bridge/gamedetect，本文件保留向后兼容的别名导出。
+export { detectGame as detectForegroundGame } from './gamedetect';
+export type { DetectedGame as GameProc } from './gamedetect';
 
 // ───────────────────────── LS 路径解析 ─────────────────────────
 

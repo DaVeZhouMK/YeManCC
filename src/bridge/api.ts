@@ -13,9 +13,11 @@ export const fs = {
     invoke<string>('fs.readTextFile', { path, maxBytes }),
   writeTextFile: (path: string, content: string) =>
     invoke<boolean>('fs.writeTextFile', { path, content }),
-  // 原子写：native 端先写临时文件再 MoveFileEx 替换，避免 RTSS 在游戏内读取时被截断式写冲坏
-  writeTextFileAtomic: (path: string, content: string) =>
-    invoke<boolean>('fs.writeTextFileAtomic', { path, content }),
+  // 原子写：native 端先写临时文件再 MoveFileEx 替换；替换失败必须 reject，禁止 UI 将未落盘状态视为成功。
+  writeTextFileAtomic: async (path: string, content: string): Promise<void> => {
+    const ok = await invoke<boolean>('fs.writeTextFileAtomic', { path, content });
+    if (!ok) throw new Error(`原子写入失败: ${path}`);
+  },
   exists: (path: string) => invoke<boolean>('fs.exists', { path }),
   readDir: (path: string) => invoke<any[]>('fs.readDir', { path }),
   stat: (path: string) => invoke<any>('fs.stat', { path }),
@@ -25,13 +27,35 @@ export const fs = {
 };
 
 export const shell = {
-  run: (program: string, args: string[] = [], timeoutMs = 30000) =>
-    invoke<RunResult>('shell.run', { program, args, timeoutMs }),
+  run: (program: string, args: string[] = [], timeoutMs = 30000) => {
+    const nativeTimeout = Math.max(100, Math.min(600000, Math.round(timeoutMs)));
+    // Native 负责终止超时进程树；前端只提供稍晚的保险超时，避免响应链异常时 Promise 永久悬挂。
+    return invoke<RunResult>(
+      'shell.run',
+      { program, args, timeoutMs: nativeTimeout },
+      { timeoutMs: nativeTimeout + 5000 },
+    );
+  },
   open: (url: string) => invoke<boolean>('shell.open', { url }),
   execute: (program: string, args: string[] = []) =>
     invoke<boolean>('shell.execute', { program, args }),
   hidden: (program: string, args: string[] = []) =>
     invoke<{ ok: boolean }>('shell.hidden', { program, args }),
+};
+
+export interface TdpDaemonResponse {
+  version: number;
+  requestId: string;
+  ok: boolean;
+  rc: number;
+  error?: string;
+  result?: Record<string, unknown>;
+}
+
+export const tdpDaemon = {
+  start: () => invoke<{ ok: boolean }>('tdpDaemon.start'),
+  request: (op: 'ping' | 'set' | 'quit', args: Record<string, unknown> = {}, timeoutMs = 3000) =>
+    invoke<TdpDaemonResponse>('tdpDaemon.request', { op, args, timeoutMs }, { timeoutMs: timeoutMs + 1000 }),
 };
 
 export const app = {
@@ -57,6 +81,25 @@ export const dialog = {
     invoke<boolean>('dialog.message', { title, message, type }),
   openFile: (filters?: { name: string; extensions: string[] }[]) =>
     invoke<string | null>('dialog.openFile', { filters }),
+  openFolder: () => invoke<string | null>('dialog.openFolder'),
+};
+
+export interface MusicState {
+  enabled: boolean;
+  folder: string;
+  baseUrl: string;
+  reloadRecommended: boolean;
+  volume: number;
+  mode: 'sequential' | 'random';
+}
+
+export const music = {
+  get: () => invoke<MusicState>('music.get'),
+  setFolder: (folder: string) => invoke<MusicState>('music.setFolder', { folder }),
+  clearFolder: () => invoke<MusicState>('music.clearFolder'),
+  // 音量独立落盘到 native 配置（与 folder 同文件），部署清 WebView2 缓存不丢
+  setVolume: (volume: number) => invoke<{ volume: number }>('music.setVolume', { volume }),
+  setMode: (mode: 'sequential' | 'random') => invoke<{ mode: 'sequential' | 'random' }>('music.setMode', { mode }),
 };
 
 export const windowApi = {
@@ -67,6 +110,37 @@ export const windowApi = {
   setTitle: (title: string) => invoke<boolean>('window.setTitle', { title }),
 };
 
+export interface DisplayMode {
+  id: string;
+  width: number;
+  height: number;
+  refresh: number;
+  orientation: number;
+}
+
+export type DisplayTopology = 'internal' | 'external' | 'clone' | 'extend';
+
+export const display = {
+  getModes: () => invoke<{ current: string; modes: DisplayMode[] }>('display.getModes'),
+  setMode: (mode: DisplayMode) => invoke<DisplayMode>('display.setMode', mode),
+  setTopology: (topology: DisplayTopology) => {
+    const args: Record<DisplayTopology, string> = {
+      internal: '/internal',
+      external: '/external',
+      clone: '/clone',
+      extend: '/extend',
+    };
+    return shell.execute('DisplaySwitch.exe', [args[topology]]);
+  },
+};
+
+export interface GamepadBrightnessState {
+  ok: boolean;
+  value?: number;
+  mode?: 'ac' | 'dc';
+  reason?: string;
+}
+
 // 任务栏常驻（与 native/main.cpp 的 ipc_on("tray.*") 对应）
 // resident=true  → 显示任务栏按钮（并移除托盘）；false → 仅托盘（默认）
 export const tray = {
@@ -74,13 +148,19 @@ export const tray = {
   setTooltip: (tip: string) => invoke<boolean>('tray.setTooltip', { tip }),
 };
 
-// Xbox 大屏游戏模式 = 总闸：开启才启动全屏检测线程并确保托盘在位
-export const xbox = {
-  setActive: (on: boolean) => invoke<boolean>('xbox.setActive', { on }),
-};
-
 export const proc = {
   running: (names: string[]) => invoke<Record<string, boolean>>('proc.running', { names }),
+};
+
+export interface HttpResponse {
+  status: number;
+  headers: string;
+  body: string;
+}
+
+export const http = {
+  request: (url: string, options: { method?: string; headers?: Record<string, string>; body?: string } = {}) =>
+    invoke<HttpResponse>('http.request', { url, ...options }, { timeoutMs: 30000 }),
 };
 
 export const registry = {

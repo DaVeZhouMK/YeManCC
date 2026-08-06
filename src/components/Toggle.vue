@@ -15,7 +15,7 @@ function toggle() {
   if (props.disabled) return;
   emit('update:modelValue', !props.modelValue);
 }
-const onColor = props.color === 'dc' ? 'var(--accent-2)' : props.color === 'danger' ? 'var(--danger)' : 'var(--accent)';
+const onColor = props.color === 'dc' ? 'var(--dc-accent)' : props.color === 'danger' ? 'var(--danger)' : 'var(--accent)';
 </script>
 
 <template>

@@ -15,16 +15,11 @@ PowerShell -Command "Start-Process -FilePath '%~f0' -ArgumentList 'Elevated' -Ve
 exit /b
 
 :MainCode
-REM ===== AC lock: read FPS-ac.txt =====
-set "SRC=C:\SOFT\YeMan\PowerControl\FPS-ac.txt"
+REM ===== AC lock: read program control-config.json fpsLimit =====
+set "SRC=C:\SOFT\YeMan\PowerControl\control-config.json"
 set "FPS=0"
-if exist "%SRC%" (
-    set "RAW="
-    for /f "usebackq eol=# delims=" %%a in ("%SRC%") do if not defined RAW set "RAW=%%a"
-    if defined RAW (
-        for /f "tokens=1 delims=abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ " %%n in ("!RAW!") do set "FPS=%%n"
-    )
-)
+if exist "%SRC%" for /f "tokens=2 delims=:,}" %%a in ('findstr /i "fpsLimit" "%SRC%"') do if "%FPS%"=="0" set "FPS=%%a"
+set "FPS=%FPS: =%"
 
 REM ===== call RTSS lock (Limit=0 means disabled) =====
 powershell -NoProfile -ExecutionPolicy Bypass -File "C:\SOFT\YeMan\PowerControl\RTSS-FPS.ps1" -Limit %FPS%

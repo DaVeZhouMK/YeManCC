@@ -106,7 +106,7 @@ async function onAutostart(v: boolean) {
 
 <style scoped>
 .card {
-  background: var(--bg-panel);
+  background: color-mix(in srgb, var(--bg-panel) 72%, transparent);
   border-radius: var(--radius);
   padding: 12px 14px;
   margin-bottom: 10px;

@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref, reactive, computed, inject, type Ref } from 'vue';
+import { ref, reactive, computed, inject, watch, type Ref } from 'vue';
+import { fs, shell } from '@/bridge/api';
 import Toggle from '@/components/Toggle.vue';
 import Slider from '@/components/Slider.vue';
 import SegButton from '@/components/SegButton.vue';
@@ -8,8 +9,6 @@ import {
   sleepGuardGet,
   sleepGuardSet,
   sleepGuardSetConfig,
-  sleepGuardRecoverAll,
-  sleepGuardSuspendCurrent,
   getPowerBtnIdx,
   setPowerBtnIdx,
   reactivateCurrentScheme,
@@ -21,15 +20,18 @@ import {
   type SleepGuardStatus,
   type PowerBtnIdx,
 } from '@/bridge/yeman';
-import { useWakeTaskStore } from '@/stores/wakeTask';
 
 const cfg = reactive<SleepGuardStatus>({
   enabled: false,
   mode: 'off',
   suspended: 0,
   pauseResume: true,
-  sleepTdp: { mode: 'lock', watts: 12 },
+  killListEnabled: false,
+  resleepEnabled: false,
+  overheatSleepEnabled: false,
+  overheatTempC: 95,
 });
+const SLEEP_KILL_LIST = 'C:\\SOFT\\YeMan\\PowerControl\\Sleep\\睡眠击杀名单.txt';
 
 // 电源按钮：0=S3睡眠, 1=S4休眠, 2=不操作
 const acBtnIdx = ref<PowerBtnIdx>(2);
@@ -42,12 +44,6 @@ const hibSize = ref(50);
 const memGB = ref<number | null>(null); // 物理内存总量（GB），用于预估休眠文件大小
 const confirmOff = ref(false); // 关闭休眠二次确认（避免整行误触关闭休眠这种销毁性操作）
 
-// 唤醒后恢复 TDP + 电源预设（与 TDP 页同一个任务计划，共用 wakeStore 单一真相，互相同步）
-const wakeStore = useWakeTaskStore();
-
-// 入睡 TDP 降低（滑块：最左=0 关闭，移动即 5W，线性到 30W）。0=off，>0=lock
-const tdpWatts = ref(0);
-
 const busy = ref(false);
 const msg = ref('');
 
@@ -58,8 +54,10 @@ async function refresh() {
     cfg.mode = s.mode;
     cfg.suspended = s.suspended;
     cfg.pauseResume = s.pauseResume;
-    cfg.sleepTdp = s.sleepTdp;
-    tdpWatts.value = s.sleepTdp.mode === 'lock' ? s.sleepTdp.watts : 0;
+    cfg.killListEnabled = !!s.killListEnabled;
+    cfg.resleepEnabled = !!s.resleepEnabled;
+    cfg.overheatSleepEnabled = !!s.overheatSleepEnabled;
+    cfg.overheatTempC = Math.max(85, Math.min(100, Number(s.overheatTempC) || 95));
   } catch {
     /* 检测不到保持现状，绝不假定关闭 */
   }
@@ -77,17 +75,15 @@ async function refresh() {
   if (hibRes.status === 'fulfilled') hibernateOn.value = hibRes.value;
   if (hibSizeRes.status === 'fulfilled') hibSize.value = hibSizeRes.value;
   if (memRes.status === 'fulfilled') memGB.value = memRes.value;
-  // 唤醒后恢复任务与 TDP 页共享，统一由 wakeStore 持有真相
-  await wakeStore.init();
   hibLoading.value = false;
 }
 
-// 睡眠时暂停游戏（与唤醒自动恢复绑定）。移除总开关后，guard 在「暂停游戏 或 降TDP>0」时自动使能
+// 睡眠时暂停游戏（与唤醒自动恢复绑定）。
 async function onPauseResume(v: boolean) {
   cfg.pauseResume = v;
   busy.value = true;
   try {
-    await sleepGuardSetConfig({ mode: 'custom', pauseResume: v, sleepTdp: cfg.sleepTdp });
+    await sleepGuardSetConfig({ mode: 'custom', pauseResume: v, killListEnabled: cfg.killListEnabled, resleepEnabled: cfg.resleepEnabled, overheatSleepEnabled: cfg.overheatSleepEnabled, overheatTempC: cfg.overheatTempC });
     await syncGuardEnabled();
   } catch {
     msg.value = '设置保存失败';
@@ -97,77 +93,95 @@ async function onPauseResume(v: boolean) {
   }
 }
 
-// 入睡 TDP（滑块：最左=0 关闭，移动即 5W，线性到 30W）
-async function onTdpSlider(v: number) {
-  tdpWatts.value = v;
-  const on = v > 0;
-  cfg.sleepTdp.mode = on ? 'lock' : 'off';
-  cfg.sleepTdp.watts = on ? Math.max(5, v) : cfg.sleepTdp.watts;
+async function onKillList(v: boolean) {
+  cfg.killListEnabled = v;
   busy.value = true;
   try {
-    await sleepGuardSetConfig({ mode: 'custom', pauseResume: cfg.pauseResume, sleepTdp: { mode: cfg.sleepTdp.mode, watts: cfg.sleepTdp.watts } });
+    await sleepGuardSetConfig({ mode: 'custom', pauseResume: cfg.pauseResume, killListEnabled: v, resleepEnabled: cfg.resleepEnabled, overheatSleepEnabled: cfg.overheatSleepEnabled, overheatTempC: cfg.overheatTempC });
     await syncGuardEnabled();
   } catch {
     msg.value = '设置保存失败';
     await refresh();
   } finally {
     busy.value = false;
+  }
+}
+
+async function onResleep(v: boolean) {
+  cfg.resleepEnabled = v;
+  busy.value = true;
+  try {
+    await sleepGuardSetConfig({
+      mode: 'custom',
+      pauseResume: cfg.pauseResume,
+      killListEnabled: cfg.killListEnabled,
+      resleepEnabled: v,
+      overheatSleepEnabled: cfg.overheatSleepEnabled,
+      overheatTempC: cfg.overheatTempC,
+    });
+    await syncGuardEnabled();
+  } catch {
+    msg.value = '设置保存失败';
+    await refresh();
+  } finally {
+    busy.value = false;
+  }
+}
+
+async function onOverheatSleep(v: boolean) {
+  cfg.overheatSleepEnabled = v;
+  busy.value = true;
+  try {
+    await sleepGuardSetConfig({
+      mode: 'custom',
+      pauseResume: cfg.pauseResume,
+      killListEnabled: cfg.killListEnabled,
+      resleepEnabled: cfg.resleepEnabled,
+      overheatSleepEnabled: v,
+      overheatTempC: cfg.overheatTempC,
+    });
+    await syncGuardEnabled();
+  } catch {
+    msg.value = '璁剧疆淇濆瓨澶辫触';
+    await refresh();
+  } finally {
+    busy.value = false;
+  }
+}
+
+async function onOverheatTemp(v: number) {
+  cfg.overheatTempC = Math.max(85, Math.min(100, Math.round(v)));
+  try {
+    await sleepGuardSetConfig({ overheatTempC: cfg.overheatTempC });
+  } catch {
+    msg.value = '璁剧疆淇濆瓨澶辫触';
+    await refresh();
+  }
+}
+
+async function openKillList() {
+  try {
+    if (!(await fs.exists(SLEEP_KILL_LIST))) {
+      await fs.writeTextFile(SLEEP_KILL_LIST, '# 每行一个 exe 名称，可带或不带 .exe\n# 例如：SomeTool.exe\n');
+    }
+    await shell.open(SLEEP_KILL_LIST);
+  } catch {
+    msg.value = '无法打开睡眠击杀名单';
   }
 }
 
 // 总闸（Enable.txt）：任一子功能生效即开启，全部关闭即关闭
 async function syncGuardEnabled() {
-  const active = cfg.pauseResume || tdpWatts.value > 0;
+  const active = cfg.pauseResume || cfg.killListEnabled || cfg.resleepEnabled || cfg.overheatSleepEnabled;
   if (active === cfg.enabled) return;
-  cfg.enabled = active;
+  const previous = cfg.enabled;
   try {
     await sleepGuardSet(active);
+    cfg.enabled = active;
   } catch {
+    cfg.enabled = previous;
     msg.value = '守护总闸设置失败';
-  }
-}
-
-// 唤醒后恢复 TDP + 电源预设：与 TDP 页共用「唤醒后-执行任务」同一任务，经 wakeStore 切换并即时同步两页
-async function onWakeTdp(v: boolean) {
-  busy.value = true;
-  try {
-    await wakeStore.set(v);
-  } catch (e) {
-    msg.value = '设置失败：' + (e as Error).message + '（需管理员权限）';
-  } finally {
-    busy.value = false;
-  }
-}
-
-async function recoverAll() {
-  busy.value = true;
-  msg.value = '正在恢复全部冻结任务…';
-  try {
-    const r = await sleepGuardRecoverAll();
-    msg.value = r.resumed > 0 ? `已恢复 ${r.resumed} 个冻结任务并还原 TDP` : '没有需要恢复的任务';
-  } catch {
-    msg.value = '恢复失败';
-  } finally {
-    busy.value = false;
-    await refresh();
-  }
-}
-
-async function suspendCurrent() {
-  busy.value = true;
-  msg.value = '正在暂停当前游戏…';
-  try {
-    const r = await sleepGuardSuspendCurrent();
-    if (r.paused) {
-      msg.value = r.name ? `已暂停 ${r.name}（PID ${r.pid}）` : '已暂停当前游戏';
-    } else {
-      msg.value = '没有可暂停的游戏进程';
-    }
-  } catch {
-    msg.value = '暂停失败';
-  } finally {
-    busy.value = false;
-    await refresh();
+    throw new Error('守护总闸设置失败');
   }
 }
 
@@ -267,7 +281,9 @@ const hibDesc = computed(() => {
 
 const globalRefreshKey = inject<Ref<number>>('globalRefreshKey');
 if (globalRefreshKey) {
-  import('vue').then(({ watch }) => watch(globalRefreshKey, () => refresh()));
+  // watch 已在顶部静态导入；动态 import('vue') 会造成异步微任务延迟注册，
+  // 刷新事件可能在注册前触发而丢失（2026-08-05 修复）。
+  watch(globalRefreshKey, () => refresh());
 }
 refresh();
 </script>
@@ -344,31 +360,44 @@ refresh();
         :disabled="busy"
         @update:model-value="onPauseResume"
       />
-      <Slider
-        v-model="tdpWatts"
-        :min="0" :max="30" :step="5"
-        label="睡眠时调节 TDP"
-        unit="W"
-        :value-text="tdpWatts === 0 ? '无操作' : undefined"
-        color="accent"
+      <Toggle
+        :model-value="cfg.resleepEnabled"
+        label="入睡失败重睡"
+        description="触发睡眠后 30 秒内，连续 10 秒无手柄/键盘输入时重新睡眠；重睡后 5 分钟内不重复触发"
         :disabled="busy"
-        @commit="onTdpSlider"
+        @update:model-value="onResleep"
       />
       <Toggle
-        :model-value="wakeStore.on"
-        label="唤醒后恢复 TDP + 电源预设"
-        description="从睡眠/休眠唤醒后复位电源与 TDP（与 TDP 页同任务，同开同关）"
-        color="accent"
-        :disabled="busy || wakeStore.busy"
-        @update:model-value="onWakeTdp"
+        :model-value="cfg.overheatSleepEnabled"
+        label="过热自动睡眠"
+        description="电池设备温度超过阈值后，10秒无手柄、键盘、鼠标输入自动睡眠"
+        :disabled="busy"
+        @update:model-value="onOverheatSleep"
       />
-      <div class="btn-row">
-        <button class="action-btn" :disabled="busy" @click="suspendCurrent">
-          <InlineIcon name="pause" /> 暂停游戏
-        </button>
-        <button class="action-btn" :disabled="busy || cfg.suspended === 0" @click="recoverAll">
-          <InlineIcon name="play" /> 恢复全部游戏
-        </button>
+      <Slider
+        v-model="cfg.overheatTempC"
+        :min="85"
+        :max="100"
+        :step="1"
+        label="过热温度"
+        unit="°C"
+        color="accent"
+        :disabled="busy || !cfg.overheatSleepEnabled"
+        @commit="onOverheatTemp"
+      />
+      <div class="kill-list-row">
+        <div class="kill-list-text">
+          <div class="kill-list-label">睡眠时清除指定程序</div>
+          <div class="kill-list-hint">入睡前结束名单中的进程防止影响睡眠</div>
+        </div>
+        <div class="kill-list-actions">
+          <button class="kill-list-edit" :disabled="busy" @click="openKillList">编辑名单</button>
+          <Toggle
+            :model-value="cfg.killListEnabled"
+            :disabled="busy"
+            @update:model-value="onKillList"
+          />
+        </div>
       </div>
     </div>
 
@@ -383,7 +412,7 @@ refresh();
 .muted { color: var(--text-dim); }
 
 .card {
-  background: var(--bg-panel);
+  background: color-mix(in srgb, var(--bg-panel) 72%, transparent);
   border-radius: var(--radius);
   padding: 12px 14px;
   margin-bottom: 10px;
@@ -398,20 +427,23 @@ refresh();
   gap: 6px;
 }
 
-.btn-row { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
-.btn-row .action-btn { flex: 1 1 auto; }
-.action-btn {
-  font-size: 12px;
-  font-weight: 600;
-  color: #fff;
-  background: var(--accent);
-  border: none;
+.kill-list-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 0; }
+.kill-list-text { min-width: 0; flex: 1; text-align: left; }
+.kill-list-label { font-size: 13px; }
+.kill-list-hint { font-size: 11px; color: var(--text-dim); line-height: 1.3; }
+.kill-list-actions { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+.kill-list-edit {
+  min-height: var(--btn-min-h);
+  padding: var(--btn-py) var(--btn-px);
+  border: 1px solid #2a3342;
   border-radius: var(--radius-ctrl);
-  padding: 7px 12px;
+  background: var(--bg-input);
+  color: var(--text);
+  font-size: var(--btn-font-size);
   cursor: pointer;
 }
-.action-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-.action-btn:focus-visible { box-shadow: var(--focus-ring); }
+.kill-list-edit:disabled { opacity: 0.4; cursor: not-allowed; }
+.kill-list-edit:focus-visible { box-shadow: var(--focus-ring); }
 
 .msg {
   font-size: 12px;

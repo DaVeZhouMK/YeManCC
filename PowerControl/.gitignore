@@ -1,5 +1,15 @@
 # PowerControl 运行时用户数据：由程序生成，更新时保留、不覆盖、不入库。
 # 安装器（native/main.cpp app.installUpdate）在部署时也会排除这些模式，双保险。
+build/
+dist/
+__pycache__/
+*.pyc
+*.bak
+*.bak_*
+*.tmp
+*.log
+*.pid
+*.hb
 tdp-*.txt
 FPS-*.txt
 Power.txt
@@ -23,3 +33,8 @@ hwinfo-ok
 !*.md
 !*.pow
 !*/
+
+# Build outputs remain local even when they contain executable files.
+pawnio/build/
+pawnio/dist/
+pawnio/__pycache__/

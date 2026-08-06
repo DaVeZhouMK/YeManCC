@@ -10,14 +10,83 @@
   --text: #e9eef5; /* 主文字 */
   --text-dim: #8b96a8; /* 次文字 */
   --accent: #2ea6ff; /* 主蓝 (AC/选中/焦点/悬浮) */
-  --accent-2: #f5b93d; /* 琥珀 (DC 语义, 仅点缀) */
+  --accent-2: #f5b93d; /* 琥珀 (普通次强调) */
+  --dc-accent: var(--accent-2); /* DC 专用语义色 */
   --danger: #e5484d; /* 红 (复位/退出) */
   --ok: #3fb950; /* 绿 (已开启状态点) */
   --radius: 12px; /* 卡片 */
   --radius-ctrl: 8px; /* 控件 */
-  --focus-ring: 0 0 0 2px var(--accent), 0 0 12px rgba(46, 166, 255, 0.5);
+  /* 普通单行按钮基准：与 CPU 页“快速调节 CPU”按钮保持同一高度比例。 */
+  --btn-py: 9px;
+  --btn-px: 12px;
+  --btn-font-size: 12px;
+  --btn-line-height: 1.2;
+  --btn-min-h: 33px;
+  --focus-ring: 0 0 0 2px var(--accent), 0 0 12px color-mix(in srgb, var(--accent) 50%, transparent);
 
   --nav-w: 105px;
+  --theme-gradient: linear-gradient(135deg, #08111f 0%, #0b1016 55%, #062437 100%);
+}
+
+:root[data-theme='red-black'] {
+  --theme-gradient: linear-gradient(135deg, #1b070d 0%, #0d090c 54%, #4b1023 100%);
+  --bg-solid: #160b10;
+  --bg-panel: rgba(25, 12, 18, 0.94);
+  --bg-input: #24131b;
+  --bg-nav: rgba(24, 10, 16, 0.97);
+  --text: #fff0f1;
+  --text-dim: #c0959d;
+  --accent: #ff3b5c;
+  --accent-2: #ff9d3d;
+  --dc-accent: var(--accent-2);
+  --danger: #ff5265;
+  --focus-ring: 0 0 0 2px var(--accent), 0 0 14px rgba(255, 59, 92, 0.55);
+}
+
+:root[data-theme='cyberpunk'] {
+  --theme-gradient: linear-gradient(135deg, #050505 0%, #08140b 58%, #0c2a16 100%);
+  --bg-solid: #050505;
+  --bg-panel: rgba(10, 18, 12, 0.98);
+  --bg-input: #102017;
+  --bg-nav: rgba(5, 9, 6, 0.99);
+  --text: #f5d90a;
+  --text-dim: #c7ad18;
+  --accent: #ffe600;
+  --accent-2: #ffef66;
+  --dc-accent: #39ff68;
+  --danger: #ff5c4d;
+  --focus-ring: 0 0 0 2px var(--accent), 0 0 14px rgba(255, 230, 0, 0.6);
+}
+
+:root[data-theme='cyberpunk'] .nav-item,
+:root[data-theme='cyberpunk'] .nav-item.active {
+  color: var(--accent);
+}
+
+:root[data-theme='cyberpunk'] .app-main,
+:root[data-theme='cyberpunk'] .app-main .muted {
+  color: var(--text);
+}
+
+:root[data-theme='cyberpunk'] body,
+:root[data-theme='cyberpunk'] .app-main {
+  color: var(--text);
+}
+
+:root[data-theme='cyberpunk'] .card,
+:root[data-theme='cyberpunk'] .row-label,
+:root[data-theme='cyberpunk'] .card-title {
+  color: var(--text);
+}
+
+
+html,
+body,
+#app {
+  /* 定稿透明：根节点必须保持透明，禁止实色/渐变背景铺底，
+     否则整窗被盖成不透明（--theme-gradient 是 alpha=1 实色渐变）。
+     桌面透出与识别度完全由前端分块底板（--bg-panel/--bg-nav）承担。 */
+  background: transparent;
 }
 
 * {
@@ -30,6 +99,7 @@ body,
 #app {
   height: 100%;
   margin: 0;
+  touch-action: manipulation;
 }
 
 body {
@@ -39,6 +109,25 @@ body {
   font-size: 13px;
   overflow: hidden;
   user-select: none;
+}
+
+button {
+  font: inherit;
+  line-height: var(--btn-line-height);
+  touch-action: manipulation;
+}
+
+input,
+select,
+textarea,
+a,
+[role='button'],
+[role='switch'] {
+  touch-action: manipulation;
+}
+
+input[type='range'] {
+  touch-action: none;
 }
 
 /* 焦点环（手柄/键盘焦点高亮） */
@@ -69,7 +158,7 @@ body {
 }
 
 .card {
-  background: var(--bg-panel);
+  background: color-mix(in srgb, var(--bg-panel) 72%, transparent);
   border-radius: var(--radius);
   padding: 12px 14px;
   margin-bottom: 10px;

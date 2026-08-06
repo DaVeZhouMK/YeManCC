@@ -47,24 +47,26 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           if (-not (Test-Path YeManCC.exe)) { exit 1 }
 
-      - name: Package YeManCC.zip (exe + index.html + assets + app.config.json + version.json + PowerControl)
+      - name: Package complete YeManCC update
         shell: pwsh
         run: |
           $root = $env:GITHUB_WORKSPACE
           $pkg = Join-Path $root 'pkg'
           New-Item -ItemType Directory -Force -Path $pkg | Out-Null
+          # dist is the complete C:\SOFT\YeMan\YeManCC payload.
+          Copy-Item (Join-Path $root 'dist\*') $pkg -Recurse -Force
           Copy-Item (Join-Path $root 'native\YeManCC.exe') $pkg
-          Copy-Item (Join-Path $root 'dist\index.html') $pkg
           Copy-Item (Join-Path $root 'app.config.json') $pkg
           Copy-Item (Join-Path $root 'version.json') $pkg
-          Copy-Item (Join-Path $root 'dist\assets') (Join-Path $pkg 'assets') -Recurse -Force
-          # 依赖包 PowerControl（仓库内已用 .gitignore 排除用户运行时数据，仅含代码/资产）
-          if (Test-Path (Join-Path $root 'PowerControl')) {
-            Copy-Item (Join-Path $root 'PowerControl') (Join-Path $pkg 'PowerControl') -Recurse -Force
+          Copy-Item (Join-Path $root 'PowerControl') (Join-Path $pkg 'PowerControl') -Recurse -Force
+          Copy-Item (Join-Path $root 'YeMan-Support.html') $pkg
+          $required = @('YeManCC.exe', 'index.html', 'app.config.json', 'version.json', 'PowerControl', 'YeMan-Support.html')
+          foreach ($name in $required) {
+            if (-not (Test-Path -LiteralPath (Join-Path $pkg $name))) { throw "Package missing $name" }
           }
           Compress-Archive -Path (Join-Path $pkg '*') -DestinationPath (Join-Path $root 'YeManCC.zip') -Force
 
-      - name: 计算 sha256 并写回 version.json
+      - name: Calculate package sha256 and update version manifest
         shell: pwsh
         run: |
           $root = $env:GITHUB_WORKSPACE
@@ -77,7 +79,7 @@ jobs:
           $ver | ConvertTo-Json -Depth 3 | Set-Content -Path $verPath -Encoding utf8
           Write-Host "sha256=$hash"
 
-      - name: 提交 version.json 回 main
+      - name: Commit version manifest back to main
         shell: bash
         run: |
           git fetch origin main

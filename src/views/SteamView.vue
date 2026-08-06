@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount, nextTick, inject, type Ref } from 'vue';
+import { ref, onMounted, onBeforeUnmount, nextTick, inject, watch, type Ref } from 'vue';
 import Toggle from '@/components/Toggle.vue';
 import StateCard from '@/components/StateCard.vue';
 import InlineIcon from '@/components/InlineIcon.vue';
@@ -330,7 +330,9 @@ async function launchBigPicture() {
 // ── 全局刷新监听（App 预加载 / 支持页刷新按钮）──
 const globalRefreshKey = inject<Ref<number>>('globalRefreshKey');
 if (globalRefreshKey) {
-  import('vue').then(({ watch }) => watch(globalRefreshKey, () => refresh()));
+  // watch 已在顶部静态导入；动态 import('vue') 会造成异步微任务延迟注册，
+  // 刷新事件可能在注册前触发而丢失（2026-08-05 修复）。
+  watch(globalRefreshKey, () => refresh());
 }
 
 onMounted(() => nextTick(refresh));
@@ -351,8 +353,8 @@ onBeforeUnmount(() => {
         <button v-if="running" class="steam-close-btn" :class="{ 'is-busy': busy || steamChecking }" :disabled="busy || steamChecking" @click="closeSteam"><InlineIcon name="close" />{{ busy || steamChecking ? ' 正在关闭…' : ' 关闭' }}</button>
       </div>
       <div class="btn-row">
-        <button class="action-btn" :class="{ 'is-busy': busy || steamChecking }" :disabled="busy || steamChecking" @click="launch"><InlineIcon name="play" />{{ busy || steamChecking ? ' 正在验证/启动…' : ' 联动启动Steam大屏' }}</button>
-        <button class="action-btn ghost" :class="{ 'is-busy': busy || steamChecking }" :disabled="busy || steamChecking" @click="launchBigPicture"><InlineIcon name="fullscreen" />{{ busy || steamChecking ? ' 正在验证/启动…' : ' 普通启动Steam大屏模式' }}</button>
+        <button data-gp-group="steam-big-picture" class="action-btn" :class="{ 'is-busy': busy || steamChecking }" :disabled="busy || steamChecking" @click="launch"><InlineIcon name="play" />{{ busy || steamChecking ? ' 正在验证/启动…' : ' 联动启动Steam大屏' }}</button>
+        <button data-gp-group="steam-big-picture" class="action-btn ghost" :class="{ 'is-busy': busy || steamChecking }" :disabled="busy || steamChecking" @click="launchBigPicture"><InlineIcon name="fullscreen" />{{ busy || steamChecking ? ' 正在验证/启动…' : ' 普通启动Steam大屏模式' }}</button>
       </div>
       <Toggle v-model="master" label="Steam 高级开机启动 (.earlystart)" description="写入用户目录 .earlystart" color="accent" :disabled="busy" @update:model-value="onMaster" />
     </section>
@@ -429,9 +431,10 @@ onBeforeUnmount(() => {
   color: #06121d;
   border: none;
   border-radius: var(--radius-ctrl);
-  padding: 9px;
+  padding: var(--btn-py) var(--btn-px);
+  min-height: var(--btn-min-h);
   font-weight: 700;
-  font-size: 12px;
+  font-size: var(--btn-font-size);
   cursor: pointer;
 }
 .action-btn:focus-visible {
@@ -466,7 +469,10 @@ onBeforeUnmount(() => {
 }
 .steam-close-btn {
   flex: 0 0 auto;
-  align-self: center;
+  align-self: stretch;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border: 1px solid rgba(229, 72, 77, 0.55);
   border-radius: var(--radius-ctrl);
   background: rgba(229, 72, 77, 0.12);

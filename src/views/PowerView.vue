@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, nextTick, inject, type Ref } from 'vue';
+import { ref, reactive, computed, onMounted, onUnmounted, onActivated, nextTick, inject, watch, type Ref } from 'vue';
 import Toggle from '@/components/Toggle.vue';
 import WarnBar from '@/components/WarnBar.vue';
 import {
@@ -9,21 +9,37 @@ import {
   fxSet,
   joyExists,
   joySet,
-  threeMarkExists,
   searchState,
   openSearchFolder,
+  readGamingHomeStartup,
+  writeGamingHomeStartup,
+  BOOT_CONTROL_CENTER_TASK,
+  readBootMirrorState,
+  toggleBootMirror,
+  BOOT_MIRROR_CHANGED_EVENT,
+  readHardwareGpuSchedule,
+  writeHardwareGpuSchedule,
+  readBootRtssState,
+  toggleBootRtss,
 } from '@/bridge/yeman';
-import { shell, xbox } from '@/bridge/api';
+import { shell, fs } from '@/bridge/api';
 import { readTrayResident, setTrayResident } from '@/bridge/trayResident';
 import { deleteAllYemanTasks, restoreAllYemanTasks } from '@/bridge/yeman';
 import InlineIcon from '@/components/InlineIcon.vue';
 
-const tasks = reactive({ desktopMode: false, xboxMode: false, energyStar: false, cleanMem: false, amd395: false });
+const BOOT_TASK = BOOT_CONTROL_CENTER_TASK;
+const BOOT_CFG = 'C:\\SOFT\\YeMan\\PowerControl\\boot_config.json';
+const bootOn = ref(false);
+const rtssBootOn = ref(false);
+
+const tasks = reactive({ desktopMode: false, xboxMode: false, energyStar: false, cleanMem: false });
 type TaskKey = keyof typeof tasks;
 // 双判定：桌面模式 或 Xbox 游戏模式 任一开启 → 屏幕自动旋转失效
 const conflict = computed(() => tasks.desktopMode || tasks.xboxMode);
 
 const audioOpt = ref(false);
+const steamCommunityBoot = ref(false);
+const STEAMCOMMUNITY_TASK = 'Steamcommunity_302';
 const joyMouse = ref(false);
 const searchSt = ref<'hidden' | 'trimmed' | 'full'>('full');
 
@@ -34,6 +50,10 @@ const taskToolsMsg = ref('');
 
 // 任务栏常驻（托盘）开关：默认不常驻；由前端持久化 + 启动期套用
 const trayResident = ref(false);
+const hardwareGpuSchedule = ref(false);
+
+// 开机启动Xbox全屏游戏模式（注册表 StartupToGamingHome）：不能单独打开，必须依靠 Xbox全屏游戏模式
+const startupGamingHome = ref(false);
 
 async function safeExists(name: string): Promise<boolean> {
   try {
@@ -43,28 +63,74 @@ async function safeExists(name: string): Promise<boolean> {
   }
 }
 
+async function readBootState(): Promise<boolean> {
+  let configured = false;
+  try {
+    const txt = await fs.readTextFile(BOOT_CFG);
+    const j = JSON.parse(txt) as { bootOn?: boolean };
+    configured = j.bootOn === true;
+  } catch { /* 使用任务计划真实状态 */ }
+  const actual = await readBootMirrorState();
+  if (configured && !actual) {
+    try {
+      await toggleBootMirror(true);
+      return true;
+    } catch { /* 页面显示真实状态 */ }
+  }
+  return actual;
+}
+
 async function refresh() {
   errMsg.value = '';
+  // 清理旧版本遗留的 AMD395 任务，避免它继续在开机时执行。
+  await toggleTask('Bug修复-AMD-395', false).catch(() => {});
   // 并行异步加载（不串行等待，不阻塞渲染）
-  const [dmRes, xbRes, esRes, cmRes, amdRes, fxRes, joyRes, searchRes] = await Promise.allSettled([
+  const [dmRes, xbRes, esRes, cmRes, fxRes, steamCommunityRes, joyRes, searchRes, bootRes, rtssBootRes] = await Promise.allSettled([
     safeExists('桌面模式-开机设置为桌面模式'),
     safeExists('Xbox大屏游戏模式'),
     safeExists('节能-能源之星'),
     safeExists('内存-开机自动内存清理并关闭'),
-    safeExists('Bug修复-AMD-395'),
     fxExists(),
+    safeExists(STEAMCOMMUNITY_TASK),
     joyExists(),
     searchState(),
+    readBootState(),
+    readBootRtssState(),
   ]);
   if (dmRes.status === 'fulfilled') tasks.desktopMode = dmRes.value;
   if (xbRes.status === 'fulfilled') tasks.xboxMode = xbRes.value;
   if (esRes.status === 'fulfilled') tasks.energyStar = esRes.value;
   if (cmRes.status === 'fulfilled') tasks.cleanMem = cmRes.value;
-  if (amdRes.status === 'fulfilled') tasks.amd395 = amdRes.value;
   if (fxRes.status === 'fulfilled') audioOpt.value = fxRes.value;
+  if (steamCommunityRes.status === 'fulfilled') steamCommunityBoot.value = steamCommunityRes.value;
   if (joyRes.status === 'fulfilled') joyMouse.value = joyRes.value;
   if (searchRes.status === 'fulfilled') searchSt.value = searchRes.value;
+  if (bootRes.status === 'fulfilled') bootOn.value = bootRes.value;
+  if (rtssBootRes.status === 'fulfilled') rtssBootOn.value = rtssBootRes.value;
   trayResident.value = await readTrayResident().catch(() => false);
+  hardwareGpuSchedule.value = await readHardwareGpuSchedule().catch(() => false);
+  // 开机启动Xbox全屏游戏模式：读注册表；Xbox 未开启时强制关闭（不能单独打开）
+  startupGamingHome.value = await readGamingHomeStartup().catch(() => false);
+  if (!tasks.xboxMode && startupGamingHome.value) {
+    startupGamingHome.value = false;
+    await writeGamingHomeStartup(false).catch(() => {});
+  }
+}
+
+async function onBootToggle(v: boolean) {
+  errMsg.value = '';
+  busy.value = true;
+  const prev = bootOn.value;
+  bootOn.value = v; // 乐观更新
+  try {
+    await fs.writeTextFile(BOOT_CFG, JSON.stringify({ bootOn: v })).catch(() => {});
+    await toggleBootMirror(v);
+  } catch (e) {
+    bootOn.value = prev; // 失败回滚
+    errMsg.value = '设置失败：' + (e as Error).message + '（创建开机任务需管理员权限，请右键以管理员身份运行 YeManCC）';
+  } finally {
+    busy.value = false;
+  }
 }
 
 async function toggleTaskSafe(name: string, on: boolean, key: TaskKey) {
@@ -82,7 +148,8 @@ async function toggleTaskSafe(name: string, on: boolean, key: TaskKey) {
   }
 }
 
-// Xbox 游戏模式：开启启动全屏检测线程，关闭则停止；与「任务栏常驻」相互独立
+// Xbox 全屏游戏模式：仅管理任务计划与联动（开机 Xbox 大屏 / 任务栏常驻 / 开机启动联动）。
+// ⚠️ 后台全屏检测线程已废弃（2026-08-02）：开启不再起 1.5s 轮询线程，开关仅保留上述联动。
 async function onXbox(v: boolean) {
   errMsg.value = '';
   busy.value = true;
@@ -94,13 +161,36 @@ async function onXbox(v: boolean) {
       await setTrayResident(true);
       trayResident.value = true;
     }
-    // 真实开启才拉起检测，关闭则停止（即便任务计划写成功也要同步停止）
-    await xbox.setActive(tasks.xboxMode);
+    // 关闭 Xbox 全屏游戏模式时，联动关闭「开机启动Xbox全屏游戏模式」（它不能单独打开）
+    if (!tasks.xboxMode && startupGamingHome.value) {
+      startupGamingHome.value = false;
+      await writeGamingHomeStartup(false).catch(() => {});
+    }
   } catch (e) {
     tasks.xboxMode = await safeExists('Xbox大屏游戏模式').catch(() => !v);
-    errMsg.value = 'Xbox 游戏模式设置失败：' + (e as Error).message + '（需管理员权限）';
+    errMsg.value = 'Xbox 全屏游戏模式设置失败：' + (e as Error).message + '（需管理员权限）';
   } finally {
     busy.value = false;
+  }
+}
+
+// 开机启动Xbox全屏游戏模式：只能依靠 Xbox 全屏游戏模式打开，不能单独打开；可单独关闭
+async function onStartupGamingHome(v: boolean) {
+  errMsg.value = '';
+  if (v && !tasks.xboxMode) {
+    // 不能单独打开：必须依赖 Xbox 全屏游戏模式
+    startupGamingHome.value = false;
+    errMsg.value = '请先开启「Xbox全屏游戏模式」，才能打开「开机启动Xbox全屏游戏模式」。';
+    return;
+  }
+  try {
+    const ok = await writeGamingHomeStartup(v);
+    if (!ok) throw new Error('注册表写入失败');
+    startupGamingHome.value = v;
+  } catch (e) {
+    // 写失败：回读注册表真实值（v-model 可能已先更新 UI，需覆盖回滚）
+    startupGamingHome.value = await readGamingHomeStartup().catch(() => false);
+    errMsg.value = '开机启动Xbox全屏游戏模式设置失败：' + (e as Error).message;
   }
 }
 
@@ -175,6 +265,34 @@ async function onFx(v: boolean) {
     busy.value = false;
   }
 }
+
+async function onHardwareGpuSchedule(v: boolean) {
+  const prev = hardwareGpuSchedule.value;
+  hardwareGpuSchedule.value = v;
+  try {
+    const ok = await writeHardwareGpuSchedule(v);
+    if (!ok) throw new Error('注册表写入失败');
+    errMsg.value = '硬件加速GPU计划已更新，重启或重新登录后完全生效';
+  } catch (e) {
+    hardwareGpuSchedule.value = prev;
+    errMsg.value = '硬件加速GPU计划设置失败：' + (e as Error).message;
+  }
+}
+async function onSteamCommunityBoot(v: boolean) {
+  errMsg.value = '';
+  const prev = steamCommunityBoot.value;
+  steamCommunityBoot.value = v;
+  busy.value = true;
+  try {
+    await toggleTask(STEAMCOMMUNITY_TASK, v);
+    steamCommunityBoot.value = await safeExists(STEAMCOMMUNITY_TASK);
+  } catch (e) {
+    steamCommunityBoot.value = prev;
+    errMsg.value = 'Steamcommunity_302 开机启动设置失败：' + (e as Error).message;
+  } finally {
+    busy.value = false;
+  }
+}
 async function onJoy(v: boolean) {
   errMsg.value = '';
   busy.value = true;
@@ -188,21 +306,20 @@ async function onJoy(v: boolean) {
     busy.value = false;
   }
 }
-async function onAmd395(v: boolean) {
-  if (v) {
-    let ok = true;
-    try {
-      ok = await threeMarkExists();
-    } catch {
-      ok = false;
-    }
-    if (!ok) {
-      errMsg.value = '未检测到 3DMark.exe，无法启用 AMD395 修复。';
-      return;
-    }
+async function onBootRtssToggle(v: boolean) {
+  const prev = rtssBootOn.value;
+  rtssBootOn.value = v;
+  busy.value = true;
+  try {
+    rtssBootOn.value = await toggleBootRtss(v);
+  } catch (e) {
+    rtssBootOn.value = prev;
+    errMsg.value = '开机启动 RTSS 监控设置失败：' + (e as Error).message;
+  } finally {
+    busy.value = false;
   }
-  await toggleTaskSafe('Bug修复-AMD-395', v, 'amd395');
 }
+
 const searchText = computed(() => {
   if (searchSt.value === 'hidden') return '不可用（系统版本差异）';
   if (searchSt.value === 'trimmed') return '任务栏搜索已精简 [点击恢复]';
@@ -221,10 +338,25 @@ const rotText = computed(() => (conflict.value ? '现在的屏幕自动旋转：
 // ── 全局刷新监听（App 预加载 / 支持页刷新按钮）──
 const globalRefreshKey = inject<Ref<number>>('globalRefreshKey');
 if (globalRefreshKey) {
-  import('vue').then(({ watch }) => watch(globalRefreshKey, () => refresh()));
+  // watch 已在顶部静态导入；动态 import('vue') 会造成异步微任务延迟注册，
+  // 刷新事件可能在注册前触发而丢失（2026-08-05 修复）。
+  watch(globalRefreshKey, () => refresh());
 }
 
 onMounted(() => nextTick(refresh));
+async function onBootMirrorChanged() {
+  try {
+    bootOn.value = await readBootMirrorState();
+  } catch {
+  }
+}
+onMounted(() => window.addEventListener(BOOT_MIRROR_CHANGED_EVENT, onBootMirrorChanged));
+onUnmounted(() => window.removeEventListener(BOOT_MIRROR_CHANGED_EVENT, onBootMirrorChanged));
+// KeepAlive 缓存下切回本页时主动刷新，避免「其它页面改了开机启动项切回来仍显示旧状态」
+// （2026-08-05 补充 onActivated）。
+onActivated(() => {
+  refresh().catch(() => {});
+});
 </script>
 
 <template>
@@ -236,26 +368,44 @@ onMounted(() => nextTick(refresh));
       <h3 class="card-title"><InlineIcon name="rocket" /> 启动模式</h3>
       <p class="muted small">{{ rotText }}</p>
       <Toggle v-model="tasks.desktopMode" label="桌面模式" description="开机设置为桌面模式" color="accent" :disabled="busy" @update:model-value="(v: boolean) => toggleTaskSafe('桌面模式-开机设置为桌面模式', v, 'desktopMode')" />
-      <Toggle v-model="tasks.xboxMode" label="Xbox 游戏模式" description="大屏游戏模式（启动全屏检测；开启后自动联动任务栏常驻）" color="accent" :disabled="busy" @update:model-value="onXbox" />
-      <Toggle v-model="trayResident" label="任务栏常驻" description="为了兼容Xbox游戏模式，正常不用开启" color="accent" :disabled="busy" @update:model-value="onTrayResident" />
+      <Toggle v-model="tasks.xboxMode" label="Xbox全屏游戏模式" description="大屏游戏模式（启动全屏检测；开启后自动联动任务栏常驻）" color="accent" :disabled="busy" @update:model-value="onXbox" />
+      <Toggle v-model="startupGamingHome" label="开机启动Xbox全屏游戏模式" description="必须能正常启动Xbox APP 也是联动" color="accent" :disabled="busy || !tasks.xboxMode" @update:model-value="onStartupGamingHome" />
+      <Toggle v-model="trayResident" label="任务栏常驻" description="Xbox全屏游戏模式的联动入口" color="accent" :disabled="busy || !tasks.xboxMode" @update:model-value="onTrayResident" />
       <WarnBar v-if="tasks.xboxMode && !trayResident" text="如关闭任务栏常驻无法在Xbox全屏中弹出野蛮系统控制台" />
     </section>
 
     <section class="card">
       <h3 class="card-title"><InlineIcon name="star" /> 开机启动项</h3>
+      <Toggle
+        v-model="bootOn"
+        label="开机启动野蛮控制中心"
+        description="登录系统后自动启动控制中心"
+        color="accent"
+        :disabled="busy"
+        @update:model-value="onBootToggle"
+      />
+      <Toggle
+        v-model="rtssBootOn"
+        label="开机启动 RTSS 监控"
+        description="登录系统后自动启动 RTSS 监控"
+        color="accent"
+        :disabled="busy"
+        @update:model-value="onBootRtssToggle"
+      />
       <Toggle v-model="tasks.energyStar" label="开机能源之星自动优化" color="accent" :disabled="busy" @update:model-value="(v: boolean) => toggleTaskSafe('节能-能源之星', v, 'energyStar')" />
       <Toggle v-model="tasks.cleanMem" label="开机清理一次内存" color="accent" :disabled="busy" @update:model-value="(v: boolean) => toggleTaskSafe('内存-开机自动内存清理并关闭', v, 'cleanMem')" />
       <Toggle v-model="audioOpt" label="开机启动音质优化 (FxSound)" color="accent" :disabled="busy" @update:model-value="onFx" />
+      <Toggle v-model="steamCommunityBoot" label="开机启动加速Steam(Steamcommunity)" color="accent" :disabled="busy" @update:model-value="onSteamCommunityBoot" />
       <Toggle v-model="joyMouse" label="开机启动手柄模拟鼠标 (Joyxoff)" color="accent" :disabled="busy" @update:model-value="onJoy" />
-      <Toggle v-model="tasks.amd395" label="AMD395 专门修复 (需 3DMark)" description="精简版 3DMark" color="accent" :disabled="busy" @update:model-value="onAmd395" />
-      <div class="task-tools" aria-label="任务计划批量管理">
-        <button class="task-tool-btn" :disabled="taskToolsBusy || busy" @click="openBootTaskTool">开机启动调节程序</button>
-        <button class="task-tool-btn danger" :disabled="taskToolsBusy || busy" @click="closeAllYemanTasks">关闭全部任务</button>
-        <button class="task-tool-btn" :disabled="taskToolsBusy || busy" @click="restoreAllTasks">恢复全部任务</button>
-      </div>
+      <Toggle v-model="hardwareGpuSchedule" label="硬件加速GPU计划" description="解决AMD395芯片模拟器游戏BUG" color="accent" :disabled="busy" @update:model-value="onHardwareGpuSchedule" />
       <div class="row">
         <span><InlineIcon name="search" /> Windows 任务栏搜索</span>
         <button class="mini-btn" @click="onSearch">{{ searchText }}</button>
+      </div>
+      <div class="task-tools" aria-label="任务计划批量管理">
+        <button class="task-tool-btn" :disabled="taskToolsBusy || busy" @click="openBootTaskTool">开机启动调节程序</button>
+        <button class="task-tool-btn danger" :disabled="taskToolsBusy || busy" @click="closeAllYemanTasks">关闭野蛮系统全部任务</button>
+        <button class="task-tool-btn" :disabled="taskToolsBusy || busy" @click="restoreAllTasks">恢复野蛮系统全部任务</button>
       </div>
     </section>
   </div>
@@ -304,7 +454,7 @@ onMounted(() => nextTick(refresh));
 }
 .task-tool-btn {
   min-width: 0;
-  min-height: 34px;
+  min-height: var(--btn-min-h);
   padding: 6px 5px;
   border: 1px solid rgba(46, 166, 255, 0.45);
   border-radius: var(--radius-ctrl);

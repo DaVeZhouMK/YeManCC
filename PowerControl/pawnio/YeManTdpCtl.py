@@ -6,12 +6,12 @@ YeManTdpCtl v2 - 贴近 Newko(KO助手) 原生逻辑的 TDP 控制器
 AMD  : PawnIO + RyzenSMU.bin (Newko 同款) -> ioctl_send_smu_command 高层 API
        命令号: 20=STAPM 21=FAST 22=SLOW (单位 mW), 邮箱交互在内核驱动内完成,
        用户态只发 3 个 ioctl, 不再轮询 PCI 寄存器 (v1 裸 MP1 已废弃)。
-Intel: KX.exe (Newko 同款, 不走 PawnIO):
-       1) 探测 MCHBAR: /rdmem32 0xfedc0000 / 0xfed10000, 解析 "Return <val>"
-       2) MMIO: /wrmem16 <MCHBAR+59>a0 0x<PL1hex16> + 100ms + /wrmem16 ...a4 0x<PL2hex16>
-       3) MSR : /wrmsr 0x610 0x00438<PL2hex3> 00DD8<PL1hex3> (失败非致命)
+Intel: PawnIO + IntelMSR.bin (UXTU 同款常驻后端):
+       1) daemon 启动时加载 IntelMSR.bin 并保持 PawnIO 句柄
+       2) MSR: ioctl_write_msr/ioctl_read_msr 直接访问 0x610/0x150
+       3) 每次 set 不再启动 KX.exe，不再重载 WinIo 驱动；当前版本先走 MSR 直写，MCHBAR 模块待有 IntelMCHBAR.bin 后再启用
 冲突治理 (与 HWiNFO 等监控共存):
-  - 每次写入 = 极短硬件占用窗口 (AMD 3 个 ioctl / Intel 数个 KX 调用)
+  - 每次写入 = 极短硬件占用窗口 (AMD 3 个 ioctl / Intel 1 个 PawnIO MSR ioctl)
   - 门忙 HRESULT 0x8007054F -> 10/25/50/100/200ms 递增退避, 最多 5 次 (并发抢门可恢复)
   - 无任何"读当前 TDP / 早退 / 调度"逻辑, 需要写就直接写
 
@@ -22,7 +22,8 @@ Intel: KX.exe (Newko 同款, 不走 PawnIO):
   YeManTdpCtl set-amd 65000 70000 65000 # 显式 stapm/fast/slow (mW)
   YeManTdpCtl set-intel 45 55           # 显式 PL1 PL2 (W)
   YeManTdpCtl get                       # AMD: SMU 版本(通道自检) / Intel: 读 MSR 0x610
-  YeManTdpCtl restore [W]               # 恢复 (默认 AMD 170W / Intel 45W)
+  YeManTdpCtl restore [W]               # 恢复（Intel: 重新编码 PL1/PL2）
+  YeManTdpCtl restore --raw <hex> --vendor intel # 精确恢复 MSR 0x610 完整 64 位快照
   YeManTdpCtl info                      # 厂商 / 路径 / 通道信息
   YeManTdpCtl set 65 --dry-run          # 只算不写
 
@@ -36,25 +37,46 @@ try:
 except Exception:
     winreg = None
 
+
+def _kernel32_handles():
+    """配置 Win32 HANDLE API 的 64-bit ctypes 签名，避免默认 c_int 截断句柄。"""
+    k32 = ctypes.windll.kernel32
+    try:
+        k32.CreateMutexW.argtypes = [ctypes.c_void_p, ctypes.c_bool, ctypes.c_wchar_p]
+        k32.CreateMutexW.restype = ctypes.c_void_p
+        k32.WaitForSingleObject.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
+        k32.WaitForSingleObject.restype = ctypes.c_uint32
+        k32.ReleaseMutex.argtypes = [ctypes.c_void_p]
+        k32.ReleaseMutex.restype = ctypes.c_bool
+        k32.CloseHandle.argtypes = [ctypes.c_void_p]
+        k32.CloseHandle.restype = ctypes.c_bool
+    except Exception:
+        pass
+    return k32
+
+
 # ---------- 跨进程互斥：确保 PawnIO 安装/卸载只并发执行一次，避免重复弹窗 ----------
 _ENSURE_MUTEX_NAME = "Global\\YeManCC_PawnIO_Ensure"
 _ensure_mutex = None
 
 def _ensure_lock(timeout_ms=60000):
     global _ensure_mutex
+    k32 = _kernel32_handles()
     if _ensure_mutex is None:
-        _ensure_mutex = ctypes.windll.kernel32.CreateMutexW(None, False, _ENSURE_MUTEX_NAME)
+        _ensure_mutex = k32.CreateMutexW(None, False, _ENSURE_MUTEX_NAME)
     if not _ensure_mutex:
-        return True
-    r = ctypes.windll.kernel32.WaitForSingleObject(_ensure_mutex, timeout_ms)
+        log("PawnIO ensure mutex 创建失败，拒绝无锁安装/卸载")
+        return False
+    r = k32.WaitForSingleObject(_ensure_mutex, timeout_ms)
     return r == 0 or r == 128  # WAIT_OBJECT_0 / WAIT_ABANDONED_0
+
 
 def _ensure_unlock():
     if _ensure_mutex:
-        ctypes.windll.kernel32.ReleaseMutex(_ensure_mutex)
+        _kernel32_handles().ReleaseMutex(_ensure_mutex)
 
 # ---------- 管理员权限自检 / 自提权 ----------
-NEEDS_DRIVER = ("set", "get", "restore", "info", "set-amd", "set-intel", "uv")
+NEEDS_DRIVER = ("set", "get", "restore", "info", "set-amd", "set-intel", "uv", "pbo", "intel-cap")
 
 def is_admin():
     try:
@@ -88,10 +110,14 @@ DLL = os.environ.get("PAWNIO_DLL", r"C:\Program Files\PawnIO\PawnIOLib.dll")
 RYZEN_SMU = _first([os.path.join(BASE, "RyzenSMU.bin"),
                     os.path.join(BASE, "_internal", "RyzenSMU.bin"),
                     r"C:\SOFT\YeMan\PowerControl\pawnio\RyzenSMU.bin"])
-# KX.exe = Newko 同款 Intel 写入工具 (MMIO + MSR)
-KX_EXE = _first([os.path.join(BASE, "KX", "KX.exe"),
-                 os.path.join(BASE, "_internal", "KX", "KX.exe"),
-                 r"C:\SOFT\YeMan\PowerControl\pawnio\KX\KX.exe"])
+# Intel PawnIO module (UXTU Intel backend 同款). `IntelMSR.bin` 提供 ioctl_read_msr/ioctl_write_msr；
+# `IntelMCHBAR.bin` 若后续带入可启用 MMIO 读写。当前先移除 KX，优先验证稳定的 MSR 0x610 路径。
+INTEL_MSR_BIN = _first([os.path.join(BASE, "IntelMSR.bin"),
+                        os.path.join(BASE, "_internal", "IntelMSR.bin"),
+                        r"C:\SOFT\YeMan\PowerControl\pawnio\IntelMSR.bin"])
+INTEL_MCHBAR_BIN = _first([os.path.join(BASE, "IntelMCHBAR.bin"),
+                           os.path.join(BASE, "_internal", "IntelMCHBAR.bin"),
+                           r"C:\SOFT\YeMan\PowerControl\pawnio\IntelMCHBAR.bin"])
 SETUP = _first([os.path.join(BASE, "PawnIO_setup.exe"),
                 os.path.join(BASE, "_internal", "PawnIO_setup.exe"),
                 r"C:\SOFT\YeMan\PowerControl\pawnio\PawnIO_setup.exe"])
@@ -114,38 +140,219 @@ SMU_SET_FAST_LIMIT  = 21
 SMU_SET_SLOW_LIMIT  = 22
 AMD_DEFAULT_MW = 170000
 
-# 各家族 MP1 邮箱地址 + stapm/fast/slow 命令号 (UXTU / ryzenadj 同源)
-FAM_DESKTOP_AM5 = {   # Granite Ridge / Raphael (9950X 等桌面 Zen4/5)
+# 各家族配置同时声明 feature + transport + 是否允许 legacy fallback；未知路径默认拒绝。
+# 字段: name(显示名) / msg,rsp,arg(MP1 邮箱) / stapm,fast,slow(TDP 命令) /
+#       coall,coper(CO 命令) / co_enc(CO 参数编码: u32=32位补码 / u20=20位补码) /
+#       co_supported(是否支持 CO) / pm_readback(是否支持 PM 表实测回读)
+# 关键事实(查证 ryzenadj lib/api.c + lib/cpuid.c):
+#   - Raphael 桌面(7950X)与 DragonRange(7945HX) 同 CPUID 19h/61h; Granite Ridge(9950X)与
+#     FireRange(9955HX) 同 CPUID 1Ah/44h → 必须用型号名区分, 纯 CPUID 会误判(历史回归教训)
+#   - Dragon/Fire Range 的 TDP 命令与桌面相同(0x4F/0x3E/0x5F), CO 走 PSMU(0x7/0x6, 未实现通道)
+FAM_DESKTOP_AM5 = {   # Raphael / Granite Ridge (7950X / 9950X 等桌面 Zen4/5)
+    "name": "Desktop-AM5", "tag": "desktop", "power_feature": "desktop_ppt",
+    "transport": "mp1", "allow_legacy_fallback": False,
+    "verified_transport": True, "tdp_supported": True,
     "msg": 0x3B10530, "rsp": 0x3B1057C, "arg": 0x3B109C4,
+    # PSMU 地址 (UXTU 26.2.0 AM5 Socket): 用于 PBO PPT/TDC/EDC
+    "psmu_msg": 0x3B10524, "psmu_rsp": 0x3B10570, "psmu_arg": 0x3B10A40,
     "stapm": 0x4F, "fast": 0x3E, "slow": 0x5F,
-    "coall": 0x36, "coper": 0x35,          # UXTU AM5_V1
+    # AM5 PBO 命令 (UXTU): ppt=0x3E(mp1)/0x56(rsmu), tdc=0x3C/0x57, edc=0x3D/0x58
+    "pbo_ppt_mp1": 0x3E, "pbo_tdc_mp1": 0x3C, "pbo_edc_mp1": 0x3D,
+    "pbo_ppt_rsmu": 0x56, "pbo_tdc_rsmu": 0x57, "pbo_edc_rsmu": 0x58,
+    # 完整 PPT/TDC/EDC 双邮箱路径尚未真机闭环验证，API/命令已实现但默认 fail-closed。
+    "pbo_supported": False, "pbo_transport_verified": False,
+    "coall": 0x36, "coper": 0x35, "co_enc": "u32",
+    "co_supported": True, "co_scopes": ("all_core",), "pm_readback": False,
 }
-FAM_APU = {           # Strix Halo / Strix Point / Krackan / Phoenix / Hawk Point / Rembrandt (FT6/FP7/FP8)
+# ★ 现代 APU 地址拆分 (依据 UXTU 26.2.0 RyzenSmu.cs Socket_FT6_FP7_FP8 / Socket_FT6):
+#   新 FT6 (Strix Point/Krackan/Strix Halo): msg=0x3B10928 rsp=0x3B10978 arg=0x3B10998
+#   旧 FT6 (Phoenix/Hawk Point/Rembrandt):  msg=0x3B10528 rsp=0x3B10578 arg=0x3B10998
+#   FP6  (Renoir/Lucienne/Cezanne):         msg=0x3B10528 rsp=0x3B10564 arg=0x3B10998
+# 已真机验证: Strix Halo(本机 TDP/CO MP1 闭环)。
+# 旧 FT6/FP6 地址来自 UXTU 但未经本机实测，verified_transport=False → 拒绝写入。
+FAM_APU_FT6_NEW = {   # Strix Point / Krackan / Strix Halo (新 FT6)
+    "name": "APU-FT6-New(Strix)", "tag": "apu_ft6_new", "power_feature": "stapm_ppt",
+    "transport": "mp1", "allow_legacy_fallback": False,
+    "verified_transport": True, "tdp_supported": True,
     "msg": 0x3B10928, "rsp": 0x3B10978, "arg": 0x3B10998,
     "stapm": 0x14, "fast": 0x15, "slow": 0x16,
-    "coall": 0x4C, "coper": 0x4B,          # UXTU FT6_FP7_FP8
+    "coall": 0x4C, "coper": 0x4B, "co_enc": "u20",
+    "co_supported": True, "co_scopes": ("all_core",), "pm_readback": True,
+}
+FAM_APU_FT6_NEW_GENERIC = dict(FAM_APU_FT6_NEW)
+FAM_APU_FT6_NEW_GENERIC.update({
+    "name": "APU-FT6-New-generic",
+    "tag": "apu_ft6_new_generic",
+    # Strix Point / Krackan 仅地址来自 UXTU；没有完成项目真机闭环，必须 fail-closed。
+    "verified_transport": False,
+    "tdp_supported": False,
+    "co_supported": False,
+    "co_scopes": (),
+    "pm_readback": False,
+})
+FAM_APU_FT6_OLD = {   # Phoenix / Hawk Point / Rembrandt (旧 FT6/FP7/FP8)
+    "name": "APU-FT6-Old(Phoenix/Rembrandt)", "tag": "apu_ft6_old", "power_feature": "stapm_ppt",
+    "transport": "mp1", "allow_legacy_fallback": False,
+    "verified_transport": False, "tdp_supported": False,    # 地址来自 UXTU 但未经本机实测
+    "msg": 0x3B10528, "rsp": 0x3B10578, "arg": 0x3B10998,
+    "stapm": 0x14, "fast": 0x15, "slow": 0x16,
+    "coall": 0x4C, "coper": 0x4B, "co_enc": "u20",          # CO 命令号按新 FT6 同源, 未经实测
+    "co_supported": False, "co_scopes": (), "pm_readback": True,
+}
+FAM_APU_FP6 = {        # Renoir / Lucienne / Cezanne (FP6, AM4 封装 APU)
+    "name": "APU-FP6(Renoir/Cezanne)", "tag": "apu_fp6", "power_feature": "stapm_ppt",
+    "transport": "mp1", "allow_legacy_fallback": False,
+    "verified_transport": False, "tdp_supported": False,    # 地址来自 UXTU Socket_FP6_AM4, 未经本机实测
+    "msg": 0x3B10528, "rsp": 0x3B10564, "arg": 0x3B10998,
+    "stapm": 0x14, "fast": 0x15, "slow": 0x16,
+    "coall": 0x55, "coper": 0x54, "co_enc": "u20",          # CO 命令号: 55/54 (UXTU), 未经实测
+    "co_supported": False, "co_scopes": (), "pm_readback": True,
+}
+# 向后兼容别名 (旧代码引用 FAM_APU / FAM_APU_OLD)
+FAM_APU = FAM_APU_FT6_NEW
+FAM_APU_GENERIC = FAM_APU_FT6_NEW_GENERIC
+FAM_APU_OLD = FAM_APU_FP6
+FAM_DRAGON_FIRE = {   # Dragon Range / Fire Range (7945HX / 9955HX 等 HX 移动端)
+    "name": "Dragon/Fire-Range(HX)", "tag": "hx", "power_feature": "unsupported",
+    "transport": "unsupported", "allow_legacy_fallback": False,
+    "verified_transport": False, "tdp_supported": False,
+    "msg": None, "rsp": None, "arg": None,
+    "stapm": None, "fast": None, "slow": None,
+    "coall": None, "coper": None, "co_enc": "u20",           # CO 走 PSMU, 当前未实现通道
+    "co_supported": False, "co_scopes": (), "pm_readback": False,           # CO 明确降级为不支持, 不瞎发命令
+}
+FAM_ZEN2_DESKTOP = {  # 桌面/工作站 17h (Summit/Pinnacle/Matisse/CastlePeak, 即 Zen/Zen+/Zen2)
+    # 覆盖: 1800X/2700X/3900X/3950X (AM4), 1950X/2950X/3970X/3990X (TR4/TRX4) 等。
+    # 依据: ZenStates-Core SMU.cs SmuType 枚举 —— Zen2 桌面/服务器 = TYPE_CPU2,
+    #       与 Zen4/5 桌面 (TYPE_CPU4, 即 FAM_DESKTOP_AM5) 的 SMU 固件/邮箱/命令集完全不同;
+    #       且桌面 CPU 的功率限制是 PBO PPT/EDC/TDC, 不存在 APU 的 STAPM/FAST/SLOW 概念。
+    # 历史回归教训: 名称正则 \d{3,4}X3?D? 会匹配 "3970X"/"3900X" → 误判为 Zen4/5 桌面,
+    #       向 TYPE_CPU2 SMU 发 0x4F/0x3E/0x5F 命令 → 无效/no-op, 表现为"调 TDP 没效果"。
+    "name": "Desktop-17h(Zen~Zen2)", "tag": "zen2_desktop", "power_feature": "pbo_ppt_tdc_edc",
+    "transport": "unsupported", "allow_legacy_fallback": False,
+    "verified_transport": False, "tdp_supported": False,
+    "msg": None, "rsp": None, "arg": None,
+    "stapm": None, "fast": None, "slow": None,    # 无 STAPM 概念; PBO PPT/EDC/TDC 路径未实现
+    "coall": None, "coper": None, "co_enc": "u32",
+    "co_supported": False, "co_scopes": (), "pm_readback": False,
+}
+FAM_NO_CO = {         # Raven / Picasso / Dali / Mendocino / VanGogh (命令号未完成真机验证，安全拒绝)
+    "name": "APU-NoCO(Raven/Dali)", "tag": "no_co", "power_feature": "unsupported",
+    "transport": "unsupported", "allow_legacy_fallback": False,
+    "verified_transport": False, "tdp_supported": False,
+    "msg": None, "rsp": None, "arg": None,
+    "stapm": None, "fast": None, "slow": None,
+    "co_supported": False, "co_scopes": (), "pm_readback": False,
+}
+FAM_UNKNOWN = {
+    "name": "Unknown", "tag": "unknown", "power_feature": "unknown",
+    "transport": "unsupported", "allow_legacy_fallback": False,
+    "verified_transport": False, "tdp_supported": False,
+    "msg": None, "rsp": None, "arg": None,
+    "stapm": None, "fast": None, "slow": None,
+    "coall": None, "coper": None, "co_enc": "u20",
+    "co_supported": False, "co_scopes": (), "pm_readback": False,
 }
 
-def detect_amd_family():
-    """返回 FAM_DESKTOP_AM5 或 FAM_APU。桌面 AM5 用 '数字X' 后缀(如 9950X)识别;其余按 APU 处理。
-    注: Strix Halo 与桌面 Granite Ridge 同为 family 0x1A, 不能用 family 区分, 必须用型号名。"""
+_AMD_FAMILIES = [FAM_DESKTOP_AM5, FAM_APU_FT6_NEW, FAM_APU_FT6_NEW_GENERIC, FAM_APU_FT6_OLD, FAM_APU_FP6,
+                   FAM_DRAGON_FIRE, FAM_ZEN2_DESKTOP, FAM_NO_CO, FAM_UNKNOWN]
+
+
+def _read_cpu_info():
+    """读注册表 ProcessorNameString + Identifier('AMD64 Family 26 Model 68 Stepping 0')。"""
+    name, ident = "", ""
     try:
         k = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
                            r"HARDWARE\DESCRIPTION\System\CentralProcessor\0")
-        name, _ = winreg.QueryValueEx(k, "ProcessorNameString")
+        try:
+            name, _ = winreg.QueryValueEx(k, "ProcessorNameString")
+        except Exception:
+            pass
+        try:
+            ident, _ = winreg.QueryValueEx(k, "Identifier")
+        except Exception:
+            pass
         winreg.CloseKey(k)
     except Exception:
-        name = ""
-    name_u = (name or "").upper()
-    if re.search(r"\d{3,4}X\b", name_u):   # 9950X / 7950X / 7900X -> 桌面
-        return FAM_DESKTOP_AM5
-    # 其余(含 Strix Halo / Phoenix / Rembrandt / 移动端)均按 APU 家族 MP1 参数
-    return FAM_APU
+        pass
+    return (name or "").strip(), (ident or "").strip()
 
-# ---------- Intel: KX.exe 常量 (Newko 同款) ----------
-MCHBAR_CANDIDATES = ["0xfedc0000", "0xfed10000"]   # Newko sq
-INTEL_MAX_W = 300                                   # Newko lq: 瓦数钳制 0..300
-MSR_PKG_POWER_LIMIT = 0x610
+
+def _parse_identifier(ident):
+    """'AMD64 Family 26 Model 68 Stepping 0' -> (0x1A, 0x44); 失败返回 None。"""
+    m = re.search(r"Family\s+(\d+)\s+Model\s+(\d+)", ident, re.I)
+    if not m:
+        return None
+    try:
+        return int(m.group(1)), int(m.group(2))
+    except Exception:
+        return None
+
+
+def detect_amd_family():
+    """按型号名 + CPUID(Family/Model) 精确选择家族, 不再靠单一名字正则两级猜。
+    顺序: ①解析 CPUID ②桌面 17h ③HX+指定CPUID ④桌面 Zen4/5 ⑤APU表 ⑥未知降级。"""
+    name, ident = _read_cpu_info()
+    name_u = name.upper()
+    fm = _parse_identifier(ident)
+    f = m = None
+    if fm:
+        f, m = fm
+    # ① 桌面 17h (Zen/Zen+/Zen2): Matisse M71h / CastlePeak M31h / Summit M01h / Pinnacle M08h 等。
+    #    SMU Type=CPU2, 无 STAPM/FAST/SLOW 命令, 功率走 PBO PPT/EDC/TDC。
+    #    必须优先于 X 后缀兜底, 否则 1800X/2700X/3900X/3970X 会被误判为 Zen4/5 桌面
+    #    (向 TYPE_CPU2 SMU 发 0x4F/0x3E/0x5F 命令 → 无效/no-op, 历史回归教训)。
+    #    排除 17h APU 型号 (Renoir/Lucienne/Raven/Picasso/Dali/VanGogh/Mendocino)。
+    if f == 0x17 and m in (0x01, 0x08, 0x31, 0x71):
+        return FAM_ZEN2_DESKTOP
+    # ③ 名称只能做否决/辅助，不能单独决定协议族：CPUID 缺失时宁可 Unknown，绝不把任意 X/X3D 发送到 AM5 邮箱。
+    # Threadripper 也只有在 CPUID 已确认 17h 时才允许归入 Zen2 Desktop；名称不是协议事实。
+    if re.search(r"THREADRIPPER", name_u) and f == 0x17:
+        return FAM_ZEN2_DESKTOP
+    # ③ Dragon/Fire Range 必须同时满足 HX 型号名和共享 CPUID，不能把任意 HX 后缀误归该协议族。
+    is_hx_name = bool(re.search(r"\d{4,5}HX\d*\b", name_u))
+    if is_hx_name and ((f == 0x19 and m == 0x61) or (f == 0x1A and m == 0x44)):
+        return FAM_DRAGON_FIRE
+    # AM5 桌面与 Dragon/Fire Range 共享 CPUID；只有标准桌面型号名 X/X3D 才可放行。
+    is_am5_desktop_name = bool(re.search(r"RYZEN\s+(?:5|7|9)\s+(?:7|9)\d{3}X(?:3D)?\b", name_u))
+    # ④ CPUID 表 (ryzenadj lib/cpuid.c 同源 + UXTU 26.2.0 Family.cs 对照)
+    if fm:
+        if f == 0x1A:                 # Zen5
+            if m in (0x20, 0x24, 0x60, 0x68): # Strix Point / Krackan / Krackan Point 2 (新 FT6, 未真机验证)
+                return FAM_APU_FT6_NEW_GENERIC
+            if m == 0x70:                       # Strix Halo：本机已验证 TDP/CO MP1
+                return FAM_APU_FT6_NEW
+            if m == 0x44:                           # Granite Ridge / Fire Range 共享 CPUID
+                return FAM_DESKTOP_AM5 if is_am5_desktop_name else FAM_UNKNOWN
+        elif f == 0x19:               # Zen3/Zen4
+            if m in (0x3F, 0x74, 0x75, 0x78, 0x40, 0x44): # Rembrandt / Phoenix / Hawk Point (旧 FT6)
+                return FAM_APU_FT6_OLD
+            if m == 0x50:                           # Cezanne (FP6)
+                return FAM_APU_FP6
+            if m == 0x61:                           # Raphael / Dragon Range 共享 CPUID
+                return FAM_DESKTOP_AM5 if is_am5_desktop_name else FAM_UNKNOWN
+        elif f == 0x17:               # Zen/Zen+/Zen2
+            if m in (0x60, 0x68):                   # Renoir / Lucienne (FP6)
+                return FAM_APU_FP6
+            if m in (0x11, 0x18, 0x20, 0x90, 0xA0): # Raven / Picasso / Dali / VanGogh / Mendocino
+                return FAM_NO_CO
+            if m in (0x01, 0x08, 0x31, 0x71):       # Summit/Pinnacle/Matisse/Castle Peak desktop/TR
+                return FAM_ZEN2_DESKTOP
+    return FAM_UNKNOWN
+
+# ---------- Intel: PawnIO 常驻后端 ----------
+MCHBAR_CANDIDATES = ["0xfedc0000", "0xfed10000"]  # 兼容旧探测记录；新后端优先用 IntelMCHBAR.bin
+INTEL_MAX_W = 300
+MSR_RAPL_POWER_UNIT = 0x606  # RAPL 功率单位 (bits[3:0] exponent)
+MSR_PKG_POWER_LIMIT = 0x610  # PL1/PL2 功率限制
+MSR_PKG_POWER_LOCK  = 1 << 63  # bit63: 锁定位, 置位后无法写入 (直至 reset)
+MSR_CORE_RATIO = 0x1AD
+INTEL_MSR_READ = "ioctl_read_msr"
+INTEL_MSR_WRITE = "ioctl_write_msr"
+INTEL_MCHBAR_GET = "ioctl_get_mchbar_addr"
+INTEL_MCHBAR_READ_DWORD = "ioctl_read_dword"
+# Intel MSR 互斥体名称 (与 UXTU 26.2.0 IntelPawnIO.cs 一致: Global\Access_MSR)
+INTEL_MSR_MUTEX = "Global\\Access_MSR"
 
 # 门忙 HRESULT (Newko cI: 0x8007054F / 2147943759)
 # 递增退避重试: 10/25/50/100/200ms, 最多 5 次 (并发抢门实测 1/12 会触发, 单次 25ms 不够)
@@ -153,35 +360,58 @@ GATE_BUSY_HR = 0x8007054F
 GATE_RETRY_DELAYS = (0.010, 0.025, 0.050, 0.100, 0.200)
 GATE_RETRY_DELAY = GATE_RETRY_DELAYS[1]  # 兼容旧引用 (25ms)
 
-# 跨进程命名互斥体: 多个 YeManTdpCtl 进程并发调 SMU 时排队串行,
+# 跨进程命名互斥体: 多个 YeManTdpCtl 进程/UXTU/HWiNFO 并发调 SMU 时排队串行,
 # 直接消除"并发抢门"导致的 0x8007054F / RyzenSMU 加载竞争。
-SMU_GATE_MUTEX = "Local\\YeManTdpCtl_SMU_Gate"
+# 互斥体名称与 UXTU 26.2.0 保持一致 (Global\Access_PCI), 确保跨工具互斥。
+SMU_GATE_MUTEX = "Global\\Access_PCI"
 
 
 class _SmuGate:
-    """上下文管理器: 获取命名互斥体, 超时(10s)或互斥体被放弃时也继续(降级为不互斥)。"""
+    """上下文管理器: 获取命名互斥体。
+    - WAIT_OBJECT_0 / WAIT_ABANDONED → 成功持有, 允许硬件操作
+    - WAIT_TIMEOUT / 其他错误 → 拒绝硬件操作 (不再无锁降级)
+    - __exit__ 只在成功持有时调用 ReleaseMutex
+    """
 
     def __init__(self, timeout_ms=10000):
-        k32 = ctypes.windll.kernel32
-        self._h = k32.CreateMutexW(None, False, SMU_GATE_MUTEX)
+        self._k32 = _kernel32_handles()
+        self._h = self._k32.CreateMutexW(None, False, SMU_GATE_MUTEX)
         self._held = False
+        self._closed = False
         if self._h:
-            r = k32.WaitForSingleObject(self._h, timeout_ms)
-            if r == 0x00000102:  # WAIT_TIMEOUT: 前一个持有者卡住, 降级继续
-                log("  [gate] SMU 互斥等待超时, 降级为直接执行")
-            self._held = True
+            r = self._k32.WaitForSingleObject(self._h, timeout_ms)
+            if r in (0, 128):  # WAIT_OBJECT_0 / WAIT_ABANDONED_0
+                self._held = True
+            elif r == 0x00000102:  # WAIT_TIMEOUT
+                log("  [gate] SMU 互斥等待超时, 拒绝无锁硬件访问")
+                self.close()
+            else:
+                log("  [gate] SMU 互斥等待失败 result=0x%X, 拒绝硬件访问" % r)
+                self.close()
+
+    @property
+    def acquired(self):
+        return self._held
+
+    def close(self):
+        if self._closed:
+            return
+        self._closed = True
+        try:
+            if self._h:
+                if self._held:
+                    self._k32.ReleaseMutex(self._h)
+                    self._held = False
+                self._k32.CloseHandle(self._h)
+        except Exception:
+            pass
+        self._h = None
 
     def __enter__(self):
         return self
 
     def __exit__(self, *exc):
-        try:
-            if self._h:
-                if self._held:
-                    ctypes.windll.kernel32.ReleaseMutex(self._h)
-                ctypes.windll.kernel32.CloseHandle(self._h)
-        except Exception:
-            pass
+        self.close()
 
 CREATE_NO_WINDOW = 0x08000000
 
@@ -272,7 +502,9 @@ class Pawn:
         ret = ctypes.c_size_t(0)
         hr = self.lib.pawnio_execute(self.h, name.encode("ascii"),
                                      inp, n, out, out_count, ctypes.byref(ret))
-        return hr, list(out[:out_count])
+        # PawnIO 返回实际输出项数；不能把未写入的 ctypes 零初始化缓冲区当成有效零值。
+        actual = min(int(ret.value), int(out_count)) if out_count else 0
+        return hr, list(out[:actual])
 
     def close(self):
         try: self.lib.pawnio_close(self.h)
@@ -311,6 +543,7 @@ def _amd_open():
 
 # --- MP1 邮箱直写 (仅桌面端回退路径; 与 v1 相同, 用户态轮询响应寄存器) ---
 def _smu_rd(p, reg):
+    """读取 SMU 寄存器；任何非零 HRESULT 都必须失败，不能消费未定义输出。"""
     hr, out = p.execute("ioctl_read_smu_register", [reg], 1)
     for delay in GATE_RETRY_DELAYS:
         if (hr & 0xFFFFFFFF) != GATE_BUSY_HR:
@@ -318,9 +551,14 @@ def _smu_rd(p, reg):
         log("  [gate] 读寄存器门忙(0x%X), %dms 后重试" % (reg, int(delay * 1000)))
         time.sleep(delay)
         hr, out = p.execute("ioctl_read_smu_register", [reg], 1)
+    if (hr & 0xFFFFFFFF) != 0 or not out:
+        log("  [SMU] 读寄存器失败 reg=0x%X HRESULT=0x%08X" % (reg, hr & 0xFFFFFFFF))
+        return None
     return out[0]
 
+
 def _smu_wr(p, reg, val):
+    """写 SMU 寄存器；失败记录日志并返回 False，不抛出异常。"""
     hr, out = p.execute("ioctl_write_smu_register", [reg, val & 0xFFFFFFFF], 0)
     for delay in GATE_RETRY_DELAYS:
         if (hr & 0xFFFFFFFF) != GATE_BUSY_HR:
@@ -328,26 +566,89 @@ def _smu_wr(p, reg, val):
         log("  [gate] 写寄存器门忙(0x%X), %dms 后重试" % (reg, int(delay * 1000)))
         time.sleep(delay)
         hr, out = p.execute("ioctl_write_smu_register", [reg, val & 0xFFFFFFFF], 0)
+    if (hr & 0xFFFFFFFF) != 0:
+        log("  [SMU] 写寄存器失败 reg=0x%X HRESULT=0x%08X" % (reg, hr & 0xFFFFFFFF))
+        return False
+    return True
 
-def _send_mp1(p, cmd, arg0, cfg, tries=300):
-    MP1_MSG, MP1_RSP, MP1_ARG = cfg["msg"], cfg["rsp"], cfg["arg"]
+def _resolve_mailbox_addr(cfg, transport):
+    """根据 transport 解析 cfg 中的邮箱地址。
+    transport: 'mp1' → msg/rsp/arg; 'psmu' → psmu_msg/psmu_rsp/psmu_arg;
+               'rsmu' → rsmu_msg/rsmu_rsp/rsmu_arg。
+    返回 (msg_addr, rsp_addr, arg_addr) 或 (None, None, None)。
+    """
+    if transport == "mp1":
+        return cfg.get("msg"), cfg.get("rsp"), cfg.get("arg")
+    elif transport in ("psmu", "rsmu"):
+        # UXTU 高层称 RSMU，底层 Socket 配置字段称 PSMU；两者使用同一组地址。
+        # 优先显式 rsmu_*，不存在时兼容 psmu_*。
+        if transport == "rsmu" and cfg.get("rsmu_msg"):
+            return cfg.get("rsmu_msg"), cfg.get("rsmu_rsp"), cfg.get("rsmu_arg")
+        return cfg.get("psmu_msg"), cfg.get("psmu_rsp"), cfg.get("psmu_arg")
+    return None, None, None
+
+
+def _send_mailbox(p, cmd, arg0, cfg, transport="mp1", tries=300):
+    """泛化 SMU 邮箱写入: 支持 MP1/PSMU/RSMU transport。
+    根据 transport 选取正确的 msg/rsp/arg 地址对, 执行标准 SMU mailbox 协议。
+    状态非 1 或 transport 不可用 → 返回 0xFE (上层转 rc=6), 不抛异常。
+    """
+    msg_addr, rsp_addr, arg_addr = _resolve_mailbox_addr(cfg, transport)
+    if not msg_addr or not rsp_addr or not arg_addr:
+        log("  [family] %s transport=%s 缺邮箱地址 (msg=%s rsp=%s arg=%s) → 跳过本命令"
+            % (cfg.get("name", "unknown"), transport, msg_addr, rsp_addr, arg_addr))
+        return 0xFE
+    MP1_MSG, MP1_RSP, MP1_ARG = msg_addr, rsp_addr, arg_addr
+    ready = False
     for _ in range(tries):
-        if _smu_rd(p, MP1_RSP) != 0: break
+        rsp = _smu_rd(p, MP1_RSP)
+        if rsp is None:
+            return 0xFE
+        if rsp != 0:
+            ready = True
+            break
         time.sleep(0.001)
-    _smu_wr(p, MP1_RSP, 0)
-    _smu_wr(p, MP1_ARG, arg0 & 0xFFFFFFFF)
+    if not ready:
+        log("  [SMU] %s mailbox ready 等待超时 rsp持续为0, 拒绝覆盖在途事务" % transport)
+        return 0xFC
+    if not _smu_wr(p, MP1_RSP, 0):
+        return 0xFE
+    if not _smu_wr(p, MP1_ARG, arg0 & 0xFFFFFFFF):
+        return 0xFE
     for i in range(1, 6):
-        _smu_wr(p, MP1_ARG + i * 4, 0)
-    _smu_wr(p, MP1_MSG, cmd & 0xFFFFFFFF)
+        if not _smu_wr(p, MP1_ARG + i * 4, 0):
+            return 0xFE
+    if not _smu_wr(p, MP1_MSG, cmd & 0xFFFFFFFF):
+        return 0xFE
     r = 0
+    completed = False
     for _ in range(tries):
         r = _smu_rd(p, MP1_RSP)
-        if r != 0: break
+        if r is None:
+            return 0xFE
+        if r != 0:
+            completed = True
+            break
         time.sleep(0.001)
-    return r & 0xFF
+    if not completed:
+        log("  [SMU] %s mailbox 命令响应超时 cmd=0x%X" % (transport, cmd))
+        return 0xFC
+    if r > 0xFF:
+        log("  [SMU] %s mailbox 异常响应超出状态字节 cmd=0x%X rsp=0x%X → 拒绝" %
+            (transport, cmd, r))
+        return 0xFE
+    return int(r)
+
+
+def _send_mp1(p, cmd, arg0, cfg, tries=300):
+    """MP1 邮箱快捷入口 (向后兼容)。内部调用 _send_mailbox(transport='mp1')。"""
+    return _send_mailbox(p, cmd, arg0, cfg, "mp1", tries)
 
 def _amd_set_mp1(p, cfg, stapm_mw, fast_mw, slow_mw):
-    """桌面端回退: 裸 MP1 邮箱写 STAPM/FAST/SLOW; 全部 status=1 才算成功。"""
+    """对明确声明为 MP1/STAPM feature 的家族写入；状态非 1 或 transport 异常均失败。"""
+    if cfg.get("power_feature") not in ("stapm_ppt", "desktop_ppt") or cfg.get("transport") != "mp1" or not cfg.get("tdp_supported", False):
+        log("  [family] %s 不是已验证的 MP1 power feature, 禁止套用该写入器" % cfg["name"])
+        return 6
     fail = 0
     for cmd, name, val in ((cfg["stapm"], "stapm", stapm_mw),
                            (cfg["fast"],  "fast",  fast_mw),
@@ -358,6 +659,111 @@ def _amd_set_mp1(p, cfg, stapm_mw, fast_mw, slow_mw):
             fail += 1
     return 0 if fail == 0 else 6
 
+def amd_set_with(p, cfg, stapm_mw, fast_mw, slow_mw):
+    """用已打开的 Pawn 句柄 + 已识别的家族写 STAPM/FAST/SLOW（daemon 复用句柄时用）。
+    与 amd_set 的唯一差异：不负责 open/close/家族检测，仅做 3 个 ioctl 写入 + 兜底回退。"""
+    # 1) verified_transport: 没经过本机实机验证的平台, 拒绝写入
+    if not cfg.get("verified_transport", False) or not cfg.get("tdp_supported", False):
+        log("  [family] %s TDP capability 未验证 -> 拒绝写入" % cfg["name"])
+        return 6
+    # 2) MP1 邮箱完整: msg/rsp/arg 任一缺失即视为不可写, 提前返回 6 (不再让 _send_mp1 抛 RuntimeError)
+    for k in ("msg", "rsp", "arg", "stapm", "fast", "slow"):
+        if cfg.get(k) is None:
+            log("  [family] %s cfg.%s 缺失, 拒绝写入" % (cfg["name"], k))
+            return 6
+    log("  [family] %-18s MP1 msg=0x%X rsp=0x%X arg=0x%X stapm=0x%02X fast=0x%02X slow=0x%02X"
+        % (cfg["name"], cfg["msg"], cfg["rsp"], cfg["arg"],
+           cfg["stapm"], cfg["fast"], cfg["slow"]))
+    rc2 = _amd_set_mp1(p, cfg, stapm_mw, fast_mw, slow_mw)
+    if rc2 != 0 and cfg.get("allow_legacy_fallback", False):
+        log("  [fallback] MP1 直写失败, 仅对明确声明兼容的 APU 家族尝试 Newko 高层 API")
+        fail = 0
+        for cmd, name, val in ((SMU_SET_STAPM_LIMIT, "stapm", stapm_mw),
+                               (SMU_SET_FAST_LIMIT, "fast", fast_mw),
+                               (SMU_SET_SLOW_LIMIT, "slow", slow_mw)):
+            hr, out = smu_send(p, cmd, int(val))
+            if hr == 0:
+                log("  AMD %-5s (cmd=%d) %d mW -> OK" % (name, cmd, val))
+            else:
+                log("  AMD %-5s (cmd=%d) %d mW -> FAIL HRESULT=0x%08X" % (name, cmd, val, hr & 0xFFFFFFFF))
+                fail += 1
+        rc2 = 0 if fail == 0 else 6
+    elif rc2 != 0:
+        log("  [fallback] family=%s 禁止跨协议回退, 保持失败 rc=6" % cfg["name"])
+    return rc2
+
+
+# --- AM5 PBO PPT/TDC/EDC (P1) ---
+# 桌面 AM5 的 PBO 功率限制独立于 STAPM/FAST/SLOW 三窗口。
+# UXTU 26.2.0: PPT=0x3E(mp1)/0x56(rsmu), TDC=0x3C(mp1)/0x57(rsmu), EDC=0x3D(mp1)/0x58(rsmu)
+# YeMan 串行发送 MP1 和 RSMU 命令, 每条独立检查 status; 不复制 UXTU 的并发双发。
+# 未实现 PBO transport 的平台 → 返回 rc=6 并提示, 绝不向 TYPE_CPU2 SMU 发 AM5 命令。
+
+def amd_set_pbo_with(p, cfg, ppt_mw, tdc_ma, edc_ma):
+    """用已打开的 Pawn 句柄写入 AM5 PBO PPT/TDC/EDC。
+    仅 Desktop-AM5 (power_feature=desktop_ppt, verified_transport=True) 支持。
+    串行: MP1 PPT → RSMU PPT → MP1 TDC → RSMU TDC → MP1 EDC → RSMU EDC。
+    """
+    if (cfg.get("power_feature") != "desktop_ppt" or not cfg.get("verified_transport") or
+            not cfg.get("tdp_supported") or not cfg.get("pbo_supported") or
+            not cfg.get("pbo_transport_verified")):
+        log("  [PBO] %s PBO capability/transport 未完成真机验证 → 拒绝写入" % cfg.get("name", "unknown"))
+        return 6
+    required = ("msg", "rsp", "arg", "psmu_msg", "psmu_rsp", "psmu_arg",
+                "pbo_ppt_mp1", "pbo_tdc_mp1", "pbo_edc_mp1",
+                "pbo_ppt_rsmu", "pbo_tdc_rsmu", "pbo_edc_rsmu")
+    missing = [k for k in required if cfg.get(k) is None]
+    if missing:
+        log("  [PBO] %s 配置不完整 missing=%s → 写入前拒绝" %
+            (cfg.get("name", "unknown"), ",".join(missing)))
+        return 6
+    fail = 0
+    # 串行: PPT(MP1+RSMU) → TDC(MP1+RSMU) → EDC(MP1+RSMU)
+    for label, mp1_cmd_key, rsmu_cmd_key, val, unit in (
+        ("PPT", "pbo_ppt_mp1", "pbo_ppt_rsmu", ppt_mw, "mW"),
+        ("TDC", "pbo_tdc_mp1", "pbo_tdc_rsmu", tdc_ma, "mA"),
+        ("EDC", "pbo_edc_mp1", "pbo_edc_rsmu", edc_ma, "mA"),
+    ):
+        st_mp1 = _send_mailbox(p, cfg[mp1_cmd_key], int(val), cfg, "mp1")
+        log("  AMD-PBO %-3s MP1   (0x%02X) %d %s → %s" %
+            (label, cfg[mp1_cmd_key], val, unit,
+             "OK" if st_mp1 == 1 else "FAIL(status=%s)" % st_mp1))
+        if st_mp1 != 1:
+            fail += 1
+        st_rsmu = _send_mailbox(p, cfg[rsmu_cmd_key], int(val), cfg, "rsmu")
+        log("  AMD-PBO %-3s RSMU  (0x%02X) %d %s → %s" %
+            (label, cfg[rsmu_cmd_key], val, unit,
+             "OK" if st_rsmu == 1 else "FAIL(status=%s)" % st_rsmu))
+        if st_rsmu != 1:
+            fail += 1
+    return 0 if fail == 0 else 6
+
+
+def amd_set_pbo(ppt_mw, tdc_ma, edc_ma, dry=False):
+    """AMD AM5 桌面 PBO PPT/TDC/EDC 一次性 CLI 入口。"""
+    log("  AMD PBO ppt=%d mW tdc=%d mA edc=%d mA" % (ppt_mw, tdc_ma, edc_ma))
+    cfg = detect_amd_family()
+    if (cfg.get("power_feature") != "desktop_ppt" or not cfg.get("pbo_supported") or
+            not cfg.get("pbo_transport_verified")):
+        log("  [PBO] %s capability 未验证，dry-run/真实写入均拒绝" % cfg.get("name", "unknown"))
+        return 6
+    if dry:
+        log("  [dry-run] PBO capability 已验证，未实际写入"); return 0
+    gate = _SmuGate()
+    if not gate.acquired:
+        log("  [gate] 未获取 SMU 互斥体, 拒绝 PBO 写入")
+        return 6
+    with gate:
+        p, rc = _amd_open()
+        if rc != 0:
+            return rc
+        try:
+            log("  [family] %s power_feature=%s" % (cfg["name"], cfg.get("power_feature")))
+            return amd_set_pbo_with(p, cfg, ppt_mw, tdc_ma, edc_ma)
+        finally:
+            p.close()
+
+
 def amd_set(stapm_mw, fast_mw, slow_mw, dry=False):
     """写 AMD STAPM/FAST/SLOW (mW)。
     完全采用 UXTU/ryzenadj 的 MP1 邮箱直写逻辑: 按家族选用正确的 MP1 地址 + 命令号
@@ -367,42 +773,38 @@ def amd_set(stapm_mw, fast_mw, slow_mw, dry=False):
     log("  AMD stapm=%d fast=%d slow=%d mW" % (stapm_mw, fast_mw, slow_mw))
     if dry:
         log("  [dry-run] 未实际写入"); return 0
-    with _SmuGate():
+    gate = _SmuGate()
+    if not gate.acquired:
+        log("  [gate] 未获取 SMU 互斥体, 拒绝 TDP 写入")
+        return 6
+    with gate:
         p, rc = _amd_open()
         if rc != 0:
             return rc
         try:
             cfg = detect_amd_family()
-            fam = "Desktop-AM5" if cfg is FAM_DESKTOP_AM5 else "APU(Strix/Phoenix/...)"
-            log("  [family] %s  MP1 stapm=0x%02X fast=0x%02X slow=0x%02X" %
-                (fam, cfg["stapm"], cfg["fast"], cfg["slow"]))
-            rc2 = _amd_set_mp1(p, cfg, stapm_mw, fast_mw, slow_mw)
-            if rc2 != 0:
-                log("  [fallback] MP1 直写失败, 尝试 Newko 高层 ioctl_send_smu_command (旧 APU 兼容)")
-                fail = 0
-                for cmd, name, val in ((SMU_SET_STAPM_LIMIT, "stapm", stapm_mw),
-                                       (SMU_SET_FAST_LIMIT,  "fast",  fast_mw),
-                                       (SMU_SET_SLOW_LIMIT,  "slow",  slow_mw)):
-                    hr, out = smu_send(p, cmd, int(val))
-                    if hr == 0:
-                        log("  AMD %-5s (cmd=%d) %d mW -> OK" % (name, cmd, val))
-                    else:
-                        log("  AMD %-5s (cmd=%d) %d mW -> FAIL HRESULT=0x%08X" % (name, cmd, val, hr & 0xFFFFFFFF))
-                        fail += 1
-                rc2 = 0 if fail == 0 else 6
-            return rc2
+            log("  [family] %s power_feature=%s transport=%s verified=%s"
+                % (cfg["name"], cfg.get("power_feature"), cfg.get("transport"), cfg.get("verified_transport")))
+            if cfg is FAM_UNKNOWN:
+                log("  [family] Unknown CPU -> 不支持 TDP 写入, 请反馈型号")
+                return 6
+            return amd_set_with(p, cfg, stapm_mw, fast_mw, slow_mw)
         finally:
             p.close()
 
 def amd_get():
     """通道自检 + 读当前 STAPM/FAST/SLOW 实测值(PM 表, best-effort)。"""
-    with _SmuGate():
+    gate = _SmuGate()
+    if not gate.acquired:
+        log("  [gate] 未获取 SMU 互斥体, 拒绝 AMD get")
+        return 6
+    with gate:
         p, rc = _amd_open()
         if rc != 0:
             return rc
         try:
             hr, out = _smu_exec(p, "ioctl_get_smu_version", [], 1)
-            if hr == 0:
+            if hr == 0 and out:
                 v = out[0]
                 log("  AMD SMU version = 0x%08X (%d.%d.%d) 通道正常"
                     % (v, (v >> 16) & 0xFF, (v >> 8) & 0xFF, v & 0xFF))
@@ -412,7 +814,10 @@ def amd_get():
             # 实测当前限制值 (PM 表, best-effort); 偏移 0x0/0x8/0x10 = stapm/fast/slow
             # ★仅 APU 家族打印: 该偏移是 ryzenadj 的 APU 表布局, 桌面 AM5 的 PM 表布局不同, 读出数值无意义
             cfg = detect_amd_family()
-            if cfg is FAM_APU:
+            log("  [family] AMD %s" % cfg["name"])
+            if cfg.get("stapm") is None:
+                log("  [family] 该家族无 STAPM/FAST/SLOW 命令, TDP 调节暂不支持 (桌面 17h 走 PBO PPT/EDC/TDC)")
+            if cfg.get("pm_readback"):
                 try:
                     import struct as _struct
                     p.execute("ioctl_resolve_pm_table", [], 0)
@@ -435,25 +840,97 @@ def amd_get():
 # CPU 降压 (Undervolt) — AMD Curve Optimizer + Intel MSR 0x150
 # ==========================================================================
 
-UV_AMD_MIN, UV_AMD_MAX = -60, 0
+UV_AMD_MIN, UV_AMD_MAX = -60, 60
 UV_INTEL_MIN, UV_INTEL_MAX = -150, 0
 
 MSR_VOLTAGE_CTL = 0x150
-UV_PLANES = {"core": 0x80000011, "cache": 0x80000211}
+# Intel OC mailbox: high dword = RUN_BUSY(bit31) | param2/VF point[23:16] |
+# domain[15:8] | command[7:0]；low dword为 payload/返回数据。
+INTEL_OC_RUN_BUSY = 1 << 31
+INTEL_OC_CMD_GET_VF = 0x10
+INTEL_OC_CMD_SET_VF = 0x11
+INTEL_OC_OFFSET_MASK = 0xFFE00000   # payload bits[31:21], signed 11-bit / 1.024
+INTEL_OC_PRESERVE_MASK = 0x001FFFFF # GET 返回的 ratio/target/mode 等非 offset 位
+INTEL_OC_TIMEOUT_S = 0.050
+# UXTU 26.2.0 的 plane/domain：Core=0, iGPU=1, Cache/Ring=2, SystemAgent=4。
+# iGPU/SA 未经本机实测 → capability matrix 默认只允许 core/cache。
+UV_PLANE_DOMAINS = {
+    "core": 0,
+    "igpu": 1,
+    "cache": 2,
+    "sa": 4,
+}
+# 保留旧常量语义供诊断/兼容：这些是 SET 命令高双字。
+UV_PLANES = {
+    name: INTEL_OC_RUN_BUSY | (domain << 8) | INTEL_OC_CMD_SET_VF
+    for name, domain in UV_PLANE_DOMAINS.items()
+}
+UV_PLANES_SAFE = ("core", "cache")
+
 
 def _uv_mv_to_data32(mv):
-    """UXTU convertVoltageToHexMSR: round(mv*1.024) << 21, 截断 32 位（补码）。"""
-    return (int(round(mv * 1.024)) << 21) & 0xFFFFFFFF
+    """把 mV 编码到 OC mailbox payload bits[31:21]（signed 11-bit, 1/1.024mV）。"""
+    raw11 = int(round(mv * 1.024)) & 0x7FF
+    return (raw11 << 21) & INTEL_OC_OFFSET_MASK
+
 
 def _msr_data_to_mv(v64):
-    """从 MSR 0x150 读回的 64 位值中解析 core offset(mV)。"""
+    """从 OC mailbox 64位返回值的 payload bits[31:21] 解析 offset(mV)。"""
     if v64 is None:
         return None
-    raw = v64 & 0xFFFFFFFF
-    if raw & 0x80000000:
-        raw -= 0x100000000
-    offset = raw >> 21
-    return int(round(offset / 1.024))
+    raw11 = (int(v64) >> 21) & 0x7FF
+    if raw11 & 0x400:
+        raw11 -= 0x800
+    return int(round(raw11 / 1.024))
+
+
+def _intel_oc_command_word(domain, command):
+    return INTEL_OC_RUN_BUSY | ((int(domain) & 0xFF) << 8) | (int(command) & 0xFF)
+
+
+def _intel_oc_wait_idle_raw(backend, timeout_s=INTEL_OC_TIMEOUT_S):
+    """事务锁内轮询 MSR 0x150，直到 RUN_BUSY 清零；返回最终64位值或 None。"""
+    deadline = time.monotonic() + max(0.001, float(timeout_s))
+    while time.monotonic() < deadline:
+        value = backend.read_msr_raw(MSR_VOLTAGE_CTL)
+        if value is None:
+            return None
+        if not ((int(value) >> 63) & 1):
+            return int(value)
+        time.sleep(0.001)
+    log("  [Intel OC] mailbox RUN_BUSY 超时")
+    return None
+
+
+def _intel_oc_mailbox_raw(backend, domain, command, payload=0):
+    """在已持有 Global\\Access_MSR 事务锁时执行一次 OC mailbox 命令。
+    返回 {ok, value, data, completion, reason}；completion为高双字低8位，0=成功。
+    """
+    idle = _intel_oc_wait_idle_raw(backend)
+    if idle is None:
+        return {"ok": False, "reason": "busy_or_read_failed", "completion": None}
+    word = _intel_oc_command_word(domain, command)
+    request = ((word & 0xFFFFFFFF) << 32) | (int(payload) & 0xFFFFFFFF)
+    if not backend.write_msr_raw(MSR_VOLTAGE_CTL, request):
+        return {"ok": False, "reason": "write_failed", "completion": None}
+    value = _intel_oc_wait_idle_raw(backend)
+    if value is None:
+        return {"ok": False, "reason": "completion_timeout", "completion": None}
+    completion = (int(value) >> 32) & 0xFF
+    if completion != 0:
+        log("  [Intel OC] domain=%d cmd=0x%02X completion=0x%02X" %
+            (domain, command, completion))
+        return {"ok": False, "reason": "firmware_rejected", "completion": completion,
+                "value": int(value), "data": int(value) & 0xFFFFFFFF}
+    return {"ok": True, "completion": 0, "value": int(value),
+            "data": int(value) & 0xFFFFFFFF}
+
+
+def _intel_oc_get_plane_raw(backend, plane):
+    domain = UV_PLANE_DOMAINS.get(plane)
+    if domain is None:
+        return {"ok": False, "reason": "unknown_plane", "completion": None}
+    return _intel_oc_mailbox_raw(backend, domain, INTEL_OC_CMD_GET_VF, 0)
 
 def _parse_msr_data(stdout):
     """匹配 KX 'Msr Data : 0xHHHHHHHH 0xLLLLLLLL'，返回完整 64 位。"""
@@ -465,93 +942,265 @@ def _parse_msr_data(stdout):
     return None
 
 # ----- AMD -----
+def _co_arg_encode(offset, cfg):
+    """CO 参数编码(按家族表 co_enc):
+    - u32: 32 位有符号偏移的无符号表示 (桌面 AM5): -20 -> 0xFFFFFFEC,
+      0 -> 0x00000000, +20 -> 0x00000014。
+    - u20: 20 位有符号偏移的无符号表示 (APU/Strix Halo 等): -20 -> 0xFFFEC,
+      0 -> 0x00000, +20 -> 0x00014。
+
+    这与 UXTU/RyzenAdj 的 uint32 参数契约一致：上层语义仍是有符号
+    CO offset，负值表示降压、正值表示加压；本层只按目标 SMU 通道宽度截断。
+    """
+    if cfg.get("co_enc") == "u20":
+        return offset & 0xFFFFF
+    return offset & 0xFFFFFFFF
+
+def amd_uv_set_with(p, cfg, offset):
+    """用已保持的 AMD PawnIO 句柄写入全核 CO；daemon 与 CLI 共用同一底层路径。"""
+    if not (UV_AMD_MIN <= offset <= UV_AMD_MAX):
+        log("  CO 超范围(%d~%d): %s" % (UV_AMD_MIN, UV_AMD_MAX, offset))
+        return 2
+    if not cfg.get("verified_transport", False) or not cfg.get("co_supported") or "all_core" not in cfg.get("co_scopes", ()):
+        log("  AMD(%s) CO capability 未验证 -> 拒绝写入" % cfg.get("name", "unknown"))
+        return 6
+    if cfg.get("coall") is None:
+        log("  AMD(%s) 缺少 CO all-core 命令 -> 拒绝写入" % cfg.get("name", "unknown"))
+        return 6
+    arg = _co_arg_encode(offset, cfg)
+    st = _send_mp1(p, cfg["coall"], arg, cfg)
+    log("  AMD(%s) set-coall(0x%02X) %d -> arg=0x%05X %s" %
+        (cfg["name"], cfg["coall"], offset, arg, "OK" if st == 1 else "FAIL(status=%s)" % st))
+    return 0 if st == 1 else 6
+
+
 def amd_uv_set(offset, dry=False):
-    """全核 Curve Optimizer。offset: -60~0（0=还原）。"""
+    """全核 Curve Optimizer。offset: -60~+60；负值降压，0 还原，正值加压。"""
     if not (UV_AMD_MIN <= offset <= UV_AMD_MAX):
         log("  CO 超范围(%d~%d):" % (UV_AMD_MIN, UV_AMD_MAX), offset)
         return 2
+    cfg = detect_amd_family()
+    if not cfg.get("co_supported") or "all_core" not in cfg.get("co_scopes", ()):
+        log("  AMD(%s) set-coall 不支持: capability 未验证" % cfg["name"])
+        return 6
     if dry:
-        log("  [dry-run] AMD set-coall arg=0x%08X" % (offset & 0xFFFFFFFF))
+        arg = _co_arg_encode(offset, cfg)
+        log("  [dry-run] AMD(%s) set-coall arg=0x%05X" % (cfg["name"], arg))
         return 0
-    with _SmuGate():
+    gate = _SmuGate()
+    if not gate.acquired:
+        log("  [gate] 未获取 SMU 互斥体, 拒绝 CO 写入")
+        return 6
+    with gate:
         p, rc = _amd_open()
         if rc != 0:
             return rc
         try:
-            cfg = detect_amd_family()
-            st = _send_mp1(p, cfg["coall"], offset & 0xFFFFFFFF, cfg)
-            fam = "AM5" if cfg["msg"] == FAM_DESKTOP_AM5["msg"] else "APU"
-            log("  AMD(%s) set-coall(0x%02X) %d -> %s" %
-                (fam, cfg["coall"], offset, "OK" if st == 1 else "FAIL(status=%s)" % st))
-            return 0 if st == 1 else 6
+            return amd_uv_set_with(p, cfg, offset)
         finally:
             p.close()
 
 def amd_uv_probe():
-    """探测 AMD CO 是否可用：发送 set-coall 0 看邮箱是否接受。"""
-    with _SmuGate():
+    """无破坏探测 AMD CO capability。
+
+    AMD MP1 没有可靠 CO 读回；禁止再用 set-coall(0) 做探测，因为会改变当前 CO。
+    本函数只验证家族 capability + SMU 通道可读，不写任何 CO 参数。
+    """
+    gate = _SmuGate()
+    if not gate.acquired:
+        return {"vendor": "amd", "supported": False, "reason": "smu_gate_timeout", "current": 0,
+                "readback": False, "current_semantics": "unavailable"}
+    with gate:
         p, rc = _amd_open()
         if rc != 0:
-            return {"vendor": "amd", "supported": False, "reason": "pawnio_open_failed", "current": 0}
+            return {"vendor": "amd", "supported": False, "reason": "pawnio_open_failed", "current": 0,
+                    "readback": False, "current_semantics": "unavailable"}
         try:
             cfg = detect_amd_family()
-            st = _send_mp1(p, cfg["coall"], 0, cfg)
-            if st == 1:
-                fam = "AM5" if cfg["msg"] == FAM_DESKTOP_AM5["msg"] else "APU"
-                return {"vendor": "amd", "supported": True, "family": fam, "current": 0}
-            return {"vendor": "amd", "supported": False, "reason": "smu_rejected", "current": 0}
+            if not cfg.get("co_supported") or "all_core" not in cfg.get("co_scopes", ()):
+                return {"vendor": "amd", "supported": False,
+                        "reason": "family_no_verified_curve_optimizer", "current": 0,
+                        "readback": False, "current_semantics": "unavailable"}
+            hr, out = _smu_exec(p, "ioctl_get_smu_version", [], 1)
+            if (hr & 0xFFFFFFFF) == 0 and out:
+                return {"vendor": "amd", "supported": True, "family": cfg["name"], "current": 0,
+                        "readback": False, "current_semantics": "not_readable",
+                        "probe_mode": "capability_plus_readonly_channel"}
+            return {"vendor": "amd", "supported": False, "reason": "smu_channel_read_failed", "current": 0,
+                    "readback": False, "current_semantics": "unavailable"}
         finally:
             p.close()
 
-# ----- Intel -----
-def intel_uv_set(mv, dry=False):
-    """Intel FIVR offset: Core + Cache 必须同值写入。mv: -150~0。"""
+def amd_get_with(p, cfg):
+    """daemon 使用常驻 AMD PawnIO 句柄读取通道状态，不重新 open/close。"""
+    if p is None or not cfg or not cfg.get("verified_transport", False):
+        return 6
+    try:
+        hr, out = _smu_exec(p, "ioctl_get_smu_version", [], 1)
+        if (hr & 0xFFFFFFFF) != 0 or not out:
+            log("  AMD daemon get: SMU version 读取失败 HRESULT=0x%08X" % (hr & 0xFFFFFFFF))
+            return 6
+        v = out[0]
+        log("  AMD daemon SMU version = 0x%08X (%d.%d.%d)" %
+            (v, (v >> 16) & 0xFF, (v >> 8) & 0xFF, v & 0xFF))
+        if cfg.get("pm_readback"):
+            try:
+                import struct as _struct
+                hr1, _ = _smu_exec(p, "ioctl_resolve_pm_table", [], 0)
+                if (hr1 & 0xFFFFFFFF) == 0:
+                    hr2, tbuf = _smu_exec(p, "ioctl_read_pm_table", [], 256)
+                    if (hr2 & 0xFFFFFFFF) == 0:
+                        raw = b"".join(_struct.pack("<Q", x & 0xFFFFFFFFFFFFFFFF) for x in tbuf)
+                        n = len(raw) // 4
+                        if n >= 5:
+                            fl = _struct.unpack("<%df" % n, raw[:n * 4])
+                            log("  AMD daemon 实测 STAPM=%.0f FAST=%.0f SLOW=%.0f mW" %
+                                (fl[0], fl[2], fl[4]))
+            except Exception as e:
+                log("  AMD daemon PM 表读取跳过: %s" % e)
+        return 0
+    except Exception as e:
+        log("  AMD daemon get 失败: %s" % e)
+        return 6
+
+
+# AMD: CO 当前仅实现 all-core；per-CCD/per-core 暂不暴露为支持。
+# Intel: MSR 0x1AD 只做读取诊断；MCHBAR 未提供 IntelMCHBAR.bin 时保持关闭。
+def intel_uv_set_pawn(backend, mv, planes=None, dry=False):
+    """通过 Intel OC mailbox 完成 GET→SET→GET 全事务。
+    完整事务持有 Global\\Access_MSR；仅在固件 completion=0 且按 plane GET 读回一致时成功。
+    """
     if not (UV_INTEL_MIN <= mv <= UV_INTEL_MAX):
         log("  Intel 电压偏移超范围(%d~0mV):" % UV_INTEL_MIN, mv)
-        return 2
-    data = _uv_mv_to_data32(mv)
+        return {"ok": False, "error": "range", "rc": 2, "planes": {}}
+    offset_bits = _uv_mv_to_data32(mv)
+    target_planes = planes if planes is not None else list(UV_PLANES_SAFE)
+    unknown = [name for name in target_planes if name not in UV_PLANE_DOMAINS]
+    if unknown:
+        return {"ok": False, "error": "unknown_planes", "rc": 2, "planes": {}}
     if dry:
-        for name in ("core", "cache"):
-            log("  [dry-run] Intel UV %s /wrmsr 0x150 0x%08X 0x%08X" %
-                (name, UV_PLANES[name], data))
-        return 0
-    for name in ("core", "cache"):
-        hi = "0x%08X" % UV_PLANES[name]
-        lo = "0x%08X" % data
-        r = kx_run(["/wrmsr", "0x150", hi, lo])
-        if not kx_ok(r):
-            log("  Intel UV %s %dmV 写入失败" % (name, mv))
-            return 6
-        log("  Intel UV %s %dmV -> OK" % (name, mv))
-        time.sleep(0.05)
-    return 0
+        globally_unverified = [name for name in target_planes if name not in UV_PLANES_SAFE]
+        if globally_unverified:
+            log("  [Intel UV dry-run] 未验证 plane=%s → 拒绝" % ",".join(globally_unverified))
+            return {"ok": False, "error": "unsupported_planes", "rc": 6, "planes": {}}
+        cap = detect_intel_capability()
+        log("  [dry-run] Intel UV model=%s verified_uv=%s planes=%s offset=0x%08X" %
+            (cap["name"], cap.get("uv_core"), target_planes, offset_bits))
+        return {"ok": True, "rc": 0, "dry": True, "planes": {}}
+    cap = detect_intel_capability()
+    unsupported = [name for name in target_planes if not cap.get("uv_" + name, False)]
+    if unsupported:
+        _intel_cap_log(cap)
+        log("  [Intel UV] 未验证 plane=%s → 拒绝写入" % ",".join(unsupported))
+        return {"ok": False, "error": "unsupported_planes", "rc": 6, "planes": {}}
+    if backend is None or backend.msr is None:
+        return {"ok": False, "error": "no_backend", "rc": 3, "planes": {}}
+    result = {"ok": True, "rc": 0, "planes": {}}
+    if not backend._enter_tx():
+        return {"ok": False, "error": "msr_gate_timeout", "rc": 6, "planes": {}}
+    try:
+        for name in target_planes:
+            domain = UV_PLANE_DOMAINS[name]
+            before = _intel_oc_get_plane_raw(backend, name)
+            if not before.get("ok"):
+                result["planes"][name] = {
+                    "ioctl_written": False, "firmware_accepted": False, "readback": False,
+                    "readback_mv": None, "reason": "get_before_" + str(before.get("reason")),
+                    "completion": before.get("completion"),
+                }
+                result["ok"] = False
+                continue
+            # GET 返回低21位含 ratio/target/mode；SET 只替换 offset，避免把固件其他字段清零。
+            set_payload = (int(before["data"]) & INTEL_OC_PRESERVE_MASK) | offset_bits
+            written = _intel_oc_mailbox_raw(backend, domain, INTEL_OC_CMD_SET_VF, set_payload)
+            if not written.get("ok"):
+                result["planes"][name] = {
+                    "ioctl_written": written.get("reason") != "write_failed",
+                    "firmware_accepted": False, "readback": False, "readback_mv": None,
+                    "reason": written.get("reason"), "completion": written.get("completion"),
+                }
+                result["ok"] = False
+                continue
+            after = _intel_oc_get_plane_raw(backend, name)
+            rb_mv = _msr_data_to_mv(after.get("value")) if after.get("ok") else None
+            matches = bool(after.get("ok") and
+                           (int(after.get("data", 0)) & INTEL_OC_OFFSET_MASK) == offset_bits)
+            result["planes"][name] = {
+                "ioctl_written": True,
+                "firmware_accepted": True,
+                "readback": bool(after.get("ok")),
+                "readback_mv": rb_mv,
+                "matches_requested": matches,
+                "completion": after.get("completion"),
+                "reason": "ok" if matches else ("readback_mismatch" if after.get("ok") else after.get("reason")),
+            }
+            if not matches:
+                result["ok"] = False
+            log("  Intel UV %s %dmV -> accepted=%s readback=%s match=%s" %
+                (name, mv, written.get("ok"), rb_mv, matches))
+        result["rc"] = 0 if result["ok"] else 6
+        return result
+    except Exception as e:
+        log("  Intel UV OC mailbox 失败: %s" % e)
+        return {"ok": False, "error": str(e), "rc": 6, "planes": result.get("planes", {})}
+    finally:
+        backend._leave_tx()
+
+
+def intel_uv_set(mv, dry=False):
+    """Intel FIVR offset via UXTU-compatible PawnIO MSR 0x150。
+    返回 0 成功 / 2 范围错 / 3 驱动错 / 6 写入错 (backward compatible rc)。"""
+    if dry:
+        result = intel_uv_set_pawn(None, mv, None, True)
+        return int(result.get("rc", 0 if result.get("ok") else 6))
+    backend = IntelPawnBackend(); rc = backend.open()
+    if rc != 0: return rc
+    try:
+        result = intel_uv_set_pawn(backend, mv, None, False)
+        return int(result.get("rc", 0 if result.get("ok") else 6))
+    finally:
+        backend.close()
 
 def intel_uv_probe():
-    """Intel 降压探测：先读 OC Lock，再写-读 -5mV 验证。"""
+    """无破坏探测 Intel UV capability：对 core/cache 发送只读 GET mailbox 命令。
+    不发送 SET；只有 RUN_BUSY 正常完成且 completion=0 才报告支持，并返回每 plane 当前 offset。
+    """
     if not is_admin():
-        return {"vendor": "intel", "supported": False, "reason": "need_admin", "current": 0}
-    # 1) OC Lock (FLEX_RATIO MSR 0x194 bit20)
-    r1 = kx_run(["/rdmsr", "0x194"])
-    v1 = _parse_msr_data(r1.stdout or "") if kx_ok(r1) else None
-    if v1 is not None and ((v1 >> 20) & 1):
-        return {"vendor": "intel", "supported": False, "reason": "oc_locked", "current": 0}
-    # 2) 读当前 core offset
-    kx_run(["/wrmsr", "0x150", "0x80000010", "0x0"])
-    r2 = kx_run(["/rdmsr", "0x150"])
-    cur = _msr_data_to_mv(_parse_msr_data(r2.stdout or "")) if kx_ok(r2) else None
-    if cur is not None and cur != 0:
-        return {"vendor": "intel", "supported": True, "current": cur}
-    # 3) 写 -5mV 测试并读回
-    test_val = -5
-    if intel_uv_set(test_val) != 0:
-        return {"vendor": "intel", "supported": False, "reason": "write_failed", "current": 0}
-    kx_run(["/wrmsr", "0x150", "0x80000010", "0x0"])
-    r3 = kx_run(["/rdmsr", "0x150"])
-    cur2 = _msr_data_to_mv(_parse_msr_data(r3.stdout or "")) if kx_ok(r3) else None
-    if cur2 is not None and abs(cur2 - test_val) <= 1:
-        intel_uv_set(0)  # 恢复 0
-        return {"vendor": "intel", "supported": True, "current": 0}
-    return {"vendor": "intel", "supported": False, "reason": "write_ignored", "current": 0}
+        return {"vendor": "intel", "supported": False, "reason": "need_admin", "current": 0,
+                "readback": False}
+    cap = detect_intel_capability()
+    if not cap.get("uv_core"):
+        return {"vendor": "intel", "supported": False, "reason": "model_no_verified_uv",
+                "family": cap.get("name"), "current": 0, "readback": False}
+    backend = IntelPawnBackend()
+    rc = backend.open()
+    if rc != 0:
+        return {"vendor": "intel", "supported": False, "reason": "pawnio_open_failed",
+                "family": cap.get("name"), "current": 0, "readback": False}
+    try:
+        if not backend._enter_tx():
+            return {"vendor": "intel", "supported": False, "reason": "msr_gate_timeout",
+                    "family": cap.get("name"), "current": 0, "readback": False}
+        try:
+            planes = {}
+            for name in UV_PLANES_SAFE:
+                if not cap.get("uv_" + name, False):
+                    continue
+                r = _intel_oc_get_plane_raw(backend, name)
+                if not r.get("ok"):
+                    return {"vendor": "intel", "supported": False,
+                            "reason": "oc_mailbox_" + str(r.get("reason")),
+                            "completion": r.get("completion"), "family": cap.get("name"),
+                            "current": 0, "readback": False}
+                planes[name] = _msr_data_to_mv(r.get("value"))
+            return {"vendor": "intel", "supported": bool(planes), "family": cap.get("name"),
+                    "current": planes.get("core", 0), "planes": planes, "readback": True,
+                    "current_semantics": "oc_mailbox_per_plane_offset",
+                    "probe_mode": "readonly_get_mailbox_completion_checked"}
+        finally:
+            backend._leave_tx()
+    finally:
+        backend.close()
 
 # ==========================================================================
 # 风扇控制 (Fan Control) — GPD Win 5
@@ -567,6 +1216,7 @@ def intel_uv_probe():
 EC_SC, EC_DATA = 0x4E, 0x4F
 EC_CMD_RD, EC_CMD_WR = 0x80, 0x81
 EC_IBF, EC_OBF = 0x02, 0x01
+EC_MUTEX = "Global\\YeManCC_EC_PIO"
 FAN_RPM_HI, FAN_RPM_LO = 0x478, 0x479
 FAN_DUTY1, FAN_DUTY2 = 0x47A, 0x47B
 FAN_DUTY_MIN, FAN_DUTY_MAX = 0, 244
@@ -585,16 +1235,23 @@ def _lpcio_open():
     return p, 0
 
 def _ec_pio_outb(p, port, val):
-    p.execute("ioctl_pio_outb", [port & 0xFFFF, val & 0xFF], 0)
+    hr, _ = p.execute("ioctl_pio_outb", [port & 0xFFFF, val & 0xFF], 0)
+    return (hr & 0xFFFFFFFF) == 0
+
 
 def _ec_pio_inb(p, port):
     hr, out = p.execute("ioctl_pio_inb", [port & 0xFFFF], 1)
-    return out[0] if out else 0
+    if (hr & 0xFFFFFFFF) != 0 or not out:
+        return None
+    return out[0]
 
 def _ec_wait_ibf(p, timeout=0.5):
     t0 = time.time()
     while time.time() - t0 < timeout:
-        if (_ec_pio_inb(p, EC_SC) & EC_IBF) == 0:
+        status = _ec_pio_inb(p, EC_SC)
+        if status is None:
+            return False
+        if (status & EC_IBF) == 0:
             return True
         time.sleep(0.001)
     return False
@@ -602,29 +1259,90 @@ def _ec_wait_ibf(p, timeout=0.5):
 def _ec_wait_obf(p, timeout=0.5):
     t0 = time.time()
     while time.time() - t0 < timeout:
-        if (_ec_pio_inb(p, EC_SC) & EC_OBF) != 0:
+        status = _ec_pio_inb(p, EC_SC)
+        if status is None:
+            return False
+        if (status & EC_OBF) != 0:
             return True
         time.sleep(0.001)
     return False
 
-def _ec_read(p, addr):
-    """标准 ACPI EC 读: RD_EC(0x80) + 地址(8-bit) + 读数据口。"""
-    if not _ec_wait_ibf(p): return 0
-    _ec_pio_outb(p, EC_SC, EC_CMD_RD)
-    if not _ec_wait_ibf(p): return 0
-    _ec_pio_outb(p, EC_DATA, addr & 0xFF)
-    if not _ec_wait_obf(p): return 0
+class _EcGate:
+    """保护多阶段 EC 命令/地址/数据事务，防止跨进程交叉。"""
+    def __init__(self, timeout_ms=2000):
+        self._k32 = _kernel32_handles()
+        self._h = self._k32.CreateMutexW(None, False, EC_MUTEX)
+        self._held = False
+        if self._h:
+            r = self._k32.WaitForSingleObject(self._h, timeout_ms)
+            self._held = r in (0, 128)
+            if not self._held:
+                self._k32.CloseHandle(self._h); self._h = None
+    @property
+    def acquired(self): return self._held
+    def close(self):
+        if self._h:
+            if self._held:
+                self._k32.ReleaseMutex(self._h); self._held = False
+            self._k32.CloseHandle(self._h); self._h = None
+    def __enter__(self): return self
+    def __exit__(self, *exc): self.close()
+
+
+def _ec_read_raw(p, addr):
+    """调用方已持有 _EcGate 时执行一次 EC 读；错误返回 None，合法 0 保持为 0。"""
+    if not _ec_wait_ibf(p): return None
+    if not _ec_pio_outb(p, EC_SC, EC_CMD_RD): return None
+    if not _ec_wait_ibf(p): return None
+    if not _ec_pio_outb(p, EC_DATA, addr & 0xFF): return None
+    if not _ec_wait_obf(p): return None
     return _ec_pio_inb(p, EC_DATA)
 
+
+def _ec_write_raw(p, addr, val):
+    """调用方已持有 _EcGate 时执行一次 EC 写。"""
+    if not _ec_wait_ibf(p): return False
+    if not _ec_pio_outb(p, EC_SC, EC_CMD_WR): return False
+    if not _ec_wait_ibf(p): return False
+    if not _ec_pio_outb(p, EC_DATA, addr & 0xFF): return False
+    if not _ec_wait_ibf(p): return False
+    return _ec_pio_outb(p, EC_DATA, val & 0xFF)
+
+
+def _ec_read(p, addr):
+    """标准 ACPI EC 读；I/O/互斥错误返回 None，合法寄存器值 0 返回 0。"""
+    gate = _EcGate()
+    if not gate.acquired: return None
+    with gate:
+        return _ec_read_raw(p, addr)
+
+
 def _ec_write(p, addr, val):
-    """标准 ACPI EC 写: WR_EC(0x81) + 地址(8-bit) + 写数据口。"""
-    if not _ec_wait_ibf(p): return False
-    _ec_pio_outb(p, EC_SC, EC_CMD_WR)
-    if not _ec_wait_ibf(p): return False
-    _ec_pio_outb(p, EC_DATA, addr & 0xFF)
-    if not _ec_wait_ibf(p): return False
-    _ec_pio_outb(p, EC_DATA, val & 0xFF)
-    return True
+    """标准 ACPI EC 写；单寄存器事务。"""
+    gate = _EcGate()
+    if not gate.acquired: return False
+    with gate:
+        return _ec_write_raw(p, addr, val)
+
+
+def _ec_write_pair(p, addr1, val1, addr2, val2):
+    """在同一 _EcGate 事务内更新双风扇；第二写失败时 best-effort 回滚第一寄存器。"""
+    gate = _EcGate()
+    if not gate.acquired:
+        return False, False, "gate_timeout"
+    with gate:
+        old1 = _ec_read_raw(p, addr1)
+        old2 = _ec_read_raw(p, addr2)
+        if old1 is None or old2 is None:
+            return False, False, "preread_failed"
+        ok1 = _ec_write_raw(p, addr1, val1)
+        if not ok1:
+            return False, False, "fan1_write_failed"
+        ok2 = _ec_write_raw(p, addr2, val2)
+        if not ok2:
+            rolled_back = _ec_write_raw(p, addr1, old1)
+            return True, False, "fan2_write_failed_rollback_%s" % ("ok" if rolled_back else "failed")
+        return True, True, "ok"
 
 def _detect_gpd_win5():
     """GPD Win5 检测: 强制文件 或 HID VID 0x2F24 注册表扫描。"""
@@ -664,8 +1382,14 @@ def _detect_gpd_win5():
     return False
 
 def fan_read_rpm(p):
-    hi = _ec_read(p, FAN_RPM_HI)
-    lo = _ec_read(p, FAN_RPM_LO)
+    gate = _EcGate()
+    if not gate.acquired:
+        return None
+    with gate:
+        hi = _ec_read_raw(p, FAN_RPM_HI)
+        lo = _ec_read_raw(p, FAN_RPM_LO)
+    if hi is None or lo is None:
+        return None
     return ((hi & 0xFF) << 8) | (lo & 0xFF)
 
 def fan_cmd_detect():
@@ -679,7 +1403,11 @@ def fan_cmd_detect():
         print(json.dumps({"supported": False, "isGPDWin5": True, "reason": "lpcio_open_failed"}))
         return 0
     try:
-        print(json.dumps({"supported": True, "isGPDWin5": True, "rpm": fan_read_rpm(p)}))
+        rpm = fan_read_rpm(p)
+        if rpm is None:
+            print(json.dumps({"supported": False, "isGPDWin5": True, "reason": "ec_read_failed"}))
+            return 6
+        print(json.dumps({"supported": True, "isGPDWin5": True, "rpm": rpm}))
         return 0
     finally:
         p.close()
@@ -908,7 +1636,10 @@ def fan_cmd_rpm():
         if rc != 0:
             print(json.dumps({"rpm": 0, "error": "lpcio_open_failed"})); return rc
         try:
-            print(json.dumps({"rpm": fan_read_rpm(p)}))
+            rpm = fan_read_rpm(p)
+            if rpm is None:
+                print(json.dumps({"rpm": 0, "error": "ec_read_failed"})); return 6
+            print(json.dumps({"rpm": rpm}))
             return 0
         finally:
             p.close()
@@ -928,8 +1659,11 @@ def fan_cmd_set_auto():
         if rc != 0:
             print(json.dumps({"ok": False, "error": "lpcio_open_failed"})); return rc
         try:
-            _ec_write(p, FAN_DUTY1, 0)
-            _ec_write(p, FAN_DUTY2, 0)
+            ok1, ok2, reason = _ec_write_pair(p, FAN_DUTY1, 0, FAN_DUTY2, 0)
+            if not (ok1 and ok2):
+                print(json.dumps({"ok": False, "error": "ec_write_failed", "reason": reason,
+                                  "fan1": ok1, "fan2": ok2}))
+                return 6
             print(json.dumps({"ok": True, "mode": "auto"}))
             return 0
         finally:
@@ -957,8 +1691,11 @@ def fan_cmd_set_duty(pct):
         if rc != 0:
             print(json.dumps({"ok": False, "error": "lpcio_open_failed"})); return rc
         try:
-            _ec_write(p, FAN_DUTY1, duty)
-            _ec_write(p, FAN_DUTY2, duty)
+            ok1, ok2, reason = _ec_write_pair(p, FAN_DUTY1, duty, FAN_DUTY2, duty)
+            if not (ok1 and ok2):
+                print(json.dumps({"ok": False, "error": "ec_write_failed", "reason": reason,
+                                  "fan1": ok1, "fan2": ok2}))
+                return 6
             print(json.dumps({"ok": True, "percent": pct, "duty": duty}))
             return 0
         finally:
@@ -976,165 +1713,465 @@ def fan_cmd_set_duty(pct):
     print(json.dumps({"ok": False, "error": "no_transport"}))
     return 1
 
-# ==========================================================================
-# Intel: Newko 原生路径 — KX.exe (MMIO wrmem16 + MSR wrmsr), 不走 PawnIO
-# ==========================================================================
-def _clamp_w(w):
-    """Newko x9: 钳制到 0..300 并四舍五入。"""
-    try:
-        w = float(w)
-    except Exception:
-        return None
-    if w != w:  # NaN
-        return None
-    return max(0, min(INTEL_MAX_W, int(round(w))))
+# ---------- Intel: PawnIO 常驻后端（UXTU IntelPawnIO.cs 对等实现） ----------
+INTEL_MSR_READ = "ioctl_read_msr"
+INTEL_MSR_WRITE = "ioctl_write_msr"
 
-def _hex16(w):
-    """Newko z9: (32768 | W*8 & 32767) 的大写 hex, 用于 MMIO wrmem16。"""
-    return format(32768 | ((_clamp_w(w) or 0) * 8 & 32767), "X")
+class IntelPawnBackend:
+    """daemon 启动时加载 IntelMSR.bin，后续 MSR 操作复用同一 PawnIO 句柄。
+    MSR 互斥体与 UXTU 26.2.0 一致 (Global\\Access_MSR)，确保跨工具互斥。
+    事务级锁: 整个 RMW(read→modify→write→readback) 持有同一互斥体。"""
 
-def _hex3(w):
-    """Newko U9: (W*8 & 4095) 的 3 位大写 hex, 用于 MSR 0x610。"""
-    return format(((_clamp_w(w) or 0) * 8) & 4095, "X").zfill(3)
+    def __init__(self):
+        self.msr = None
+        self._lock = None
+        self._tx_depth = 0          # 事务嵌套计数
 
-def kx_run(args, timeout=15):
-    """调用 KX.exe; 返回 CompletedProcess 或 None。成败用 kx_ok() 看输出文本判定
-    （KX 会把读回值作为退出码返回, returncode 可能非零, 不能依赖 ==0）。"""
-    if not os.path.exists(KX_EXE):
-        log("FATAL: KX.exe 不存在:", KX_EXE)
-        return None
-    cmd = [KX_EXE] + list(args)
-    log("  KX: " + " ".join(args))
-    try:
-        r = subprocess.run(cmd, capture_output=True, text=True, errors="ignore",
-                           timeout=timeout, creationflags=CREATE_NO_WINDOW)
-        if not kx_ok(r):
-            log("  KX rc=%d %s" % (r.returncode, (r.stdout or r.stderr or "").strip()[:200]))
-        return r
-    except Exception as e:
-        log("  KX EXCEPTION: %s" % e)
-        return None
+    def open(self):
+        if not INTEL_MSR_BIN or not os.path.exists(INTEL_MSR_BIN):
+            log("FATAL: IntelMSR.bin 不存在: %s" % INTEL_MSR_BIN)
+            return 4
+        try:
+            self.msr = Pawn(DLL)
+            rc = self.msr.open()
+            if rc != 0:
+                log("FATAL: Intel PawnIO open 0x%08X" % (rc & 0xFFFFFFFF))
+                self.msr.close(); self.msr = None
+                return 3
+            rc = self.msr.load(INTEL_MSR_BIN)
+            if rc != 0:
+                log("FATAL: 加载 IntelMSR.bin 失败 0x%08X" % (rc & 0xFFFFFFFF))
+                self.msr.close(); self.msr = None
+                return 4
+            self._k32 = _kernel32_handles()
+            self._lock = self._k32.CreateMutexW(None, False, INTEL_MSR_MUTEX)
+            if not self._lock:
+                log("FATAL: 创建 Intel MSR mutex 失败: %s" % INTEL_MSR_MUTEX)
+                self.msr.close(); self.msr = None
+                return 3
+            log("Intel PawnIO 句柄已保持, module=%s mutex=%s" % (INTEL_MSR_BIN, INTEL_MSR_MUTEX))
+            return 0
+        except Exception as e:
+            log("FATAL: Intel PawnIO 初始化异常: %s" % e)
+            self.close()
+            return 3
 
-def kx_ok(r):
-    """KX 成功判定: 输出无驱动加载错误即为成功。KX 读操作会把值作为退出码(可能非零),
-    故不能依赖 returncode==0。仅当输出含驱动加载失败特征才算失败。"""
-    if r is None:
-        return False
-    out = ((r.stdout or "") + (r.stderr or "")).lower()
-    if "can not be loaded" in out:
-        return False
-    # ErrorCode 32 = 文件被其他进程独占(如 HWiNFO 占着 KX 驱动文件)
-    if "errorcode" in out and ("无法访问" in out or "in use" in out or "sharing" in out):
-        return False
-    return True
+    def _enter(self):
+        """获取 MSR 互斥体；创建失败必须 fail-closed，禁止无锁访问。"""
+        if not self._lock:
+            log("  [Intel] Global\\Access_MSR 创建失败, 拒绝无锁 MSR 访问")
+            return False
+        r = self._k32.WaitForSingleObject(self._lock, 1000)
+        if r not in (0, 128):
+            log("  [Intel] MSR mutex 等待失败 result=0x%X" % r)
+            return False
+        return True
 
-def _parse_kx_return(stdout):
-    """Newko sx: 匹配 'Return <hex|dec>'; -1/0xFFFFFFFF 视为无效。"""
-    if not stdout:
-        return None
-    m = re.search(r"\bReturn\s+(-?0x[0-9a-fA-F]+|-?\d+)", stdout)
-    if not m:
-        return None
-    tok = m.group(1).lower()
-    neg = tok.startswith("-")
-    if neg:
-        tok = tok[1:]
-    try:
-        v = int(tok, 16) if tok.startswith("0x") else int(tok, 10)
-    except Exception:
-        return None
-    if neg:
-        v = -v
-    if v == 0xFFFFFFFF or v == -1:
-        return None
-    return v
+    def _leave(self):
+        if self._lock:
+            try:
+                self._k32.ReleaseMutex(self._lock)
+            except Exception:
+                pass
 
-_mchbar_cache = "unset"  # "unset" | None | str
+    def _enter_tx(self):
+        """事务级锁: 整个 RMW 操作持有同一个互斥体。
+        _tx_depth 支持嵌套 (read/write 可能被 RMW 内部多次调用)。"""
+        if self._tx_depth == 0:
+            if not self._enter():
+                return False
+        self._tx_depth += 1
+        return True
 
-def probe_mchbar():
-    """Newko aq: 依次 /rdmem32 候选地址, 读到有效 Return 即取 '<候选>59' 作寄存器前缀。
-    (MCHBAR+0x59A0/0x59A4 = PKG RAPL MMIO 限制寄存器)"""
-    global _mchbar_cache
-    if _mchbar_cache != "unset":
-        return _mchbar_cache
-    for cand in MCHBAR_CANDIDATES:
-        r = kx_run(["/rdmem32", cand])
-        if r is None or not kx_ok(r):
-            continue
-        v = _parse_kx_return(r.stdout or "")
-        if v is None:
-            continue
-        prefix = cand + "59"
-        log("  [Intel MCHBAR] Detected: %s (rdmem32 %s = %s)" % (prefix, cand, v))
-        _mchbar_cache = prefix
-        return prefix
-    log("  [Intel MCHBAR] 所有候选地址无效 — MMIO TDP 不可用")
-    _mchbar_cache = None
+    def _leave_tx(self):
+        self._tx_depth = max(0, self._tx_depth - 1)
+        if self._tx_depth == 0:
+            self._leave()
+
+    def read_msr_raw(self, msr):
+        """直接读 MSR (不获取互斥体, 由调用方保证在事务内)。"""
+        hr, out = self.msr.execute(INTEL_MSR_READ, [int(msr)], 1)
+        if (hr & 0xFFFFFFFF) != 0 or not out:
+            log("  [Intel] 读 MSR 0x%X 失败 HRESULT=0x%08X" % (msr, hr & 0xFFFFFFFF))
+            return None
+        return int(out[0])
+
+    def write_msr_raw(self, msr, value):
+        """直接写 MSR (不获取互斥体, 由调用方保证在事务内)。"""
+        hr, _ = self.msr.execute(INTEL_MSR_WRITE,
+                                 [int(msr), int(value) & 0xFFFFFFFFFFFFFFFF], 0)
+        if (hr & 0xFFFFFFFF) != 0:
+            log("  [Intel] 写 MSR 0x%X 失败 HRESULT=0x%08X" % (msr, hr & 0xFFFFFFFF))
+            return False
+        return True
+
+    def read_msr(self, msr):
+        """读单个 MSR (自动获取/释放互斥体)。"""
+        if not self._enter():
+            return None
+        try:
+            return self.read_msr_raw(msr)
+        finally:
+            self._leave()
+
+    def write_msr(self, msr, value):
+        """写单个 MSR (自动获取/释放互斥体)。"""
+        if not self._enter():
+            return False
+        try:
+            return self.write_msr_raw(msr, value)
+        finally:
+            self._leave()
+
+    def close(self):
+        try:
+            if self.msr:
+                self.msr.close()
+        except Exception:
+            pass
+        self.msr = None
+        if self._lock:
+            try:
+                self._k32.CloseHandle(self._lock)
+            except Exception:
+                pass
+            self._lock = None
+
+
+# ---------- Intel capability matrix (P1) ----------
+# 按 Family/Model 建立候选能力矩阵, 再叠加运行时探测 (rapl_read/rapl_write/rapl_locked/
+# uv_core/uv_cache/uv_igpu/uv_sa/ratio)。未知型号输出明确 capability 诊断, 未验证功能
+# 不能因厂商为 Intel 就自动放行。
+# 已实测平台: Intel Desktop (RPL), 356H (MTL-H), 358H (LNL-H) → 0x610 路径已验证。
+_INTEL_CAP_MATRIX = {
+    # 字段必须分开声明；igpu/sa 未真机验证时保持 False。
+    (0x06, 0x97):  {"name": "AlderLake-S",  "rapl": True, "uv_core": True, "uv_cache": True},
+    (0x06, 0xB7):  {"name": "RaptorLake-S", "rapl": True, "uv_core": True, "uv_cache": True},
+    (0x06, 0x9A):  {"name": "AlderLake-P",  "rapl": True, "uv_core": True, "uv_cache": True},
+    (0x06, 0xBA):  {"name": "RaptorLake-P", "rapl": True, "uv_core": True, "uv_cache": True},
+    (0x06, 0xAA):  {"name": "MeteorLake-H", "rapl": True, "uv_core": True, "uv_cache": True},
+    (0x06, 0xBD):  {"name": "LunarLake-H",  "rapl": True, "uv_core": True, "uv_cache": True},
+    (0x06, 0xC6):  {"name": "ArrowLake-S",  "rapl": True, "uv_core": False, "uv_cache": False},
+    (0x06, 0xCD):  {"name": "ArrowLake-H",  "rapl": True, "uv_core": False, "uv_cache": False},
+    (0x06, 0xCF):  {"name": "ArrowLake-U",  "rapl": True, "uv_core": False, "uv_cache": False},
+}
+
+
+def _read_intel_cpuid():
+    """读注册表 Intel Identifier → (family, model); 失败返回 None。"""
+    _, ident = _read_cpu_info()
+    fm = _parse_identifier(ident)
+    if fm:
+        return fm
     return None
 
-def intel_set(pl1_w, pl2_w, dry=False):
-    """Newko jZ 同款: MMIO(必须成功) + MSR(失败非致命)。"""
-    o, f = _clamp_w(pl1_w), _clamp_w(pl2_w)
+
+def detect_intel_capability():
+    """返回 Intel CPU 静态候选能力；未知平台默认 fail-closed。
+    Family/Model 表优先；已实测 356H/358H 额外按完整型号名放行 RAPL/core/cache。
+    iGPU/SA 始终保持 False，直到对应 plane 真机验证。"""
+    result = {
+        "family": None, "model": None, "name": "Unknown-Intel",
+        "rapl_supported": False, "rapl_locked": False,
+        "uv_core": False, "uv_cache": False, "uv_igpu": False, "uv_sa": False,
+        "ratio": False,
+    }
+    cpu_name, _ = _read_cpu_info()
+    fm = _read_intel_cpuid()
+    if fm:
+        f, m = fm
+        result["family"] = f; result["model"] = m
+        cap = _INTEL_CAP_MATRIX.get((f, m), {})
+        result["name"] = cap.get("name", "Intel-F%d-M%02X" % (f, m))
+        result["rapl_supported"] = cap.get("rapl", False)
+        result["uv_core"] = cap.get("uv_core", False)
+        result["uv_cache"] = cap.get("uv_cache", False)
+        result["uv_igpu"] = cap.get("uv_igpu", False)
+        result["uv_sa"] = cap.get("uv_sa", False)
+        result["ratio"] = cap.get("ratio", False)
+    # 用户已实测 356H/358H 的 0x610 路径；以型号名补充，避免 CPUID 表版本差异。
+    if re.search(r"\b(?:356H|358H)\b", cpu_name.upper()):
+        result["name"] = cpu_name.strip() or result["name"]
+        result["rapl_supported"] = True
+        result["uv_core"] = True
+        result["uv_cache"] = True
+    return result
+
+
+def _intel_cap_log(cap):
+    log("  [Intel] capability: %s f=%s m=%s rapl=%s uv=%s ratio=%s" %
+        (cap["name"], cap.get("family"), cap.get("model"),
+         cap["rapl_supported"], cap.get("uv_core"), cap.get("ratio")))
+
+
+def _rapl_power_unit_w(backend):
+    """读取 MSR 0x606 bits[3:0] 获取 RAPL power unit (W/unit)。
+    返回 (unit_w, exponent)；读取失败返回 (None, None)，禁止固定 1/8W 降级写入。
+    若已在事务内则 raw 读取，否则使用自动互斥读取。"""
+    try:
+        if backend is None or backend.msr is None:
+            return None, None
+        if getattr(backend, "_tx_depth", 0) > 0:
+            raw = backend.read_msr_raw(MSR_RAPL_POWER_UNIT)
+        else:
+            raw = backend.read_msr(MSR_RAPL_POWER_UNIT)
+        if raw is None:
+            log("  [Intel] 无法读取 MSR 0x606, 拒绝使用猜测 power unit")
+            return None, None
+        exponent = int(raw) & 0xF
+        unit_w = 1.0 / (1 << exponent)
+        log("  [Intel] MSR 0x606 power unit exponent=%d (1/%.0f W)" %
+            (exponent, (1 << exponent)))
+        return unit_w, exponent
+    except Exception as e:
+        log("  [Intel] MSR 0x606 读取异常: %s, 拒绝使用猜测 power unit" % e)
+        return None, None
+
+
+def _intel_power_limit_value(backend, pl1_w, pl2_w, old_msr=None):
+    """计算 Intel PL1/PL2 目标值 (mW→raw), 并维护 OEM 非目标位 (Clamp/Time Window 等)。
+    使用动态 RAPL power unit (MSR 0x606 bits[3:0]) 替代固定 *8。
+    若提供 old_msr (64-bit), 则走 RMW 只修改目标位; 否则新建。"""
+    o = _clamp_w(pl1_w)
+    f = _clamp_w(pl2_w)
     if o is None or f is None:
-        log("  Intel TDP 参数无效"); return 2
-    # 保证 PL2 > PL1 (UXTU 硬性规则): 封顶时压 PL1, 否则抬 PL2
+        return None, None, None, None
     if f <= o:
         if f < INTEL_MAX_W:
             f = o + 1
         else:
             o = max(0, f - 1)
-        log("  [Intel] 修正 PL2<=PL1 -> PL1=%dW PL2=%dW" % (o, f))
-    log("  Intel (Newko KX) PL1=%dW PL2=%dW" % (o, f))
-    if dry:
-        log("  [dry-run] MMIO a0<-0x%s a4<-0x%s ; MSR 0x610 <- 0x00438%s 00DD8%s (未写入)"
-            % (_hex16(o), _hex16(f), _hex3(f), _hex3(o)))
-        return 0
-    prefix = probe_mchbar()
-    if not prefix:
-        log("  MCHBAR 探测失败 — Intel MMIO TDP 不可用"); return 6
-    # 1) MMIO: PL1 -> +a0, 100ms, PL2 -> +a4 (Newko 精确时序)
-    r1 = kx_run(["/wrmem16", prefix + "a0", "0x" + _hex16(o)])
-    if r1 is None or not kx_ok(r1):
-        log("  MMIO PL1 写入失败"); return 6
-    time.sleep(0.1)
-    r2 = kx_run(["/wrmem16", prefix + "a4", "0x" + _hex16(f)])
-    if r2 is None or not kx_ok(r2):
-        log("  MMIO PL2 写入失败"); return 6
-    log("  [Intel TDP] MMIO OK: PL1=%dW PL2=%dW (MCHBAR=%s)" % (o, f, prefix))
-    # 2) MSR: /wrmsr 0x610 0x00438<PL2> 00DD8<PL1> (Newko: 失败非致命)
-    hi = "0x00438" + _hex3(f)
-    lo = "00DD8" + _hex3(o)
-    r3 = kx_run(["/wrmsr", "0x610", hi, lo])
-    if kx_ok(r3):
-        log("  [Intel TDP] MSR OK: /wrmsr 0x610 %s %s" % (hi, lo))
+    unit_w, _ = _rapl_power_unit_w(backend)
+    if unit_w is None:
+        return None, None, None, None
+    raw_pl1 = int(round(o / unit_w))
+    raw_pl2 = int(round(f / unit_w))
+    # PL1 bits 0..14, PL2 bits 32..46; enable bits 15/47
+    pl1_field = (raw_pl1 & 0x7FFF) | 0x8000
+    pl2_field = (raw_pl2 & 0x7FFF) | 0x8000
+    new_value = (pl2_field << 32) | pl1_field
+    # RMW: 保留 old_msr 的非目标位 (Clamp/Time Window/Lock/保留字段)
+    if old_msr is not None:
+        # 目标 mask: PL1 [0:15] + PL2 [32:47]
+        rmw_mask = 0xFFFF | (0xFFFF << 32)
+        value = (int(old_msr) & ~rmw_mask) | (new_value & rmw_mask)
     else:
-        log("  [Intel TDP] MSR 写入失败 (非致命, MMIO 已生效)")
-    return 0
+        value = new_value
+    return value, o, f, unit_w
+
+
+def intel_set_pawn(backend, pl1_w, pl2_w, dry=False):
+    """Intel TDP: capability → read 0x606 → 0x610 RMW → lock → write → readback。"""
+    requested_pl1, requested_pl2 = _clamp_w(pl1_w), _clamp_w(pl2_w)
+    if requested_pl1 is None or requested_pl2 is None:
+        log("  Intel TDP 参数无效")
+        return 2
+    cap = detect_intel_capability()
+    if dry:
+        # dry-run 允许跨机预演，不接触硬件；未知平台只警告，不伪装为已支持。
+        o, f = requested_pl1, requested_pl2
+        if f <= o:
+            f = min(INTEL_MAX_W, o + 1)
+        log("  [dry-run] Intel(%s, verified_rapl=%s) PL1=%dW PL2=%dW; 实际 raw 需目标机读取 MSR 0x606" %
+            (cap["name"], cap.get("rapl_supported"), o, f))
+        return 0
+    if not cap.get("rapl_supported"):
+        _intel_cap_log(cap)
+        log("  [Intel TDP] 当前型号未在已验证 RAPL capability 中 → 拒绝写入")
+        return 6
+    if backend is None or backend.msr is None:
+        log("  Intel TDP: backend 无效")
+        return 3
+    # 事务级锁: 整个 RMW 持有 Global\Access_MSR
+    if not backend._enter_tx():
+        log("  [Intel TDP] 无法获取 MSR 事务锁")
+        return 6
+    try:
+        # 1) 读当前 MSR 0x610
+        old = backend.read_msr_raw(MSR_PKG_POWER_LIMIT)
+        if old is None:
+            log("  [Intel TDP] 无法读取 MSR 0x610")
+            return 6
+        # 2) 检查 bit63 Lock
+        if int(old) & MSR_PKG_POWER_LOCK:
+            log("  [Intel TDP] MSR 0x610 bit63 Lock 已置位, 拒绝写入 (需 reboot 解锁)")
+            return 6
+        # 3) 计算目标值 (RMW 保留 OEM 位)
+        packed = _intel_power_limit_value(backend, requested_pl1, requested_pl2, old)
+        if packed[0] is None:
+            log("  [Intel TDP] MSR 0x606 power unit 不可用 → 拒绝写入")
+            return 6
+        value, o, f, unit_w = packed
+        log("  Intel (PawnIO) PL1=%dW PL2=%dW raw_PL1=0x%04X raw_PL2=0x%04X unit=%.3fW" %
+            (o, f, (value & 0x7FFF), ((value >> 32) & 0x7FFF), unit_w))
+        log("  [Intel TDP] MSR 0x610 old=0x%016X → new=0x%016X (RMW preserved OEM fields)" %
+            (old, value))
+        # 4) 写入
+        if not backend.write_msr_raw(MSR_PKG_POWER_LIMIT, value):
+            log("  [Intel TDP] MSR 0x610 写入未成功")
+            return 6
+        # 5) 读回校验 (按目标 mask)
+        actual = backend.read_msr_raw(MSR_PKG_POWER_LIMIT)
+        if actual is None:
+            log("  [Intel TDP] MSR 0x610 写后读回失败")
+            return 6
+        rmw_mask = 0xFFFF | (0xFFFF << 32)
+        if (int(actual) & rmw_mask) != (value & rmw_mask):
+            log("  [Intel TDP] MSR 0x610 功耗字段读回不一致: expected=0x%016X actual=0x%016X" %
+                (value & rmw_mask, int(actual) & rmw_mask))
+            return 6
+        log("  [Intel TDP] MSR 0x610 RMW/读回 OK: 0x%016X (OEM fields preserved)" % actual)
+        return 0
+    except Exception as e:
+        log("  [Intel TDP] RMW 失败: %s" % e)
+        return 6
+    finally:
+        backend._leave_tx()
+
+
+def intel_get_pawn(backend, dry=False):
+    if dry:
+        log("  [dry-run] Intel PawnIO 跳过读取")
+        return 0
+    if backend is None or backend.msr is None:
+        return 3
+    try:
+        value = backend.read_msr(MSR_PKG_POWER_LIMIT)
+        if value is None:
+            log("  Intel PawnIO 读取 MSR 0x610 失败")
+            return 6
+        unit_w, _ = _rapl_power_unit_w(backend)
+        raw_pl1 = value & 0x7FFF
+        raw_pl2 = (value >> 32) & 0x7FFF
+        pl1 = raw_pl1 * unit_w
+        pl2 = raw_pl2 * unit_w
+        locked = "LOCKED" if (int(value) & MSR_PKG_POWER_LOCK) else "unlocked"
+        log("  Intel PawnIO MSR 0x610 = 0x%016X PL1=%.1fW PL2=%.1fW (unit=%.3fW) %s" %
+            (value, pl1, pl2, unit_w, locked))
+        ratio = backend.read_msr(MSR_CORE_RATIO)
+        if ratio is not None:
+            log("  Intel MSR 0x1AD CORE_RATIO = 0x%016X" % ratio)
+        if INTEL_MCHBAR_BIN and os.path.exists(INTEL_MCHBAR_BIN):
+            log("  IntelMCHBAR.bin 已发现，但当前未启用未验证 MMIO 写入路径")
+        else:
+            log("  IntelMCHBAR.bin 未提供，MCHBAR 功能保持关闭")
+        return 0
+    except Exception as e:
+        log("  Intel PawnIO 读取失败: %s" % e)
+        return 6
+
+def _parse_msr_raw_value(value):
+    """解析 restore --raw 的十六进制/十进制完整 MSR 值。"""
+    try:
+        text = str(value).strip().lower()
+        if text.startswith("0x"):
+            return int(text, 16)
+        return int(text, 0)
+    except Exception:
+        return None
+
+
+def intel_restore_raw(backend, raw_value, dry=False):
+    """按 Intel 验证报告要求，精确恢复 MSR 0x610 的完整 64 位快照。
+
+    restore <W> 是 UXTU 风格的 PL1/PL2 重新编码，会丢失原始 time-window/保留字段；
+    restore --raw <hex> 才用于恢复验证前保存的完整 MSR 值。
+    若 bit63 Lock 置位，报告 locked 并拒绝写入。
+    """
+    value = _parse_msr_raw_value(raw_value)
+    if value is None:
+        log("  Intel raw MSR 参数无效: %s" % raw_value)
+        return 2
+    if not (0 <= value <= 0xFFFFFFFFFFFFFFFF):
+        log("  Intel raw MSR 必须是 0..0xFFFFFFFFFFFFFFFF")
+        return 2
+    if value & MSR_PKG_POWER_LOCK:
+        log("  Intel raw restore 目标值含 bit63 Lock，拒绝写入以避免锁死至重启")
+        return 6
+    log("  Intel raw restore MSR 0x610 <- 0x%016X" % value)
+    if dry:
+        log("  [dry-run] 未实际写入")
+        return 0
+    if backend is None or backend.msr is None:
+        return 3
+    if not backend._enter_tx():
+        log("  [Intel raw restore] 无法获取 MSR 事务锁")
+        return 6
+    try:
+        # 先读当前值检查 Lock
+        old = backend.read_msr_raw(MSR_PKG_POWER_LIMIT)
+        if old is None:
+            log("  [Intel raw restore] 无法预读 MSR 0x610/确认 Lock 状态 → 拒绝写入")
+            return 6
+        if int(old) & MSR_PKG_POWER_LOCK:
+            log("  [Intel raw restore] MSR 0x610 bit63 Lock 置位 (当前值=0x%016X), 拒绝写入" % old)
+            return 6
+        if not backend.write_msr_raw(MSR_PKG_POWER_LIMIT, value):
+            log("  [Intel raw restore] 写入未成功")
+            return 6
+        actual = backend.read_msr_raw(MSR_PKG_POWER_LIMIT)
+        if actual is None:
+            log("  [Intel raw restore] 写后读回失败")
+            return 6
+        if actual != value:
+            log("  [Intel raw restore] 读回不一致: expected=0x%016X actual=0x%016X" % (value, actual))
+            return 6
+        log("  [Intel raw restore] 完整 MSR 读回一致: 0x%016X" % actual)
+        return 0
+    except Exception as e:
+        log("  [Intel raw restore] 写入失败: %s" % e)
+        return 6
+    finally:
+        backend._leave_tx()
+
+
+def intel_restore_raw_once(raw_value, dry=False):
+    if dry:
+        return intel_restore_raw(None, raw_value, True)
+    backend = IntelPawnBackend()
+    rc = backend.open()
+    if rc != 0:
+        return rc
+    try:
+        return intel_restore_raw(backend, raw_value, False)
+    finally:
+        backend.close()
+
+
+# ---------- Intel 兼容计算与一次性 CLI 包装 ----------
+def _clamp_w(w):
+    """钳制 Intel 功耗到 0..300W 并四舍五入。"""
+    try:
+        w = float(w)
+    except Exception:
+        return None
+    if w != w:
+        return None
+    return max(0, min(INTEL_MAX_W, int(round(w))))
+
+def intel_set(pl1_w, pl2_w, dry=False):
+    if dry:
+        return intel_set_pawn(None, pl1_w, pl2_w, True)
+    backend = IntelPawnBackend()
+    rc = backend.open()
+    if rc != 0:
+        return rc
+    try:
+        return intel_set_pawn(backend, pl1_w, pl2_w, False)
+    finally:
+        backend.close()
 
 def intel_get(dry=False):
     if dry:
-        log("  [dry-run] Intel 跳过读取"); return 0
-    r = kx_run(["/rdmsr", "0x610"])
-    out = (r.stdout or "") if r else ""
-    if not kx_ok(r):
-        log("  Intel /rdmsr 0x610 失败 (KX 驱动未加载? 关闭 HWiNFO/ThrottleStop 后重试)"); return 6
-    # KX 成功时输出 "Msr Data : 0xHHHHHHHH 0xLLLLLLLL" (高/低 32 位), 退出码可能非零
-    m = re.search(r"Msr Data\s*:\s*0x([0-9a-fA-F]+)\s+0x([0-9a-fA-F]+)", out)
-    if m:
-        high = int(m.group(1), 16); low = int(m.group(2), 16)
-        pl1 = (low & 0x7FFF) / 8.0
-        pl2 = (high & 0x7FFF) / 8.0
-        log("  Intel MSR 0x610 = 0x%08X%08X  PL1=%.1fW PL2=%.1fW" % (high, low, pl1, pl2))
-    else:
-        # 兜底: 解析 "Return <value>"
-        v = _parse_kx_return(out)
-        if v is not None and v > 0:
-            pl1 = (v & 0x7FFF) / 8.0
-            pl2 = ((v >> 32) & 0x7FFF) / 8.0
-            log("  Intel MSR 0x610 (Return) PL1=%.1fW PL2=%.1fW" % (pl1, pl2))
-        else:
-            log("  Intel MSR 0x610 无有效数据")
-    return 0
+        return intel_get_pawn(None, True)
+    backend = IntelPawnBackend()
+    rc = backend.open()
+    if rc != 0:
+        return rc
+    try:
+        return intel_get_pawn(backend, False)
+    finally:
+        backend.close()
 
 # ---------- 统一写入入口 (无早退 / 无调度 / 无重试循环) ----------
 def apply_tdp(vendor, watts, intel_delta=1, dry=False):
@@ -1652,6 +2689,340 @@ def optiscaler_cmd(argv, dry=False):
     print(json.dumps({"ok": False, "msgs": ["unknown optiscaler subcommand: " + sub]}))
     return 2
 
+# ==========================================================================
+# Daemon 常驻模式 — 安全双向命名管道。
+# 仅由受信任 YeManCC.exe 客户端请求 ping/set/quit；每次 set 等待真实硬件 rc。
+# 单例 mutex 在打开 PawnIO 前获取，禁止并发实例互杀或强杀在途硬件事务。
+# ==========================================================================
+
+
+class _DaemonSecurityAttributes(ctypes.Structure):
+    _fields_ = [
+        ("nLength", ctypes.c_ulong),
+        ("lpSecurityDescriptor", ctypes.c_void_p),
+        ("bInheritHandle", ctypes.c_int),
+    ]
+
+
+def _daemon_amd_gate_call(func):
+    """daemon AMD 常驻句柄操作也必须持有 Global\\Access_PCI。"""
+    gate = _SmuGate()
+    if not gate.acquired:
+        log("  [daemon gate] 未获取 SMU 互斥体, 拒绝操作")
+        return 6
+    with gate:
+        return func()
+
+
+DAEMON_PIPE_NAME = r"\\.\pipe\YeManTdpCtl.v1"
+DAEMON_MUTEX_NAME = "Global\\YeManTdpCtl_Daemon_v1"
+DAEMON_PIPE_MAX = 4096
+DAEMON_ALLOWED_CLIENTS = (
+    r"C:\SOFT\YeMan\YeManCC\YeManCC.exe",
+    r"C:\SOFT\YeMan\YeManCC4\YeManCC\YeManCC.exe",
+)
+
+
+def _daemon_pipe_kernel32():
+    k32 = _kernel32_handles()
+    try:
+        k32.CreateNamedPipeW.argtypes = [ctypes.c_wchar_p, ctypes.c_uint32, ctypes.c_uint32,
+                                         ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32,
+                                         ctypes.c_uint32, ctypes.c_void_p]
+        k32.CreateNamedPipeW.restype = ctypes.c_void_p
+        k32.ConnectNamedPipe.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+        k32.ConnectNamedPipe.restype = ctypes.c_int
+        k32.DisconnectNamedPipe.argtypes = [ctypes.c_void_p]
+        k32.DisconnectNamedPipe.restype = ctypes.c_int
+        k32.FlushFileBuffers.argtypes = [ctypes.c_void_p]
+        k32.FlushFileBuffers.restype = ctypes.c_int
+        k32.ReadFile.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint32,
+                                 ctypes.POINTER(ctypes.c_uint32), ctypes.c_void_p]
+        k32.ReadFile.restype = ctypes.c_int
+        k32.WriteFile.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint32,
+                                  ctypes.POINTER(ctypes.c_uint32), ctypes.c_void_p]
+        k32.WriteFile.restype = ctypes.c_int
+        k32.GetNamedPipeClientProcessId.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_uint32)]
+        k32.GetNamedPipeClientProcessId.restype = ctypes.c_int
+        k32.ProcessIdToSessionId.argtypes = [ctypes.c_uint32, ctypes.POINTER(ctypes.c_uint32)]
+        k32.ProcessIdToSessionId.restype = ctypes.c_int
+        k32.GetLastError.argtypes = []
+        k32.GetLastError.restype = ctypes.c_uint32
+        k32.LocalFree.argtypes = [ctypes.c_void_p]
+        k32.LocalFree.restype = ctypes.c_void_p
+    except Exception:
+        pass
+    return k32
+
+
+def _daemon_security_attributes():
+    """仅 SYSTEM 与管理员组可访问 daemon IPC 对象；返回 (sa, sd)。"""
+    adv = ctypes.windll.advapi32
+    adv.ConvertStringSecurityDescriptorToSecurityDescriptorW.argtypes = [
+        ctypes.c_wchar_p, ctypes.c_ulong, ctypes.POINTER(ctypes.c_void_p), ctypes.c_void_p
+    ]
+    adv.ConvertStringSecurityDescriptorToSecurityDescriptorW.restype = ctypes.c_int
+    sd = ctypes.c_void_p()
+    # D:P = protected DACL；SY=SYSTEM，BA=Built-in Administrators。
+    if not adv.ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            "D:P(A;;GA;;;SY)(A;;GA;;;BA)", 1, ctypes.byref(sd), None):
+        return None, None
+    sa = _DaemonSecurityAttributes()
+    sa.nLength = ctypes.sizeof(sa)
+    sa.lpSecurityDescriptor = sd
+    sa.bInheritHandle = 0
+    return sa, sd
+
+
+def _daemon_singleton_open():
+    """在任何硬件初始化前竞争 daemon 单例。
+    返回 (handle, reason)：ok / already_running / security_failed / create_failed。
+    """
+    k32 = _daemon_pipe_kernel32()
+    sa, sd = _daemon_security_attributes()
+    if sa is None:
+        log("daemon FATAL: 无法创建安全描述符")
+        return None, "security_failed"
+    try:
+        h = k32.CreateMutexW(ctypes.byref(sa), True, DAEMON_MUTEX_NAME)
+        err = k32.GetLastError()
+    finally:
+        _daemon_pipe_kernel32().LocalFree(sd)
+    if not h:
+        log("daemon FATAL: 单例 mutex 创建失败")
+        return None, "create_failed"
+    if err == 183:  # ERROR_ALREADY_EXISTS
+        k32.CloseHandle(h)
+        log("daemon: 已有安全单例运行，本实例退出")
+        return None, "already_running"
+    return h, "ok"
+
+
+def _canonical_exe_path(path):
+    try:
+        return os.path.normcase(os.path.realpath(os.path.abspath(path)))
+    except Exception:
+        return ""
+
+
+def _daemon_client_image(pid):
+    k32 = _daemon_pipe_kernel32()
+    k32.OpenProcess.argtypes = [ctypes.c_uint32, ctypes.c_int, ctypes.c_uint32]
+    k32.OpenProcess.restype = ctypes.c_void_p
+    k32.QueryFullProcessImageNameW.argtypes = [ctypes.c_void_p, ctypes.c_uint32,
+                                               ctypes.c_wchar_p, ctypes.POINTER(ctypes.c_uint32)]
+    k32.QueryFullProcessImageNameW.restype = ctypes.c_int
+    h = k32.OpenProcess(0x1000, False, int(pid))  # PROCESS_QUERY_LIMITED_INFORMATION
+    if not h:
+        return ""
+    try:
+        cap = ctypes.c_uint32(32768)
+        buf = ctypes.create_unicode_buffer(cap.value)
+        if not k32.QueryFullProcessImageNameW(h, 0, buf, ctypes.byref(cap)):
+            return ""
+        return _canonical_exe_path(buf.value)
+    finally:
+        k32.CloseHandle(h)
+
+
+def _daemon_verify_pipe_client(pipe_h):
+    """连接后、读取命令前验证客户端 PID、会话和最终镜像路径。"""
+    k32 = _daemon_pipe_kernel32()
+    pid = ctypes.c_uint32(0)
+    if not k32.GetNamedPipeClientProcessId(pipe_h, ctypes.byref(pid)) or not pid.value:
+        log("daemon pipe: 无法取得客户端 PID，拒绝连接")
+        return False
+    client_session = ctypes.c_uint32(0)
+    self_session = ctypes.c_uint32(0)
+    if (not k32.ProcessIdToSessionId(pid.value, ctypes.byref(client_session)) or
+            not k32.ProcessIdToSessionId(os.getpid(), ctypes.byref(self_session)) or
+            client_session.value != self_session.value):
+        log("daemon pipe: 客户端会话不匹配 pid=%d" % pid.value)
+        return False
+    actual = _daemon_client_image(pid.value)
+    allowed = {_canonical_exe_path(p) for p in DAEMON_ALLOWED_CLIENTS}
+    if not actual or actual not in allowed:
+        log("daemon pipe: 客户端路径未授权 pid=%d path=%s" % (pid.value, actual or "<unknown>"))
+        return False
+    return True
+
+
+def _daemon_pipe_create():
+    k32 = _daemon_pipe_kernel32()
+    sa, sd = _daemon_security_attributes()
+    if sa is None:
+        return None
+    try:
+        h = k32.CreateNamedPipeW(
+            DAEMON_PIPE_NAME,
+            0x00000003,  # PIPE_ACCESS_DUPLEX；单连接服务端同步处理，客户端使用可取消 overlapped I/O
+            0x00000004 | 0x00000002 | 0x00000008,  # MESSAGE | READMODE_MESSAGE | REJECT_REMOTE
+            1, DAEMON_PIPE_MAX, DAEMON_PIPE_MAX, 0, ctypes.byref(sa),
+        )
+    finally:
+        _daemon_pipe_kernel32().LocalFree(sd)
+    if not h or h == ctypes.c_void_p(-1).value:
+        return None
+    return h
+
+
+def _daemon_pipe_read_json(pipe_h):
+    k32 = _daemon_pipe_kernel32()
+    buf = ctypes.create_string_buffer(DAEMON_PIPE_MAX)
+    got = ctypes.c_uint32(0)
+    if not k32.ReadFile(pipe_h, buf, DAEMON_PIPE_MAX, ctypes.byref(got), None):
+        return None
+    if got.value <= 0 or got.value > DAEMON_PIPE_MAX:
+        return None
+    try:
+        obj = json.loads(bytes(buf.raw[:got.value]).decode("utf-8"))
+        return obj if isinstance(obj, dict) else None
+    except Exception:
+        return None
+
+
+def _daemon_pipe_write_json(pipe_h, obj):
+    k32 = _daemon_pipe_kernel32()
+    data = json.dumps(obj, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    if len(data) > DAEMON_PIPE_MAX:
+        return False
+    sent = ctypes.c_uint32(0)
+    buf = ctypes.create_string_buffer(data)
+    return bool(k32.WriteFile(pipe_h, buf, len(data), ctypes.byref(sent), None) and sent.value == len(data))
+
+
+def _daemon_dispatch_request(v, p, cfg, intel_backend, req):
+    """窄命令集 typed RPC；不接受原始命令行，不暴露 restore-raw/UV/PBO。"""
+    request_id = req.get("requestId")
+    resp = {"version": 1, "requestId": request_id, "ok": False, "rc": 2, "error": "bad_request"}
+    if req.get("version") != 1 or not isinstance(request_id, str) or not request_id or len(request_id) > 80:
+        return resp, False
+    op = req.get("op")
+    args = req.get("args") if isinstance(req.get("args"), dict) else {}
+    if op == "ping":
+        resp.update({"ok": True, "rc": 0, "error": "", "result": {"vendor": v}})
+        return resp, False
+    if op == "quit":
+        resp.update({"ok": True, "rc": 0, "error": "", "result": {"stopping": True}})
+        return resp, True
+    if op != "set":
+        resp["error"] = "operation_not_allowed"
+        return resp, False
+    try:
+        w = float(args.get("watts"))
+    except Exception:
+        resp["error"] = "invalid_watts"
+        return resp, False
+    if not (w == w and 2 <= w <= 200):
+        resp["error"] = "watts_out_of_range"
+        return resp, False
+    if v == "amd":
+        mw = int(round(w * 1000))
+        rc = _daemon_amd_gate_call(lambda: amd_set_with(p, cfg, mw, mw, mw))
+    elif v == "intel":
+        rc = intel_set_pawn(intel_backend, w - 1, w, False)
+    else:
+        rc = 5
+    resp.update({"ok": rc == 0, "rc": int(rc),
+                 "error": "" if rc == 0 else "hardware_operation_failed",
+                 "result": {"watts": w, "vendor": v}})
+    return resp, False
+
+
+def daemon_run():
+    """安全 daemon：单例 mutex + 身份验证命名管道；不再读取普通命令文件。"""
+    if not is_admin():
+        log("daemon 需要管理员权限, 自提权重启...")
+        if relaunch_elevated():
+            return 0
+        msgbox("TDP 常驻进程需要管理员权限。\n请右键以管理员身份运行，或在 UAC 提示时点击\"是\"。",
+               "需要管理员权限", MB_ERR)
+        return 3
+    singleton, singleton_reason = _daemon_singleton_open()
+    if not singleton:
+        return 0 if singleton_reason == "already_running" else 6
+    v = detect_vendor()
+    log("daemon secure pipe start vendor=%s pid=%d" % (v, os.getpid()))
+    p = None
+    cfg = None
+    intel_backend = None
+    try:
+        if v == "amd":
+            if not ensure_pawnio():
+                log("daemon FATAL: PawnIO 不可用"); return 3
+            startup_gate = _SmuGate()
+            if not startup_gate.acquired:
+                log("daemon FATAL: 无法获取 Global\\Access_PCI 以加载 AMD 模块")
+                return 6
+            with startup_gate:
+                p, rc = _amd_open()
+            if rc != 0:
+                log("daemon FATAL: _amd_open rc=%d" % rc); return rc
+            cfg = detect_amd_family()
+            if cfg is FAM_UNKNOWN:
+                log("daemon FATAL: CPU family unknown"); return 6
+            log("daemon AMD 句柄已保持, family=%s" % cfg["name"])
+        elif v == "intel":
+            intel_backend = IntelPawnBackend()
+            rc = intel_backend.open()
+            if rc != 0:
+                log("daemon FATAL: Intel PawnIO open rc=%d" % rc)
+                return rc
+            log("daemon Intel PawnIO 句柄已保持, MSR backend ready")
+        else:
+            log("daemon FATAL: vendor unknown"); return 5
+
+        stop = False
+        while not stop:
+            pipe_h = _daemon_pipe_create()
+            if not pipe_h:
+                log("daemon FATAL: 创建安全命名管道失败")
+                return 6
+            try:
+                k32 = _daemon_pipe_kernel32()
+                connected = bool(k32.ConnectNamedPipe(pipe_h, None))
+                if not connected and k32.GetLastError() != 535:  # ERROR_PIPE_CONNECTED
+                    continue
+                if not _daemon_verify_pipe_client(pipe_h):
+                    continue
+                req = _daemon_pipe_read_json(pipe_h)
+                if req is None:
+                    _daemon_pipe_write_json(pipe_h, {"version": 1, "requestId": None,
+                                                     "ok": False, "rc": 2, "error": "invalid_json"})
+                    continue
+                resp, stop = _daemon_dispatch_request(v, p, cfg, intel_backend, req)
+                _daemon_pipe_write_json(pipe_h, resp)
+                try:
+                    k32.FlushFileBuffers(pipe_h)
+                except Exception:
+                    pass
+                log("daemon rpc op=%s id=%s rc=%s" % (req.get("op"), req.get("requestId"), resp.get("rc")))
+            finally:
+                try:
+                    ctypes.windll.kernel32.DisconnectNamedPipe(pipe_h)
+                except Exception:
+                    pass
+                ctypes.windll.kernel32.CloseHandle(pipe_h)
+        return 0
+    finally:
+        try:
+            if p:
+                p.close()
+        except Exception:
+            pass
+        try:
+            if intel_backend:
+                intel_backend.close()
+        except Exception:
+            pass
+        try:
+            _kernel32_handles().ReleaseMutex(singleton)
+        except Exception:
+            pass
+        _kernel32_handles().CloseHandle(singleton)
+
+
+
 def main():
     argv = sys.argv[1:]
     if not argv:
@@ -1667,7 +3038,7 @@ def main():
     cmd = argv[0].lower(); rest = argv[1:]
 
     # 需要硬件通道的命令: 非管理员则自提权重启一次 (dry-run 不碰硬件, 无需提权)
-    if cmd in NEEDS_DRIVER and not is_admin() and not dry:
+    if (cmd in NEEDS_DRIVER or (cmd == "restore" and rest and rest[0].lower() == "--raw")) and not is_admin() and not dry:
         log("当前非管理员，自提权以访问硬件通道...")
         if relaunch_elevated():
             return 0
@@ -1683,21 +3054,36 @@ def main():
                "需要管理员权限", MB_ERR)
         return 3
 
-    # AMD 路径依赖 PawnIO; Intel 路径走 KX.exe 不需要; 风扇路径(任意厂商)依赖 PawnIO。
+    # AMD 路径依赖 PawnIO；Intel 也已切换为 PawnIO，KX 已移除。
     v_for_ensure = (vendor_ov or detect_vendor())
-    need_pawnio = (cmd in ("set", "get", "restore", "info", "set-amd", "uv") and v_for_ensure == "amd")
+    need_pawnio = (cmd in ("set", "get", "restore", "restore-raw", "info", "set-amd", "set-intel", "uv") and v_for_ensure in ("amd", "intel"))
     if need_pawnio and not dry:
         if not ensure_pawnio():
             log("FATAL: PawnIO 不可用，且自动安装失败。"); return 3
+
+    if cmd == "daemon":
+        if dry:
+            log("  [dry-run] daemon 未启动；dry-run 禁止创建可执行真实硬件命令的常驻进程")
+            return 0
+        return daemon_run()
 
     if cmd == "info":
         v = vendor_ov or detect_vendor()
         log("vendor =", v)
         log("PawnIOLib =", DLL)
         log("RyzenSMU.bin =", RYZEN_SMU, "(Newko 同款)")
-        log("KX.exe =", KX_EXE, "(Newko 同款)")
-        if v == "amd": return amd_get()
-        if v == "intel": return intel_get(dry)
+        log("IntelMSR.bin =", INTEL_MSR_BIN, "(UXTU PawnIO backend)")
+        if v == "amd":
+            cfg = detect_amd_family()
+            log("  AMD family:", cfg["name"])
+            log("  transport:", cfg.get("transport"), "verified:", cfg.get("verified_transport"))
+            log("  tdp:", cfg.get("tdp_supported"), "co:", cfg.get("co_supported"))
+            return amd_get()
+        if v == "intel":
+            cap = detect_intel_capability()
+            _intel_cap_log(cap)
+            print(json.dumps(cap))
+            return intel_get(dry)
         return 0
 
     if cmd == "get":
@@ -1707,6 +3093,13 @@ def main():
         log("厂商未识别"); return 5
 
     if cmd == "restore":
+        if rest and rest[0].lower() == "--raw":
+            if len(rest) < 2:
+                log("usage: restore --raw <64-bit-msr-0x610>"); return 2
+            v = vendor_ov or detect_vendor()
+            if v != "intel":
+                log("restore --raw 仅支持 Intel MSR 0x610"); return 2
+            return intel_restore_raw_once(rest[1], dry)
         w = int(rest[0]) if rest else None
         v = vendor_ov or detect_vendor()
         if v == "amd":
@@ -1728,6 +3121,18 @@ def main():
     if cmd == "set-intel":
         if len(rest) < 2: log("usage: set-intel <pl1_w> <pl2_w>"); return 2
         return intel_set(float(rest[0]), float(rest[1]), dry)
+
+    if cmd == "pbo":
+        # AM5 PBO PPT/TDC/EDC (非 APU STAPM/FAST/SLOW)
+        # pbo 65000 95000 150000  → ppt=65W tdc=95A edc=150A
+        if len(rest) < 3: log("usage: pbo <ppt_mw> <tdc_ma> <edc_ma>"); return 2
+        return amd_set_pbo(int(rest[0]), int(rest[1]), int(rest[2]), dry)
+
+    if cmd == "intel-cap":
+        cap = detect_intel_capability()
+        _intel_cap_log(cap)
+        print(json.dumps(cap))
+        return 0
 
     if cmd == "uv":
         if not rest:
@@ -1762,6 +3167,16 @@ def main():
             if v == "intel": return intel_uv_set(val, dry)
             log("厂商未识别"); return 5
         if sub == "probe":
+            if dry:
+                if v == "amd":
+                    print(json.dumps({"vendor": "amd", "supported": False, "reason": "dry_run_no_hardware_access",
+                                      "current": 0, "readback": False, "current_semantics": "probe_skipped"}))
+                elif v == "intel":
+                    print(json.dumps({"vendor": "intel", "supported": False, "reason": "dry_run_no_hardware_access",
+                                      "current": 0, "restored": True}))
+                else:
+                    print(json.dumps({"vendor": "", "supported": False, "reason": "unknown_vendor", "current": 0}))
+                return 0
             if v == "amd":
                 print(json.dumps(amd_uv_probe()))
             elif v == "intel":
@@ -1780,6 +3195,8 @@ def main():
         if sub == "temp":
             return fan_cmd_temp()
         if sub == "set-auto":
+            if dry:
+                print(json.dumps({"ok": True, "dry": True, "mode": "auto"})); return 0
             return fan_cmd_set_auto()
         if sub == "set":
             if not rest2:
@@ -1788,6 +3205,8 @@ def main():
                 pct = int(rest2[0])
             except Exception:
                 log("fan set 参数必须是整数(0-100)"); return 2
+            if dry:
+                print(json.dumps({"ok": True, "dry": True, "percent": max(0, min(100, pct))})); return 0
             return fan_cmd_set_duty(pct)
         if sub == "rpm":
             return fan_cmd_rpm()
@@ -1808,4 +3227,13 @@ def main():
     log("未知命令:", cmd); return 2
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except (ValueError, TypeError, IndexError) as e:
+        # CLI 参数错误统一走 rc=2，避免 PyInstaller windowed traceback 弹红框。
+        log("参数错误: %s" % e)
+        sys.exit(2)
+    except Exception as e:
+        # 硬件控制器禁止未处理异常弹窗；未知运行时错误记录后优雅退出。
+        log("未处理运行时错误: %s" % e)
+        sys.exit(6)

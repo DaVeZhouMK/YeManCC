@@ -15,14 +15,20 @@ $HB       = Join-Path $DIR "fps-monitor.hb"
 $HWINFO_OK = Join-Path $DIR "hwinfo-ok"
 $EXCLUDE  = Join-Path $DIR "Sleep\exclude.txt"
 
-# ── 单实例：杀掉旧实例 ──
-if (Test-Path $PIDFILE) {
-    $old = [int](Get-Content $PIDFILE -ErrorAction SilentlyContinue)
-    if ($old -and $old -ne $PID) {
-        $op = Get-Process -Id $old -ErrorAction SilentlyContinue
-        if ($op -and $op.ProcessName -match "powershell") { Stop-Process -Id $old -Force }
+# ── 单实例：杀掉所有其它运行中的本脚本实例 ──
+# 旧逻辑只按 pidfile 杀「一个」旧 PID；反复重拉时旧实例未被引用→僵尸累积。
+# 改为按命令行匹配杀掉全部同类 powershell 实例，保证任意时刻最多一个存活。
+try {
+    $me = $PID
+    Get-CimInstance Win32_Process -Filter "Name='powershell.exe' OR Name='pwsh.exe'" -ErrorAction SilentlyContinue | ForEach-Object {
+        if ($_.ProcessId -ne $me) {
+            $cl = $_.CommandLine
+            if ($cl -and $cl -like '*-File*' -and $cl -like '*FPS-Monitor.ps1*') {
+                Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+            }
+        }
     }
-}
+} catch { }
 Set-Content -Path $PIDFILE -Value $PID
 if (Test-Path $STOPFLAG) { Remove-Item $STOPFLAG -Force }
 # 初始心跳：证明守护已存活（前端据此区分"空闲"与"守护已死"）
@@ -54,7 +60,7 @@ function Load-Exclude {
     return $set
 }
 
-# ── HWiNFO 共享内存读取（帧率 avg/1%Low + GPU 3D 负载最大值）──
+# ── HWiNFO 共享内存读取（帧率 avg/1%Low + GPU 3D 负载 + CPU Package Power）──
 # 内存映射 "Global\HWiNFO_SENS_SM2"，签名 0x53695748("HWiS")；布局遵循 REALiX 官方 SM2 规范（#pragma pack(1)）
 # Header: dwOffsetOfReadingSection@32 / dwSizeOfReadingElement@36 / dwNumReadingElements@40
 # Reading 元素(460B): szLabelOrig@+12(128 ANSI) / szUnit@+268(16 ANSI) / double Value@+284 / double ValueAvg@+308
@@ -62,7 +68,7 @@ function Load-Exclude {
 # GPU 3D 负载（多 GPU 取最大值）：标签含 "GPU" + 单位 "%" + (D3D Usage|Core Load|Utilization)，
 #   排除 Video/Compute/显存控制器/总线/风扇/显存占用 等无关传感器；比 Win32_PerfFormattedData 准很多
 function Read-HwinfoAll {
-    $res = @{ avg = 0.0; p1 = 0.0; gpu = 0.0; ok = $false; err = '' }
+    $res = @{ avg = 0.0; p1 = 0.0; gpu = 0.0; packagePower = 0.0; ok = $false; err = ''; presentedSensor = $false }
     $mmf = $null
     foreach ($nm in @('Global\HWiNFO_SENS_SM2','HWiNFO_SENS_SM2','Global\HWiNFO_SENS_SM','HWiNFO_SENS_SM')) {
         try { $mmf = [System.IO.MemoryMappedFiles.MemoryMappedFile]::OpenExisting($nm); if ($mmf) { break } } catch {}
@@ -86,13 +92,17 @@ function Read-HwinfoAll {
             $acc.ReadArray([long]($base + 12), $buf, 0, 128) | Out-Null   # szLabelOrig (ANSI)
             $lab = $enc.GetString($buf).TrimEnd([char]0)
             if ($lab -match 'Framerate') {
-                $v  = $acc.ReadDouble([long]($base + 284))   # double Value (current, 噪声大)
-                $va = $acc.ReadDouble([long]($base + 308))   # double ValueAvg (running avg, 稳定)
-                $cur  = $v; if ($cur  -eq 0) { $cur  = $va }   # avg: 用瞬时值（实时帧率），缺失回退运行均值
-                $cur1 = $v; if ($cur1 -eq 0) { $cur1 = $va }   # 1%Low: 用瞬时值（实时），缺失回退运行均值
+                $v  = $acc.ReadDouble([long]($base + 284))
+                $va = $acc.ReadDouble([long]($base + 308))
+                $cur  = if (-not [double]::IsNaN($v) -and -not [double]::IsInfinity($v)) { $v } else { 0 }
+                $cur1 = if (-not [double]::IsNaN($v) -and -not [double]::IsInfinity($v)) { $v } else { 0 }
                 if ($lab -match 'Presented' -and $lab -match '\(avg\)') {
+                    $res.presentedSensor = $true
+                    if ($cur -le 0 -and -not [double]::IsNaN($va) -and -not [double]::IsInfinity($va)) { $cur = $va }
                     $res.avg = $cur
                 } elseif (($lab -match 'Presented' -and $lab -match '\(1%\)') -or ($lab -match '1% Low')) {
+                    $res.presentedSensor = $true
+                    if ($cur1 -le 0 -and -not [double]::IsNaN($va) -and -not [double]::IsInfinity($va)) { $cur1 = $va }
                     if ($res.p1 -eq 0) { $res.p1 = $cur1 }
                 }
             } elseif ($lab -match 'GPU' -and $lab -notmatch 'Video|Compute|Memory Controller|Bus Load|Busy|Memory Usage|Fan') {
@@ -103,9 +113,17 @@ function Read-HwinfoAll {
                     $gv = $acc.ReadDouble([long]($base + 284))   # 当前负载(%)，取多 GPU 最大值
                     if ($gv -gt $res.gpu) { $res.gpu = $gv }
                 }
+            } elseif ($lab -match '(?i)CPU.*(Package|Pkg).*Power|Package Power.*CPU' -and $lab -notmatch '(?i)Core|CCD|SoC|GPU') {
+                # CPU Package Power：只取整颗 CPU 封装功耗，避免误读单核心/CCD/SoC 功耗
+                $acc.ReadArray([long]($base + 268), $bufU, 0, 16) | Out-Null
+                $unit = $enc.GetString($bufU).TrimEnd([char]0)
+                if ($unit -match '(?i)^W$|Watts?') {
+                    $pv = $acc.ReadDouble([long]($base + 284))
+                    if ($pv -gt 0) { $res.packagePower = $pv }
+                }
             }
         }
-        if ($res.avg -gt 0 -or $res.p1 -gt 0) { $res.ok = $true }
+        if ($res.presentedSensor) { $res.ok = $true }
         else { $res.err = 'Framerate Presented sensors not found' }
     } finally {
         if ($acc) { $acc.Dispose() }
@@ -117,9 +135,28 @@ function Read-HwinfoAll {
 # ── 主循环 ──
 $excl = Load-Exclude
 $LOG  = Join-Path $DIR "fps-monitor.log"
-# 工具：用 .NET IO 替代 PowerShell cmdlet（避免 Set-Content 在某些环境卡死文件锁）
+# 游戏进程枚举缓存：Get-Process 全枚举（提权下遍历全系统进程+查工作集）很重，约 200ms+ 系统级瞬时负载。
+# 若每 2 秒跑一次，YeManCC 的 UI 线程消息泵会被判定持续繁忙 → 鼠标旁出现 IDC_APPSTARTING 转圈。
+# 且此分支只在 HWiNFO 提供帧率时才进入（$hw.ok -and $fps -gt 0）——正好解释「只有 浮动+HWiNFO64 开才转圈」。
+# 用户要求：游戏进程还在 → 不再搜索、直接继续；游戏没了 → 每 GAME_ENUM_MS 才搜一次。
+$gameCacheId = 0; $gameCacheName = $null; $gameCacheTs = 0
+$GAME_ENUM_MS = 30000
+# 工具：原子写（temp 写入 + File.Replace 替换），读者永远看到旧值或新值，不会读到
+# 截断半截内容。原 File.WriteAllText 先截断再写，前端每秒读 hb/status 时若撞上截断窗口会
+# 读到空/半截→JSON.parse 失败→readStatus 返回 null→前端误判守护死亡→反复重拉（抖动根因）。
 function Write-Atomic($path, $content) {
-    try { [System.IO.File]::WriteAllText($path, $content) } catch { }
+    try {
+        $tmp = $path + '.tmp'
+        [System.IO.File]::WriteAllText($tmp, $content)
+        if (Test-Path $path) {
+            [System.IO.File]::Replace($tmp, $path, $null)  # 原子替换（NTFS MoveFileEx）
+        } else {
+            [System.IO.File]::Move($tmp, $path)
+        }
+    } catch {
+        # 极端情况回退：直接写（仍可能被截断，但至少尽力）
+        try { [System.IO.File]::WriteAllText($path, $content) } catch { }
+    }
 }
 function Touch-Delete($path) {
     try { if (Test-Path $path) { Remove-Item $path -Force } } catch { }
@@ -138,8 +175,9 @@ while ($true) {
         $fps  = [math]::Round($hw.avg, 1)
         $fps1 = [math]::Round($hw.p1, 1)
         $gpu  = [math]::Round($hw.gpu, 0)
+        $packagePower = [math]::Round($hw.packagePower, 1)
 
-        # HWiNFO 健康标记（仅成功读时写入时间戳；前端 30s 有效）
+        # HWiNFO 健康标记：共享内存/header/目标传感器可读即健康，FPS 为 0 不代表 HWiNFO 故障。
         if ($hw.ok) {
             Write-Atomic $HWINFO_OK ([DateTimeOffset]::Now.ToUnixTimeMilliseconds().ToString())
         } else {
@@ -148,22 +186,40 @@ while ($true) {
 
         if ($hw.ok -and $fps -gt 0) {
             # 有渲染 → 选游戏进程：工作集 > 500MB + 黑名单过滤，取最大工作集者
-            $best = $null; $bestWs = 0
-            foreach ($pr in (Get-Process | Where-Object { $_.WorkingSet64 -gt 524288000 })) {
-                $nm = $pr.ProcessName.ToLower()
-                if (-not $excl.ContainsKey($nm)) {
-                    if ($pr.WorkingSet64 -gt $bestWs) { $bestWs = $pr.WorkingSet64; $best = $pr }
+            # ⚠ 全进程枚举很重（提权遍历全系统进程+查工作集）。用户要求：游戏进程还在 → 不再搜索直接继续；
+            #   游戏没了 → 每 GAME_ENUM_MS(30s) 才搜一次。缓存窗口内的存活校验用轻量 Get-Process -Id（毫秒级）。
+            $nowMs = [DateTimeOffset]::Now.ToUnixTimeMilliseconds()
+            if ($gameCacheId -le 0) {
+                # 无缓存游戏 → 冷却期外才全枚举搜索新游戏
+                if ($nowMs - $gameCacheTs -gt $GAME_ENUM_MS) {
+                    $gameCacheTs = $nowMs
+                    $best = $null; $bestWs = 0
+                    foreach ($pr in (Get-Process | Where-Object { $_.WorkingSet64 -gt 524288000 })) {
+                        $nm = $pr.ProcessName.ToLower()
+                        if (-not $excl.ContainsKey($nm)) {
+                            if ($pr.WorkingSet64 -gt $bestWs) { $bestWs = $pr.WorkingSet64; $best = $pr }
+                        }
+                    }
+                    if ($best) {
+                        $gameCacheName = $best.ProcessName; $gameCacheId = [int]$best.Id
+                    }
                 }
+            } elseif ($nowMs - $gameCacheTs -gt $GAME_ENUM_MS) {
+                # 有缓存游戏且到 30s：仅轻量单进程校验存活；仍在 → 直接继续（不枚举）；死了 → 清缓存走搜索
+                $gameCacheTs = $nowMs
+                $chk = Get-Process -Id $gameCacheId -ErrorAction SilentlyContinue
+                if (-not $chk) { $gameCacheId = 0; $gameCacheName = $null }
             }
-            if ($best) {
+            if ($gameCacheId -gt 0) {
                 # 有真实游戏：每 2 秒记录完整数据（用户明确要求 2 秒刷新）
                 $json = '{"ts":' + [DateTimeOffset]::Now.ToUnixTimeMilliseconds() +
                         ',"fps":' + $fps + ',"fps1":' + $fps1 + ',"gpu":' + $gpu +
-                        ',"game":' + $('"' + $best.ProcessName + '"') + ',"pid":' + [int]$best.Id + '}'
+                        ',"packagePower":' + $packagePower +
+                        ',"game":' + $('"' + $gameCacheName + '"') + ',"pid":' + $gameCacheId + '}'
                 Write-Atomic $STATUS $json
                 # 调试日志：每 10 轮记录一次（避免日志爆炸）
                 if ($cycle % 10 -eq 0) {
-                    Write-Atomic $LOG ("[{0}] cycle=$cycle game={1} fps=$fps fps1=$fps1 gpu=$gpu`n" -f ([DateTimeOffset]::Now.ToString('HH:mm:ss')), $best.ProcessName)
+                    Write-Atomic $LOG ("[{0}] cycle=$cycle game={1} fps=$fps fps1=$fps1 gpu=$gpu packagePower=$packagePower`n" -f ([DateTimeOffset]::Now.ToString('HH:mm:ss')), $gameCacheName)
                 }
                 Start-Sleep -Milliseconds 2000
                 continue

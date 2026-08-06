@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue';
+import InlineIcon from './InlineIcon.vue';
 
 const props = withDefaults(
   defineProps<{
@@ -8,6 +9,7 @@ const props = withDefaults(
     max?: number;
     step?: number;
     label?: string;
+    icon?: string;
     unit?: string;
     color?: 'ac' | 'dc' | 'accent';
     disabled?: boolean;
@@ -24,14 +26,17 @@ const emit = defineEmits<{
   (e: 'commit', v: number): void;
 }>();
 
-const pct = computed(() =>
-  Math.max(0, Math.min(100, ((props.modelValue - props.min) / (props.max - props.min)) * 100))
-);
+// min===max 时避免除零（如 TDP 上限被钳到单值档）：填充条按 0% 处理而非 Infinity
+const pct = computed(() => {
+  const span = props.max - props.min;
+  if (span <= 0) return 0;
+  return Math.max(0, Math.min(100, ((props.modelValue - props.min) / span) * 100));
+});
 const accentVar = computed(() =>
-  props.color === 'dc' ? 'var(--accent-2)' : 'var(--accent)'
+  props.color === 'dc' ? 'var(--dc-accent)' : 'var(--accent)'
 );
 const thumbGlow = computed(() =>
-  props.color === 'dc' ? 'rgba(245, 185, 61, 0.32)' : 'rgba(46, 166, 255, 0.32)'
+  props.color === 'dc' ? 'color-mix(in srgb, var(--dc-accent) 32%, transparent)' : 'rgba(46, 166, 255, 0.32)'
 );
 
 function onInput(e: Event) {
@@ -67,7 +72,10 @@ function onKeyup(e: KeyboardEvent) {
 <template>
   <div class="slider" :class="{ disabled }" :style="{ '--thumb-color': accentVar, '--thumb-glow': thumbGlow }">
     <div class="slider-head" v-if="label">
-      <span class="slider-label">{{ label }}</span>
+      <span class="slider-label">
+        <InlineIcon v-if="icon" :name="icon" class="slider-ic" />
+        {{ label }}
+      </span>
       <span class="slider-val" :style="{ color: accentVar }"
         >{{ displayValue }}<small v-if="unit && !valueText"> {{ unit }}</small></span
       >
@@ -82,6 +90,7 @@ function onKeyup(e: KeyboardEvent) {
         :step="step"
         :value="modelValue"
         :disabled="disabled"
+        :aria-label="label || '滑块'"
         @input="onInput"
         @change="onChange"
         @keydown="onKeydown"
@@ -108,6 +117,10 @@ function onKeyup(e: KeyboardEvent) {
 .slider-label {
   color: var(--text);
   font-size: 13px;
+}
+.slider-ic {
+  margin-right: 6px;
+  opacity: 0.85;
 }
 .slider-val {
   font-variant-numeric: tabular-nums;

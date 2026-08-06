@@ -32,27 +32,32 @@ const highlight = ref(0);
 // 弹层用 fixed 定位到视口（teleport 到 body），避免被 overflow 滚动容器裁切
 const menuStyle = ref<Record<string, string>>({});
 
-const selectedIndex = computed(() =>
-  Math.max(0, props.options.findIndex((o) => o.value === props.modelValue))
-);
+const selectedIndex = computed(() => {
+  // modelValue 不在选项中时返回 -1：菜单打开不高亮任何项，避免误导「第一个就是当前值」
+  const idx = props.options.findIndex((o) => o.value === props.modelValue);
+  return idx >= 0 ? idx : -1;
+});
 const selectedLabel = computed(() => {
   const o = props.options.find((op) => op.value === props.modelValue);
   return o ? o.label : props.placeholder ?? '—';
 });
 
 function colorVar(): string {
-  if (props.color === 'dc') return 'var(--accent-2)';
+  if (props.color === 'dc') return 'var(--dc-accent)';
   return 'var(--accent)';
 }
 
 function openMenu() {
   if (props.disabled || open.value) return;
   computePosition();
-  highlight.value = selectedIndex.value;
+  // modelValue 不在选项中时（selectedIndex=-1）不高亮任何项，避免误导
+  highlight.value = Math.max(0, selectedIndex.value);
   open.value = true;
   nextTick(() => {
     const el = menuEl.value?.querySelector<HTMLElement>('[data-hl="true"]');
     el?.scrollIntoView({ block: 'nearest' });
+    // 焦点落到高亮项：手柄 A 打开菜单后可直接 A 确认 / B 取消 / 上下移动（与鼠标菜单一致）
+    el?.focus({ preventScroll: true });
   });
 }
 
@@ -60,11 +65,19 @@ function closeMenu() {
   open.value = false;
 }
 
+function restoreTriggerFocus() {
+  const trigger = triggerEl.value;
+  if (!trigger) return;
+  document.querySelectorAll('.focused').forEach((n) => n.classList.remove('focused'));
+  trigger.focus({ preventScroll: true });
+  trigger.classList.add('focused');
+}
+
 // 计算弹层 fixed 定位（对齐 trigger；空间不足则向上翻转）
 function computePosition() {
   const r = triggerEl.value?.getBoundingClientRect();
   if (!r) return;
-  const MENU_MAX = 240;
+  const MENU_MAX = 360;
   const style: Record<string, string> = {
     position: 'fixed',
     left: r.left + 'px',
@@ -95,12 +108,15 @@ function select(i: number) {
   emit('update:modelValue', o.value);
   emit('change', o.value);
   closeMenu();
-  triggerEl.value?.focus({ preventScroll: true });
+  restoreTriggerFocus();
 }
 
 function move(dir: 1 | -1) {
-  let i = highlight.value;
+  if (!open.value || !menuEl.value) return;
   const n = props.options.length;
+  if (n === 0) return; // 选项为空：不导航，避免除零/越界（2026-08-05 修复）
+  // 选项列表在打开期间可能被父组件改短：先钳到合法范围再取模，避免指向陈旧下标
+  let i = Math.max(0, Math.min(n - 1, highlight.value));
   for (let k = 0; k < n; k++) {
     i = (i + dir + n) % n;
     if (!props.options[i].disabled) break;
@@ -108,6 +124,7 @@ function move(dir: 1 | -1) {
   highlight.value = i;
   const el = menuEl.value?.querySelectorAll<HTMLElement>('.dd-option')[i];
   el?.scrollIntoView({ block: 'nearest' });
+  el?.focus({ preventScroll: false });
 }
 
 function onTriggerKey(e: KeyboardEvent) {
@@ -124,7 +141,7 @@ function onMenuKey(e: KeyboardEvent) {
   if (e.key === 'Escape') {
     e.preventDefault();
     closeMenu();
-    triggerEl.value?.focus({ preventScroll: true });
+    restoreTriggerFocus();
   } else if (e.key === 'ArrowDown') {
     e.preventDefault();
     move(1);
@@ -137,6 +154,14 @@ function onMenuKey(e: KeyboardEvent) {
   }
 }
 
+// ── 手柄 B 键：菜单打开时拦截返回，关闭菜单并把焦点交还触发器 ──
+function onGpBack(e: Event) {
+  if (open.value) {
+    e.preventDefault();
+    closeMenu();
+    restoreTriggerFocus();
+  }
+}
 // 点击外部关闭（弹层已 teleport 到 body，故需同时判断 rootEl 与 menuEl）
 function onDocPointer(e: PointerEvent) {
   if (!open.value) return;
@@ -144,35 +169,36 @@ function onDocPointer(e: PointerEvent) {
   if ((rootEl.value && rootEl.value.contains(t)) || (menuEl.value && menuEl.value.contains(t))) return;
   closeMenu();
 }
-// 滚动关闭（避免错位）
-function onScroll() {
-  if (open.value) closeMenu();
+// 滚动关闭（避免错位；排除菜单自身 scrollIntoView 引发的滚动事件——根因：高亮最后一项时
+// scrollIntoView 触发 window scroll → 旧逻辑立即 closeMenu → 用户看到菜单闪现即消失 = "卡死"）
+function onScroll(e: Event) {
+  if (!open.value) return;
+  const t = e.target as HTMLElement;
+  if (menuEl.value && menuEl.value.contains(t)) return;
+  closeMenu();
 }
 
 onMounted(() => {
   document.addEventListener('pointerdown', onDocPointer);
   window.addEventListener('scroll', onScroll, true);
+  window.addEventListener('ipc:gamepad-back', onGpBack);
 });
 onBeforeUnmount(() => {
   document.removeEventListener('pointerdown', onDocPointer);
   window.removeEventListener('scroll', onScroll, true);
+  window.removeEventListener('ipc:gamepad-back', onGpBack);
 });
 
-// ── 手柄 X/A 循环（对齐原生 select 的旧行为）──
-function cycle() {
-  if (props.disabled) return;
-  const n = props.options.length;
-  if (n === 0) return;
-  let i = selectedIndex.value;
-  for (let k = 0; k < n; k++) {
-    i = (i + 1) % n;
-    if (!props.options[i].disabled) break;
-  }
-  select(i);
-}
-function onGpCycle(e: Event) {
+// ── 手柄 A/X：打开菜单（与鼠标点击一致），不再顺序轮转档位 ──
+function onGpOpen(e: Event) {
   e.preventDefault();
-  cycle();
+  openMenu();
+}
+// ── 手柄上下导航（来自引擎 gp:dropdown-nav）：在菜单项内移动高亮并聚焦 ──
+function onGpNav(e: Event) {
+  const dir = (e as CustomEvent<{ dir: number }>).detail?.dir;
+  if (dir !== 1 && dir !== -1) return;
+  move(dir);
 }
 </script>
 
@@ -184,12 +210,14 @@ function onGpCycle(e: Event) {
     :style="width ? { width } : undefined"
     data-gp-dropdown
     @pointerdown.stop
-    @gp:dropdown-cycle="onGpCycle"
+    @gp:dropdown-open="onGpOpen"
+    @gp:dropdown-nav="onGpNav"
   >
     <button
       ref="triggerEl"
       type="button"
       class="dd-trigger"
+      data-gp-dropdown
       :aria-label="ariaLabel"
       :disabled="disabled"
       :aria-expanded="open"
@@ -249,7 +277,7 @@ function onGpCycle(e: Event) {
   width: 100%;
   --dd-accent: var(--accent);
 }
-.dd-dc { --dd-accent: var(--accent-2); }
+.dd-dc { --dd-accent: var(--dc-accent); }
 .dd-ac { --dd-accent: var(--accent); }
 
 .dd-trigger {
@@ -258,12 +286,13 @@ function onGpCycle(e: Event) {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 8px 10px;
+  padding: var(--btn-py) var(--btn-px);
+  min-height: var(--btn-min-h);
   background: var(--bg-input);
   color: var(--text);
   border: 1px solid #2a3342;
   border-radius: var(--radius-ctrl);
-  font-size: 12px;
+  font-size: 13px;
   font-family: inherit;
   cursor: pointer;
   transition: border-color 0.12s, background 0.12s, box-shadow 0.12s;
@@ -306,7 +335,7 @@ function onGpCycle(e: Event) {
   border-radius: 10px;
   padding: 5px;
   box-shadow: 0 14px 36px rgba(0, 0, 0, 0.5);
-  max-height: 240px;
+  max-height: 360px;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
@@ -318,12 +347,12 @@ function onGpCycle(e: Event) {
   justify-content: space-between;
   gap: 8px;
   width: 100%;
-  padding: 9px 10px;
+  padding: 11px 12px;
   background: transparent;
   border: none;
   border-radius: var(--radius-ctrl);
   color: var(--text);
-  font-size: 13px;
+  font-size: 14px;
   font-family: inherit;
   text-align: left;
   cursor: pointer;
@@ -338,11 +367,13 @@ function onGpCycle(e: Event) {
 }
 .dd-opt-sub {
   display: inline;
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 400;
   color: var(--text-dim);
   margin-left: 6px;
+  white-space: nowrap;
 }
+.dd-opt-label { white-space: nowrap; }
 .dd-opt-disabled {
   opacity: 0.4;
   cursor: not-allowed;

@@ -21,7 +21,7 @@ EADesktop.exe
 UbisoftConnect.exe
 XboxApp.exe
 
-# ---- 即时通讯 / 主流软件（用户点名：QQ、微信 等）----
+# ---- 即时通讯 / 社交 ----
 QQ.exe
 QQExternal.exe
 WeChat.exe
@@ -32,6 +32,82 @@ Discord.exe
 Telegram.exe
 Slack.exe
 WorkBuddy.exe
+
+# ---- 浏览器（常驻、体量大但不应被冻结）----
+msedge.exe
+edge.exe
+chrome.exe
+brave.exe
+firefox.exe
+
+# ---- 主流办公软件 ----
+# Microsoft Office
+WINWORD.EXE
+EXCEL.EXE
+POWERPNT.EXE
+OUTLOOK.EXE
+ONENOTE.EXE
+MSACCESS.EXE
+MSPUB.EXE
+# WPS Office
+wps.exe
+wpscenter.exe
+et.exe
+wpp.exe
+wpspdf.exe
+# PDF / 文档阅读
+Acrobat.exe
+AcroRd32.exe
+FoxitReader.exe
+FoxitPhantomPDF.exe
+# 笔记 / 协作文档
+Notion.exe
+DingTalk.exe
+Feishu.exe
+
+# ---- 图像 / 设计（Adobe 全家桶 + 常见设计工具）----
+photoshop.exe
+illustrator.exe
+PremierePro.exe
+AfterFX.exe
+lightroom.exe
+InDesign.exe
+Bridge.exe
+CorelDRW.exe
+Krita.exe
+Blender.exe
+Meitu.exe
+
+# ---- 视频剪辑 / 录制 ----
+JianyingPro.exe
+CapCut.exe
+Resolve.exe
+obs64.exe
+
+# ---- AI 类软件（桌面客户端）----
+ChatGPT.exe
+Claude.exe
+Gemini.exe
+DeepSeek.exe
+Doubao.exe
+Yuanbao.exe
+Kimi.exe
+Perplexity.exe
+Cursor.exe
+Ollama.exe
+LM Studio.exe
+
+# ---- 抖音系 / 短视频创作 ----
+Douyin.exe
+
+# ---- 常用工具 / 多媒体 ----
+wemeetapp.exe
+BaiduNetdisk.exe
+AliyDrive.exe
+Quark.exe
+cloudmusic.exe
+qqmusic.exe
+Thunder.exe
 
 # ---- 自身与工具（代码已硬编码排除，列此双保险）----
 YeManCC.exe

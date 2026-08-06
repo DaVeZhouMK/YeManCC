@@ -17,48 +17,90 @@ const connected = ref(false);
 const padName = ref('');
 const testMode = ref(false);
 let raf = 0;
+let probeTimer = 0; // 无手柄时的低频探测 timer（省 CPU）
+// 复用缓冲：仅当内容变化时才整体替换 ref，避免每帧 map + Vue 响应式开销
+let lastLive: boolean[] = [];
+let lastAxes: number[] = [];
 
 function setTestMode(v: boolean) {
   testMode.value = v;
   window.dispatchEvent(new CustomEvent('ipc:gamepad.testmode', { detail: v }));
 }
 
+function scheduleNext(connectedNow: boolean) {
+  if (connectedNow) {
+    raf = requestAnimationFrame(poll);
+  } else {
+    // 无手柄：250ms 低频探测（连接后由下一轮恢复 60Hz）
+    probeTimer = window.setTimeout(poll, 250);
+  }
+}
+
 function poll() {
   try {
     const pads = navigator.getGamepads ? navigator.getGamepads() : [];
-    const p = Array.from(pads).find((x) => x && x.connected) || null;
+    let p: Gamepad | null = null;
+    for (const x of pads) if (x && x.connected) { p = x; break; }
     if (p) {
       connected.value = true;
       padName.value = p.id || '手柄';
-      const pressedNow = p.buttons.map((b) => b.pressed);
-      live.value = pressedNow;
-      axes.value = Array.from(p.axes).map((a) => (Number.isFinite(a) ? a : 0));
+      const bl = p.buttons.length;
+      if (lastLive.length !== bl) lastLive = new Array(bl).fill(false);
+      const al = p.axes.length;
+      if (lastAxes.length !== al) lastAxes = new Array(al).fill(0);
+      let liveChanged = false;
+      let axesChanged = false;
+      for (let i = 0; i < bl; i++) {
+        const v = p.buttons[i].pressed;
+        if (lastLive[i] !== v) { lastLive[i] = v; liveChanged = true; }
+      }
+      for (let i = 0; i < al; i++) {
+        const v = Number.isFinite(p.axes[i]) ? p.axes[i] : 0;
+        if (lastAxes[i] !== v) { lastAxes[i] = v; axesChanged = true; }
+      }
+      if (liveChanged) live.value = lastLive.slice();
+      if (axesChanged) axes.value = lastAxes.slice();
+      scheduleNext(true);
     } else {
+      if (connected.value) {
+        connected.value = false;
+        live.value = [];
+        axes.value = [];
+      }
+      scheduleNext(false);
+    }
+  } catch {
+    if (connected.value) {
       connected.value = false;
       live.value = [];
       axes.value = [];
     }
-  } catch {
-    connected.value = false;
+    scheduleNext(false);
   }
-  raf = requestAnimationFrame(poll);
+}
+
+function onTestModeEvent(e: Event) {
+  testMode.value = Boolean((e as CustomEvent<boolean>).detail);
 }
 
 onMounted(() => {
+  window.addEventListener('ipc:gamepad.testmode', onTestModeEvent);
   raf = requestAnimationFrame(poll);
 });
 onBeforeUnmount(() => {
   if (raf) cancelAnimationFrame(raf);
+  if (probeTimer) clearTimeout(probeTimer);
+  window.removeEventListener('ipc:gamepad.testmode', onTestModeEvent);
   setTestMode(false);
 });
 watch(connected, (c) => {
   if (!c && testMode.value) setTestMode(false); // 断连时自动退出测试模式
 });
 
-// 摇杆方向点（按 02.png 机身缩放后校准）
-const STICK_L = { x: 141, y: 154 };
-const STICK_R = { x: 247, y: 204 };
-const STICK_TRAVEL = 9;
+// 交互层以原始 420x270 标定坐标为基准；模板统一应用与 495px PNG 相同的 1.1 倍几何变换。
+const STICK_L = { x: 116, y: 138 };
+const STICK_R = { x: 255, y: 191 };
+const STICK_TRAVEL = 10;
 const stickL = computed(() => ({
   x: STICK_L.x + (axes.value[0] || 0) * STICK_TRAVEL,
   y: STICK_L.y + (axes.value[1] || 0) * STICK_TRAVEL,
@@ -85,7 +127,7 @@ function cls(i: number): Record<string, boolean> {
 <template>
   <div class="viz">
     <div class="pad-wrap">
-      <svg viewBox="0 61 420 249" class="pad" aria-label="手柄可视化">
+      <svg viewBox="0 48 420 270" class="pad" aria-label="手柄可视化">
         <defs>
           <filter id="glow-green" x="-50%" y="-50%" width="200%" height="200%">
             <feGaussianBlur stdDeviation="3" result="coloredBlur" />
@@ -94,109 +136,119 @@ function cls(i: number): Record<string, boolean> {
               <feMergeNode in="SourceGraphic" />
             </feMerge>
           </filter>
+          <!-- 底图为近黑剪影：按 alpha 强行映射为纯白，形状/位置不变 -->
+          <filter id="whiteShape" x="-20%" y="-20%" width="140%" height="140%">
+            <feColorMatrix in="SourceGraphic" type="matrix"
+              values="0 0 0 0 1
+                      0 0 0 0 1
+                      0 0 0 0 1
+                      0 0 0 1 0" />
+          </filter>
         </defs>
 
-        <!-- 机身底图：原图已适配黑色 UI，直接显示 -->
+        <!-- PNG 在上一版基础上向下 5%（约 10.5）并放大 10%，以中心 x=210 放大。 -->
         <image
           href="/gamepad-base.png"
-          x="40"
-          y="60"
-          width="340"
-          height="283"
+          x="-37.5"
+          y="68.5"
+          width="495"
+          height="232.1"
           preserveAspectRatio="none"
+          filter="url(#whiteShape)"
         />
 
-        <!-- LT / RT 扳机：与 LB/RB 同中心竖线（累计上移 5px） -->
-        <g class="pad-trigger" :class="cls(6)">
-          <rect x="103" y="71" width="34" height="16" rx="8" />
-          <text x="120" y="80">LT</text>
-        </g>
-        <g class="pad-trigger" :class="cls(7)">
-          <rect x="283" y="71" width="34" height="16" rx="8" />
-          <text x="300" y="80">RT</text>
-        </g>
-
-        <!-- LB / RB 肩键：与 LT/RT 同中心竖线，底边压入机身顶边（累计上移 5px） -->
-        <g class="pad-shoulder" :class="cls(4)">
-          <rect x="95" y="87" width="50" height="18" rx="9" />
-          <text x="120" y="97">LB</text>
-        </g>
-        <g class="pad-shoulder" :class="cls(5)">
-          <rect x="275" y="87" width="50" height="18" rx="9" />
-          <text x="300" y="97">RB</text>
-        </g>
-
-        <!-- 左摇杆（上左） -->
-        <g class="stick-base" :class="{ live: stickLPushed }">
-          <circle cx="141" cy="154" r="19" />
-        </g>
-        <g class="stick-dot" :class="{ live: stickLPushed, mapped: isMapped(10) }">
-          <circle :cx="stickL.x" :cy="stickL.y" r="10" />
-        </g>
-
-        <!-- 方向键 D-pad（下左）：单中心(180,204) 对称十字，缩小 40%（居中缩放）并内移避免贴边 -->
-        <g class="dpad" :class="{ live: isLive(12), mapped: isMapped(12) }">
-          <rect x="177" y="182" width="6" height="22" rx="3" />
-        </g>
-        <g class="dpad" :class="{ live: isLive(13), mapped: isMapped(13) }">
-          <rect x="177" y="204" width="6" height="22" rx="3" />
-        </g>
-        <g class="dpad" :class="{ live: isLive(14), mapped: isMapped(14) }">
-          <rect x="158" y="201" width="22" height="6" rx="3" />
-        </g>
-        <g class="dpad" :class="{ live: isLive(15), mapped: isMapped(15) }">
-          <rect x="180" y="201" width="22" height="6" rx="3" />
-        </g>
-
-        <!-- 右摇杆（下右） -->
-        <g class="stick-base" :class="{ live: stickRPushed }">
-          <circle cx="247" cy="204" r="19" />
-        </g>
-        <g class="stick-dot" :class="{ live: stickRPushed, mapped: isMapped(11) }">
-          <circle :cx="stickR.x" :cy="stickR.y" r="10" />
-        </g>
-
-        <!-- A B X Y（上右）：严格水平/垂直钻石对齐，中心(279,154) -->
-        <g class="pad-btn face" :class="cls(3)">
-          <circle cx="279" cy="130" r="10" />
-          <text x="279" y="130">Y</text>
-        </g>
-        <g class="pad-btn face" :class="cls(1)">
-          <circle cx="303" cy="154" r="10" />
-          <text x="303" y="154">B</text>
-        </g>
-        <g class="pad-btn face" :class="cls(0)">
-          <circle cx="279" cy="178" r="10" />
-          <text x="279" y="178">A</text>
-        </g>
-        <g class="pad-btn face" :class="cls(2)">
-          <circle cx="255" cy="154" r="10" />
-          <text x="255" y="154">X</text>
-        </g>
-
-        <!-- Back / Guide / Start（中间水平排列，累计上移 15px） -->
-        <!-- 左：Select/Back — 圆形 + 两道横条 -->
-        <g class="pad-btn small" :class="cls(8)">
-          <circle cx="187" cy="140" r="7" />
-          <g class="pad-glyph">
-            <rect x="184.2" y="138.4" width="5.6" height="1.4" rx="0.65" />
-            <rect x="184.2" y="140.6" width="5.6" height="1.4" rx="0.65" />
+        <!-- 交互层与 PNG 保持同一 1.1 倍几何映射；图标按中心缩放到 64%，LB/RB 放大到 85%。 -->
+        <g transform="translate(-21 4.7) scale(1.1)">
+          <!-- LT / RT：以 x=210 镜像，左侧补齐 cls(6)，左右严格对称。 -->
+          <g class="pad-trigger" :class="cls(6)" transform="translate(128 74) scale(.64) translate(-124 -68)">
+            <path d="M93 93 99 77Q102 67 116 61L136 53Q148 49 151 59L160 78L140 78Q118 80 106 89Z" />
+            <text x="124" y="68">LT</text>
           </g>
-        </g>
-        <!-- 中：Home — 圆形 + 小房子（沿用上一版 outline） -->
-        <g class="pad-btn guide" :class="cls(16)">
-          <circle cx="211" cy="140" r="8" />
-          <g class="pad-glyph outline">
-            <path d="M208.5 139.5 211 136.8 213.5 139.5V142.5H208.5Z" />
+          <g class="pad-trigger" :class="cls(7)" transform="translate(292 74) scale(.64) translate(-296 -68)">
+            <path d="M327 93 321 77Q318 67 304 61L284 53Q272 49 269 59L260 78L280 78Q302 80 314 89Z" />
+            <text x="296" y="68">RT</text>
           </g>
-        </g>
-        <!-- 右：Start/Menu — 圆形 + 三道横线 -->
-        <g class="pad-btn small" :class="cls(9)">
-          <circle cx="235" cy="140" r="7" />
-          <g class="pad-glyph">
-            <line x1="233" y1="137.6" x2="237" y2="137.6" />
-            <line x1="233" y1="140" x2="237" y2="140" />
-            <line x1="233" y1="142.4" x2="237" y2="142.4" />
+
+          <!-- LB / RB：同一轮廓关于 x=210 镜像。 -->
+          <g class="pad-shoulder" :class="cls(4)" transform="translate(124 89) scale(.85) translate(-124 -86)">
+            <path d="M140 78Q124 79 114 88L96 94L91 107Q102 99 118 97L154 87Q162 84 160 78Z" />
+            <text x="124" y="86">LB</text>
+          </g>
+          <g class="pad-shoulder" :class="cls(5)" transform="translate(296 89) scale(.85) translate(-296 -86)">
+            <path d="M280 78Q296 79 306 88L324 94L329 107Q318 99 302 97L266 87Q258 84 260 78Z" />
+            <text x="296" y="86">RB</text>
+          </g>
+
+          <!-- 左摇杆 -->
+          <g transform="translate(128 147) scale(.64) translate(-116 -138)">
+            <g class="stick-range" :class="{ live: stickLPushed }">
+              <circle cx="116" cy="138" r="31" />
+              <circle cx="116" cy="138" r="27" />
+            </g>
+            <g class="stick-dot" :class="{ live: stickLPushed, mapped: isMapped(10) }">
+              <circle :cx="stickL.x" :cy="stickL.y" r="21" />
+              <circle class="stick-cap-ring" :cx="stickL.x" :cy="stickL.y" r="16" />
+            </g>
+          </g>
+
+          <!-- 方向键 -->
+          <g transform="translate(169.5 195.5) scale(.66528 .7392) translate(-152.5 -200.5)">
+            <g class="dpad" :class="{ live: isLive(12), mapped: isMapped(12) }">
+              <path d="M139 172Q139 166 145 166H160Q166 166 166 172V194H139Z" />
+            </g>
+            <g class="dpad" :class="{ live: isLive(13), mapped: isMapped(13) }" transform="rotate(180 152.5 201.5)">
+              <path d="M139 172Q139 166 145 166H160Q166 166 166 172V194H139Z" />
+            </g>
+            <g class="dpad" :class="{ live: isLive(14), mapped: isMapped(14) }" transform="rotate(-90 152.5 201.5) translate(152.5 201.5) scale(1 1.2) translate(-152.5 -201.5)">
+              <path d="M139 172Q139 166 145 166H160Q166 166 166 172V194H139Z" />
+            </g>
+            <g class="dpad" :class="{ live: isLive(15), mapped: isMapped(15) }" transform="rotate(90 152.5 201.5) translate(152.5 201.5) scale(1 1.2) translate(-152.5 -201.5)">
+              <path d="M139 172Q139 166 145 166H160Q166 166 166 172V194H139Z" />
+            </g>
+            <rect class="dpad-center" x="139" y="188" width="27" height="27" rx="2" />
+          </g>
+
+          <!-- 右摇杆 -->
+          <g transform="translate(249 195) scale(.704) translate(-255 -191)">
+            <g class="stick-range" :class="{ live: stickRPushed }">
+              <circle cx="255" cy="191" r="31" />
+              <circle cx="255" cy="191" r="27" />
+            </g>
+            <g class="stick-dot" :class="{ live: stickRPushed, mapped: isMapped(11) }">
+              <circle :cx="stickR.x" :cy="stickR.y" r="21" />
+              <circle class="stick-cap-ring" :cx="stickR.x" :cy="stickR.y" r="16" />
+            </g>
+          </g>
+
+          <!-- ABXY -->
+          <g class="pad-btn face y" :class="cls(3)" transform="translate(293 130) scale(.6336) translate(-288 -102)">
+            <circle cx="288" cy="102" r="17" /><text x="288" y="102">Y</text>
+          </g>
+          <g class="pad-btn face b" :class="cls(1)" transform="translate(313 148) scale(.6336) translate(-318 -132)">
+            <circle cx="318" cy="132" r="17" /><text x="318" y="132">B</text>
+          </g>
+          <g class="pad-btn face a" :class="cls(0)" transform="translate(293 168) scale(.6336) translate(-288 -162)">
+            <circle cx="288" cy="162" r="17" /><text x="288" y="162">A</text>
+          </g>
+          <g class="pad-btn face x" :class="cls(2)" transform="translate(273 148) scale(.6336) translate(-258 -132)">
+            <circle cx="258" cy="132" r="17" /><text x="258" y="132">X</text>
+          </g>
+
+          <!-- View / Menu -->
+          <g class="pad-btn small" :class="cls(8)" transform="translate(185 147) scale(.768) translate(-185 -132)">
+            <circle cx="185" cy="132" r="10" />
+            <g class="pad-glyph outline">
+              <rect x="180.5" y="128.5" width="7" height="5.5" rx="0.8" />
+              <rect x="183" y="130" width="7" height="5.5" rx="0.8" />
+            </g>
+          </g>
+          <g class="pad-btn small" :class="cls(9)" transform="translate(231 147) scale(.768) translate(-235 -132)">
+            <circle cx="235" cy="132" r="10" />
+            <g class="pad-glyph">
+              <line x1="231.5" y1="128.5" x2="238.5" y2="128.5" />
+              <line x1="231.5" y1="132" x2="238.5" y2="132" />
+              <line x1="231.5" y1="135.5" x2="238.5" y2="135.5" />
+            </g>
           </g>
         </g>
       </svg>
@@ -211,7 +263,7 @@ function cls(i: number): Record<string, boolean> {
       <Toggle
         v-model="testMode"
         :label="connected ? '手柄测试模式' : '未检测'"
-        :description="connected ? '开启后可视化显示摇杆方向，但手柄不再控制程序界面' : '未检测到手柄，无法进入测试'"
+        :description="connected ? (testMode ? '【B】按住以退出（实际按住 3 秒）' : '开启后可视化显示摇杆方向，但手柄不再控制程序界面') : '未检测到手柄，无法进入测试'"}}
         :disabled="!connected"
         color="accent"
         @update:model-value="setTestMode"
@@ -238,17 +290,41 @@ function cls(i: number): Record<string, boolean> {
   margin: 0 auto;
 }
 
-/* 底图原图即深色机身 + 透明背景（用户指定直接导入、不做处理）；矢量按钮用浅色填充在深色机身上才看得清 */
-.pad-trigger rect,
-.pad-shoulder rect {
-  fill: #7d8ba2;
+/* 纯 SVG 手柄：深色机身 + 浅色轮廓，所有输入区均为独立矢量节点 */
+.controller-shell path,
+.controller-shell circle {
+  fill: #0b0f16;
+  stroke: #aabbd0;
+  stroke-width: 1.8;
+  stroke-linejoin: round;
+}
+.controller-shell .shell-body {
+  fill: #101621;
+  stroke-width: 2.2;
+  filter: drop-shadow(0 8px 10px rgba(0, 0, 0, 0.35));
+}
+.controller-shell .shell-detail {
+  fill: none;
+  stroke: #68778d;
+  stroke-width: 1.25;
+}
+.controller-shell .xbox-mark {
+  fill: none;
+  stroke: #c9d5e5;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+}
+.pad-trigger path,
+.pad-shoulder path {
+  fill: #202a38;
   stroke: #aabbd0;
   stroke-width: 1.5;
+  stroke-linejoin: round;
   transition: fill 0.08s, stroke 0.08s;
 }
 .pad-trigger text,
 .pad-shoulder text {
-  fill: #0b0d11;
+  fill: #ffffff;
   font-size: 9px;
   font-weight: 700;
   text-anchor: middle;
@@ -256,42 +332,61 @@ function cls(i: number): Record<string, boolean> {
   pointer-events: none;
   transition: fill 0.08s;
 }
-.pad-shoulder rect {
-  fill: #8695ad;
+.pad-shoulder path {
+  fill: #253142;
 }
 
 .dpad path,
-.dpad rect {
-  fill: #7d8ba2;
+.dpad-center {
+  fill: #222c3a;
   stroke: #aabbd0;
   stroke-width: 1.5;
+  stroke-linejoin: round;
   transition: fill 0.08s, stroke 0.08s;
+}
+.dpad-center {
+  pointer-events: none;
 }
 
-.stick-base circle {
-  fill: #7d8ba2;
-  stroke: #aabbd0;
+.stick-range circle {
+  fill: #121925;
+  stroke: #7f90a8;
   stroke-width: 1.5;
   transition: fill 0.08s, stroke 0.08s;
 }
-.stick-dot circle {
-  fill: #a4b3c9;
+.stick-range circle + circle {
+  fill: none;
+  stroke: #c2cfdf;
+  stroke-width: 1.15;
+}
+.stick-dot > circle:not(.stick-cap-ring) {
+  fill: #263244;
   stroke: #cdd8e8;
-  stroke-width: 1.5;
+  stroke-width: 1.7;
   transition: fill 0.05s, stroke 0.05s;
+}
+.stick-cap-ring {
+  fill: none;
+  stroke: #718198;
+  stroke-width: 1.15;
+  pointer-events: none;
 }
 
 .pad-btn.face circle,
 .pad-btn.small circle,
-.pad-btn.guide circle {
-  fill: #7d8ba2;
+.pad-btn.guide rect {
+  fill: #17202c;
   stroke: #aabbd0;
   stroke-width: 1.5;
   transition: fill 0.08s, stroke 0.08s;
 }
+.pad-btn.face.y circle { stroke: #d9c86a; }
+.pad-btn.face.b circle { stroke: #df7d7d; }
+.pad-btn.face.a circle { stroke: #70cf91; }
+.pad-btn.face.x circle { stroke: #69aeea; }
 .pad-btn text {
-  fill: #0b0d11;
-  font-size: 11px;
+  fill: #d8e2ef;
+  font-size: 14px;
   font-weight: 700;
   text-anchor: middle;
   dominant-baseline: central;
@@ -302,8 +397,8 @@ function cls(i: number): Record<string, boolean> {
   font-size: 7px;
 }
 .pad-btn .pad-glyph {
-  fill: #0b0d11;
-  stroke: #0b0d11;
+  fill: none;
+  stroke: #aabbd0;
   stroke-width: 1.3;
   stroke-linecap: round;
   pointer-events: none;
@@ -322,8 +417,8 @@ function cls(i: number): Record<string, boolean> {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.35; }
 }
-.pad-shoulder.mapped rect,
-.pad-trigger.mapped rect,
+.pad-shoulder.mapped path,
+.pad-trigger.mapped path,
 .pad-btn.mapped circle,
 .dpad.mapped path,
 .dpad.mapped rect {
@@ -343,12 +438,12 @@ function cls(i: number): Record<string, boolean> {
   fill: #06203a;
 }
 
-.pad-shoulder.live rect,
-.pad-trigger.live rect,
+.pad-shoulder.live path,
+.pad-trigger.live path,
 .pad-btn.live circle,
 .dpad.live path,
 .dpad.live rect,
-.stick-base.live circle,
+.stick-range.live circle,
 .stick-dot.live circle {
   fill: var(--ok);
   stroke: #5fe08a;
@@ -357,19 +452,24 @@ function cls(i: number): Record<string, boolean> {
 .pad-shoulder.live text,
 .pad-trigger.live text,
 .pad-btn.live text {
-  fill: #06210f;
+  fill: #ffffff;
+  filter: drop-shadow(0 0 2px #5fe08a);
+}
+.pad-shoulder.mapped text,
+.pad-trigger.mapped text {
+  fill: #ffffff;
 }
 
 /* 当某键既是「关联高亮」又是「实时按下」时，仍以蓝色闪烁为主（override 放在最后确保优先级） */
-.pad-shoulder.mapped.live rect,
-.pad-trigger.mapped.live rect,
+.pad-shoulder.mapped.live path,
+.pad-trigger.mapped.live path,
 .pad-btn.mapped.live circle,
 .dpad.mapped.live path,
 .stick-dot.mapped.live circle {
   stroke: #7fb4ff;
 }
-.pad-shoulder.mapped rect,
-.pad-trigger.mapped rect,
+.pad-shoulder.mapped path,
+.pad-trigger.mapped path,
 .pad-btn.mapped circle,
 .dpad.mapped path,
 .dpad.mapped rect,

@@ -14,7 +14,7 @@ type Tab = 'log' | 'txt' | 'task' | 'pad';
 const tab = ref<Tab>('log');
 
 // ── txt 读写测试器 ──
-const txtPath = ref('C:\\SOFT\\YeMan\\PowerControl\\tdp-ac.txt');
+const txtPath = ref('C:\\SOFT\\YeMan\\PowerControl\\control-config.json');
 const txtContent = ref('');
 const txtMsg = ref('');
 async function txtRead() {
@@ -42,7 +42,7 @@ async function txtWrite() {
 }
 
 // ── schtasks 测试器 ──
-const taskName = ref('TDP-插电AC模式TDP调节');
+const taskName = ref('监控-开机启动监控锁帧软件RTSS');
 const taskResult = ref('');
 async function taskQuery() {
   taskResult.value = '查询中...';
@@ -246,9 +246,10 @@ onMounted(() => {
   color: #06121d;
   border: none;
   border-radius: 6px;
-  padding: 6px 14px;
+  padding: var(--btn-py) var(--btn-px);
+  min-height: var(--btn-min-h);
   font-weight: 600;
-  font-size: 12px;
+  font-size: var(--btn-font-size);
   cursor: pointer;
 }
 .db-msg {

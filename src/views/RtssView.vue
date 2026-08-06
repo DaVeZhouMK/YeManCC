@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, nextTick, inject, type Ref } from 'vue';
+import { ref, reactive, computed, onMounted, onUnmounted, onActivated, onDeactivated, nextTick, inject, watch, type Ref } from 'vue';
 import Slider from '@/components/Slider.vue';
 import Toggle from '@/components/Toggle.vue';
 import Dropdown from '@/components/Dropdown.vue';
@@ -22,13 +22,17 @@ import {
   readFps,
   FPS_MIN,
   FPS_CEILINGS,
-  FPS_MAX_DEFAULT,
   taskExists,
   toggleTask,
+  BOOT_RTSS_TASK,
+  toggleBootRtss,
+  readBootRtssState,
+  BOOT_MIRROR_CHANGED_EVENT,
 } from '@/bridge/yeman';
+import { detectGame, type DetectedGame, clearGameCache } from '@/bridge/gamedetect';
 import { fs } from '@/bridge/api';
 
-// 自动CPU浮动优化的「自动启用」模式（与 CpuView 共用同一文件）
+// 自动浮动优化的「自动启用」模式（与 CpuView 共用同一文件）
 const AUTO_ENABLE_FILE = 'C:\\SOFT\\YeMan\\PowerControl\\cpu_auto_enable.json';
 
 const rtssOn = ref(false);
@@ -36,15 +40,13 @@ const monOn = ref(false);
 const lockOn = ref(false);
 const fps = ref(60); // 默认 60（掌机常用）
 const fpsCeiling = ref(200); // 下拉上限（滑块最大值）
-const tasks = reactive({ acRestore: false, bootRtss: false });
+const tasks = reactive({ bootRtss: false });
 type TaskKey = keyof typeof tasks;
-const dcMode = ref('off'); // 'off' | '30' | '45' | '60' | '90' | '120'
-const overlay = ref<'W' | 'L'>('W');
-// 自动CPU浮动优化「自动启用」模式：dc(使用电池) / always(总是) 时会接管电池调度逻辑，
-// 与下方 DC 电池锁帧任务冲突 → 锁定该任务并提示前往 CPU调度 修改。
+const overlay = ref<'W' | 'L' | 'J'>('W');
+// 自动浮动优化「自动启用」模式：ac/always 时会接管插电调度与锁帧逻辑。
+// （插电恢复锁帧任务已移除、DC 电池模式锁帧任务已移除：锁帧节能完全交给自动浮动优化）
 const autoEnableMode = ref<string>('never');
-const dcConflict = computed(() => autoEnableMode.value === 'dc' || autoEnableMode.value === 'always');
-// 自动CPU浮动优化（接通电源 / 总是）会接管插电调度逻辑，与「插电恢复锁帧」任务冲突 → 同样锁定
+// 自动浮动优化（接通电源 / 总是）会接管锁帧调度 → 锁帧卡片置灰
 const acConflict = computed(() => autoEnableMode.value === 'ac' || autoEnableMode.value === 'always');
 const busy = ref(false);
 const errMsg = ref('');
@@ -53,18 +55,63 @@ const monitorHint = ref('');
 const zoomPct = ref(100); // OSD 缩放百分比（= ZoomRatio × 20），默认 100%
 const zoomHint = ref('');
 
-// DC 电池模式锁帧选项
-const dcOpts = [
-  { value: 'off', label: '不启用' },
-  { value: '30', label: '30 FPS' },
-  { value: '45', label: '45 FPS' },
-  { value: '60', label: '60 FPS' },
-  { value: '90', label: '90 FPS' },
-  { value: '120', label: '120 FPS' },
-];
+// ── 游戏运行中拦截：关闭 RTSS / 切换布局（RTSS 重启）/ 复位 都会让游戏闪退。
+// 检测到游戏时延迟执行该操作，顶部条幅提示并轮询；游戏关闭后自动继续，用户可取消。
+type PendingRtssAction = 'stopRtss' | 'changeOverlay' | 'reset';
+const gameRunningWarn = ref<{ game: DetectedGame; pending: PendingRtssAction; pendingArg?: 'W' | 'L' | 'J' } | null>(null);
+let gameWatchTimer: number | null = null;
 
-// FPS 上限档位（对齐 TDP 页面 ceilingOpts 下拉逻辑）
-const fpsCeilingOpts = FPS_CEILINGS.map((v) => ({ value: v, label: v + ' FPS' }));
+async function guardGameRunning(action: PendingRtssAction, arg?: 'W' | 'L' | 'J'): Promise<boolean> {
+  // 游戏运行中 → true（已挂起，调用方应直接 return）；未运行 → false（调用方继续）
+  const game = await detectGame();
+  if (!game) { clearGameCache(); return false; }
+  gameRunningWarn.value = { game, pending: action, pendingArg: arg };
+  startGameWatch();
+  return true;
+}
+
+function startGameWatch() {
+  stopGameWatch();
+  gameWatchTimer = window.setInterval(async () => {
+    const warn = gameRunningWarn.value;
+    if (!warn) { stopGameWatch(); return; }
+    clearGameCache();
+    const game = await detectGame(true); // 强制重跑，绕开 5 秒缓存
+    if (!game) {
+      const pending = warn.pending;
+      const arg = warn.pendingArg;
+      gameRunningWarn.value = null;
+      stopGameWatch();
+      if (pending === 'stopRtss') await doToggleRtssOff();
+      else if (pending === 'changeOverlay' && arg) await doSetOverlay(arg);
+      else if (pending === 'reset') { confirmingReset.value = true; await doReset(); }
+    } else {
+      // 仍在跑：刷新当前游戏信息
+      gameRunningWarn.value = { game, pending: warn.pending, pendingArg: warn.pendingArg };
+    }
+  }, 2000);
+}
+
+function stopGameWatch() {
+  if (gameWatchTimer !== null) {
+    window.clearInterval(gameWatchTimer);
+    gameWatchTimer = null;
+  }
+}
+
+function cancelGameWatch() {
+  gameRunningWarn.value = null;
+  stopGameWatch();
+}
+
+// DC 电池模式锁帧任务已移除（锁帧节能完全交给自动浮动优化），保留 FPS 上限档位常量不再需要 dcOpts
+
+// FPS 上限档位（对齐 TDP 页面 ceilingOpts 下拉逻辑；0 = 不锁帧）
+const fpsCeilingOpts = FPS_CEILINGS.map((v) => ({ value: v, label: v === 0 ? '不锁帧' : v + ' FPS' }));
+function smallestFpsCeiling(val: number): number {
+  for (const c of FPS_CEILINGS) if (c >= val) return c;
+  return FPS_CEILINGS[FPS_CEILINGS.length - 1];
+}
 
 async function safeExists(name: string): Promise<boolean> {
   try {
@@ -77,77 +124,64 @@ async function safeExists(name: string): Promise<boolean> {
 async function refresh() {
   errMsg.value = '';
   // 并行异步加载所有数据（不串行等待，不阻塞渲染）
-  const [rtssRes, monRes, limRes, layRes, acTaskRes, bootTaskRes, dcFpsRes, zoomRes, aeRes] = await Promise.allSettled([
+  const [rtssRes, monRes, limRes, fpsCfgRes, layRes, bootTaskRes, zoomRes, aeRes] = await Promise.allSettled([
     rtssRunning(),
     monitorOn(),
     readRtssLimit(),
+    readFps('ac'),
     readOverlayLayout(),
-    safeExists('锁帧-插电AC模式锁帧'),
-    safeExists('监控-开机启动监控锁帧软件RTSS'),
-    readFps('dc'),
+    readBootRtssState(),
     readRtssZoom(),
     fs.readTextFile(AUTO_ENABLE_FILE, 64),
   ]);
   // 逐项赋值（不阻塞 UI）
   if (rtssRes.status === 'fulfilled') rtssOn.value = rtssRes.value;
   if (monRes.status === 'fulfilled') monOn.value = monRes.value;
-  if (limRes.status === 'fulfilled') {
+  if (fpsCfgRes.status === 'fulfilled' && fpsCfgRes.value != null) {
+    const configured = fpsCfgRes.value;
+    fps.value = configured > 0 ? configured : 90;
+  } else if (limRes.status === 'fulfilled') {
     const lim = limRes.value;
     fps.value = lim > 0 ? lim : 90;
-    fpsCeiling.value = lim > 0 ? Math.max(lim, FPS_CEILINGS[0]) : FPS_MAX_DEFAULT;
-    lockOn.value = lim > 0;
   }
+  fpsCeiling.value = smallestFpsCeiling(fps.value);
+  if (limRes.status === 'fulfilled') lockOn.value = limRes.value > 0;
   if (layRes.status === 'fulfilled') {
-    overlay.value = layRes.value === 'YeManOBS-L-1.ovl' ? 'L' : 'W';
+    overlay.value = layRes.value === 'YeManOBS-L-1.ovl' ? 'L' : layRes.value === 'YeManOBS-JJ-1.ovl' ? 'J' : 'W';
   }
-  if (acTaskRes.status === 'fulfilled') tasks.acRestore = acTaskRes.value;
   if (bootTaskRes.status === 'fulfilled') tasks.bootRtss = bootTaskRes.value;
   if (aeRes.status === 'fulfilled') {
     try { autoEnableMode.value = (JSON.parse(aeRes.value as string).mode as string) ?? 'never'; } catch { autoEnableMode.value = 'never'; }
   } else {
     autoEnableMode.value = 'never';
   }
-  if (dcFpsRes.status === 'fulfilled') {
-    const d = dcFpsRes.value;
-    dcMode.value = d != null && [30, 45, 60, 90, 120].includes(d) ? String(d) : 'off';
-  }
   if (zoomRes.status === 'fulfilled') zoomPct.value = zoomRes.value * 20;
-
-  // ── 冲突处理：自动CPU浮动优化（使用电池 / 总是）已接管电池调度逻辑，
-  // DC 电池锁帧任务与其冲突 → 锁定该任务（关闭实际计划任务 + 禁用 UI）并提示前往 CPU调度。
-  if (dcConflict.value && dcMode.value !== 'off') {
-    // ⚠️ 只关实际计划任务，绝不 saveFps('dc',0) —— 否则会抹掉用户设过的 DC 锁帧值（如 60）。
-    // 冲突解除后 refresh 会读回 FPS-dc.txt 恢复原值。
-    try {
-      await toggleTask('锁帧-离电DC模式锁帧', false);
-      dcMode.value = 'off';
-    } catch { /* 忽略：下次刷新再试 */ }
-  }
-  if (acConflict.value && tasks.acRestore) {
-    // 同理 DC：只关实际计划任务，绝不 saveFps('ac',0) —— 保留用户手动 AC 锁帧值（FPS-ac.txt）
-    try {
-      await toggleTask('锁帧-插电AC模式锁帧', false);
-      tasks.acRestore = false;
-    } catch { /* 忽略：下次刷新再试 */ }
-  }
 }
 
 async function onFpsCommit(v: number) {
   errMsg.value = '';
   try {
     await saveFps('ac', v);
-    await setRtssLimit(v);
+    void setRtssLimit(v).catch(() => {});
     lockOn.value = v > 0;
   } catch (e) {
-    errMsg.value = '锁帧下发失败：' + (e as Error).message;
+    errMsg.value = '锁帧保存失败：' + (e as Error).message;
   }
 }
 
-// FPS 上限档位选择（对齐 TDP onCeiling：直接设值+提交）
+// FPS 上限档位选择（对齐 TDP onQuickCeiling：只改范围；若当前值超出新上限才钳制并提交；
+// 选「不锁帧(0)」立即解锁并联动右上角 FPS 锁帧状态为已关闭）
 function onFpsCeiling(val: number) {
   fpsCeiling.value = val;
-  fps.value = Math.min(fps.value, val); // 不超过上限
-  void onFpsCommit(fps.value); // 提交当前帧率（已钳到上限），不要误把上限档位当锁帧值下发
+  if (val === 0) {
+    fps.value = 0;
+    void onFpsCommit(0);
+    return;
+  }
+  if (fps.value > val) {
+    fps.value = val;
+    void onFpsCommit(val);
+  }
 }
 
 async function toggleLock() {
@@ -155,11 +189,15 @@ async function toggleLock() {
   try {
     if (lockOn.value) {
       await saveFps('ac', 0);
-      await setRtssLimit(0);
+      void setRtssLimit(0).catch(() => {});
       lockOn.value = false;
     } else {
-      await saveFps('ac', fps.value);
-      await setRtssLimit(fps.value);
+      // 从不锁帧(0)重新开启时，用默认 90 起步，避免 saveFps(0) 导致仍无法锁帧
+      const target = fps.value > 0 ? fps.value : 90;
+      fps.value = target;
+      fpsCeiling.value = smallestFpsCeiling(target);
+      await saveFps('ac', target);
+      void setRtssLimit(target).catch(() => {});
       lockOn.value = true;
     }
   } catch (e) {
@@ -169,14 +207,51 @@ async function toggleLock() {
 
 async function toggleRtssOn() {
   errMsg.value = '';
+  if (rtssOn.value) {
+    // 关闭 RTSS：游戏在跑则延迟到游戏关闭后执行（避免闪退游戏）
+    if (await guardGameRunning('stopRtss')) return;
+    await doToggleRtssOff();
+  } else {
+    // 启动 RTSS：与运行中的游戏无冲突，可直接执行
+    busy.value = true;
+    try {
+      await toggleRtss(true);
+      rtssOn.value = true;
+    } catch (e) {
+      errMsg.value = 'RTSS 启动失败：' + (e as Error).message;
+    } finally {
+      busy.value = false;
+    }
+  }
+}
+
+async function doToggleRtssOff() {
   busy.value = true;
   try {
-    await toggleRtss(!rtssOn.value);
-    rtssOn.value = !rtssOn.value;
+    await toggleRtss(false);
+    rtssOn.value = false;
   } catch (e) {
-    errMsg.value = 'RTSS 启停失败：' + (e as Error).message;
+    errMsg.value = 'RTSS 关闭失败：' + (e as Error).message;
   } finally {
     busy.value = false;
+  }
+}
+
+async function onOverlay(v: 'W' | 'L' | 'J') {
+  errMsg.value = '';
+  // 切换布局会让 RTSS 重启 → 同样会让运行中的游戏闪退
+  if (await guardGameRunning('changeOverlay', v)) return;
+  await doSetOverlay(v);
+}
+
+async function doSetOverlay(v: 'W' | 'L' | 'J') {
+  try {
+    overlay.value = v;
+    await setOverlayLayout(v);
+    monitorHint.value = '监控样式已切换，RTSS 重启中（约 1~2 秒后生效）';
+    setTimeout(() => (monitorHint.value = ''), 6000);
+  } catch (e) {
+    errMsg.value = '布局切换失败：' + (e as Error).message;
   }
 }
 
@@ -194,18 +269,6 @@ async function toggleMonitor() {
     }
   } catch (e) {
     errMsg.value = '监控切换失败：' + (e as Error).message;
-  }
-}
-
-async function onOverlay(v: 'W' | 'L') {
-  errMsg.value = '';
-  try {
-    overlay.value = v;
-    await setOverlayLayout(v);
-    monitorHint.value = '监控样式已切换，RTSS 重启中（约 1~2 秒后生效）';
-    setTimeout(() => (monitorHint.value = ''), 6000);
-  } catch (e) {
-    errMsg.value = '布局切换失败：' + (e as Error).message;
   }
 }
 
@@ -230,33 +293,11 @@ function onZoomCommit(z: number) {
   }, 500);
 }
 
-async function onDcMode(v: string) {
-  // 冲突态（自动CPU浮动优化 使用电池/总是）下 DC 锁帧任务已锁定，不可改
-  if (dcConflict.value) return;
-  errMsg.value = '';
-  busy.value = true;
-  try {
-    dcMode.value = v;
-    if (v === 'off') {
-      await saveFps('dc', 0);
-      await toggleTask('锁帧-离电DC模式锁帧', false);
-    } else {
-      const n = Number(v);
-      await saveFps('dc', n);
-      await toggleTask('锁帧-离电DC模式锁帧', true);
-    }
-  } catch (e) {
-    errMsg.value = 'DC 锁帧任务失败：' + (e as Error).message;
-  } finally {
-    busy.value = false;
-  }
-}
-
 async function toggleTaskSafe(name: string, on: boolean, key: TaskKey) {
   errMsg.value = '';
   busy.value = true;
   try {
-    tasks[key] = await toggleTask(name, on);
+    tasks[key] = name === BOOT_RTSS_TASK ? await toggleBootRtss(on) : await toggleTask(name, on);
   } catch (e) {
     tasks[key] = !on; // 回滚
     errMsg.value = '任务计划操作失败：' + (e as Error).message + '（需管理员权限）';
@@ -266,6 +307,8 @@ async function toggleTaskSafe(name: string, on: boolean, key: TaskKey) {
 }
 
 async function resetAll() {
+  // 复位会关闭 RTSS：游戏在跑则延迟到游戏关闭后自动执行
+  if (await guardGameRunning('reset')) return;
   // 两步内联确认：避免调用原生 dialog.confirm（会阻塞 WebView2 渲染线程）
   confirmingReset.value = true;
 }
@@ -279,14 +322,10 @@ async function doReset() {
     rtssOn.value = false;
     await setRtssLimit(0);
     await saveFps('ac', 0);
-    await saveFps('dc', 0);
     lockOn.value = false;
-    await toggleTask('锁帧-插电AC模式锁帧', false);
-    await toggleTask('锁帧-离电DC模式锁帧', false);
-    await toggleTask('监控-开机启动监控锁帧软件RTSS', false);
-    tasks.acRestore = false;
+    // 自动浮动优化已接管锁帧，复位时只关闭 RTSS 监控任务
+    await toggleBootRtss(false);
     tasks.bootRtss = false;
-    dcMode.value = 'off';
     await setOverlayLayout('off');
     monOn.value = false;
   } catch (e) {
@@ -299,10 +338,33 @@ async function doReset() {
 // ── 全局刷新监听（App 预加载 / 支持页刷新按钮）──
 const globalRefreshKey = inject<Ref<number>>('globalRefreshKey');
 if (globalRefreshKey) {
-  import('vue').then(({ watch }) => watch(globalRefreshKey, () => refresh()));
+  // watch 已在顶部静态导入；动态 import('vue') 会造成异步微任务延迟注册，
+  // 刷新事件可能在注册前触发而丢失（2026-08-05 修复）。
+  watch(globalRefreshKey, () => refresh());
 }
 
 onMounted(() => nextTick(refresh));
+async function onBootMirrorChanged() {
+  try {
+    tasks.bootRtss = await readBootRtssState();
+  } catch {
+  }
+}
+onMounted(() => window.addEventListener(BOOT_MIRROR_CHANGED_EVENT, onBootMirrorChanged));
+onUnmounted(() => window.removeEventListener(BOOT_MIRROR_CHANGED_EVENT, onBootMirrorChanged));
+onActivated(() => {
+  refresh().catch(() => {});
+});
+// KeepAlive 缓存下失活/卸载时清理轮询与防抖定时器，避免隐藏页继续每 2 秒
+// 跑 PowerShell 检测游戏、或卸载后回调访问已销毁组件（2026-08-05 修复）。
+onDeactivated(() => {
+  stopGameWatch();
+  if (zoomTimer !== null) { window.clearTimeout(zoomTimer); zoomTimer = null; }
+});
+onUnmounted(() => {
+  stopGameWatch();
+  if (zoomTimer !== null) { window.clearTimeout(zoomTimer); zoomTimer = null; }
+});
 </script>
 
 <template>
@@ -310,6 +372,14 @@ onMounted(() => nextTick(refresh));
     <div v-if="errMsg" class="err-bar">{{ errMsg }}</div>
     <div v-if="monitorHint" class="info-bar">{{ monitorHint }}</div>
     <div v-if="zoomHint" class="info-bar">{{ zoomHint }}</div>
+    <div v-if="gameRunningWarn" class="game-warn-bar">
+      <div class="game-warn-text">
+        <InlineIcon name="warning" />
+        检测到游戏「<strong>{{ gameRunningWarn.game.name }}</strong>」正在运行（PID {{ gameRunningWarn.game.pid }}）。
+        当前操作会导致游戏闪退（停止 RTSS / 切换布局 / 复位）。请先关闭游戏，正在监控等待…
+      </div>
+      <button class="action-btn ghost" @click="cancelGameWatch">取消</button>
+    </div>
 
     <section class="card states">
       <StateCard
@@ -341,12 +411,23 @@ onMounted(() => nextTick(refresh));
       <h3 class="card-title"><InlineIcon name="target" /> RTSS 锁定帧率上限</h3>
       <div v-if="acConflict" class="conflict-bar">
         <InlineIcon name="warning" />
-        被【自动CPU浮动优化】锁定，请至【CPU调度】页面修改。
+        被其他帧数目标类调节锁定
       </div>
       <template v-if="lockOn">
-        <Slider v-model="fps" :min="FPS_MIN" :max="fpsCeiling" :step="5" :label="'FPS帧率上限'" :unit="'FPS'" color="accent" :disabled="busy || acConflict" @commit="onFpsCommit" />
-        <div class="row">
-          <span class="row-label">FPS 上限</span>
+        <div class="lock-combo">
+          <Slider
+            :model-value="fps"
+            :min="FPS_MIN"
+            :max="fpsCeiling > 0 ? fpsCeiling : FPS_MIN"
+            :step="5"
+            label="FPS 帧率上限"
+            unit="FPS"
+            color="accent"
+            :disabled="busy || acConflict || fpsCeiling === 0"
+            aria-label="FPS 帧率上限"
+            @update:model-value="(v: number) => (fps = v)"
+            @commit="onFpsCommit"
+          />
           <Dropdown
             :model-value="fpsCeiling"
             :options="fpsCeilingOpts"
@@ -357,25 +438,8 @@ onMounted(() => nextTick(refresh));
             @change="(v: number) => onFpsCeiling(v)"
           />
         </div>
-        <Toggle
-          v-model="tasks.acRestore"
-          label="插电恢复锁帧"
-          description="电源事件 AC 时自动回到此锁帧"
-          color="ac"
-          :disabled="acConflict || busy"
-          @update:model-value="(v: boolean) => toggleTaskSafe('锁帧-插电AC模式锁帧', v, 'acRestore')"
-        />
       </template>
       <p v-else style="margin:10px 0 0;color:#8a8f98;font-size:13px;line-height:1.5;"><InlineIcon name="lock" /> 锁帧已关闭 —— 点击上方「FPS 锁帧」开启后可调节</p>
-    </section>
-
-    <section class="card" :class="{ conflict: dcConflict }">
-      <h3 class="card-title"><InlineIcon name="battery" /> DC 电池模式锁帧任务</h3>
-      <div v-if="dcConflict" class="conflict-bar">
-        <InlineIcon name="warning" />
-        被【自动CPU浮动优化】锁定，请至【CPU调度】页面修改。
-      </div>
-      <SegButton v-model="dcMode" :options="dcOpts" color="dc" full :disabled="dcConflict" @update:model-value="onDcMode" />
     </section>
 
     <section class="card">
@@ -396,10 +460,11 @@ onMounted(() => nextTick(refresh));
         :options="[
           { value: 'W', label: '横版监控' },
           { value: 'L', label: '竖版监控' },
+          { value: 'J', label: '极端简单' },
         ]"
         color="accent"
         full
-        @update:model-value="(v: string) => onOverlay(v as 'W' | 'L')"
+        @update:model-value="(v: string) => onOverlay(v as 'W' | 'L' | 'J')"
       />
     </section>
 
@@ -407,13 +472,13 @@ onMounted(() => nextTick(refresh));
       <Toggle
         v-model="tasks.bootRtss"
         label="开机启动 RTSS 监控"
-        description="登录后自动启动 RTSS + HWiNFO"
+        description="登录后自动启动 RTSS"
         color="accent"
         :disabled="busy"
-        @update:model-value="(v: boolean) => toggleTaskSafe('监控-开机启动监控锁帧软件RTSS', v, 'bootRtss')"
+        @update:model-value="(v: boolean) => toggleTaskSafe(BOOT_RTSS_TASK, v, 'bootRtss')"
       />
       <div v-if="confirmingReset" class="confirm-bar">
-        <span class="confirm-text">确认复位 RTSS 全部设置？将关闭 RTSS/HWiNFO、清除锁帧与所有相关任务、关闭监控显示。</span>
+        <span class="confirm-text">确认复位 RTSS 全部设置？将关闭 RTSS、清除锁帧与所有相关任务、关闭监控显示。</span>
         <div class="confirm-actions">
           <button class="action-btn" :disabled="busy" @click="doReset">确认复位</button>
           <button class="action-btn ghost" @click="confirmingReset = false">取消</button>
@@ -491,10 +556,10 @@ onMounted(() => nextTick(refresh));
   margin-bottom: 10px;
   line-height: 1.4;
 }
-.row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+.lock-combo {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 120px;
+  align-items: end;
   gap: 10px;
   margin-top: 8px;
 }
@@ -508,6 +573,31 @@ onMounted(() => nextTick(refresh));
   line-height: 1.45;
   margin: 6px 2px 0;
 }
+.action-btn {
+  flex: 1;
+  width: 100%;
+  margin: 0;
+  border: none;
+  border-radius: var(--radius-ctrl);
+  padding: var(--btn-py) var(--btn-px);
+  min-height: var(--btn-min-h);
+  background: var(--accent);
+  color: #06121d;
+  font-weight: 700;
+  font-size: var(--btn-font-size);
+  cursor: pointer;
+}
+.action-btn.ghost {
+  background: var(--bg-input);
+  color: var(--text);
+}
+.action-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.action-btn:focus-visible {
+  box-shadow: var(--focus-ring);
+}
 .danger-btn {
   margin-top: 10px;
   width: 100%;
@@ -515,9 +605,10 @@ onMounted(() => nextTick(refresh));
   border: 1px solid rgba(229, 72, 77, 0.5);
   color: #ff9ea1;
   border-radius: var(--radius-ctrl);
-  padding: 9px;
+  padding: var(--btn-py) var(--btn-px);
+  min-height: var(--btn-min-h);
   cursor: pointer;
-  font-size: 12px;
+  font-size: var(--btn-font-size);
   font-weight: 600;
 }
 .conflict-bar {
@@ -530,6 +621,21 @@ onMounted(() => nextTick(refresh));
   margin-bottom: 10px;
   line-height: 1.45;
 }
+.game-warn-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: rgba(245, 185, 61, 0.12);
+  border: 1px solid rgba(245, 185, 61, 0.45);
+  color: #f5b93d;
+  border-radius: var(--radius-ctrl);
+  padding: 10px 12px;
+  font-size: 12px;
+  margin-bottom: 10px;
+  line-height: 1.45;
+}
+.game-warn-text { flex: 1 1 auto; }
+.game-warn-text strong { color: #fff; }
 .card.conflict {
   opacity: 0.85;
 }

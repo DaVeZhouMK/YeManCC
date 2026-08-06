@@ -7,8 +7,10 @@ import SteamView from './views/SteamView.vue';
 import SleepGuardView from './views/SleepGuardView.vue';
 import SettingsView from './views/SettingsView.vue';
 import QuickAppView from './views/QuickAppView.vue';
+import PerformanceScheduleView from './views/PerformanceScheduleView.vue';
 
 export const ROUTES = [
+  { path: '/schedule', name: 'schedule', title: '性能调度', icon: 'gamepad', component: PerformanceScheduleView },
   { path: '/tdp', name: 'tdp', title: 'TDP功耗', icon: 'tdp', component: TdpView },
   { path: '/cpu', name: 'cpu', title: 'CPU调度', icon: 'cpu', component: CpuView },
   { path: '/rtss', name: 'rtss', title: '监控/锁帧', icon: 'rtss', component: RtssView },
@@ -23,7 +25,7 @@ export const ROUTES = [
 export const router = createRouter({
   history: createWebHashHistory(),
   routes: [
-    { path: '/', redirect: '/tdp' },
+    { path: '/', redirect: '/schedule' },
     ...ROUTES,
   ],
 });

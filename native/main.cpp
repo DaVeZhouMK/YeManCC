@@ -52,6 +52,7 @@
 #include <condition_variable>
 #include <unordered_set>
 #include <cstdarg>
+#include <cmath>
 #pragma comment(lib, "shlwapi.lib")
 #pragma comment(lib, "shell32.lib")
 #pragma comment(lib, "ole32.lib")
@@ -59,6 +60,8 @@
 #pragma comment(lib, "winhttp.lib")
 #include <urlmon.h>
 #pragma comment(lib, "urlmon.lib")
+#include <sddl.h>
+#pragma comment(lib, "advapi32.lib")
 
 #include "resource.h"
 
@@ -116,6 +119,23 @@ static std::string ascii_lower(std::string s) {
         return (char)std::tolower(c);
     });
     return s;
+}
+
+static bool isSteamHostName(const wchar_t* host) {
+    const auto value = ascii_lower(W2U(host));
+    return value == "steampowered.com" || value.ends_with(".steampowered.com") ||
+           value == "steamstatic.com" || value.ends_with(".steamstatic.com") ||
+           value == "steamusercontent.com" || value.ends_with(".steamusercontent.com") ||
+           value == "akamaihd.net" || value.ends_with(".akamaihd.net") ||
+           value == "eccdnx.com" || value.ends_with(".eccdnx.com");
+}
+
+static void setHttpTimeouts(HINTERNET session) {
+    DWORD resolveTimeout = 10000;
+    DWORD connectTimeout = 15000;
+    DWORD sendTimeout = 30000;
+    DWORD receiveTimeout = 30000;
+    WinHttpSetTimeouts(session, resolveTimeout, connectTimeout, sendTimeout, receiveTimeout);
 }
 
 static std::string trim_ascii(std::string s) {
@@ -295,14 +315,16 @@ static bool g_startMinimized = false; // 启动参数 --minimized：开机最小
 static bool g_summonEnabled = true;   // 「按键呼出」开关：后台按住 LB+RB 呼出程序（设置可关，默认开）
 static bool g_bDoubleMinimize = true; // 双击 B 最小化到托盘（设置可关）
 static HWND g_prevForeground = nullptr; // 呼出前的前台窗口（游戏）：双击 B 关闭后归还其焦点
+static DWORD g_prevForegroundPid = 0;   // 与 HWND 绑定的 PID；防 HWND 失效/复用后误把焦点交给其它进程
 static ULONGLONG g_returnFocusDeadline = 0; // 双击 B 后回游戏焦点的截止时间
 static int g_summonFocusRetries = 0; // 呼出后的有限延迟对焦次数
-static bool g_tdpShortcut = false;    // Start + 上/下 快捷调节 TDP（前端处理，持久化在 native）
-static bool g_fpsShortcut = false;    // Start + 左/右 快捷调节 RTSS 锁帧（前端处理，持久化在 native）
+static bool g_tdpShortcut = true;    // Start + 上/下 快捷调节 TDP 最大值（前端处理，持久化在 native）
+static bool g_fpsShortcut = true;    // Start + 左/右 快捷调节 RTSS 锁帧（前端处理，持久化在 native）
 static bool g_killGame = false;       // 选择(Back) + B 长按 0.5s → 结束当前游戏（执行 KiLL-EXE.bat）
-static bool g_openKeyboard = false;   // 选择(Back) + X 长按 0.5s → 呼出 Windows 触摸键盘（TabTip.exe）
-static bool g_summonQuit    = false;  // 退出时通知后台手柄轮询线程退出
-static HANDLE g_summonThread = nullptr;
+static bool g_openKeyboard = false;   // 选择(Back) + X 长按 0.5s → 打开 Windows 触摸键盘
+static bool g_returnDesktop = false;  // 选择(Back) + A 组合按下瞬间 → 返回桌面
+static bool g_mouseToggle = false;    // 选择(Back) + Y 长按 0.5s → 模拟鼠标开/关
+static std::atomic<bool> g_summonQuit{false};  // 退出信号（跨线程原子；手柄已改 Raw Input，掌机自动关闭线程仍复用）
 
 // ── 掌机前端自动关闭（后台轮询 5 秒，温和关闭 = 发 WM_CLOSE）──
 static std::atomic<bool> g_autoCloseEnabled{false};   // 总开关（原子读写，跨线程）
@@ -350,8 +372,6 @@ static std::unordered_map<std::string, bool> g_permissions; // cmd -> allowed
 #define ID_TRAY_SEP  4004
 static NOTIFYICONDATAW g_nid = {};
 static bool            g_taskbarResident = false; // 任务栏常驻开关（前端 tray.create/remove 同步，默认不常驻）
-static HANDLE          g_xboxThread = nullptr; // Xbox/全屏游戏检测线程句柄
-static std::atomic<bool> g_xboxActive{false};  // 检测线程启停（前端 xbox.setActive 控制）
 static HINSTANCE       g_hinst = nullptr;
 static HWND            g_menuHwnd = nullptr;
 struct TrayMenuItem { std::wstring label; int cmd; bool danger = false; };
@@ -423,6 +443,9 @@ static std::unordered_map<int, FileWatcher*> g_watchers;
 static int g_nextWatchId = 1;
 
 #define WM_FILE_CHANGED (WM_USER + 2)
+#define WM_GAMEPAD_TDP_DELTA (WM_USER + 4)
+#define WM_GAMEPAD_BRIGHTNESS (WM_USER + 5)
+#define WM_APP_EXIT            (WM_USER + 6) // 任意 IPC 工作线程请求 UI 线程执行完整退出
 
 // ================================================================
 //  AC/DC 电源插拔订阅（推送/零轮询）+ 尾防抖 + 频繁切换熔断
@@ -433,13 +456,19 @@ static const GUID YM_GUID_ACDC_POWER_SOURCE =
     { 0x5d3e9a59, 0xe9d5, 0x4b00, { 0xa6, 0xbd, 0xff, 0x34, 0xff, 0x51, 0x65, 0x48 } };
 
 // GUID_MONITOR_POWER_ON = {02731015-4510-4526-99e6-e5a17ebd1aea}
-// 显示器开关通知。现代待机(S0ix)系统没有 S3，OS 不会向应用广播 PBT_APMSUSPEND，
-// 但进 DRIPS(低功耗待机)前必定先关显示器 → 用「显示器关闭」作为跨 S0/S3 的「进入睡眠」信号。
+// 该通知只表示显示器开/关，不等价于系统已进入 S3/S0 低功耗状态。
+// 关屏仅更新状态；破坏性的进程冻结只由 PBT_APMSUSPEND 触发。
 static const GUID YM_GUID_MONITOR_POWER_ON =
     { 0x02731015, 0x4510, 0x4526, { 0x99, 0xe6, 0xe5, 0xa1, 0x7e, 0xbd, 0x1a, 0xea } };
 
+// GUID_ACTIVE_POWERSCHEME = {245D8541-3943-4422-B025-13A784F679B7}
+// 活动电源方案变化通知：只在 Windows 广播方案 GUID 变化时通知前端，不做常驻轮询。
+static const GUID YM_GUID_ACTIVE_POWERSCHEME =
+    { 0x245d8541, 0x3943, 0x4422, { 0xb0, 0x25, 0x13, 0xa7, 0x84, 0xf6, 0x79, 0xb7 } };
+
 static HPOWERNOTIFY       g_acdcNotify   = nullptr; // RegisterPowerSettingNotification 句柄
 static HPOWERNOTIFY       g_monitorNotify= nullptr; // 显示器开关通知句柄
+static HPOWERNOTIFY       g_schemeNotify = nullptr; // 活动电源方案通知句柄
 static int               g_lastAcState  = -1;      // -1=未初始化 0=离电(DC) 1=插电(AC)
 static std::vector<DWORD> g_acSwitchTicks;          // 5 秒滑动窗口内的真实切换时间戳
 
@@ -448,30 +477,68 @@ static std::vector<DWORD> g_acSwitchTicks;          // 5 秒滑动窗口内的�
 #define ACDC_BURST_MS     5000    // 熔断滑动窗口 = 5s
 #define ACDC_BURST_LIMIT  10      // 5s 内 >10 次切换 → 直接退出，防止系统卡死
 #define MEM_TRAY_TIMER_ID 0xA201  // 内存变色托盘图标刷新（30 s）
+#define SG_RESLEEP_TIMER_ID 0xA202 // 入睡失败重睡检查（250 ms）
 
 // ================================================================
-//  睡眠守护（Sleep Guard）— 见 docs/sleep-guard-design.md v5
-//  入睡前冻结"最大工作集进程"(游戏) + 压 TDP 到 12W；
-//  唤醒时由 OS 电源消息判定是否"用户主动唤醒"——是则恢复，否则判定误唤醒、
-//  记录日志并立即重睡；5 分钟内反复误唤醒≥3 次则升级 S4 休眠(或关机)。
-//  纪律：慢操作(冻结/TDP/恢复)只在电源事件回调里做最简处理，极端情况靠孤儿恢复兜底。
-// ================================================================
+// 睡眠守护：入睡冻结 → 唤醒恢复；可选异常唤醒后单次重睡。
+// 重睡只在启用后生效，观察窗口最多30秒，连续10秒无输入才触发，
+// 每次重睡尝试后使用单调时钟抑制300秒；系统时间仅用于审计记录。
+// 不升级 S4，不创建外部保底任务。
 static const std::wstring SG_DIR = L"C:\\SOFT\\YeMan\\PowerControl\\Sleep";
+static const std::wstring SG_KILL_LIST = L"C:\\SOFT\\YeMan\\PowerControl\\Sleep\\睡眠击杀名单.txt";
+static const std::wstring SG_SLEEP_TRIGGER_MARKER = L"C:\\SOFT\\YeMan\\PowerControl\\Sleep\\sleep-trigger-last.txt";
+static const std::wstring SG_RESLEEP_MARKER = L"C:\\SOFT\\YeMan\\PowerControl\\Sleep\\resleep-last.txt";
+static const std::wstring TOPMON_STOP_MARKER = L"C:\\SOFT\\YeMan\\PowerControl\\topmon.stop";
 static const uint64_t     SG_MIN_WS   = 500ULL * 1024 * 1024; // 仅冻结工作集≥500MB的进程(避开系统/小进程)
 
 static bool g_guardEnabled = false;  // 总开关（持久化 Enable.txt）
-static bool g_sgInSuspend  = false;  // 本周期是否已冻结游戏、处于"睡眠值守"状态
+static std::atomic<bool> g_sgInSuspend{false};  // 本周期是否已冻结游戏、处于"睡眠值守"状态
+static bool g_sgCleanupDone   = false;  // 正常退出清理只执行一次（app.exit/WM_DESTROY/会话结束共用）
+static std::mutex g_sgOpMtx;         // 串行化冻结/恢复/退出清理，避免电源事件与 IPC 同时操作同一进程
 static DWORD g_sgSessionId = 0;      // 当前会话 ID（仅冻结同会话进程，避开系统/其他用户会话）
+static bool g_sgSessionValid = false; // 会话获取失败时 fail-closed，禁止跨会话冻结/击杀
+
+static void stopTopMonitorForExit() {
+    HANDLE h = CreateFileW(TOPMON_STOP_MARKER.c_str(), GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE,
+        nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_HIDDEN, nullptr);
+    if (h != INVALID_HANDLE_VALUE) {
+        const char one = '1';
+        DWORD written = 0;
+        WriteFile(h, &one, 1, &written, nullptr);
+        CloseHandle(h);
+    }
+}
 
 // ── 睡眠守护可调参数（持久化于 Sleep\sleepguard.json，前端控制面修改）──
-// 机制极简：入睡（显示器关闭 / PBT_APMSUSPEND）→ 冻结最大工作集进程 + 压 TDP；
-// 唤醒（显示器亮起 / PBT_APMRESUME*）→ 直接恢复游戏 + 还原 TDP。不做误唤醒判定、不重睡、不强制 S4。
+// 入睡（PBT_APMSUSPEND）→ 冻结最大工作集进程；
+// 唤醒（PBT_APMRESUME*）→ 直接恢复冻结进程。显示器通知仅记录状态。
 static std::string g_sgMode   = "off"; // 总开关模式：off / custom
 static bool g_sgPauseResume   = true;  // 睡眠时暂停游戏 + 唤醒时自动恢复（两者绑定，只一个开关）
-static bool g_sgTdpLock       = true;  // 入睡调低 TDP
-static int  g_sgSleepTdp      = 12;    // 入睡 TDP(W) 5~30
-static bool g_sgTdpLowered    = false; // 本次睡眠是否真的压了 TDP（决定恢复时是否还原）
+static bool g_sgKillListEnabled = false; // 入睡前终止 Sleep\\睡眠击杀名单.txt 中的指定 exe
+static bool g_sgResleepEnabled = false; // 异常唤醒后满足静默条件时重新进入睡眠
 static bool g_monitorOn       = true;  // 当前显示器状态
+static ULONGLONG g_sgSleepTriggerTick = 0; // 最近一次睡眠触发的单调时间
+static ULONGLONG g_sgWakeTick = 0; // 最近一次唤醒的单调时间
+static ULONGLONG g_sgLastInputTick = 0; // 最近一次手柄/键盘输入的单调时间
+static ULONGLONG g_sgResleepCooldownTick = 0; // 最近一次重睡后的5分钟抑制截止时间
+static double g_sgResleepCooldownEpoch = 0.0; // 跨进程保留的重睡系统时间
+static ULONGLONG g_lastResumeNotifyTick = 0; // 同一唤醒周期的前端事件去重时间
+static bool g_sgResleepPending = false; // 已进入重睡观察窗口
+static double g_sgSleepTriggerEpoch = 0.0; // 审计用系统时间（Unix秒）
+
+// 电源通知只负责排队，冻结/恢复在独立生命周期线程执行，避免阻塞窗口消息线程。
+enum class SgWork : uint8_t { Suspend, WakeAutomatic, WakeSuspend };
+static std::mutex g_sgWorkMx;
+static std::condition_variable g_sgWorkCv;
+static std::deque<SgWork> g_sgWorkQ;
+static std::thread g_sgWorkThread;
+static bool g_sgWorkStop = false;
+#define SG_OVERHEAT_TIMER_ID 0xA203
+static bool g_sgOverheatSleepEnabled = false;
+static int g_sgOverheatTempC = 95;
+static ULONGLONG g_sgOverheatAboveTick = 0;
+static ULONGLONG g_sgOverheatLastInputTick = 0;
+static bool g_sgOverheatAttempted = false;
 
 // ntdll 运行时解析（无需额外链接库）
 typedef LONG (NTAPI* NtSuspendProcess_t)(HANDLE);
@@ -509,29 +576,51 @@ static void sgWriteFile(const std::wstring& path, const std::string& content) {
     std::ofstream f(path, std::ios::binary);
     if (f) f.write(content.data(), (std::streamsize)content.size());
 }
-// 原子写：先写同目录临时文件，再用 MoveFileEx / ReplaceFileW 替换目标。
-// 关键（RTSS 配置损坏根因）：绝不回退到「截断式写」。RTSS 在游戏内持续读取
-// Profiles\Global，一旦被读到半截就会解析崩溃 / 配置损坏（损坏后 RTSS 无法启动，必须删配置）。
-// 若目标被 RTSS 钩子短暂占用导致替换失败 → 重试若干次；仍失败则保留原文件、返回 false（绝不截断）。
+// 原子写：同目录唯一临时文件 + 分片路径锁 + 全量 WriteFile/FlushFileBuffers 校验。
+// 每个成功返回只提交本次调用自己的内容；任何短写/刷盘/替换失败均保留原文件。
 static bool sgWriteFileAtomic(const std::wstring& path, const std::string& content) {
-    std::wstring tmp = path + L".ymcc.tmp";
-    {
-        std::ofstream f(tmp, std::ios::binary | std::ios::trunc);
-        if (!f) return false;
-        f.write(content.data(), (std::streamsize)content.size());
-        f.flush();
+    static std::mutex pathLocks[32];
+    static std::atomic<unsigned long long> tempSeq{1};
+
+    std::wstring lockKey = path;
+    std::transform(lockKey.begin(), lockKey.end(), lockKey.begin(), ::towlower);
+    std::lock_guard<std::mutex> pathLock(pathLocks[std::hash<std::wstring>{}(lockKey) % 32]);
+
+    const auto seq = tempSeq.fetch_add(1);
+    std::wstring tmp = path + L".ymcc." + std::to_wstring(GetCurrentProcessId()) +
+        L"." + std::to_wstring(seq) + L".tmp";
+    HANDLE file = CreateFileW(tmp.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW,
+                              FILE_ATTRIBUTE_NORMAL | FILE_FLAG_WRITE_THROUGH, nullptr);
+    if (file == INVALID_HANDLE_VALUE) return false;
+
+    bool writeOk = true;
+    size_t offset = 0;
+    while (offset < content.size()) {
+        const size_t remaining = content.size() - offset;
+        const DWORD chunk = static_cast<DWORD>((std::min)(remaining, static_cast<size_t>(1u << 20)));
+        DWORD written = 0;
+        if (!WriteFile(file, content.data() + offset, chunk, &written, nullptr) || written != chunk) {
+            writeOk = false;
+            break;
+        }
+        offset += written;
     }
+    if (writeOk && !FlushFileBuffers(file)) writeOk = false;
+    if (!CloseHandle(file)) writeOk = false;
+    if (!writeOk) {
+        DeleteFileW(tmp.c_str());
+        return false;
+    }
+
     // 1) 首选 MoveFileEx（原子替换）。目标可能被 RTSS 钩子短暂占用 → 重试。
     for (int attempt = 0; attempt < 6; attempt++) {
         if (MoveFileExW(tmp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
             return true;
         if (attempt < 5) Sleep(50);
     }
-    // 2) 退路 ReplaceFileW：专为「目标可能正被其它进程打开」设计，
-    //    把旧文件让位、新文件顶上，比 MoveFileEx 更能扛占用。
+    // 2) 退路 ReplaceFileW。仍失败时原文件保持完整，只删除本次调用自己的临时文件。
     if (ReplaceFileW(path.c_str(), tmp.c_str(), nullptr, REPLACEFILE_WRITE_THROUGH, nullptr, 0))
         return true;
-    // 3) 仍失败：原文件保持完整（不截断！），清理临时文件后返回 false，由调用方决定是否重试。
     DeleteFileW(tmp.c_str());
     return false;
 }
@@ -540,6 +629,140 @@ static std::string sgReadFile(const std::wstring& path) {
     if (!f) return {};
     return std::string((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
 }
+static constexpr wchar_t kTdpDaemonPipeName[] = L"\\\\.\\pipe\\YeManTdpCtl.v1";
+static constexpr wchar_t kTdpDaemonExe[] = L"C:\\SOFT\\YeMan\\PowerControl\\pawnio\\YeManTdpCtl.exe";
+static HANDLE g_tdpDaemonJob = nullptr;
+static bool g_tdpDaemonStopSent = false;
+static std::atomic<unsigned long long> g_tdpRequestSeq{1};
+
+static std::wstring finalPathForFile(const std::wstring& path) {
+    HANDLE h = CreateFileW(path.c_str(), 0,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
+        FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (h == INVALID_HANDLE_VALUE) return {};
+    std::vector<wchar_t> buf(32768);
+    DWORD n = GetFinalPathNameByHandleW(h, buf.data(), (DWORD)buf.size(), FILE_NAME_NORMALIZED);
+    CloseHandle(h);
+    if (!n || n >= buf.size()) return {};
+    std::wstring out(buf.data(), n);
+    if (out.rfind(L"\\\\?\\", 0) == 0) out.erase(0, 4);
+    return out;
+}
+
+static bool sameFinalPath(const std::wstring& a, const std::wstring& b) {
+    auto fa = finalPathForFile(a), fb = finalPathForFile(b);
+    return !fa.empty() && !fb.empty() && _wcsicmp(fa.c_str(), fb.c_str()) == 0;
+}
+
+static std::wstring processImagePath(DWORD pid) {
+    HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    if (!h) return {};
+    std::vector<wchar_t> buf(32768);
+    DWORD n = (DWORD)buf.size();
+    bool ok = QueryFullProcessImageNameW(h, 0, buf.data(), &n) != FALSE;
+    CloseHandle(h);
+    return ok ? std::wstring(buf.data(), n) : std::wstring{};
+}
+
+static bool tdpVerifyPipeServer(HANDLE pipe, DWORD* serverPidOut = nullptr) {
+    DWORD pid = 0;
+    if (!GetNamedPipeServerProcessId(pipe, &pid) || !pid) return false;
+    DWORD sidServer = 0, sidSelf = 0;
+    if (!ProcessIdToSessionId(pid, &sidServer) ||
+        !ProcessIdToSessionId(GetCurrentProcessId(), &sidSelf) || sidServer != sidSelf)
+        return false;
+    auto image = processImagePath(pid);
+    bool ok = !image.empty() && sameFinalPath(image, kTdpDaemonExe);
+    if (ok && serverPidOut) *serverPidOut = pid;
+    return ok;
+}
+
+static json tdpDaemonPipeRequest(const json& request, DWORD timeoutMs = 3000) {
+    if (!WaitNamedPipeW(kTdpDaemonPipeName, timeoutMs))
+        throw std::runtime_error("TDP daemon pipe unavailable");
+    HANDLE pipe = CreateFileW(kTdpDaemonPipeName, GENERIC_READ | GENERIC_WRITE, 0, nullptr,
+                              OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED, nullptr);
+    if (pipe == INVALID_HANDLE_VALUE)
+        throw std::runtime_error("TDP daemon pipe connect failed");
+    try {
+        if (!tdpVerifyPipeServer(pipe))
+            throw std::runtime_error("TDP daemon identity verification failed");
+        DWORD mode = PIPE_READMODE_MESSAGE;
+        if (!SetNamedPipeHandleState(pipe, &mode, nullptr, nullptr))
+            throw std::runtime_error("TDP daemon pipe mode failed");
+        std::string payload = request.dump();
+        if (payload.empty() || payload.size() > 4096)
+            throw std::runtime_error("TDP daemon request too large");
+        auto ioWithTimeout = [&](bool write, void* data, DWORD size, DWORD& transferred) -> bool {
+            OVERLAPPED ov{};
+            ov.hEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+            if (!ov.hEvent) return false;
+            BOOL started = write
+                ? WriteFile(pipe, data, size, nullptr, &ov)
+                : ReadFile(pipe, data, size, nullptr, &ov);
+            DWORD le = started ? ERROR_SUCCESS : GetLastError();
+            bool ok = false;
+            if (started || le == ERROR_IO_PENDING) {
+                DWORD wr = WaitForSingleObject(ov.hEvent, timeoutMs);
+                if (wr == WAIT_OBJECT_0)
+                    ok = GetOverlappedResult(pipe, &ov, &transferred, FALSE) != FALSE;
+                else
+                    CancelIoEx(pipe, &ov);
+            }
+            CloseHandle(ov.hEvent);
+            return ok;
+        };
+        DWORD wrote = 0;
+        if (!ioWithTimeout(true, payload.data(), (DWORD)payload.size(), wrote) || wrote != payload.size())
+            throw std::runtime_error("TDP daemon request write failed or timed out");
+        char buf[4096] = {};
+        DWORD got = 0;
+        if (!ioWithTimeout(false, buf, sizeof(buf), got) || got == 0 || got > sizeof(buf))
+            throw std::runtime_error("TDP daemon response read failed or timed out");
+        json resp = json::parse(std::string(buf, buf + got));
+        if (resp.value("version", 0) != 1 ||
+            resp.value("requestId", std::string{}) != request.value("requestId", std::string{}))
+            throw std::runtime_error("TDP daemon response correlation failed");
+        CloseHandle(pipe);
+        return resp;
+    } catch (...) {
+        CloseHandle(pipe);
+        throw;
+    }
+}
+
+static std::string nextTdpRequestId() {
+    return std::to_string(GetCurrentProcessId()) + "-" +
+           std::to_string(g_tdpRequestSeq.fetch_add(1, std::memory_order_relaxed));
+}
+
+static HANDLE ensureTdpDaemonJob() {
+    if (g_tdpDaemonJob) return g_tdpDaemonJob;
+    HANDLE job = CreateJobObjectW(nullptr, nullptr);
+    if (!job) return nullptr;
+    JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits{};
+    limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+    if (!SetInformationJobObject(job, JobObjectExtendedLimitInformation,
+                                 &limits, sizeof(limits))) {
+        CloseHandle(job);
+        return nullptr;
+    }
+    g_tdpDaemonJob = job;
+    return g_tdpDaemonJob;
+}
+
+static void stopTdpDaemonForExit() {
+    if (g_tdpDaemonStopSent) return;
+    g_tdpDaemonStopSent = true;
+    try {
+        json req = {{"version", 1}, {"requestId", nextTdpRequestId()},
+                    {"op", "quit"}, {"args", json::object()}};
+        tdpDaemonPipeRequest(req, 2000);
+    } catch (...) {
+    }
+}
+
+
 static std::wstring sgSelfBase() {
     wchar_t buf[MAX_PATH] = {};
     DWORD n = GetModuleFileNameW(nullptr, buf, MAX_PATH);
@@ -565,48 +788,214 @@ static std::string sgDetectVendor() { // 对齐 yeman.detectVendor
 }
 
 // ── 睡眠守护配置持久化（Sleep\sleepguard.json）──
+static void sgMarkSleepTrigger() {
+    g_sgSleepTriggerTick = GetTickCount64();
+    g_sgSleepTriggerEpoch = sgNowEpoch();
+    g_sgLastInputTick = g_sgSleepTriggerTick;
+    g_sgWakeTick = 0;
+    g_sgResleepPending = g_sgResleepEnabled;
+    sgWriteFileAtomic(
+        SG_SLEEP_TRIGGER_MARKER,
+        "triggerEpoch=" + std::to_string(g_sgSleepTriggerEpoch) + "\n"
+    );
+    // 观察窗口从唤醒信号开始，不能在入睡前启动定时器；睡眠期间消息线程不会可靠运行。
+}
+
+static void sgMarkInputActivity() {
+    const ULONGLONG now = GetTickCount64();
+    if (g_sgResleepEnabled && g_sgSleepTriggerTick != 0)
+        g_sgLastInputTick = now;
+    if (g_sgOverheatSleepEnabled && g_guardEnabled)
+        g_sgOverheatLastInputTick = now;
+}
+
+static void sgStopResleepObservation();
+
+static void sgStartResleepObservation() {
+    if (!g_sgResleepEnabled || g_sgSleepTriggerTick == 0 || !g_hwnd) return;
+    const ULONGLONG now = GetTickCount64();
+    if (now < g_sgResleepCooldownTick) {
+        sgStopResleepObservation();
+        return;
+    }
+    g_sgWakeTick = now;
+    g_sgLastInputTick = now;
+    g_sgResleepPending = true;
+    SetTimer(g_hwnd, SG_RESLEEP_TIMER_ID, 250, nullptr);
+}
+
+static void sgStopResleepObservation() {
+    if (g_hwnd) KillTimer(g_hwnd, SG_RESLEEP_TIMER_ID);
+    g_sgResleepPending = false;
+    g_sgSleepTriggerTick = 0;
+    g_sgWakeTick = 0;
+}
+
+static void sgTryResleep() {
+    if (!g_sgResleepPending) return;
+    if (!g_sgResleepEnabled) {
+        sgStopResleepObservation();
+        return;
+    }
+    const ULONGLONG now = GetTickCount64();
+    if (now < g_sgResleepCooldownTick ||
+        now - g_sgWakeTick > 30000ULL) {
+        sgStopResleepObservation();
+        return;
+    }
+    if (now - g_sgLastInputTick < 10000ULL) return;
+
+    const std::string log =
+        "sleepTriggerEpoch=" + std::to_string(g_sgSleepTriggerEpoch) +
+        "\nresleepEpoch=" + std::to_string(sgNowEpoch()) +
+        "\naction=resleep\n";
+    sgWriteFileAtomic(SG_RESLEEP_MARKER, log);
+    g_sgResleepCooldownTick = now + 300000ULL;
+    sgStopResleepObservation();
+    // 仅执行一次重睡尝试；失败不循环，避免与电源/USB驱动争抢。
+    SetSuspendState(FALSE, FALSE, FALSE);
+}
+
+static bool sgReadTopmonOverheat(double& tempC, bool& hasBattery) {
+    const std::string c = sgReadFile(L"C:\\SOFT\\YeMan\\PowerControl\\topmon.json");
+    if (c.empty()) return false;
+    try {
+        const json j = json::parse(c);
+        const long long ts = j.value("ts", 0LL);
+        const long long now = static_cast<long long>(sgNowEpoch() * 1000.0);
+        if (ts <= 0 || now < ts || now - ts > 6000) return false;
+        tempC = j.value("tempC", 0.0);
+        hasBattery = j.value("hasBattery", false);
+        return std::isfinite(tempC);
+    } catch (...) {
+        return false;
+    }
+}
+
+static void sgResetOverheatState() {
+    g_sgOverheatAboveTick = 0;
+    g_sgOverheatLastInputTick = 0;
+    g_sgOverheatAttempted = false;
+}
+
+static void sgTryOverheatSleep() {
+    if (!g_guardEnabled || !g_sgOverheatSleepEnabled) {
+        sgResetOverheatState();
+        return;
+    }
+    double tempC = 0.0;
+    bool hasBattery = false;
+    if (!sgReadTopmonOverheat(tempC, hasBattery) || !hasBattery || tempC <= g_sgOverheatTempC) {
+        sgResetOverheatState();
+        return;
+    }
+    const ULONGLONG now = GetTickCount64();
+    if (g_sgOverheatAboveTick == 0) {
+        g_sgOverheatAboveTick = now;
+        g_sgOverheatLastInputTick = now;
+        g_sgOverheatAttempted = false;
+        return;
+    }
+    if (g_sgOverheatAttempted || now - g_sgOverheatLastInputTick < 10000ULL) return;
+    g_sgOverheatAttempted = true;
+    if (!SetSuspendState(TRUE, FALSE, FALSE))
+        SetSuspendState(FALSE, FALSE, FALSE);
+}
+
+static void sgUpdateOverheatTimer() {
+    if (!g_hwnd) return;
+    if (g_guardEnabled && g_sgOverheatSleepEnabled)
+        SetTimer(g_hwnd, SG_OVERHEAT_TIMER_ID, 250, nullptr);
+    else {
+        KillTimer(g_hwnd, SG_OVERHEAT_TIMER_ID);
+        sgResetOverheatState();
+    }
+}
+
+static void sgLoadResleepCooldown() {
+    g_sgResleepCooldownTick = 0;
+    g_sgResleepCooldownEpoch = 0.0;
+    const std::string c = sgReadFile(SG_RESLEEP_MARKER);
+    const std::string key = "resleepEpoch=";
+    const size_t p = c.find(key);
+    if (p == std::string::npos) return;
+    try {
+        const double epoch = std::stod(c.substr(p + key.size()));
+        const double age = sgNowEpoch() - epoch;
+        if (age >= 0.0 && age < 300.0) {
+            g_sgResleepCooldownEpoch = epoch;
+            g_sgResleepCooldownTick = GetTickCount64() +
+                static_cast<ULONGLONG>((300.0 - age) * 1000.0);
+        }
+    } catch (...) {
+        // 损坏的冷却记录不阻断主程序；本次启动按无冷却处理。
+    }
+}
+
 static void sgLoadConfig() {
     std::string c = sgReadFile(SG_DIR + L"\\sleepguard.json");
     if (!c.empty()) {
         try {
             json j = json::parse(c);
             g_sgPauseResume = j.value("pauseResume", true);
-            auto tdp = j.value("sleepTdp", json::object());
-            g_sgTdpLock  = tdp.value("mode", std::string("lock")) == "lock";
-            g_sgSleepTdp = tdp.value("watts", 12);
+            g_sgKillListEnabled = j.value("killListEnabled", false);
+            g_sgResleepEnabled = j.value("resleepEnabled", false);
+            g_sgOverheatSleepEnabled = j.value("overheatSleepEnabled", false);
+            g_sgOverheatTempC = j.value("overheatTempC", 95);
+            if (g_sgOverheatTempC < 85) g_sgOverheatTempC = 85;
+            if (g_sgOverheatTempC > 100) g_sgOverheatTempC = 100;
             g_sgMode      = j.value("mode", std::string("off"));
         } catch (...) {}
     }
     if (g_sgMode != "off" && g_sgMode != "custom") g_sgMode = "off";
-    if (g_sgSleepTdp < 5)    g_sgSleepTdp = 5;
-    if (g_sgSleepTdp > 30)   g_sgSleepTdp = 30;
 }
 static void sgSaveConfig() {
     json j = {
         {"mode", g_sgMode},
         {"pauseResume", g_sgPauseResume},
-        {"sleepTdp", {{"mode", g_sgTdpLock ? "lock" : "off"}, {"watts", g_sgSleepTdp}}}
+        {"killListEnabled", g_sgKillListEnabled},
+        {"resleepEnabled", g_sgResleepEnabled},
+        {"overheatSleepEnabled", g_sgOverheatSleepEnabled},
+        {"overheatTempC", g_sgOverheatTempC}
     };
     sgWriteFile(SG_DIR + L"\\sleepguard.json", j.dump(2));
 }
 
-// ── 按键呼出（后台手柄呼出）：持久化于 <exe_dir>\config\summon.json ──
+// ── 按键呼出（后台手柄呼出）：持久化于 C:\SOFT\YeMan\PowerControl\summon.json ──
 static std::wstring summonPath() {
-    return exe_dir() + L"\\config\\summon.json";
+    return L"C:\\SOFT\\YeMan\\PowerControl\\summon.json";
 }
+static void summonSave();
 static void summonLoad() {
     std::string c = sgReadFile(summonPath());
+    bool needsSave = false;
     if (!c.empty()) {
         try {
             json j = json::parse(c);
-            g_summonEnabled   = j.value("enabled", true);
-            g_bDoubleMinimize = j.value("bDoubleMinimize", true);
-            g_tdpShortcut     = j.value("tdpShortcut", false);
-            g_fpsShortcut     = j.value("fpsShortcut", false);
-            g_killGame        = j.value("killGame", false);
-            g_openKeyboard     = j.value("openKeyboard", false);
-        } catch (...) {}
+            auto loadBool = [&](const char* key, bool& dst, bool fallback) {
+                if (!j.contains(key) || !j[key].is_boolean()) {
+                    dst = fallback;
+                    needsSave = true;
+                    return;
+                }
+                dst = j[key].get<bool>();
+            };
+            loadBool("enabled", g_summonEnabled, true);
+            loadBool("bDoubleMinimize", g_bDoubleMinimize, true);
+            loadBool("tdpShortcut", g_tdpShortcut, true);
+            loadBool("fpsShortcut", g_fpsShortcut, true);
+            loadBool("killGame", g_killGame, false);
+            loadBool("openKeyboard", g_openKeyboard, false);
+            loadBool("returnDesktop", g_returnDesktop, false);
+            loadBool("mouseToggle", g_mouseToggle, false);
+        } catch (...) {
+            needsSave = true;
+        }
+    } else {
+        needsSave = true;
     }
+    // 首次启动、字段缺失或 JSON 损坏时只补齐当前文件，不覆盖已有合法用户配置。
+    if (needsSave) summonSave();
 }
 static void summonSave() {
     json j = {
@@ -615,7 +1004,9 @@ static void summonSave() {
         {"tdpShortcut", g_tdpShortcut},
         {"fpsShortcut", g_fpsShortcut},
         {"killGame", g_killGame},
-        {"openKeyboard", g_openKeyboard}
+        {"openKeyboard", g_openKeyboard},
+        {"returnDesktop", g_returnDesktop},
+        {"mouseToggle", g_mouseToggle}
     };
     std::error_code ec;
     fspath::create_directories(fspath::path(summonPath()).parent_path(), ec);
@@ -727,6 +1118,7 @@ static DWORD WINAPI autoCloseThread(LPVOID) {
 // 再显式 MoveFocus 把导航焦点交给 WebView（对齐可用的 YeManCC5 行为）。
 #define SUMMON_FOCUS_TIMER_ID 0x5A31
 #define RETURN_GAME_FOCUS_TIMER_ID 0x5A32
+#define GP_HOLD_TIMER_ID 0x5A33  // 手柄快捷键"按住0.5s/连发"复检（仅按住期间运行）
 static void refocusWebView() {
     if (!g_hwnd || !IsWindow(g_hwnd)) return;
     if (IsIconic(g_hwnd) || !IsWindowVisible(g_hwnd)) ShowWindow(g_hwnd, SW_RESTORE);
@@ -744,16 +1136,60 @@ static void refocusWebView() {
     if (g_ctrl) g_ctrl->MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC);
 }
 
+struct FocusWindowCandidate {
+    DWORD pid = 0;
+    HWND hwnd = nullptr;
+    long long area = 0;
+};
+
+static bool isUsableFocusWindow(HWND h, DWORD expectedPid) {
+    if (!h || h == g_hwnd || !IsWindow(h) || !IsWindowVisible(h) || IsIconic(h)) return false;
+    DWORD pid = 0;
+    GetWindowThreadProcessId(h, &pid);
+    if (!pid || pid != expectedPid) return false;
+    LONG_PTR ex = GetWindowLongPtrW(h, GWL_EXSTYLE);
+    if (ex & WS_EX_TOOLWINDOW) return false;
+    BOOL cloaked = FALSE;
+    if (SUCCEEDED(DwmGetWindowAttribute(h, 14 /* DWMWA_CLOAKED */, &cloaked, sizeof(cloaked))) && cloaked)
+        return false;
+    RECT rc{};
+    return GetWindowRect(h, &rc) && rc.right > rc.left && rc.bottom > rc.top;
+}
+
+static BOOL CALLBACK findFocusWindowEnum(HWND h, LPARAM lp) {
+    auto* c = reinterpret_cast<FocusWindowCandidate*>(lp);
+    if (!isUsableFocusWindow(h, c->pid)) return TRUE;
+    RECT rc{};
+    GetWindowRect(h, &rc);
+    long long area = (long long)(rc.right - rc.left) * (long long)(rc.bottom - rc.top);
+    // 原窗口失效时，优先同 PID 最大可见顶层窗口；对游戏主窗口比临时弹窗稳定。
+    if (area > c->area) { c->hwnd = h; c->area = area; }
+    return TRUE;
+}
+
+static HWND resolvePreviousFocusWindow() {
+    if (!g_prevForegroundPid) return nullptr;
+    if (isUsableFocusWindow(g_prevForeground, g_prevForegroundPid)) return g_prevForeground;
+    FocusWindowCandidate c{};
+    c.pid = g_prevForegroundPid;
+    EnumWindows(findFocusWindowEnum, reinterpret_cast<LPARAM>(&c));
+    if (c.hwnd) g_prevForeground = c.hwnd;
+    return c.hwnd;
+}
+
 static bool refocusPreviousWindow() {
-    HWND target = g_prevForeground;
-    if (!target || target == g_hwnd || !IsWindow(target)) return false;
+    HWND target = resolvePreviousFocusWindow();
+    if (!target) return false;
+    DWORD targetTid = GetWindowThreadProcessId(target, nullptr);
+    DWORD myTid = GetCurrentThreadId();
     HWND fg = GetForegroundWindow();
     DWORD fgTid = fg ? GetWindowThreadProcessId(fg, nullptr) : 0;
-    DWORD myTid = GetCurrentThreadId();
-    bool attached = fgTid && fgTid != myTid && AttachThreadInput(myTid, fgTid, TRUE);
+    bool attTarget = targetTid && targetTid != myTid && AttachThreadInput(myTid, targetTid, TRUE);
+    bool attFg = fgTid && fgTid != myTid && fgTid != targetTid && AttachThreadInput(myTid, fgTid, TRUE);
+    BringWindowToTop(target);
     SetForegroundWindow(target);
-    SetActiveWindow(target);
-    if (attached) AttachThreadInput(myTid, fgTid, FALSE);
+    if (attFg) AttachThreadInput(myTid, fgTid, FALSE);
+    if (attTarget) AttachThreadInput(myTid, targetTid, FALSE);
     return GetForegroundWindow() == target;
 }
 
@@ -789,164 +1225,231 @@ static void bringToFront(HWND hwnd) {
 }
 // 后台手柄轮询线程：检测任意手柄 LB+RB 同时按住满 0.5 秒 → 呼出程序（仅当窗口未在前台时）
 static void hideWindowAnimated(HWND hwnd); // 前向声明（本线程要用）
-// ── 手柄全局快捷调节：前向声明（定义见 sgRestoreTdp 之后，调用 ipc_emit） ──
+// ── 手柄全局快捷调节前向声明（调用 ipc_emit） ──
 static inline int clampInt(int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v); }
 static void nativeAdjustTdp(int delta);
 static void nativeAdjustRtss(int delta);
+static void nativeAdjustBrightness(int dir); // Start+左右转发亮度调节
+// 浮动运行标志文件：autofloat 启用时写、关闭时删，且每 5 秒刷新时间戳；
+// native 按 30 秒新鲜度判定，避免程序强杀/残留文件导致误判浮动仍在运行而吞掉按键。
+static bool floatActive() {
+    try {
+        auto p = fspath::path(L"C:\\SOFT\\YeMan\\PowerControl\\float-active");
+        if (!fspath::exists(p)) return false;
+        auto last = fspath::last_write_time(p);
+        auto now = fspath::file_time_type::clock::now();
+        return (now - last) < std::chrono::seconds(30);
+    } catch (...) { return false; }
+}
 static void runKillBat();          // 选择 + B → 执行 KiLL-EXE.bat 结束当前游戏
-static void openTouchKeyboard();   // 选择 + X → 呼出 Windows 触摸键盘（TabTip.exe）
+static void openTouchKeyboard();   // 选择 + X → 呼出 Windows 触摸键盘
+static void returnToDesktop();     // 选择 + A → 内部 Win+D 立即返回桌面
+static void toggleMouseMode();     // 选择 + Y → 启停 JoyXoff 模拟鼠标
 static void ipc_emit(const std::string& ev, const json& data);
 // 后台手柄轮询线程：
 //  - 按住 LB+RB 满 0.5 秒 → 呼出程序（仅当窗口隐藏在托盘时；全局免点击，绕开 Chromium Gamepad API 需先点击的限制）
 //  - 0.5 秒内双击 B → 最小化到托盘（同样全局免点击，与前端引擎的双击 B 解耦）
-static DWORD WINAPI gamepadSummonThread(LPVOID) {
+// ── 事件驱动手柄：Raw Input 订阅（零后台占用，Tier A）──
+// 替代原 100Hz 轮询线程：向 OS 注册 Raw Input（RIDEV_INPUTSINK 后台也能收到、
+// RIDEV_DEVNOTIFY 收插拔），OS 仅在手柄状态变化时投递 WM_INPUT，空闲=0 CPU。
+// 收到 WM_INPUT 后用 XInputGetState 读权威按键态（映射稳定，无需解析 HID 报表），
+// gamepadEval() 做边沿+计时器驱动的全局快捷键。所有"按住0.5s"用一次性计时器，
+// 仅按住期间运行（50ms 复检），松开即停 → 空闲零占用。
+// 原 ipc_emit("gamepad.state") 已删除：前端（engine.ts / GamepadVisualizer.vue）均用
+// navigator.getGamepads() 直接读，无人消费该事件，属纯浪费（详见优化方案 MD）。
+static bool g_padConnected   = false;
+static WORD  g_curW          = 0;     // 首个已连手柄的按钮位（权威态）
+static WORD  g_prevW         = 0;     // 上一帧按钮位（边沿检测）
+static XINPUT_GAMEPAD g_curPad{};     // 当前手柄完整状态，用于区分真实变化与周期性 HID 报文
+static XINPUT_GAMEPAD g_prevPad{};    // 上一次手柄完整状态
+static bool g_gpHoldTimerOn = false;  // 持有计时器是否在跑
+static BYTE  g_riBuf[1024];           // WM_INPUT 报文缓冲（HID 报文通常 <256B）
+// 快捷键状态（原线程局部变量提升为文件作用域，供 WM_INPUT / WM_TIMER 复用）
+static bool gpArmed        = true;
+static ULONGLONG gpHoldStart = 0;
+static bool gpPrevB        = false;
+static ULONGLONG gpLastBPress = 0;
+static bool gpKbArmed = true, gpKxArmed = true, gpKyArmed = true;
+static ULONGLONG gpKbHoldStart = 0, gpKxHoldStart = 0, gpKyHoldStart = 0;
+static ULONGLONG s_dpHeldStart = 0, s_dpLastEmit = 0;
+static ULONGLONG s_brightnessHeldStart = 0, s_brightnessLastEmit = 0;
+
+static void gamepadReadState() {
+    bool live = false;
+    XINPUT_GAMEPAD pad{};
+    for (DWORD i = 0; i < 4; i++) {
+        XINPUT_STATE s; ZeroMemory(&s, sizeof(s));
+        if (XInputGetState(i, &s) == ERROR_SUCCESS) {
+            live = true;
+            pad = s.Gamepad;
+            break;
+        }
+    }
+    g_padConnected = live;
+    g_curPad = pad;
+    g_curW = pad.wButtons;
+}
+
+// 任何与"按住0.5s / 连发"相关的键仍按下 → 需保持持有计时器
+static bool gpAnyShortcutHeld() {
+    return (g_curW & (XINPUT_GAMEPAD_LEFT_SHOULDER | XINPUT_GAMEPAD_RIGHT_SHOULDER |
+        XINPUT_GAMEPAD_A | XINPUT_GAMEPAD_B | XINPUT_GAMEPAD_START | XINPUT_GAMEPAD_BACK |
+        XINPUT_GAMEPAD_X | XINPUT_GAMEPAD_Y | XINPUT_GAMEPAD_DPAD_UP | XINPUT_GAMEPAD_DPAD_DOWN |
+        XINPUT_GAMEPAD_DPAD_LEFT | XINPUT_GAMEPAD_DPAD_RIGHT)) != 0;
+}
+
+// 边沿+计时器驱动的全部全局快捷键（WM_INPUT 唤醒 与 持有计时器复检 都调用，幂等）
+static void gamepadEval() {
     const ULONGLONG HOLD_MS = 500;
     const ULONGLONG B_DOUBLE_MS = 500;
-    bool armed = true;           // 需松开后重新蓄力，避免持续按住反复触发
-    ULONGLONG holdStart = 0;
-    bool prevB = false;          // B 键上一帧状态（用于边沿检测，避免长按连发）
-    ULONGLONG lastBPress = 0;    // 上一次 B 键按下时刻（双击判定）
-    // 选择(Back) + B / 选择 + X 长按 0.5s 触发状态（需松开重蓄力，避免反复触发）
-    bool kbArmed = true, kxArmed = true;
-    ULONGLONG kbHoldStart = 0, kxHoldStart = 0;
-    // Start+方向键 快捷调节的边沿状态（跨帧保持，用于每按一次仅触发一次）
-    static bool prevDpUp = false, prevDpDown = false, prevDpLeft = false, prevDpRight = false;
-    while (!g_summonQuit) {
-        bool both = false;
-        bool bPressed = false;
-        bool startHeld = false;
-        bool selectHeld = false;  // 选择(Back) 键
-        bool xPressed = false;    // X 键
-        bool dpUp = false, dpDown = false, dpLeft = false, dpRight = false;
-        XINPUT_STATE live = {}; bool haveLive = false;
-        for (DWORD i = 0; i < 4; i++) {
-            XINPUT_STATE s; ZeroMemory(&s, sizeof(s));
-            if (XInputGetState(i, &s) == ERROR_SUCCESS) {
-                WORD w = s.Gamepad.wButtons;
-                if (!haveLive) { live = s; haveLive = true; } // 捕获首个已连手柄完整状态供前端转发
-                if ((w & XINPUT_GAMEPAD_LEFT_SHOULDER) && (w & XINPUT_GAMEPAD_RIGHT_SHOULDER)) {
-                    both = true;
-                }
-                if (w & XINPUT_GAMEPAD_B) bPressed = true;
-                if (w & XINPUT_GAMEPAD_START) startHeld = true;
-                if (w & XINPUT_GAMEPAD_BACK) selectHeld = true;
-                if (w & XINPUT_GAMEPAD_X) xPressed = true;
-                if (w & XINPUT_GAMEPAD_DPAD_UP) dpUp = true;
-                if (w & XINPUT_GAMEPAD_DPAD_DOWN) dpDown = true;
-                if (w & XINPUT_GAMEPAD_DPAD_LEFT) dpLeft = true;
-                if (w & XINPUT_GAMEPAD_DPAD_RIGHT) dpRight = true;
+    gamepadReadState();
+    if (g_padConnected && memcmp(&g_curPad, &g_prevPad, sizeof(XINPUT_GAMEPAD)) != 0)
+        sgMarkInputActivity();
+    WORD w = g_curW;
+    bool both       = (w & XINPUT_GAMEPAD_LEFT_SHOULDER) && (w & XINPUT_GAMEPAD_RIGHT_SHOULDER);
+    bool bPressed   = (w & XINPUT_GAMEPAD_B) != 0;
+    bool aPressed   = (w & XINPUT_GAMEPAD_A) != 0;
+    bool startHeld  = (w & XINPUT_GAMEPAD_START) != 0;
+    bool selectHeld = (w & XINPUT_GAMEPAD_BACK) != 0;
+    bool xPressed   = (w & XINPUT_GAMEPAD_X) != 0;
+    bool yPressed   = (w & XINPUT_GAMEPAD_Y) != 0;
+    bool dpUp   = (w & XINPUT_GAMEPAD_DPAD_UP) != 0;
+    bool dpDown = (w & XINPUT_GAMEPAD_DPAD_DOWN) != 0;
+    bool dpLeft = (w & XINPUT_GAMEPAD_DPAD_LEFT) != 0;
+    bool dpRight= (w & XINPUT_GAMEPAD_DPAD_RIGHT) != 0;
+    ULONGLONG now = GetTickCount64();
+
+    // ── 双击 B → 最小化到托盘（仅窗口可见且设置开启时生效；隐藏时 no-op）──
+    if (bPressed && !gpPrevB) {
+        if (g_summonEnabled && g_bDoubleMinimize && IsWindowVisible(g_hwnd) && (now - gpLastBPress) <= B_DOUBLE_MS) {
+            gpLastBPress = 0;
+            hideWindowAnimated(g_hwnd);
+            g_returnFocusDeadline = now + 1800;
+            HWND target = resolvePreviousFocusWindow();
+            if (!refocusPreviousWindow() && target)
+                SetTimer(g_hwnd, RETURN_GAME_FOCUS_TIMER_ID, 35, nullptr);
+            else {
+                g_prevForeground = nullptr;
+                g_prevForegroundPid = 0;
             }
-        }
-        ULONGLONG now = GetTickCount64();
-        // ── 双击 B → 最小化到托盘（仅窗口可见且设置开启时生效；隐藏时为 no-op，不影响游戏内 B 连按）──
-        if (bPressed && !prevB) {
-            if (g_summonEnabled && g_bDoubleMinimize && IsWindowVisible(g_hwnd) && (now - lastBPress) <= B_DOUBLE_MS) {
-                lastBPress = 0;
-                hideWindowAnimated(g_hwnd);
-                // 先立即回焦；独占全屏/前台锁拒绝时交给消息线程限时重试。
-                g_returnFocusDeadline = now + 1800;
-                if (!refocusPreviousWindow() && IsWindow(g_prevForeground))
-                    SetTimer(g_hwnd, RETURN_GAME_FOCUS_TIMER_ID, 35, nullptr);
-                else
-                    g_prevForeground = nullptr;
-                if (g_returnFocusDeadline <= now) g_returnFocusDeadline = 0;
-            } else {
-                lastBPress = now;
-            }
-        }
-        prevB = bPressed;
-        // ── 按住 LB+RB 0.5s → 任何窗口状态都强制呼出/抢焦 ──
-        if (both) {
-            if (holdStart == 0) holdStart = now;
-            if (armed && g_summonEnabled && g_hwnd && (now - holdStart) >= HOLD_MS) {
-                armed = false;
-                HWND fg = GetForegroundWindow();
-                if (fg && fg != g_hwnd) g_prevForeground = fg;
-                bringToFront(g_hwnd);
-                // 通知前端重新接管手柄导航（呼出后前端循环可能未运行/窗口可见态未刷新）
-                ipc_emit("gamepad.summon", json::object());
-            }
+            if (g_returnFocusDeadline <= now) g_returnFocusDeadline = 0;
         } else {
-            holdStart = 0;
-            armed = true;
+            gpLastBPress = now;
         }
-        // ── Start + 方向键 全局快捷调节（TDP / RTSS 锁帧） ──
-        // 不依赖窗口焦点，游戏内全屏也生效；每按一次即一次生效（边沿检测，零 debounce）。
-        if (startHeld) {
-            if (g_tdpShortcut) {
-                if (dpUp && !prevDpUp)   nativeAdjustTdp(+1);
-                if (dpDown && !prevDpDown) nativeAdjustTdp(-1);
-            }
-            if (g_fpsShortcut) {
-                if (dpRight && !prevDpRight) nativeAdjustRtss(+5);
-                if (dpLeft && !prevDpLeft)   nativeAdjustRtss(-5);
-            }
-        }
-        prevDpUp = dpUp; prevDpDown = dpDown; prevDpLeft = dpLeft; prevDpRight = dpRight;
-        // ── 选择(Back) + B 长按 0.5s → 结束当前游戏（全局，游戏内全屏也生效） ──
-        if (selectHeld && bPressed) {
-            if (kbHoldStart == 0) kbHoldStart = now;
-            if (kbArmed && g_killGame && (now - kbHoldStart) >= HOLD_MS) {
-                kbArmed = false;
-                runKillBat();
-            }
-        } else {
-            kbHoldStart = 0;
-            kbArmed = true;
-        }
-        // ── 选择(Back) + X 长按 0.5s → 呼出 Windows 触摸键盘（全局，游戏内全屏也生效） ──
-        if (selectHeld && xPressed) {
-            if (kxHoldStart == 0) kxHoldStart = now;
-            if (kxArmed && g_openKeyboard && (now - kxHoldStart) >= HOLD_MS) {
-                kxArmed = false;
-                openTouchKeyboard();
-            }
-        } else {
-            kxHoldStart = 0;
-            kxArmed = true;
-        }
-        // ── 转发手柄状态给前端引擎（绕开 WebView2 Gamepad API 在后台/呼出时读不到手柄的限制）──
-        // 内容页导航/滑块由前端引擎消费此状态；native 仅保留全局快捷（LB+RB 呼出/B双击/Start+方向 TDP 等）。
-        // 按键索引对齐 W3C 标准 Gamepad（0=A 1=B 2=X 3=Y 4=LB 5=RB 6=LT 7=RT 8=Back 9=Start
-        // 10=LS 11=RS 12=↑ 13=↓ 14=← 15=→），轴 [LX,LY(上为负),RX,RY(上为负)] 归一化 [-1,1]。
-        {
-            static bool prevHadLive = false;
-            if (haveLive) {
-                WORD w = live.Gamepad.wButtons;
-                std::vector<int> bt(16, 0);
-                auto setb = [&](int idx, bool on) { if (on) bt[idx] = 1; };
-                setb(0,  w & XINPUT_GAMEPAD_A);
-                setb(1,  w & XINPUT_GAMEPAD_B);
-                setb(2,  w & XINPUT_GAMEPAD_X);
-                setb(3,  w & XINPUT_GAMEPAD_Y);
-                setb(4,  w & XINPUT_GAMEPAD_LEFT_SHOULDER);
-                setb(5,  w & XINPUT_GAMEPAD_RIGHT_SHOULDER);
-                setb(6,  live.Gamepad.bLeftTrigger  > 30);
-                setb(7,  live.Gamepad.bRightTrigger > 30);
-                setb(8,  w & XINPUT_GAMEPAD_BACK);
-                setb(9,  w & XINPUT_GAMEPAD_START);
-                setb(10, w & XINPUT_GAMEPAD_LEFT_THUMB);
-                setb(11, w & XINPUT_GAMEPAD_RIGHT_THUMB);
-                setb(12, w & XINPUT_GAMEPAD_DPAD_UP);
-                setb(13, w & XINPUT_GAMEPAD_DPAD_DOWN);
-                setb(14, w & XINPUT_GAMEPAD_DPAD_LEFT);
-                setb(15, w & XINPUT_GAMEPAD_DPAD_RIGHT);
-                auto norm = [](short v) { double d = v / 32767.0; if (d > 1) d = 1; if (d < -1) d = -1; return d; };
-                json st = json::object();
-                st["connected"] = true;
-                st["buttons"] = bt;
-                st["axes"] = json::array({ norm(live.Gamepad.sThumbLX), -norm(live.Gamepad.sThumbLY),
-                                           norm(live.Gamepad.sThumbRX), -norm(live.Gamepad.sThumbRY) });
-                ipc_emit("gamepad.state", st);
-                prevHadLive = true;
-            } else if (prevHadLive) {
-                ipc_emit("gamepad.state", json::object({ { "connected", false } }));
-                prevHadLive = false;
-            }
-        }
-        Sleep(10);
     }
-    return 0;
+    gpPrevB = bPressed;
+
+    // ── 按住 LB+RB 0.5s → 强制呼出/抢焦（任意窗口态，全局免点击）──
+    if (both) {
+        if (gpHoldStart == 0) gpHoldStart = now;
+        if (gpArmed && g_summonEnabled && g_hwnd && (now - gpHoldStart) >= HOLD_MS) {
+            gpArmed = false;
+            HWND fg = GetForegroundWindow();
+            if (fg && fg != g_hwnd) {
+                DWORD pid = 0;
+                GetWindowThreadProcessId(fg, &pid);
+                g_prevForeground = fg;
+                g_prevForegroundPid = pid;
+            }
+            bringToFront(g_hwnd);
+            ipc_emit("gamepad.summon", json::object());
+        }
+    } else {
+        gpHoldStart = 0;
+        gpArmed = true;
+    }
+
+    // ── Start + 方向键 全局快捷调节（TDP / RTSS 锁帧），按住自动连发 ──
+    // 速度参数需与 src/gamepad/engine.ts 的 SLIDER_REPEAT_* / SLIDER_ACCEL_* 保持一致。
+    if (startHeld) {
+        if (g_tdpShortcut && (dpUp || dpDown)) {
+            int delta = dpUp ? 1 : -1;
+            ULONGLONG nowMs = GetTickCount64();
+            if (s_dpHeldStart == 0) { s_dpHeldStart = nowMs; s_dpLastEmit = nowMs; nativeAdjustTdp(delta); }
+            else {
+                ULONGLONG heldMs = nowMs - s_dpHeldStart;
+                ULONGLONG interval = 150;
+                if (heldMs > 500) { ULONGLONG dec = (heldMs - 500) / 400 * 15; interval = dec >= 110 ? 40 : 150 - dec; }
+                if (nowMs - s_dpLastEmit >= interval) { s_dpLastEmit = nowMs; nativeAdjustTdp(delta); }
+            }
+        } else { s_dpHeldStart = 0; }
+        if (g_fpsShortcut && (dpRight || dpLeft)) {
+            int dir = dpRight ? 1 : -1;
+            ULONGLONG nowMs = GetTickCount64();
+            if (s_brightnessHeldStart == 0) { s_brightnessHeldStart = nowMs; s_brightnessLastEmit = nowMs; nativeAdjustBrightness(dir); }
+            else {
+                ULONGLONG heldMs = nowMs - s_brightnessHeldStart;
+                ULONGLONG interval = 150;
+                if (heldMs > 500) { ULONGLONG dec = (heldMs - 500) / 400 * 15; interval = dec >= 110 ? 40 : 150 - dec; }
+                if (nowMs - s_brightnessLastEmit >= interval) { s_brightnessLastEmit = nowMs; nativeAdjustBrightness(dir); }
+            }
+        } else { s_brightnessHeldStart = 0; }
+    } else {
+        s_dpHeldStart = 0;
+        s_brightnessHeldStart = 0;
+    }
+
+    // ── 选择(Back) + B 长按 0.5s → 结束当前游戏 ──
+    if (selectHeld && bPressed) {
+        if (gpKbHoldStart == 0) gpKbHoldStart = now;
+        if (gpKbArmed && g_killGame && (now - gpKbHoldStart) >= HOLD_MS) {
+            gpKbArmed = false;
+            runKillBat();
+        }
+    } else { gpKbHoldStart = 0; gpKbArmed = true; }
+
+    // ── 选择(Back) + X 长按 0.5s → 打开 Windows 触摸键盘 ──
+    if (selectHeld && xPressed) {
+        if (gpKxHoldStart == 0) gpKxHoldStart = now;
+        if (gpKxArmed && g_openKeyboard && (now - gpKxHoldStart) >= HOLD_MS) {
+            gpKxArmed = false;
+            openTouchKeyboard();
+        }
+    } else { gpKxHoldStart = 0; gpKxArmed = true; }
+
+    // ── 选择(Back) + A 组合按下瞬间 → 返回桌面（只在组合刚建立时触发一次） ──
+    const bool comboNow = selectHeld && aPressed;
+    const bool comboPrev = (g_prevW & XINPUT_GAMEPAD_BACK) && (g_prevW & XINPUT_GAMEPAD_A);
+    if (g_returnDesktop && comboNow && !comboPrev) {
+        returnToDesktop();
+    }
+
+    // ── 选择(Back) + Y 长按 0.5s → 模拟鼠标开/关 ──
+    if (selectHeld && yPressed) {
+        if (gpKyHoldStart == 0) gpKyHoldStart = now;
+        if (gpKyArmed && g_mouseToggle && (now - gpKyHoldStart) >= HOLD_MS) {
+            gpKyArmed = false;
+            toggleMouseMode();
+        }
+    } else { gpKyHoldStart = 0; gpKyArmed = true; }
+
+    // 持有计时器：仅在有相关键按下时运行（空闲自动停 → 0 CPU）
+    if (gpAnyShortcutHeld()) {
+        if (!g_gpHoldTimerOn) { SetTimer(g_hwnd, GP_HOLD_TIMER_ID, 50, nullptr); g_gpHoldTimerOn = true; }
+    } else if (g_gpHoldTimerOn) {
+        KillTimer(g_hwnd, GP_HOLD_TIMER_ID);
+        g_gpHoldTimerOn = false;
+    }
+    g_prevW = w;
+    g_prevPad = g_curPad;
+}
+
+// 注册 Raw Input 订阅：后台(窗口隐藏)也能收到手柄 WM_INPUT，并收插拔通知
+static void gamepadRegisterRawInput() {
+    RAWINPUTDEVICE rid[4];
+    rid[0].usUsagePage = 0x01; rid[0].usUsage = 0x05; // Generic Desktop / Game Pad
+    rid[0].dwFlags = RIDEV_INPUTSINK | RIDEV_DEVNOTIFY;
+    rid[0].hwndTarget = g_hwnd;
+    rid[1].usUsagePage = 0x01; rid[1].usUsage = 0x04; // Generic Desktop / Joystick
+    rid[1].dwFlags = RIDEV_INPUTSINK | RIDEV_DEVNOTIFY;
+    rid[1].hwndTarget = g_hwnd;
+    rid[2].usUsagePage = 0x01; rid[2].usUsage = 0x06; // Generic Desktop / Keyboard
+    rid[2].dwFlags = RIDEV_INPUTSINK | RIDEV_DEVNOTIFY;
+    rid[2].hwndTarget = g_hwnd;
+    rid[3].usUsagePage = 0x01; rid[3].usUsage = 0x02; // Generic Desktop / Mouse
+    rid[3].dwFlags = RIDEV_INPUTSINK | RIDEV_DEVNOTIFY;
+    rid[3].hwndTarget = g_hwnd;
+    RegisterRawInputDevices(rid, 4, sizeof(RAWINPUTDEVICE));
 }
 // 隐藏规则：若实际进入 S4 休眠（本程序自己的「强制入睡」或用户/系统把电源键/睡眠键/合盖配成休眠），
 // 睡眠守护的冻结/TDP/值守一律不执行（"一切均不发生"）。这里检测配置层面是否为 S4 动作。
@@ -982,18 +1485,26 @@ static bool sgIsHibernateAction() {
     return false;
 }
 
-// 同步执行外部 exe（带超时，避免阻塞电源事件回调），不捕获输出
-static void sgRunExeSync(const std::wstring& exe, const std::wstring& args, DWORD timeoutMs = 4000) {
-    if (!fspath::exists(exe)) return;
+// 同步执行外部 exe（带超时，避免阻塞电源事件回调），不捕获输出；仅退出码 0 视为成功。
+static bool sgRunExeSync(const std::wstring& exe, const std::wstring& args, DWORD timeoutMs = 4000) {
+    if (!fspath::exists(exe)) return false;
     std::wstring cmd = L"\"" + exe + L"\" " + args;
     STARTUPINFOW si{sizeof(si)}; si.dwFlags = STARTF_USESHOWWINDOW; si.wShowWindow = SW_HIDE;
     PROCESS_INFORMATION pi{};
     std::vector<wchar_t> buf(cmd.begin(), cmd.end()); buf.push_back(0);
     if (!CreateProcessW(nullptr, buf.data(), nullptr, nullptr, FALSE,
         CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi))
-        return;
-    WaitForSingleObject(pi.hProcess, timeoutMs);
+        return false;
+    DWORD wait = WaitForSingleObject(pi.hProcess, timeoutMs);
+    if (wait == WAIT_TIMEOUT) {
+        // 不能让“已判定失败”的 TDP 子进程稍后继续改硬件，超时必须终止并回收。
+        TerminateProcess(pi.hProcess, ERROR_TIMEOUT);
+        WaitForSingleObject(pi.hProcess, 1000);
+    }
+    DWORD exitCode = STILL_ACTIVE;
+    bool ok = wait == WAIT_OBJECT_0 && GetExitCodeProcess(pi.hProcess, &exitCode) && exitCode == 0;
     CloseHandle(pi.hThread); CloseHandle(pi.hProcess);
+    return ok;
 }
 
 // 同步运行命令并捕获 stdout（CREATE_NO_WINDOW），stderr 合并到 stdout 避免管道死锁。
@@ -1342,60 +1853,56 @@ static bool writeSmtReg(DWORD override, DWORD mask) {
     return ok;
 }
 
-// TDP 压制/还原：复用 pawnio/YeManTdpCtl.exe（与前端 setTdp 同款机制，零新依赖）
-static bool sgApplyTdp(int watts) {
-    std::wstring exe = L"C:\\SOFT\\YeMan\\PowerControl\\pawnio\\YeManTdpCtl.exe";
-    if (!fspath::exists(exe)) return false;
-    std::wstring a = L"set " + std::to_wstring(watts);
-    std::string v = sgDetectVendor();
-    if (!v.empty()) a += L" --vendor " + U2W(v);
-    sgRunExeSync(exe, a);
-    return true; // best-effort：外部 exe 已调用（成功与否由 YeManTdpCtl 自身决定）
-}
-// 前向声明（定义见下方 手柄全局快捷调节 段，按电源模式选 tdp-ac/tdp-dc）
-static std::wstring nativeTdpTxtPath();
-static int nativeReadTdp(const std::wstring& primary);
-
-static void sgRestoreTdp() { // 还原到用户配置的 TDP（插电→tdp-ac.txt / 电池→tdp-dc.txt）
-    // 修复(2026-07-30 重加)：旧版写死 tdp-dc.txt(30W)，插电开机被拍到电池档→主频爆低。
-    // 现与手柄调节/前端同源：按当前电源模式选真相源 txt。
-    int w = nativeReadTdp(nativeTdpTxtPath());
-    if (w > 0) sgApplyTdp(w);
-}
-
 // ── 手柄全局快捷调节（后台 XInput 线程处理，不依赖窗口焦点，游戏内全屏也生效） ──
-// TDP：按当前电源模式（AC/DC）选真相源 txt——插电改 tdp-ac.txt、电池改 tdp-dc.txt，
-// 与前端 setTdp/计划任务 bat 完全同源；±delta 后先存档再立即下发硬件。
-// 修复(2026-07-27)：旧版写死 tdp-ac.txt，掌机离电时手柄调节不落 DC 档，
-// 导致界面回读与离电恢复跳回旧值。
-static std::wstring nativeTdpTxtPath() {
-    // GetSystemPowerStatus: ACLineStatus 0=电池(DC)，1=交流(AC)，255=未知→按 AC（与 sys.info 同判定）
-    SYSTEM_POWER_STATUS sps{};
-    bool dc = (GetSystemPowerStatus(&sps) && sps.ACLineStatus == 0);
-    return dc ? L"C:\\SOFT\\YeMan\\PowerControl\\tdp-dc.txt"
-              : L"C:\\SOFT\\YeMan\\PowerControl\\tdp-ac.txt";
-}
-static int nativeReadTdp(const std::wstring& primary) {
-    int v = 0;
-    std::string c = sgReadFile(primary);
-    if (c.empty()) { // 主 txt 缺失时兜底读另一份，仅作起始值参考
-        std::wstring other = (primary.find(L"tdp-dc") != std::wstring::npos)
-            ? L"C:\\SOFT\\YeMan\\PowerControl\\tdp-ac.txt"
-            : L"C:\\SOFT\\YeMan\\PowerControl\\tdp-dc.txt";
-        c = sgReadFile(other);
-    }
-    if (!c.empty()) { try { v = std::stoi(c); } catch (...) { v = 0; } }
-    return v;
-}
+// 手柄 TDP 调节：只转发按键方向给前端（gamepad.tdp-delta），由前端程序统一调节/记录/刷新 UI，
+// 前端写入 control-config.json，native 不再直接读取或写入 tdp.txt。
 static void nativeAdjustTdp(int delta) {
     if (!g_tdpShortcut) return;
-    std::wstring txt = nativeTdpTxtPath();
-    int cur = nativeReadTdp(txt);
-    int next = clampInt((cur > 0 ? cur : 0) + delta, 2, 300);
-    if (next == cur) return;
-    sgWriteFile(txt, std::to_string(next)); // 先落盘对应电源模式的真相源
-    sgApplyTdp(next);
-    ipc_emit("gamepad.refresh", {}); // 通知前端回读刷新（窗口可见时）
+    PostMessageW(g_hwnd, WM_GAMEPAD_TDP_DELTA, (WPARAM)delta, 0);
+}
+// 手柄锁帧调节：统一转发方向，由程序更新 FPS 帧率上限并负责 RTSS 下发。
+static void nativeAdjustBrightness(int dir) {
+    if (!g_fpsShortcut) return;
+    PostMessageW(g_hwnd, WM_GAMEPAD_BRIGHTNESS, (WPARAM)dir, 0);
+}
+static const GUID YM_GUID_YEMAN_SCHEME =
+    { 0x1cb8b882, 0xa900, 0x4b9f, { 0x9b, 0xac, 0x99, 0xd1, 0x51, 0xe6, 0x44, 0x41 } };
+static const GUID YM_GUID_VIDEO_SUBGROUP =
+    { 0x7516b95f, 0xf776, 0x4464, { 0x8c, 0x53, 0x06, 0x16, 0x7f, 0x40, 0xcc, 0x99 } };
+static const GUID YM_GUID_VIDEO_BRIGHTNESS =
+    { 0xaded5e82, 0xb909, 0x4619, { 0x99, 0x49, 0xf5, 0xd7, 0x1d, 0xac, 0x0b, 0xcb } };
+
+static void nativeApplyBrightness(int dir) {
+    if (!g_fpsShortcut || !g_hwnd) return;
+    GUID* active = nullptr;
+    const bool yeman = PowerGetActiveScheme(nullptr, &active) == ERROR_SUCCESS && active &&
+        IsEqualGUID(*active, YM_GUID_YEMAN_SCHEME);
+    if (active) LocalFree(active);
+    SYSTEM_POWER_STATUS sps{};
+    const bool dc = GetSystemPowerStatus(&sps) && sps.ACLineStatus == 0;
+    if (!yeman) {
+        ipc_emit("gamepad.brightness", json{{"ok", false}, {"reason", "not-yeman"}, {"mode", dc ? "dc" : "ac"}});
+        return;
+    }
+    ULONG current = 0;
+    DWORD rc = dc
+        ? PowerReadDCValueIndex(nullptr, &YM_GUID_YEMAN_SCHEME, &YM_GUID_VIDEO_SUBGROUP,
+                                &YM_GUID_VIDEO_BRIGHTNESS, &current)
+        : PowerReadACValueIndex(nullptr, &YM_GUID_YEMAN_SCHEME, &YM_GUID_VIDEO_SUBGROUP,
+                                &YM_GUID_VIDEO_BRIGHTNESS, &current);
+    if (rc != ERROR_SUCCESS) {
+        ipc_emit("gamepad.brightness", json{{"ok", false}, {"reason", "unsupported"}, {"mode", dc ? "dc" : "ac"}});
+        return;
+    }
+    const LONG next = std::max<LONG>(0, std::min<LONG>(100, (LONG)current + dir * 5));
+    rc = dc
+        ? PowerWriteDCValueIndex(nullptr, &YM_GUID_YEMAN_SCHEME, &YM_GUID_VIDEO_SUBGROUP,
+                                 &YM_GUID_VIDEO_BRIGHTNESS, (ULONG)next)
+        : PowerWriteACValueIndex(nullptr, &YM_GUID_YEMAN_SCHEME, &YM_GUID_VIDEO_SUBGROUP,
+                                 &YM_GUID_VIDEO_BRIGHTNESS, (ULONG)next);
+    if (rc == ERROR_SUCCESS) rc = PowerSetActiveScheme(nullptr, &YM_GUID_YEMAN_SCHEME);
+    ipc_emit("gamepad.brightness", json{{"ok", rc == ERROR_SUCCESS}, {"value", (int)next},
+        {"mode", dc ? "dc" : "ac"}, {"reason", rc == ERROR_SUCCESS ? "" : "write-failed"}});
 }
 // RTSS 锁帧：读/改写 Profiles\Global 的 Limit=，rundll32 重载配置（对齐前端 setRtssLimit）。
 static void nativeAdjustRtss(int delta) {
@@ -1462,6 +1969,55 @@ static void openTouchKeyboard() {
     }
 }
 
+// 选择 + A：内部模拟 Win+D 返回桌面；不启动脚本、不等待、不切回游戏窗口。
+static void returnToDesktop() {
+    if (g_hwnd && IsWindow(g_hwnd))
+        ShowWindow(g_hwnd, SW_HIDE);
+
+    INPUT inputs[4] = {};
+    inputs[0].type = INPUT_KEYBOARD;
+    inputs[0].ki.wVk = VK_LWIN;
+    inputs[1].type = INPUT_KEYBOARD;
+    inputs[1].ki.wVk = 'D';
+    inputs[2].type = INPUT_KEYBOARD;
+    inputs[2].ki.wVk = 'D';
+    inputs[2].ki.dwFlags = KEYEVENTF_KEYUP;
+    inputs[3].type = INPUT_KEYBOARD;
+    inputs[3].ki.wVk = VK_LWIN;
+    inputs[3].ki.dwFlags = KEYEVENTF_KEYUP;
+    SendInput(4, inputs, sizeof(INPUT));
+}
+
+// 选择 + Y：优先启动 模拟鼠标.vbs（内部跑 JoyXoff.bat 切换 + 播放提示音），
+// 脚本缺失时回退直接跑 JoyXoff.bat。wscript 无窗口，异步启动不阻塞 Raw Input/UI 消息线程；
+// 完成后 App 延迟扫描回报 gp:mouse-mode，页面状态与实际进程保持一致。
+static void toggleMouseMode() {
+    const std::wstring vbs = L"C:\\SOFT\\YeMan\\PowerControl\\模拟鼠标.vbs";
+    const std::wstring bat = L"C:\\SOFT\\YeMan\\PowerControl\\JoyXoff.bat";
+
+    std::wstring cmd;
+    if (fspath::exists(vbs)) {
+        cmd = L"wscript.exe //nologo \"" + vbs + L"\"";
+    } else if (fspath::exists(bat)) {
+        cmd = L"cmd.exe /c \"" + bat + L"\"";
+    } else {
+        return;
+    }
+
+    STARTUPINFOW si{sizeof(si)};
+    si.dwFlags = STARTF_USESHOWWINDOW;
+    si.wShowWindow = SW_HIDE;
+    PROCESS_INFORMATION pi{};
+    std::vector<wchar_t> buf(cmd.begin(), cmd.end());
+    buf.push_back(0);
+    if (CreateProcessW(nullptr, buf.data(), nullptr, nullptr, FALSE,
+                       CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi)) {
+        CloseHandle(pi.hThread);
+        CloseHandle(pi.hProcess);
+        ipc_emit("gamepad.mouse-toggle", json::object());
+    }
+}
+
 // 系统内置黑名单（基名小写，不含 .exe）。WebView2 进程也排除，保护壳自身。
 static const wchar_t* SG_BLACKLIST[] = {
     L"csrss", L"winlogon", L"lsass", L"services", L"smss", L"system", L"idle",
@@ -1492,9 +2048,79 @@ static std::vector<std::wstring> sgExcludes() {
     return ex;
 }
 
-struct SgProc { DWORD pid; std::wstring name; uint64_t ws; };
+static void sgKillListedProcesses() {
+    const std::string txt = sgReadFile(SG_KILL_LIST);
+    if (txt.empty()) return;
+    std::vector<std::string> names;
+    std::istringstream iss(txt);
+    std::string line;
+    while (std::getline(iss, line)) {
+        auto h = line.find('#');
+        if (h != std::string::npos) line = line.substr(0, h);
+        size_t a = line.find_first_not_of(" \t\r\n");
+        if (a == std::string::npos) continue;
+        size_t b = line.find_last_not_of(" \t\r\n");
+        line = line.substr(a, b - a + 1);
+        if (!line.empty()) names.push_back(line);
+    }
+    if (names.empty()) return;
+    const DWORD selfPid = GetCurrentProcessId();
+    const std::wstring selfBase = sgSelfBase();
+    if (!g_sgSessionValid) return;
+    auto excludes = sgExcludes();
+    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snap == INVALID_HANDLE_VALUE) return;
+    PROCESSENTRY32W pe{ sizeof(pe) };
+    if (Process32FirstW(snap, &pe)) {
+        do {
+            std::wstring base = sgBaseName(pe.szExeFile);
+            if (pe.th32ProcessID == 0 || pe.th32ProcessID == 4 ||
+                pe.th32ProcessID == selfPid || base == selfBase) {
+                continue;
+            }
+            bool excluded = false;
+            for (const auto& e : excludes) {
+                if (e == base) { excluded = true; break; }
+            }
+            if (excluded) continue;
+            DWORD psid = 0;
+            if (!ProcessIdToSessionId(pe.th32ProcessID, &psid) || psid != g_sgSessionId) {
+                continue;
+            }
+            if (acNameMatch(base, names)) {
+                HANDLE h = OpenProcess(PROCESS_TERMINATE, FALSE, pe.th32ProcessID);
+                if (h) { TerminateProcess(h, 0); CloseHandle(h); }
+            }
+        } while (Process32NextW(snap, &pe));
+    }
+    CloseHandle(snap);
+}
+
+static uint64_t sgFileTimeTicks(const FILETIME& ft) {
+    ULARGE_INTEGER u{};
+    u.LowPart = ft.dwLowDateTime;
+    u.HighPart = ft.dwHighDateTime;
+    return u.QuadPart;
+}
+
+static bool sgEnsureSuspendDir() {
+    std::error_code ec;
+    fspath::create_directories(fspath::path(SG_DIR) / L"suspended", ec);
+    return !ec && fspath::exists(fspath::path(SG_DIR) / L"suspended");
+}
+
+static bool sgWriteSuspendMarker(DWORD pid, const std::string& name, uint64_t created,
+                                 const char* state) {
+    if (!sgEnsureSuspendDir()) return false;
+    std::wstring path = SG_DIR + L"\\suspended\\" + std::to_wstring(pid) + L".txt";
+    std::string body = "name=" + name + "|created=" + std::to_string(created) +
+        "|epoch=" + std::to_string(sgNowEpoch()) + "|state=" + state;
+    return sgWriteFileAtomic(path, body);
+}
+
+struct SgProc { DWORD pid; std::wstring name; uint64_t ws; uint64_t created; };
 // 入睡前冻结结果（写进日志，便于跨机确认游戏到底有没有被冻）
-struct SgSuspendResult { std::string name; DWORD pid = 0; uint64_t ws = 0; bool frozen = false; bool tdp = false; };
+struct SgSuspendResult { std::string name; DWORD pid = 0; uint64_t ws = 0; bool frozen = false; };
 // 唤醒后恢复结果
 struct SgResumeResult  { int count = 0; std::string names; };
 static std::vector<SgProc> sgEnumProcs() {
@@ -1510,8 +2136,11 @@ static std::vector<SgProc> sgEnumProcs() {
             HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ, FALSE, pid);
             if (!h) continue;
             uint64_t ws = 0;
+            uint64_t created = 0;
             PROCESS_MEMORY_COUNTERS_EX mc{}; mc.cb = sizeof(mc);
             if (GetProcessMemoryInfo(h, (PROCESS_MEMORY_COUNTERS*)&mc, sizeof(mc))) ws = mc.WorkingSetSize;
+            FILETIME ftCreate{}, ftExit{}, ftKernel{}, ftUser{};
+            if (GetProcessTimes(h, &ftCreate, &ftExit, &ftKernel, &ftUser)) created = sgFileTimeTicks(ftCreate);
             wchar_t img[MAX_PATH] = {}; DWORD sz = MAX_PATH;
             std::wstring name;
             if (QueryFullProcessImageNameW(h, 0, img, &sz)) name = img;
@@ -1520,86 +2149,106 @@ static std::vector<SgProc> sgEnumProcs() {
             bool skip = false;
             for (auto& e : ex) if (e == base) { skip = true; break; }
             if (skip) continue;
-            // 仅考虑与 YeManCC 同会话的进程（避开系统会话 / 其他用户会话里的进程）
-            if (g_sgSessionId != 0) {
-                DWORD psid = 0;
-                if (!ProcessIdToSessionId(pid, &psid) || psid != g_sgSessionId) continue;
-            }
+            // 仅考虑与 YeManCC 同会话的进程；会话 ID 无法获取时 fail-closed。
+            if (!g_sgSessionValid || g_sgSessionId == 0) continue;
+            DWORD psid = 0;
+            if (!ProcessIdToSessionId(pid, &psid) || psid != g_sgSessionId) continue;
             // 额外排除游戏之外不应被冻的常见宿主（参考用户 PowerShell 扫描规则：steam/explorer/Taskmgr）
             static const wchar_t* extraExcl[] = { L"steam.exe", L"explorer.exe", L"Taskmgr.exe" };
             bool ex2 = false;
             for (auto e : extraExcl) if (_wcsicmp(base.c_str(), e) == 0) { ex2 = true; break; }
             if (ex2) continue;
-            out.push_back({ pid, base, ws });
+            out.push_back({ pid, base, ws, created });
         } while (Process32NextW(snap, &pe));
     }
     CloseHandle(snap);
     return out;
 }
 
-// 阶段1 入睡前：写标记(先于冻结，保证崩溃可恢复) → 冻结最大工作集进程 → 压 TDP
+// 阶段1 入睡前：写标记(先于冻结，保证崩溃可恢复) → 冻结最大工作集进程
 static SgSuspendResult sgSuspendTarget() {
+    std::lock_guard<std::mutex> opLock(g_sgOpMtx);
     SgSuspendResult r;
     try {
         sgInitNt();
+        if (g_sgKillListEnabled) sgKillListedProcesses();
         auto procs = sgEnumProcs();
-        SgProc best{0, {}, 0};
+        SgProc best{0, {}, 0, 0};
         for (auto& p : procs) if (p.ws > best.ws) best = p;
         r.name = W2U(best.name); r.pid = best.pid; r.ws = best.ws;
         // 写"目标"展示文件（仅展示，不参与恢复）
         sgWriteFile(SG_DIR + L"\\target.txt",
             "name=" + r.name + "|pid=" + std::to_string(r.pid) +
             "|epoch=" + std::to_string(sgNowEpoch()));
-        if (best.pid == 0 || best.ws < SG_MIN_WS) return r; // 无可冻的大进程
-        // 睡眠时暂停游戏（与「唤醒自动恢复」绑定，只一个开关）
-        if (g_sgPauseResume) {
-            // 标记先于冻结写：崩溃残留可被孤儿恢复扫描
-            std::wstring mpath = SG_DIR + L"\\suspended\\" + std::to_wstring(best.pid) + L".txt";
-            sgWriteFile(mpath, "name=" + r.name + "|epoch=" + std::to_string(sgNowEpoch()) +
-                "|tdplocked=" + std::to_string(g_sgTdpLock ? g_sgSleepTdp : 0));
-            HANDLE h = OpenProcess(PROCESS_SUSPEND_RESUME, FALSE, best.pid);
+        const bool hasFreezableTarget = best.pid != 0 && best.ws >= SG_MIN_WS;
+        // 睡眠时暂停游戏（与「唤醒自动恢复」绑定，只一个开关）。
+        if (g_sgPauseResume && hasFreezableTarget) {
+            // 先写 pending 标记：若进程刚冻结程序就异常退出，启动孤儿恢复仍有依据。
+            if (!fnNtSuspend || !sgWriteSuspendMarker(best.pid, r.name, best.created, "pending")) {
+                return r;
+            }
+            HANDLE h = OpenProcess(PROCESS_SUSPEND_RESUME | PROCESS_QUERY_LIMITED_INFORMATION,
+                FALSE, best.pid);
             if (h) {
-                if (fnNtSuspend) { fnNtSuspend(h); r.frozen = true; }
+                LONG st = fnNtSuspend(h);
                 CloseHandle(h);
+                if (st >= 0) {
+                    r.frozen = true;
+                    // 成功后把状态改为 suspended；失败不影响 pending 标记的恢复安全性。
+                    sgWriteSuspendMarker(best.pid, r.name, best.created, "suspended");
+                } else {
+                    fspath::remove(SG_DIR + L"\\suspended\\" + std::to_wstring(best.pid) + L".txt");
+                }
+            } else {
+                fspath::remove(SG_DIR + L"\\suspended\\" + std::to_wstring(best.pid) + L".txt");
             }
         }
-        // 入睡调低 TDP（best-effort）
-        if (g_sgTdpLock) { r.tdp = sgApplyTdp(g_sgSleepTdp); g_sgTdpLowered = true; }
     } catch (...) {}
     return r;
 }
 
 // 手动暂停：冻结当前最大工作集进程（=当前游戏），写标记但不锁 TDP（区别于睡眠冻结）
 static json sgSuspendCurrent() {
+    std::lock_guard<std::mutex> opLock(g_sgOpMtx);
     json out = {{"paused", false}};
     try {
         sgInitNt();
         auto procs = sgEnumProcs();
-        SgProc best{0, {}, 0};
+        SgProc best{0, {}, 0, 0};
         for (auto& p : procs) if (p.ws > best.ws) best = p;
-        if (best.pid == 0 || best.ws < SG_MIN_WS) return out; // 无足够大的进程
-        std::wstring mpath = SG_DIR + L"\\suspended\\" + std::to_wstring(best.pid) + L".txt";
-        sgWriteFile(mpath, "name=" + W2U(best.name) + "|epoch=" + std::to_string(sgNowEpoch()) +
-            "|tdplocked=0");
-        HANDLE h = OpenProcess(PROCESS_SUSPEND_RESUME, FALSE, best.pid);
+        if (best.pid == 0 || best.ws < SG_MIN_WS || !fnNtSuspend) return out; // 无足够大的进程/系统不支持
+        const std::string name = W2U(best.name);
+        if (!sgWriteSuspendMarker(best.pid, name, best.created, "pending")) return out;
+        HANDLE h = OpenProcess(PROCESS_SUSPEND_RESUME | PROCESS_QUERY_LIMITED_INFORMATION,
+            FALSE, best.pid);
+        bool paused = false;
         if (h) {
-            if (fnNtSuspend) fnNtSuspend(h);
+            LONG st = fnNtSuspend(h);
             CloseHandle(h);
+            paused = st >= 0;
         }
+        if (!paused) {
+            fspath::remove(SG_DIR + L"\\suspended\\" + std::to_wstring(best.pid) + L".txt");
+            return out;
+        }
+        sgWriteSuspendMarker(best.pid, name, best.created, "suspended");
         out["paused"] = true;
         out["pid"] = (int)best.pid;
-        out["name"] = W2U(best.name);
+        out["name"] = name;
     } catch (...) {}
     return out;
 }
 
-// 恢复全部被冻结进程（校验 PID 存活 + 映像名），并还原 TDP
-static SgResumeResult sgResumeAll(bool restoreTdp) {
+// 恢复全部被冻结进程（校验 PID 存活 + 映像名）
+static SgResumeResult sgResumeAll() {
+    std::lock_guard<std::mutex> opLock(g_sgOpMtx);
     SgResumeResult rr;
     try {
+        sgInitNt();
         std::wstring dir = SG_DIR + L"\\suspended";
-        // 修复(2026-07-30 重加)：目录缺失 → 直接返回，绝不碰 TDP（避免插电开机被拍到电池档）。
-        if (!fspath::exists(dir)) { return rr; }
+        if (!fspath::exists(dir)) {
+            return rr;
+        }
         for (auto& e : fspath::directory_iterator(dir)) {
             if (!e.is_regular_file()) continue;
             std::wstring fn = e.path().filename().wstring();
@@ -1612,48 +2261,158 @@ static SgResumeResult sgResumeAll(bool restoreTdp) {
             HANDLE h = OpenProcess(PROCESS_SUSPEND_RESUME | PROCESS_QUERY_LIMITED_INFORMATION,
                 FALSE, pid);
             if (!h) { fspath::remove(e.path()); continue; } // 进程已不在 → 清标记
-            // PID 复用校验：映像名须与标记一致，防误恢复错进程
+            // PID 复用校验：映像名 + 进程创建时间须与标记一致，防止 PID 被新进程复用。
             bool match = true;
             std::wstring nm;
             std::string content = sgReadFile(e.path());
             auto pos = content.find("name=");
-            if (pos != std::string::npos) {
+            if (pos == std::string::npos) match = false;
+            else {
                 std::string stored = content.substr(pos + 5);
                 auto bar = stored.find('|'); if (bar != std::string::npos) stored = stored.substr(0, bar);
                 nm = sgBaseName(U2W(stored));
                 wchar_t img[MAX_PATH] = {}; DWORD sz = MAX_PATH;
-                if (QueryFullProcessImageNameW(h, 0, img, &sz)) {
-                    if (sgBaseName(std::wstring(img, sz)) != nm) match = false;
-                }
+                if (!QueryFullProcessImageNameW(h, 0, img, &sz) ||
+                    sgBaseName(std::wstring(img, sz)) != nm) match = false;
             }
-            if (match && fnNtResume) fnNtResume(h);
+            uint64_t storedCreated = 0;
+            auto cp = content.find("created=");
+            if (cp != std::string::npos) {
+                cp += 8;
+                auto end = content.find('|', cp);
+                try { storedCreated = std::stoull(content.substr(cp, end - cp)); } catch (...) { match = false; }
+            }
+            if (match && storedCreated != 0) {
+                FILETIME ftCreate{}, ftExit{}, ftKernel{}, ftUser{};
+                if (!GetProcessTimes(h, &ftCreate, &ftExit, &ftKernel, &ftUser) ||
+                    sgFileTimeTicks(ftCreate) != storedCreated) match = false;
+            }
+            bool resumed = false;
+            if (match && fnNtResume) resumed = fnNtResume(h) >= 0;
             CloseHandle(h);
-            if (match) {
-                fspath::remove(e.path()); // 仅成功恢复才删标记
+            if (match && resumed) {
+                fspath::remove(e.path()); // 仅确认恢复成功才删标记
                 rr.count++;
                 if (!rr.names.empty()) rr.names += ",";
                 rr.names += W2U(nm);
+            } else if (!match) {
+                // 进程身份不符说明 PID 已复用；删除过期标记，绝不操作新进程。
+                fspath::remove(e.path());
             }
         }
-        // 修复(2026-07-30 重加)：仅当本次睡眠确有压低 TDP（g_sgTdpLowered）才还原；
-        // 空目录/孤儿恢复（启动）不碰 TDP，防止误拍到电池档。
-        if (restoreTdp && g_sgTdpLowered) sgRestoreTdp();
     } catch (...) {}
     return rr;
 }
 
-// ── 唤醒处置（极简，不做误唤醒判定、不重睡、不强制 S4）──
-// 入睡（显示器关闭 / PBT_APMSUSPEND）已冻结游戏 + 压 TDP；这里任何唤醒（显示器亮起 /
-// PBT_APMRESUMEAUTOMATIC / PBT_APMRESUMESUSPEND）直接恢复游戏并还原 TDP。
-// 隐藏规则：若实际进入 S4 休眠（用户/系统把电源按钮/睡眠键/合盖配成休眠），由 sgIsHibernateAction()
-// 在入睡侧拦截，本函数不会触发，故「S4 不触发」天然成立。
-static void sgRealWake(const char* src) {
-    if (!g_sgInSuspend) return;            // 非本程序睡眠周期，忽略
-    // 睡眠时暂停游戏 与 唤醒自动恢复 绑定：开启才恢复游戏（关闭则保持冻结，需手动恢复）
-    SgResumeResult rr;
-    if (g_sgPauseResume) rr = sgResumeAll(g_sgTdpLowered);
-    g_sgTdpLowered = false;
+static void sgCleanupBeforeExit() {
+    if (g_sgCleanupDone) return;
+    g_sgCleanupDone = true;
+    // 正常退出必须解除所有由本程序挂起的进程。
+    SgResumeResult rr = sgResumeAll();
+    // 若仍有标记，说明恢复失败；允许 WM_DESTROY/消息循环退出再重试一次。
+    std::error_code ec;
+    bool pending = false;
+    std::wstring dir = SG_DIR + L"\\suspended";
+    if (fspath::exists(dir, ec)) {
+        for (auto& e : fspath::directory_iterator(dir, ec)) {
+            if (e.is_regular_file()) { pending = true; break; }
+        }
+    }
+    if (pending) g_sgCleanupDone = false;
     g_sgInSuspend = false;
+}
+
+// ── 唤醒处置：恢复本周期资源；仅自动/代理唤醒进入重睡观察 ──
+static void sgRealWake(const char* src) {
+    const bool hadSuspend = g_sgInSuspend;
+    if (hadSuspend) {
+        // 恢复全部标记：即使用户在睡眠周期中关闭了开关，也不能把已冻结游戏留住。
+        SgResumeResult rr = sgResumeAll();
+        (void)rr;
+        g_sgInSuspend = false;
+    }
+
+    // S3 的 RESUMEAUTOMATIC 和 S0 的显示器亮起都只能作为“候选”信号；
+    // RESUMESUSPEND 代表用户主动唤醒，必须取消此前已经启动的观察窗口，
+    // 即使 RESUMEAUTOMATIC 已经先把 g_sgInSuspend 清零。
+    if (strcmp(src, "resume_suspend") == 0) {
+        sgStopResleepObservation();
+        return;
+    }
+    if (!hadSuspend) return;
+    if (g_sgResleepEnabled &&
+        (strcmp(src, "resume_auto") == 0 || strcmp(src, "monitor_on") == 0)) {
+        sgStartResleepObservation();
+    } else {
+        sgStopResleepObservation();
+    }
+}
+
+static void sgQueueWork(SgWork work) {
+    std::lock_guard<std::mutex> lock(g_sgWorkMx);
+    if (g_sgWorkStop) return;
+    for (const auto queued : g_sgWorkQ) {
+        if (queued == work) return;
+    }
+    // 电源事件偶尔会成组到达；保持小而有界的队列，且不让旧事件无限堆积。
+    if (g_sgWorkQ.size() >= 8) g_sgWorkQ.pop_front();
+    g_sgWorkQ.push_back(work);
+    g_sgWorkCv.notify_one();
+}
+
+static void sgWorkLoop() {
+    for (;;) {
+        SgWork work;
+        {
+            std::unique_lock<std::mutex> lock(g_sgWorkMx);
+            g_sgWorkCv.wait(lock, [] { return g_sgWorkStop || !g_sgWorkQ.empty(); });
+            if (g_sgWorkStop && g_sgWorkQ.empty()) return;
+            work = g_sgWorkQ.front();
+            g_sgWorkQ.pop_front();
+        }
+        try {
+            if (work == SgWork::Suspend) {
+                if (!g_guardEnabled || g_sgInSuspend.load() || sgIsHibernateAction()) continue;
+                g_sgInSuspend.store(true);
+                const SgSuspendResult result = sgSuspendTarget();
+                if (!result.frozen) g_sgInSuspend.store(false);
+            } else if (work == SgWork::WakeAutomatic) {
+                if (g_sgInSuspend.load()) sgRealWake("resume_auto");
+            } else if (work == SgWork::WakeSuspend) {
+                if (g_sgInSuspend.load()) sgRealWake("resume_suspend");
+                else sgStopResleepObservation();
+            }
+        } catch (...) {
+            if (work == SgWork::Suspend) g_sgInSuspend.store(false);
+        }
+    }
+}
+
+static void sgStartWorkThread() {
+    std::lock_guard<std::mutex> lock(g_sgWorkMx);
+    if (g_sgWorkThread.joinable()) return;
+    g_sgWorkStop = false;
+    g_sgWorkThread = std::thread(sgWorkLoop);
+}
+
+static void sgStopWorkThread() {
+    {
+        std::lock_guard<std::mutex> lock(g_sgWorkMx);
+        g_sgWorkStop = true;
+        g_sgWorkQ.clear();
+    }
+    g_sgWorkCv.notify_all();
+    if (g_sgWorkThread.joinable()) g_sgWorkThread.join();
+}
+
+static void emitResumeEventsOnce() {
+    const ULONGLONG now = GetTickCount64();
+    // Windows 用户唤醒通常连续产生 RESUMEAUTOMATIC + RESUMESUSPEND；2 秒内只通知前端一次。
+    if (g_lastResumeNotifyTick != 0 && now - g_lastResumeNotifyTick < 2000)
+        return;
+    g_lastResumeNotifyTick = now;
+    ipc_emit("gamepad.restart", {});
+    ipc_emit("power.resumed", {});
 }
 
 // Child windows
@@ -1892,7 +2651,15 @@ static json loadConfig() {
     for (const auto& dir : production_asset_dirs()) {
         auto path = dir + L"\\app.config.json";
         std::ifstream f(path);
-        if (f) { json j; f >> j; return j; }
+        if (f) {
+            try {
+                json j;
+                f >> j;
+                return j;
+            } catch (...) {
+                // 外部配置损坏不能阻断窗口创建；继续尝试下一候选，最终回退内置/默认配置。
+            }
+        }
     }
 #ifdef SINGLE_EXE
     auto cfg = loadResourceString(IDR_CONFIG);
@@ -1914,15 +2681,15 @@ static json loadConfig() {
 //  可调旋钮（环境变量，便于多方案实测）：
 //    YEMAN_ASYNC  0=全同步(旧行为) 1=仅 shell.run 异步(默认) 2=扩展白名单
 //    YEMAN_POOL   worker 线程数 1..16（默认 4）
-//    YEMAN_TRACE  1=写诊断日志(%TEMP%\yemancc_trace.log)+冻结监视线程
+//    YEMAN_TRACE=debug  显式开启诊断日志(%TEMP%\yemancc_trace.log)+冻结监视线程
 // ================================================================
 
 #define WM_IPC_RESULT (WM_USER + 3)
 
-static int  g_asyncMode = 1;   // 0/1/2，见上（默认 1：仅 shell.run 异步，实测零冻结且风险面最小）
+static int  g_asyncMode = 2;   // 0/1/2 —— 2: 扩展白名单(读+写+进程启动)全异步，浮动调度不再阻塞 UI 线程
 static int  g_poolSize  = 3;   // 改为 3：默认异步池线程数。实测首屏已降至 1 个 shell.run，正常交互峰值并发 2-4，3 线程绰绰有余，省 ~5 条常驻线程
 
-// ── 诊断 trace（仅 YEMAN_TRACE=1 时激活；生产零开销）──
+// ── 诊断 trace（仅 YEMAN_TRACE=debug 时激活；生产默认关闭）──
 static std::atomic<bool> g_traceOn{false};
 static std::mutex   g_traceMx;
 static FILE*        g_traceFile = nullptr;
@@ -1955,31 +2722,59 @@ static void traceInit() {
 static std::mutex g_poolMx;
 static std::condition_variable g_poolCv;
 static std::deque<std::function<void()>> g_poolQ;
-static std::once_flag g_poolOnce;
+static std::vector<std::thread> g_poolThreads;
+static bool g_poolStarted = false;
+static bool g_poolStopping = false;
+static constexpr size_t IPC_POOL_QUEUE_LIMIT = 32;
 
-static void poolSubmit(std::function<void()> job) {
-    std::call_once(g_poolOnce, [] {
-        for (int i = 0; i < g_poolSize; i++) {
-            std::thread([] {
-                for (;;) {
-                    std::function<void()> j;
-                    {
-                        std::unique_lock<std::mutex> lk(g_poolMx);
-                        g_poolCv.wait(lk, [] { return !g_poolQ.empty(); });
-                        j = std::move(g_poolQ.front());
-                        g_poolQ.pop_front();
-                    }
-                    // handler 抛出的异常已在任务内部捕获，此处兜底防线程死亡
-                    try { j(); } catch (...) {}
+static void poolStartLocked() {
+    if (g_poolStarted) return;
+    g_poolStarted = true;
+    g_poolStopping = false;
+    g_poolThreads.reserve((size_t)g_poolSize);
+    for (int i = 0; i < g_poolSize; i++) {
+        g_poolThreads.emplace_back([] {
+            for (;;) {
+                std::function<void()> job;
+                {
+                    std::unique_lock<std::mutex> lk(g_poolMx);
+                    g_poolCv.wait(lk, [] { return g_poolStopping || !g_poolQ.empty(); });
+                    if (g_poolStopping && g_poolQ.empty()) return;
+                    job = std::move(g_poolQ.front());
+                    g_poolQ.pop_front();
                 }
-            }).detach();
-        }
-    });
+                try { job(); } catch (...) {}
+            }
+        });
+    }
+}
+
+static bool poolSubmit(std::function<void()> job) {
     {
         std::lock_guard<std::mutex> lk(g_poolMx);
+        if (g_poolStopping || g_poolQ.size() >= IPC_POOL_QUEUE_LIMIT) return false;
+        poolStartLocked();
         g_poolQ.push_back(std::move(job));
     }
     g_poolCv.notify_one();
+    return true;
+}
+
+static void poolStop() {
+    {
+        std::lock_guard<std::mutex> lk(g_poolMx);
+        if (!g_poolStarted) return;
+        g_poolStopping = true;
+        // 丢弃尚未开始的任务，避免退出时继续向已销毁的 WebView 投递结果。
+        g_poolQ.clear();
+    }
+    g_poolCv.notify_all();
+    for (auto& thread : g_poolThreads) {
+        if (thread.joinable()) thread.join();
+    }
+    g_poolThreads.clear();
+    std::lock_guard<std::mutex> lk(g_poolMx);
+    g_poolStarted = false;
 }
 
 // ── 异步白名单：只放「无 UI、无全局可变状态、纯本地计算/IO」的命令 ──
@@ -1990,10 +2785,18 @@ static bool ipc_cmd_async(const std::string& cmd) {
     static const std::unordered_set<std::string> lvl1 = {
         "shell.run",
     };
-    // 模式 2：扩展只读命令（纯读文件/注册表/HTTP/CPU 拓扑，均无共享可变状态）
+    // 模式 2：扩展白名单（读 + 写 + 进程启动，均为独立文件/系统叶子操作，无跨命令共享可变状态）。
+    // 把 fs.* 全部(含写)、shell.hidden、shell.execute 也 offload，使浮动调度相关的所有 IPC
+    // 都不在 UI 线程同步阻塞 —— 消除「前端每秒同步读守护写的 fps-status.json」造成的消息泵冻结
+    // （鼠标旁 IDC_APPSTARTING 转圈的根因）。shell.run 已在 lvl1 异步。
     static const std::unordered_set<std::string> lvl2 = {
-        "fs.readTextFile", "fs.readTextRange", "fs.exists", "fs.readDir", "fs.stat",
+        "fs.readTextFile", "fs.readTextRange", "fs.readBinaryFile",
+        "fs.writeTextFile", "fs.writeTextFileAtomic", "fs.writeBinaryFile", "fs.exists", "fs.readDir", "fs.stat",
+        "fs.remove", "fs.mkdir", "fs.rename", "fs.copyFile",
+        "background.get", "background.install", "background.clear",
+        "dynamicBackground.get", "dynamicBackground.installUrl", "dynamicBackground.clear",
         "registry.read", "registry.exists", "http.request", "smt.get",
+        "shell.hidden", "shell.execute", "tdpDaemon.start", "tdpDaemon.request",
     };
     if (lvl1.count(cmd)) return true;
     if (g_asyncMode >= 2 && lvl2.count(cmd)) return true;
@@ -2072,7 +2875,7 @@ static void ipc_dispatch(LPCWSTR raw) {
         if (ipc_cmd_async(cmd)) {
             IpcFn fn = it->second;
             ULONGLONG tq = GetTickCount64();
-            poolSubmit([resp, args, fn = std::move(fn), cmd, tq]() mutable {
+            const bool queued = poolSubmit([resp, args, fn = std::move(fn), cmd, tq]() mutable {
                 ULONGLONG ts = GetTickCount64();
                 try { resp["result"] = fn(args); }
                 catch (const std::exception& e) { resp["error"] = e.what(); }
@@ -2086,6 +2889,10 @@ static void ipc_dispatch(LPCWSTR raw) {
                 if (!PostMessageW(g_hwnd, WM_IPC_RESULT, 0, (LPARAM)heap))
                     delete heap; // 窗口已销毁（进程退出中）
             });
+            if (!queued) {
+                resp["error"] = "IPC worker queue is full or stopping";
+                g_view->PostWebMessageAsJson(U2W(resp.dump()).c_str());
+            }
             return;
         }
 
@@ -2267,6 +3074,104 @@ static void applyNativeTheme() {
 // ================================================================
 //  Commands: Window
 // ================================================================
+
+struct DisplayModeInfo {
+    std::string id;
+    int width = 0;
+    int height = 0;
+    int refresh = 0;
+    int orientation = 0;
+};
+
+static bool currentDisplayDevice(std::wstring& device, DEVMODEW& current) {
+    if (!g_hwnd) return false;
+    HMONITOR mon = MonitorFromWindow(g_hwnd, MONITOR_DEFAULTTONEAREST);
+    MONITORINFOEXW mi{sizeof(mi)};
+    if (!GetMonitorInfoW(mon, &mi)) return false;
+    device = mi.szDevice;
+    current = DEVMODEW{};
+    current.dmSize = sizeof(current);
+    return EnumDisplaySettingsExW(device.c_str(), ENUM_CURRENT_SETTINGS, &current, 0) != FALSE;
+}
+
+static std::string displayModeId(int width, int height, int refresh, int orientation) {
+    return std::to_string(width) + "x" + std::to_string(height) + "@" +
+           std::to_string(refresh) + "/" + std::to_string(orientation);
+}
+
+static std::vector<DisplayModeInfo> enumerateCurrentDisplayModes(std::wstring* deviceOut = nullptr,
+                                                                   DEVMODEW* currentOut = nullptr) {
+    std::wstring device;
+    DEVMODEW current{};
+    std::vector<DisplayModeInfo> modes;
+    if (!currentDisplayDevice(device, current)) return modes;
+    if (deviceOut) *deviceOut = device;
+    if (currentOut) *currentOut = current;
+    std::unordered_set<std::string> seen;
+    for (DWORD i = 0;; i++) {
+        DEVMODEW dm{};
+        dm.dmSize = sizeof(dm);
+        if (!EnumDisplaySettingsExW(device.c_str(), i, &dm, EDS_ROTATEDMODE)) break;
+        if (dm.dmPelsWidth == 0 || dm.dmPelsHeight == 0) continue;
+        const int hz = dm.dmDisplayFrequency > 1 ? (int)dm.dmDisplayFrequency :
+                       (current.dmDisplayFrequency > 1 ? (int)current.dmDisplayFrequency : 60);
+        const int orientation = (int)dm.dmDisplayOrientation;
+        const std::string id = displayModeId((int)dm.dmPelsWidth, (int)dm.dmPelsHeight, hz, orientation);
+        if (!seen.insert(id).second) continue;
+        modes.push_back({id, (int)dm.dmPelsWidth, (int)dm.dmPelsHeight, hz, orientation});
+    }
+    std::sort(modes.begin(), modes.end(), [](const DisplayModeInfo& a, const DisplayModeInfo& b) {
+        if (a.width != b.width) return a.width < b.width;
+        if (a.height != b.height) return a.height < b.height;
+        if (a.refresh != b.refresh) return a.refresh < b.refresh;
+        return a.orientation < b.orientation;
+    });
+    return modes;
+}
+
+static void reg_display() {
+    ipc_on("display.getModes", [](const json&) -> json {
+        std::wstring device;
+        DEVMODEW current{};
+        auto modes = enumerateCurrentDisplayModes(&device, &current);
+        const std::string currentId = displayModeId((int)current.dmPelsWidth, (int)current.dmPelsHeight,
+            current.dmDisplayFrequency > 1 ? (int)current.dmDisplayFrequency : 60,
+            (int)current.dmDisplayOrientation);
+        json list = json::array();
+        for (const auto& m : modes) {
+            list.push_back({{"id", m.id}, {"width", m.width}, {"height", m.height},
+                            {"refresh", m.refresh}, {"orientation", m.orientation}});
+        }
+        return {{"current", currentId}, {"modes", list}};
+    });
+    ipc_on("display.setMode", [](const json& a) -> json {
+        const int width = a.value("width", 0);
+        const int height = a.value("height", 0);
+        const int refresh = a.value("refresh", 0);
+        const int orientation = a.value("orientation", 0);
+        if (width <= 0 || height <= 0 || refresh <= 0) throw std::runtime_error("Invalid display mode");
+        std::wstring device;
+        DEVMODEW current{};
+        const auto modes = enumerateCurrentDisplayModes(&device, &current);
+        const auto it = std::find_if(modes.begin(), modes.end(), [&](const DisplayModeInfo& m) {
+            return m.width == width && m.height == height && m.refresh == refresh && m.orientation == orientation;
+        });
+        if (it == modes.end()) throw std::runtime_error("Display mode is not supported by the current monitor");
+        DEVMODEW dm = current;
+        dm.dmPelsWidth = (DWORD)it->width;
+        dm.dmPelsHeight = (DWORD)it->height;
+        dm.dmDisplayFrequency = (DWORD)it->refresh;
+        dm.dmDisplayOrientation = (DWORD)it->orientation;
+        dm.dmFields = DM_PELSWIDTH | DM_PELSHEIGHT | DM_DISPLAYFREQUENCY | DM_DISPLAYORIENTATION;
+        LONG test = ChangeDisplaySettingsExW(device.c_str(), &dm, nullptr, CDS_TEST, nullptr);
+        if (test != DISP_CHANGE_SUCCESSFUL) throw std::runtime_error("Display mode test failed");
+        const LONG result = ChangeDisplaySettingsExW(device.c_str(), &dm, nullptr,
+            CDS_UPDATEREGISTRY | CDS_RESET, nullptr);
+        if (result != DISP_CHANGE_SUCCESSFUL) throw std::runtime_error("Display mode change failed");
+        return {{"id", it->id}, {"width", it->width}, {"height", it->height},
+                {"refresh", it->refresh}, {"orientation", it->orientation}};
+    });
+}
 
 static void reg_window() {
     ipc_on("window.setTitle", [](const json& a) -> json {
@@ -2527,9 +3432,13 @@ static void reg_fs() {
     ipc_on("fs.writeTextFile", [](const json& a) -> json {
         auto path    = a.value("path", std::string{});
         auto content = a.value("content", std::string{});
-        std::ofstream f(U2W(path), std::ios::binary);
+        std::ofstream f(U2W(path), std::ios::binary | std::ios::trunc);
         if (!f) throw std::runtime_error("Cannot write: " + path);
-        f.write(content.data(), content.size());
+        f.write(content.data(), static_cast<std::streamsize>(content.size()));
+        f.flush();
+        if (!f.good()) throw std::runtime_error("Write failed: " + path);
+        f.close();
+        if (f.fail()) throw std::runtime_error("Close failed: " + path);
         return true;
     });
     // 原子写：先写临时文件再 MoveFileEx/ReplaceFileW 替换，避免截断式写被 RTSS 并发读取时读到半截（损坏根因）。
@@ -2539,8 +3448,7 @@ static void reg_fs() {
         auto path    = a.value("path", std::string{});
         auto content = a.value("content", std::string{});
         std::wstring wp = U2W(path);
-        bool ok = sgWriteFileAtomic(wp, content);
-        return ok;
+        return sgWriteFileAtomic(wp, content);
     });
     ipc_on("fs.exists", [](const json& a) -> json {
         return fspath::exists(U2W(a.value("path", std::string{})));
@@ -2587,6 +3495,396 @@ static void reg_fs() {
     });
 }
 
+static std::mutex g_backgroundMtx;
+
+static bool downloadFile(const std::string& url, const std::wstring& dest);
+static bool webmDurationSeconds(const std::wstring& path, double& seconds);
+
+static std::wstring background_assets_dir() {
+    auto dir = std::wstring{L"C:\\SOFT\\YeMan\\PowerControl\\ui-background"};
+    std::error_code ec;
+    fspath::create_directories(dir, ec);
+    if (ec) {
+        dir = exe_dir() + L"\\config\\ui-background";
+        ec.clear();
+        fspath::create_directories(dir, ec);
+    }
+    return dir;
+}
+
+static std::wstring background_config_path() {
+    return background_assets_dir() + L"\\background.json";
+}
+
+static json background_state() {
+    std::ifstream f(background_config_path(), std::ios::binary);
+    if (!f) return {{"enabled", false}, {"kind", "image"}, {"url", ""}};
+    json cfg;
+    try { f >> cfg; } catch (...) { return {{"enabled", false}, {"kind", "image"}, {"url", ""}}; }
+    auto file = cfg.value("file", std::string{});
+    if (file.empty() || file.find('/') != std::string::npos || file.find('\\') != std::string::npos)
+        return {{"enabled", false}, {"kind", "image"}, {"url", ""}};
+    auto path = background_assets_dir() + L"\\" + U2W(file);
+    std::error_code ec;
+    if (!fspath::is_regular_file(path, ec)) return {{"enabled", false}, {"kind", "image"}, {"url", ""}};
+    auto stamp = cfg.value("stamp", uint64_t{0});
+    auto kind = cfg.value("kind", file == "background.mp4" ? std::string{"video"} : std::string{"image"});
+    if (kind != "video") kind = "image";
+    return {
+        {"enabled", true},
+        {"kind", kind},
+        {"file", file},
+        {"url", "https://user-assets.localhost/" + file + "?v=" + std::to_string(stamp)}
+    };
+}
+
+static void reg_background() {
+    ipc_on("background.get", [](const json&) -> json {
+        std::lock_guard<std::mutex> lock(g_backgroundMtx);
+        return background_state();
+    });
+    ipc_on("background.install", [](const json& a) -> json {
+        std::lock_guard<std::mutex> lock(g_backgroundMtx);
+        auto source = U2W(a.value("source", std::string{}));
+        std::error_code ec;
+        if (source.empty() || !fspath::is_regular_file(source, ec))
+            throw std::runtime_error("Background image not found");
+        auto size = fspath::file_size(source, ec);
+        if (ec || size == 0) throw std::runtime_error("Background file size is invalid");
+        auto ext = fspath::path(source).extension().wstring();
+        std::transform(ext.begin(), ext.end(), ext.begin(), ::towlower);
+        const bool isVideo = ext == L".mp4";
+        const uint64_t maxSize = isVideo ? 2ULL * 1024ULL * 1024ULL * 1024ULL : 20ULL * 1024ULL * 1024ULL;
+        if (size > maxSize) throw std::runtime_error(isVideo ? "MP4 background must be 1 byte to 2 GB" : "Background image must be 1 byte to 20 MB");
+        if (ext != L".jpg" && ext != L".jpeg" && ext != L".png" && !isVideo)
+            throw std::runtime_error("Only JPG, JPEG and MP4 are supported");
+        std::string file;
+        if (isVideo) {
+            std::ifstream sig(source, std::ios::binary);
+            unsigned char header[16] = {};
+            sig.read(reinterpret_cast<char*>(header), sizeof(header));
+            const bool mp4 = sig.gcount() >= 12 && header[4] == 'f' && header[5] == 't' && header[6] == 'y' && header[7] == 'p';
+            if (!mp4) throw std::runtime_error("Invalid MP4 container");
+            file = "background.mp4";
+        } else {
+            std::ifstream sig(source, std::ios::binary);
+            unsigned char header[8] = {};
+            sig.read(reinterpret_cast<char*>(header), sizeof(header));
+            const bool jpeg = header[0] == 0xFF && header[1] == 0xD8 && header[2] == 0xFF;
+            const bool png = header[0] == 0x89 && header[1] == 0x50 && header[2] == 0x4E && header[3] == 0x47 &&
+                             header[4] == 0x0D && header[5] == 0x0A && header[6] == 0x1A && header[7] == 0x0A;
+            if ((ext == L".png" && !png) || (ext != L".png" && !jpeg))
+                throw std::runtime_error("Invalid background image data");
+            file = ext == L".png" ? "background.png" : "background.jpg";
+        }
+        auto dir = background_assets_dir();
+        auto target = dir + L"\\" + U2W(file);
+        auto temp = target + L".tmp";
+        fspath::copy_file(source, temp, fspath::copy_options::overwrite_existing, ec);
+        if (ec) throw std::runtime_error("Failed to copy background file");
+        if (!MoveFileExW(temp.c_str(), target.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+            DeleteFileW(temp.c_str());
+            throw std::runtime_error("Failed to activate background file");
+        }
+        for (const auto& old : {L"background.jpg", L"background.png", L"background.mp4"}) {
+            if (W2U(old) != file) DeleteFileW((dir + L"\\" + old).c_str());
+        }
+        uint64_t stamp = GetTickCount64();
+        {
+            std::ofstream cfg(background_config_path(), std::ios::binary | std::ios::trunc);
+            if (!cfg) throw std::runtime_error("Failed to open background config");
+            cfg << json{{"file", file}, {"kind", isVideo ? "video" : "image"}, {"stamp", stamp}}.dump(2);
+            cfg.flush();
+            if (!cfg) throw std::runtime_error("Failed to write background config");
+        }
+        return background_state();
+    });
+    ipc_on("background.clear", [](const json&) -> json {
+        std::lock_guard<std::mutex> lock(g_backgroundMtx);
+        auto dir = background_assets_dir();
+        DeleteFileW((dir + L"\\background.jpg").c_str());
+        DeleteFileW((dir + L"\\background.png").c_str());
+        DeleteFileW((dir + L"\\background.mp4").c_str());
+        DeleteFileW(background_config_path().c_str());
+        return json{{"enabled", false}, {"kind", "image"}, {"url", ""}};
+    });
+
+    ipc_on("dynamicBackground.get", [](const json&) -> json {
+        std::lock_guard<std::mutex> lock(g_backgroundMtx);
+        {
+            std::ifstream online(background_assets_dir() + L"\\dynamic-online.json", std::ios::binary);
+            if (online) {
+                try {
+                    json cfg; online >> cfg;
+                    const auto source = cfg.value("url", std::string{});
+                    if (!source.empty()) {
+                        auto kind = cfg.value("kind", std::string{"video"});
+                        if (kind != "image") kind = "video";
+                        return json{
+                            {"enabled", true}, {"kind", kind}, {"url", source},
+                            {"fallbackUrls", cfg.value("fallbackUrls", json::array())},
+                            {"appId", cfg.value("appId", 0)}, {"gameName", cfg.value("gameName", std::string{})},
+                            {"source", cfg.value("source", std::string{"video-online"})}
+                        };
+                    }
+                } catch (...) { /* fall through to the local cache */ }
+            }
+        }
+        std::ifstream f(background_assets_dir() + L"\\dynamic.json", std::ios::binary);
+        if (!f) return json{{"enabled", false}, {"kind", "image"}, {"url", ""}};
+        json cfg;
+        try { f >> cfg; } catch (...) { return json{{"enabled", false}, {"kind", "image"}, {"url", ""}}; }
+        auto file = cfg.value("file", std::string{});
+        if (file.empty() || file.find('/') != std::string::npos || file.find('\\') != std::string::npos)
+            return json{{"enabled", false}, {"kind", "image"}, {"url", ""}};
+        auto path = background_assets_dir() + L"\\" + U2W(file);
+        std::error_code ec;
+        if (!fspath::is_regular_file(path, ec)) return json{{"enabled", false}, {"kind", "image"}, {"url", ""}};
+        auto kind = cfg.value("kind", std::string{"image"});
+        if (kind != "video") kind = "image";
+        return json{
+            {"enabled", true}, {"kind", kind},
+            {"url", "https://user-assets.localhost/" + file + "?v=" + std::to_string(cfg.value("stamp", uint64_t{0}))},
+            {"appId", cfg.value("appId", 0)}, {"gameName", cfg.value("gameName", std::string{})},
+            {"source", cfg.value("source", std::string{})}
+        };
+    });
+    ipc_on("dynamicBackground.installOnline", [](const json& a) -> json {
+        std::lock_guard<std::mutex> lock(g_backgroundMtx);
+        const auto source = a.value("source", std::string{});
+        const auto fallbackUrls = a.value("fallbackUrls", json::array());
+        auto kind = a.value("kind", std::string{"video"});
+        if (kind != "image") kind = "video";
+        if (source.empty() || source.size() > 4096 || source.rfind("https://", 0) != 0)
+            throw std::runtime_error("Online Steam video URL is invalid");
+        if (!fallbackUrls.is_array() || fallbackUrls.size() > 16)
+            throw std::runtime_error("Online Steam video fallback list is invalid");
+        json urls = json::array();
+        for (const auto& item : fallbackUrls) {
+            if (item.is_string() && item.get<std::string>().rfind("https://", 0) == 0 && item.get<std::string>().size() <= 4096)
+                urls.push_back(item.get<std::string>());
+        }
+        auto dir = background_assets_dir();
+        for (const auto& old : {L"dynamic.jpg", L"dynamic.png", L"dynamic.mp4", L"dynamic.webm", L"dynamic.json"})
+            DeleteFileW((dir + L"\\" + old).c_str());
+        const auto appId = a.value("appId", 0);
+        const auto gameName = a.value("gameName", std::string{});
+        const auto sourceType = a.value("sourceType", std::string{"video-online"});
+        std::ofstream cfg(dir + L"\\dynamic-online.json", std::ios::binary | std::ios::trunc);
+        if (!cfg) throw std::runtime_error("Failed to save online Steam video state");
+        cfg << json{{"url", source}, {"fallbackUrls", urls}, {"kind", kind}, {"appId", appId}, {"gameName", gameName}, {"source", sourceType}}.dump(2);
+        cfg.flush();
+        if (!cfg) throw std::runtime_error("Failed to save online Steam video state");
+        return json{
+            {"enabled", true}, {"kind", kind}, {"url", source}, {"fallbackUrls", urls},
+            {"appId", appId}, {"gameName", gameName}, {"source", sourceType}
+        };
+    });
+    ipc_on("dynamicBackground.installUrl", [](const json& a) -> json {
+        std::lock_guard<std::mutex> lock(g_backgroundMtx);
+        auto source = a.value("source", std::string{});
+        auto kind = a.value("kind", std::string{"image"});
+        if (kind != "video") kind = "image";
+        auto appId = a.value("appId", 0);
+        auto gameName = a.value("gameName", std::string{});
+        if (source.empty() || source.size() > 4096) throw std::runtime_error("Dynamic background URL is invalid");
+        auto dir = background_assets_dir();
+        std::wstring file = kind == "video" ? L"dynamic.webm" : L"dynamic.jpg";
+        auto lower = ascii_lower(source);
+        if (kind == "video" && lower.find(".mp4") != std::string::npos) file = L"dynamic.mp4";
+        if (kind == "image" && lower.find(".png") != std::string::npos) file = L"dynamic.png";
+        auto target = dir + L"\\" + file;
+        // Each refresh gets its own temporary file so overlapping UI/game-status refreshes
+        // cannot delete or truncate another download in progress.
+        auto temp = target + L".tmp." + std::to_wstring(GetTickCount64());
+        if (!downloadFile(source, temp)) throw std::runtime_error("Failed to download Steam background media");
+        std::error_code ec;
+        auto size = fspath::file_size(temp, ec);
+        if (ec || size == 0 || size > (kind == "video" ? 300ULL * 1024ULL * 1024ULL : 30ULL * 1024ULL * 1024ULL)) {
+            fspath::remove(temp, ec);
+            throw std::runtime_error("Steam background media size is invalid");
+        }
+        if (kind == "video" && lower.find(".webm") != std::string::npos) {
+            double duration = 0.0;
+            if (!webmDurationSeconds(temp, duration)) {
+                fspath::remove(temp, ec);
+                throw std::runtime_error("Steam video duration cannot be verified");
+            }
+            if (duration < 30.0) {
+                fspath::remove(temp, ec);
+                throw std::runtime_error("Steam video is shorter than 30 seconds (" + std::to_string(duration) + "s)");
+            }
+        }
+        if (!MoveFileExW(temp.c_str(), target.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+            DeleteFileW(temp.c_str());
+            throw std::runtime_error("Failed to activate Steam background media");
+        }
+        for (const auto& old : {L"dynamic.jpg", L"dynamic.png", L"dynamic.mp4", L"dynamic.webm"}) {
+            if (old != file) DeleteFileW((dir + L"\\" + old).c_str());
+        }
+        auto stamp = GetTickCount64();
+        std::ofstream cfg(dir + L"\\dynamic.json", std::ios::binary | std::ios::trunc);
+        if (!cfg) throw std::runtime_error("Failed to write dynamic background config");
+        cfg << json{{"file", W2U(file)}, {"kind", kind}, {"appId", appId}, {"gameName", gameName}, {"source", a.value("sourceType", std::string{})}, {"stamp", stamp}}.dump(2);
+        cfg.flush();
+        return json{
+            {"enabled", true}, {"kind", kind}, {"url", "https://user-assets.localhost/" + W2U(file) + "?v=" + std::to_string(stamp)},
+            {"appId", appId}, {"gameName", gameName}, {"source", a.value("sourceType", std::string{})}
+        };
+    });
+    ipc_on("dynamicBackground.clear", [](const json&) -> json {
+        std::lock_guard<std::mutex> lock(g_backgroundMtx);
+        auto dir = background_assets_dir();
+        for (const auto& old : {L"dynamic.jpg", L"dynamic.png", L"dynamic.mp4", L"dynamic.webm", L"dynamic.json"})
+            DeleteFileW((dir + L"\\" + old).c_str());
+        DeleteFileW((dir + L"\\dynamic-online.json").c_str());
+        return json{{"enabled", false}, {"kind", "image"}, {"url", ""}};
+    });
+}
+
+// ================================================================
+//  Commands: Music player (folder → dedicated virtual host)
+// ================================================================
+
+static std::mutex g_musicMtx;
+static const wchar_t* MUSIC_HOST = L"music-assets.invalid";
+
+static std::wstring music_config_path() {
+    return std::wstring{L"C:\\SOFT\\YeMan\\PowerControl\\music_player.json"};
+}
+
+static json music_config_read() {
+    std::ifstream f(music_config_path(), std::ios::binary);
+    if (!f) return json::object();
+    try {
+        json cfg; f >> cfg;
+        return cfg.is_object() ? cfg : json::object();
+    } catch (...) {
+        return json::object();
+    }
+}
+
+static void music_config_write(const json& cfg) {
+    std::error_code ec;
+    fspath::create_directories(fspath::path(music_config_path()).parent_path(), ec);
+    if (!sgWriteFileAtomic(music_config_path(), cfg.dump(2)))
+        throw std::runtime_error("Failed to write music config");
+}
+
+static std::string music_mode_from_config() {
+    const json cfg = music_config_read();
+    const std::string m = cfg.value("mode", std::string("sequential"));
+    return m == "random" ? "random" : "sequential";
+}
+
+// 读取已持久化的音乐目录（仅当真实存在且为目录时返回）
+static std::wstring music_folder_from_config() {
+    const json cfg = music_config_read();
+    auto folder = cfg.value("folder", std::string{});
+    if (folder.empty()) return {};
+    std::error_code ec;
+    if (!fspath::is_directory(U2W(folder), ec)) return {};
+    return U2W(folder);
+}
+
+// 读取已持久化的音量（缺省 0.8；与 music_player.json 的 folder 同文件存储）
+static double music_volume_from_config() {
+    const json cfg = music_config_read();
+    double v = cfg.value("volume", 0.8);
+    if (!(v >= 0.0 && v <= 1.0)) v = 0.8;
+    return v;
+}
+
+// 启动期在导航前恢复映射（当前页即生效，无需刷新）
+static bool configureMusicHost(ICoreWebView2* view) {
+    if (!view) return true;
+    auto folder = music_folder_from_config();
+    if (folder.empty()) return true; // 未配置不是错误
+    ComPtr<ICoreWebView2_3> v3;
+    if (FAILED(view->QueryInterface(IID_PPV_ARGS(&v3)))) return true;
+    v3->SetVirtualHostNameToFolderMapping(
+        MUSIC_HOST, folder.c_str(),
+        COREWEBVIEW2_HOST_RESOURCE_ACCESS_KIND_DENY_CORS);
+    return true;
+}
+
+static void reg_music() {
+    ipc_on("music.get", [](const json&) -> json {
+        std::lock_guard<std::mutex> lock(g_musicMtx);
+        auto folder = music_folder_from_config();
+        const auto mode = music_mode_from_config();
+        if (folder.empty())
+            return {{"enabled", false}, {"folder", ""}, {"baseUrl", ""}, {"reloadRecommended", false},
+                    {"volume", music_volume_from_config()}, {"mode", mode}};
+        return {
+            {"enabled", true},
+            {"folder", W2U(folder)},
+            {"baseUrl", "https://music-assets.invalid/"},
+            {"reloadRecommended", false},
+            {"volume", music_volume_from_config()},
+            {"mode", mode}
+        };
+    });
+    ipc_on("music.setFolder", [](const json& a) -> json {
+        std::lock_guard<std::mutex> lock(g_musicMtx);
+        auto folder = U2W(a.value("folder", std::string{}));
+        std::error_code ec;
+        if (folder.empty() || !fspath::is_directory(folder, ec))
+            throw std::runtime_error("Invalid music folder");
+        if (folder.size() > static_cast<size_t>(MAX_PATH))
+            throw std::runtime_error("Music folder path too long");
+        json cfg = music_config_read();
+        cfg["folder"] = W2U(folder);
+        music_config_write(cfg);
+        ComPtr<ICoreWebView2_3> v3;
+        if (SUCCEEDED(g_view->QueryInterface(IID_PPV_ARGS(&v3)))) {
+            v3->SetVirtualHostNameToFolderMapping(
+                MUSIC_HOST, folder.c_str(),
+                COREWEBVIEW2_HOST_RESOURCE_ACCESS_KIND_DENY_CORS);
+        }
+        return {
+            {"enabled", true},
+            {"folder", W2U(folder)},
+            {"baseUrl", "https://music-assets.invalid/"},
+            {"reloadRecommended", true},
+            {"volume", music_volume_from_config()},
+            {"mode", music_mode_from_config()}
+        };
+    });
+    ipc_on("music.clearFolder", [](const json&) -> json {
+        std::lock_guard<std::mutex> lock(g_musicMtx);
+        json cfg = music_config_read();
+        cfg["folder"] = "";
+        music_config_write(cfg);
+        ComPtr<ICoreWebView2_3> v3;
+        if (SUCCEEDED(g_view->QueryInterface(IID_PPV_ARGS(&v3)))) {
+            v3->ClearVirtualHostNameToFolderMapping(MUSIC_HOST);
+        }
+        return {{"enabled", false}, {"folder", ""}, {"baseUrl", ""}, {"reloadRecommended", false},
+                {"volume", music_volume_from_config()}, {"mode", music_mode_from_config()}};
+    });
+    // 音量独立持久化：即使未配置文件夹也可记忆；写盘时保留 folder
+    ipc_on("music.setVolume", [](const json& a) -> json {
+        std::lock_guard<std::mutex> lock(g_musicMtx);
+        double v = a.value("volume", 0.8);
+        if (!(v >= 0.0 && v <= 1.0)) v = 0.8;
+        json cfg = music_config_read();
+        cfg["volume"] = v;
+        music_config_write(cfg);
+        return {{"volume", v}};
+    });
+    ipc_on("music.setMode", [](const json& a) -> json {
+        std::lock_guard<std::mutex> lock(g_musicMtx);
+        const std::string m = a.value("mode", std::string("sequential"));
+        if (m != "sequential" && m != "random")
+            throw std::runtime_error("Invalid music mode");
+        json cfg = music_config_read();
+        cfg["mode"] = m;
+        music_config_write(cfg);
+        return {{"mode", m}};
+    });
+}
+
 // ================================================================
 //  Commands: Clipboard
 // ================================================================
@@ -2622,6 +3920,74 @@ static void reg_clipboard() {
 // ================================================================
 
 static void reg_shell_app() {
+    // TDP daemon 专用控制面：路径和参数由 native 固定，前端不能传入任意管理员程序。
+    ipc_on("tdpDaemon.start", [](const json&) -> json {
+        if (!sameFinalPath(kTdpDaemonExe, kTdpDaemonExe))
+            throw std::runtime_error("Trusted YeManTdpCtl.exe not found");
+        HANDLE job = ensureTdpDaemonJob();
+        if (!job)
+            throw std::runtime_error("Failed to create TDP daemon lifetime job");
+        if (WaitNamedPipeW(kTdpDaemonPipeName, 200)) {
+            HANDLE pipe = CreateFileW(kTdpDaemonPipeName, GENERIC_READ | GENERIC_WRITE, 0,
+                                      nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+            if (pipe != INVALID_HANDLE_VALUE) {
+                DWORD pid = 0;
+                bool valid = tdpVerifyPipeServer(pipe, &pid);
+                CloseHandle(pipe);
+                if (valid) {
+                    HANDLE daemon = OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE,
+                                                FALSE, pid);
+                    if (daemon) {
+                        bool attached = AssignProcessToJobObject(job, daemon) != FALSE;
+                        CloseHandle(daemon);
+                        if (attached) return json{{"ok", true}};
+                    }
+                }
+            }
+        }
+        std::wstring cmdLine = quote_windows_arg(kTdpDaemonExe) + L" daemon";
+        std::vector<wchar_t> cmd(cmdLine.begin(), cmdLine.end());
+        cmd.push_back(0);
+        STARTUPINFOW si{sizeof(si)};
+        PROCESS_INFORMATION pi{};
+        if (!CreateProcessW(kTdpDaemonExe, cmd.data(), nullptr, nullptr, FALSE,
+                            CREATE_NO_WINDOW | CREATE_SUSPENDED, nullptr, nullptr, &si, &pi)) {
+            DWORD le = GetLastError();
+            throw std::runtime_error("Failed to start trusted TDP daemon (Win32 " + std::to_string(le) + ")");
+        }
+        if (!AssignProcessToJobObject(job, pi.hProcess)) {
+            DWORD le = GetLastError();
+            TerminateProcess(pi.hProcess, ERROR_ACCESS_DENIED);
+            WaitForSingleObject(pi.hProcess, 1000);
+            CloseHandle(pi.hThread);
+            CloseHandle(pi.hProcess);
+            throw std::runtime_error("Failed to bind TDP daemon lifetime (Win32 " + std::to_string(le) + ")");
+        }
+        ResumeThread(pi.hThread);
+        CloseHandle(pi.hThread);
+        CloseHandle(pi.hProcess);
+        return json{{"ok", true}};
+    });
+    ipc_on("tdpDaemon.request", [](const json& a) -> json {
+        auto op = a.value("op", std::string{});
+        if (op != "ping" && op != "set" && op != "quit")
+            throw std::runtime_error("TDP daemon operation not allowed");
+        json args = a.contains("args") && a["args"].is_object() ? a["args"] : json::object();
+        if (op == "set") {
+            if (!args.contains("watts") || !args["watts"].is_number())
+                throw std::runtime_error("TDP daemon watts required");
+            double w = args["watts"].get<double>();
+            if (!std::isfinite(w) || w < 2.0 || w > 200.0)
+                throw std::runtime_error("TDP daemon watts out of range");
+        }
+        json req = {{"version", 1}, {"requestId", nextTdpRequestId()},
+                    {"op", op}, {"args", args}};
+        DWORD timeoutMs = a.value("timeoutMs", 3000u);
+        if (timeoutMs < 100) timeoutMs = 100;
+        if (timeoutMs > 10000) timeoutMs = 10000;
+        return tdpDaemonPipeRequest(req, timeoutMs);
+    });
+
     ipc_on("shell.open", [](const json& a) -> json {
         auto url = a.value("url", std::string{});
         auto target = trim_ascii(url);
@@ -2678,7 +4044,9 @@ static void reg_shell_app() {
         return json{{"ok", true}};
     });
     ipc_on("app.exit", [](const json& a) -> json {
-        PostQuitMessage(a.value("code", 0));
+        // IPC 可能运行在工作线程；窗口销毁和退出清理必须切回 UI 线程。
+        if (g_hwnd && IsWindow(g_hwnd)) PostMessageW(g_hwnd, WM_APP_EXIT, (WPARAM)a.value("code", 0), 0);
+        else PostQuitMessage(a.value("code", 0));
         return true;
     });
     ipc_on("app.dataDir", [](const json&) -> json {
@@ -2723,6 +4091,7 @@ static void reg_shell_app() {
         bool on = a.value("on", false);
         g_guardEnabled = on;
         sgWriteFile(SG_DIR + L"\\Enable.txt", on ? "1" : "0");
+        sgUpdateOverheatTimer();
         return true;
     });
     ipc_on("sleepGuard.get", [](const json& a) -> json {
@@ -2737,7 +4106,10 @@ static void reg_shell_app() {
             {"mode", g_sgMode},
             {"suspended", suspended},
             {"pauseResume", g_sgPauseResume},
-            {"sleepTdp", {{"mode", g_sgTdpLock ? "lock" : "off"}, {"watts", g_sgSleepTdp}}}
+            {"killListEnabled", g_sgKillListEnabled},
+            {"resleepEnabled", g_sgResleepEnabled},
+            {"overheatSleepEnabled", g_sgOverheatSleepEnabled},
+            {"overheatTempC", g_sgOverheatTempC}
         };
     });
     ipc_on("sleepGuard.setConfig", [](const json& a) -> json {
@@ -2747,23 +4119,28 @@ static void reg_shell_app() {
             if (m == "off" || m == "custom") g_sgMode = m;
         }
         if (a.contains("pauseResume")) g_sgPauseResume = a.value("pauseResume", g_sgPauseResume);
-        if (a.contains("sleepTdp")) {
-            auto t = a["sleepTdp"];
-            g_sgTdpLock = t.value("mode", std::string("lock")) == "lock";
-            int w = t.value("watts", g_sgSleepTdp); if (w < 5) w = 5; if (w > 30) w = 30; g_sgSleepTdp = w;
+        if (a.contains("killListEnabled")) g_sgKillListEnabled = a.value("killListEnabled", g_sgKillListEnabled);
+        if (a.contains("resleepEnabled")) {
+            g_sgResleepEnabled = a.value("resleepEnabled", g_sgResleepEnabled);
+            if (!g_sgResleepEnabled) sgStopResleepObservation();
+        }
+        if (a.contains("overheatSleepEnabled"))
+            g_sgOverheatSleepEnabled = a.value("overheatSleepEnabled", g_sgOverheatSleepEnabled);
+        if (a.contains("overheatTempC")) {
+            g_sgOverheatTempC = a.value("overheatTempC", g_sgOverheatTempC);
+            if (g_sgOverheatTempC < 85) g_sgOverheatTempC = 85;
+            if (g_sgOverheatTempC > 100) g_sgOverheatTempC = 100;
         }
         sgSaveConfig();
+        sgUpdateOverheatTimer();
         return true;
     });
     ipc_on("sleepGuard.recoverAll", [](const json& a) -> json {
-        int before = 0;
-        std::wstring dir = SG_DIR + L"\\suspended";
-        std::error_code ec;
-        if (fspath::exists(dir, ec))
-            for (auto& e : fspath::directory_iterator(dir, ec))
-                if (e.is_regular_file()) before++;
-        sgResumeAll(true); // 恢复全部 + 还原 TDP（仅恢复不冻结）
-        return {{"resumed", before}};
+        SgResumeResult rr = sgResumeAll(); // 返回真实成功恢复数，而不是操作前标记数
+        if (rr.count > 0) {
+            g_sgInSuspend = false;
+        }
+        return {{"resumed", rr.count}};
     });
     ipc_on("sleepGuard.suspendCurrent", [](const json& a) -> json {
         return sgSuspendCurrent();
@@ -2971,9 +4348,22 @@ static void reg_http() {
             throw std::runtime_error("Invalid HTTP method");
 
         bool https = (uc.nScheme == INTERNET_SCHEME_HTTPS);
-        HINTERNET hSession = WinHttpOpen(L"QQ/1.0", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
+        bool steamHostHeader = false;
+        if (hdrs.is_object()) {
+            const auto it = hdrs.find("Host");
+            if (it != hdrs.end() && it->is_string()) {
+                const auto hostHeader = U2W(it->get<std::string>());
+                steamHostHeader = isSteamHostName(hostHeader.c_str());
+            }
+        }
+        const bool steamHost = isSteamHostName(host) || steamHostHeader;
+        HINTERNET hSession = WinHttpOpen(L"QQ/1.0",
+                                          steamHost ? WINHTTP_ACCESS_TYPE_NO_PROXY : WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
                                           WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
         if (!hSession) throw std::runtime_error("WinHttpOpen failed");
+        setHttpTimeouts(hSession);
+        DWORD redirectPolicy = WINHTTP_OPTION_REDIRECT_POLICY_ALWAYS;
+        WinHttpSetOption(hSession, WINHTTP_OPTION_REDIRECT_POLICY, &redirectPolicy, sizeof(redirectPolicy));
 
         HINTERNET hConnect = WinHttpConnect(hSession, host, uc.nPort, 0);
         if (!hConnect) { WinHttpCloseHandle(hSession); throw std::runtime_error("WinHttpConnect failed"); }
@@ -2987,6 +4377,12 @@ static void reg_http() {
             WinHttpCloseHandle(hConnect);
             WinHttpCloseHandle(hSession);
             throw std::runtime_error("WinHttpOpenRequest failed");
+        }
+        if (steamHost && https) {
+            DWORD securityFlags = SECURITY_FLAG_IGNORE_UNKNOWN_CA |
+                                  SECURITY_FLAG_IGNORE_CERT_DATE_INVALID |
+                                  SECURITY_FLAG_IGNORE_CERT_CN_INVALID;
+            WinHttpSetOption(hRequest, WINHTTP_OPTION_SECURITY_FLAGS, &securityFlags, sizeof(securityFlags));
         }
 
         // Add custom headers
@@ -3422,42 +4818,6 @@ static void applyResidentMode() {
     applyFramelessDwmAttrs();
 }
 
-// ── Xbox / 全屏游戏检测线程 ──
-// 由前端「Xbox 游戏模式」开关经 xbox.setActive 启停。检测到全屏游戏（Xbox 独占 / D3D 独占 / 演示模式）
-// 时确保托盘在位，防止被全屏游戏压住、找不到入口；游戏结束后按 g_taskbarResident 决定去留。
-static DWORD WINAPI xboxDetectThread(LPVOID) {
-    bool wasGaming = false;
-    while (g_xboxActive.load(std::memory_order_relaxed)) {
-        bool gaming = false;
-        // 信号1：系统级“前台有全屏/独占全屏应用”（Xbox 独占全屏游戏会触发 QUNS_BUSY / QUNS_RUNNING_D3D_FULL_SCREEN）
-        QUERY_USER_NOTIFICATION_STATE st = QUNS_ACCEPTS_NOTIFICATIONS;
-        if (SUCCEEDED(SHQueryUserNotificationState(&st))) {
-            if (st == QUNS_BUSY || st == QUNS_RUNNING_D3D_FULL_SCREEN || st == QUNS_PRESENTATION_MODE)
-                gaming = true;
-        }
-        // 信号2：前台窗口矩形 == 所在显示器矩形（兜底，捕捉未触发信号1的全屏游戏）
-        if (!gaming) {
-            HWND fg = GetForegroundWindow();
-            if (fg && fg != GetDesktopWindow() && fg != GetShellWindow()) {
-                RECT wr{}; MONITORINFO mi{}; mi.cbSize = sizeof(mi);
-                HMONITOR hm = MonitorFromWindow(fg, MONITOR_DEFAULTTONEAREST);
-                if (hm && GetWindowRect(fg, &wr) && GetMonitorInfo(hm, &mi) && EqualRect(&wr, &mi.rcMonitor))
-                    gaming = true;
-            }
-        }
-        if (gaming && !wasGaming) {
-            // 进入全屏：确保托盘在位作为兜底入口（防被全屏压住找不到窗口）
-            if (!g_trayActive) trayCreate(L"野蛮控制中心");
-        } else if (!gaming && wasGaming) {
-            // 离开全屏：按常驻模式恢复（常驻=任务栏按钮、否则=托盘）
-            applyResidentMode();
-        }
-        wasGaming = gaming;
-        Sleep(1500);
-    }
-    return 0;
-}
-
 static void reg_tray() {
     // 任务栏常驻：resident=true → 显示任务栏按钮(并移除托盘)；false → 仅托盘(默认)
     ipc_on("tray.setResident", [](const json& a) -> json {
@@ -3472,23 +4832,10 @@ static void reg_tray() {
         Shell_NotifyIconW(NIM_MODIFY, &g_nid);
         return true;
     });
-    // Xbox / 全屏游戏检测：由前端「Xbox 游戏模式」开关启停
-    ipc_on("xbox.setActive", [](const json& a) -> json {
-        bool on = a.value("active", false);
-        if (on && !g_xboxActive.load()) {
-            g_xboxActive = true;
-            g_xboxThread = CreateThread(nullptr, 0, xboxDetectThread, nullptr, 0, nullptr);
-        } else if (!on && g_xboxActive.load()) {
-            g_xboxActive = false;
-            if (g_xboxThread) {
-                WaitForSingleObject(g_xboxThread, 2000);
-                CloseHandle(g_xboxThread);
-                g_xboxThread = nullptr;
-            }
-            // Xbox 关闭不再影响任务栏常驻（两者解耦；任务栏常驻由前端独立开关控制）
-        }
-        return true;
-    });
+    // ⚠️ Xbox / 全屏游戏检测线程已废弃（2026-08-02）：原 1.5s 后台轮询（xboxDetectThread）已删除，
+    //    「Xbox全屏游戏模式」开关仅保留任务计划/联动（见 PowerView.vue），不再起后台线程。
+    //    xbox.setActive 保留为 no-op 兼容旧前端，避免残留调用报错。
+    ipc_on("xbox.setActive", [](const json&) -> json { return true; });
 }
 
 // ================================================================
@@ -3733,9 +5080,11 @@ static bool downloadFile(const std::string& url, const std::wstring& dest) {
     std::error_code cleanupEc;
     std::filesystem::remove(dest, cleanupEc);
     bool https = true;
-    HINTERNET hS = WinHttpOpen(L"QQ/1.0", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
+    const bool steamHost = isSteamHostName(host);
+    HINTERNET hS = WinHttpOpen(L"QQ/1.0", steamHost ? WINHTTP_ACCESS_TYPE_NO_PROXY : WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
         WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
     if (!hS) return false;
+    setHttpTimeouts(hS);
     DWORD redirectPolicy = WINHTTP_OPTION_REDIRECT_POLICY_ALWAYS;
     WinHttpSetOption(hS, WINHTTP_OPTION_REDIRECT_POLICY, &redirectPolicy, sizeof(redirectPolicy));
     HINTERNET hC = WinHttpConnect(hS, host, uc.nPort, 0);
@@ -3743,6 +5092,18 @@ static bool downloadFile(const std::string& url, const std::wstring& dest) {
     HINTERNET hR = WinHttpOpenRequest(hC, L"GET", objectPath.c_str(), nullptr,
         WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, https ? WINHTTP_FLAG_SECURE : 0);
     if (!hR) { WinHttpCloseHandle(hC); WinHttpCloseHandle(hS); return false; }
+    if (steamHost && https) {
+        DWORD securityFlags = SECURITY_FLAG_IGNORE_UNKNOWN_CA |
+                              SECURITY_FLAG_IGNORE_CERT_DATE_INVALID |
+                              SECURITY_FLAG_IGNORE_CERT_CN_INVALID;
+        WinHttpSetOption(hR, WINHTTP_OPTION_SECURITY_FLAGS, &securityFlags, sizeof(securityFlags));
+    }
+    const wchar_t* requestHeaders =
+        L"Accept: video/webm,video/mp4,application/octet-stream,*/*\r\n"
+        L"Accept-Encoding: identity\r\n"
+        L"User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0 Safari/537.36\r\n"
+        L"Referer: https://store.steampowered.com/\r\n";
+    WinHttpAddRequestHeaders(hR, requestHeaders, (DWORD)-1, WINHTTP_ADDREQ_FLAG_ADD);
     if (!WinHttpSendRequest(hR, WINHTTP_NO_ADDITIONAL_HEADERS, 0,
         WINHTTP_NO_REQUEST_DATA, 0, 0, 0) || !WinHttpReceiveResponse(hR, nullptr)) {
         WinHttpCloseHandle(hR); WinHttpCloseHandle(hC); WinHttpCloseHandle(hS);
@@ -3756,12 +5117,18 @@ static bool downloadFile(const std::string& url, const std::wstring& dest) {
         WinHttpCloseHandle(hR); WinHttpCloseHandle(hC); WinHttpCloseHandle(hS);
         return false;
     }
+    DWORD expectedLength = 0;
+    DWORD expectedLengthSize = sizeof(expectedLength);
+    const bool hasExpectedLength = WinHttpQueryHeaders(
+        hR, WINHTTP_QUERY_CONTENT_LENGTH | WINHTTP_QUERY_FLAG_NUMBER,
+        WINHTTP_HEADER_NAME_BY_INDEX, &expectedLength, &expectedLengthSize, WINHTTP_NO_HEADER_INDEX) != FALSE;
     std::ofstream out(dest, std::ios::binary);
     if (!out) {
         WinHttpCloseHandle(hR); WinHttpCloseHandle(hC); WinHttpCloseHandle(hS);
         return false;
     }
     bool ok = true;
+    uint64_t receivedLength = 0;
     DWORD avail = 0, rd = 0;
     while (true) {
         if (!WinHttpQueryDataAvailable(hR, &avail)) { ok = false; break; }
@@ -3769,15 +5136,74 @@ static bool downloadFile(const std::string& url, const std::wstring& dest) {
         std::string chunk(avail, 0);
         if (!WinHttpReadData(hR, chunk.data(), avail, &rd)) { ok = false; break; }
         out.write(chunk.data(), rd);
+        receivedLength += rd;
         if (!out) { ok = false; break; }
     }
     out.close();
     WinHttpCloseHandle(hR); WinHttpCloseHandle(hC); WinHttpCloseHandle(hS);
+    if (ok && hasExpectedLength && receivedLength != expectedLength) ok = false;
     if (!ok) {
         std::error_code ec;
         std::filesystem::remove(dest, ec);
     }
     return ok;
+}
+
+static bool webmReadVint(const std::vector<unsigned char>& data, size_t pos, size_t& width, uint64_t& value) {
+    if (pos >= data.size()) return false;
+    const unsigned char first = data[pos];
+    unsigned char mask = 0x80;
+    width = 1;
+    while (width <= 8 && !(first & mask)) { mask >>= 1; width++; }
+    if (width > 8 || pos + width > data.size()) return false;
+    value = first & (mask - 1);
+    for (size_t i = 1; i < width; i++) value = (value << 8) | data[pos + i];
+    return true;
+}
+
+static bool webmDurationSeconds(const std::wstring& path, double& seconds) {
+    seconds = 0.0;
+    std::error_code ec;
+    const auto fileSize = fspath::file_size(path, ec);
+    if (ec || fileSize == 0 || fileSize > 300ULL * 1024ULL * 1024ULL) return false;
+    const size_t readSize = (size_t)std::min<uintmax_t>(fileSize, 8ULL * 1024ULL * 1024ULL);
+    std::vector<unsigned char> data(readSize);
+    std::ifstream in(path, std::ios::binary);
+    if (!in || !in.read(reinterpret_cast<char*>(data.data()), (std::streamsize)data.size())) return false;
+    uint64_t timecodeScale = 1000000;
+    double durationValue = 0.0;
+    bool foundDuration = false;
+    for (size_t i = 0; i + 2 < data.size(); i++) {
+        if (data[i] == 0x2A && data[i + 1] == 0xD7 && data[i + 2] == 0xB1) {
+            size_t width = 0; uint64_t value = 0;
+            if (webmReadVint(data, i + 3, width, value) && value > 0 && value <= 8 && i + 3 + width + value <= data.size()) {
+                uint64_t scale = 0;
+                for (size_t j = 0; j < value; j++) scale = (scale << 8) | data[i + 3 + width + j];
+                if (scale > 0) timecodeScale = scale;
+            }
+        }
+        if (data[i] == 0x44 && data[i + 1] == 0x89) {
+            size_t width = 0; uint64_t value = 0;
+            if (!webmReadVint(data, i + 2, width, value) || (value != 4 && value != 8) || i + 2 + width + value > data.size()) continue;
+            const unsigned char* raw = data.data() + i + 2 + width;
+            if (value == 8) {
+                uint64_t bits = 0; for (size_t j = 0; j < 8; j++) bits = (bits << 8) | raw[j];
+                std::memcpy(&durationValue, &bits, sizeof(durationValue));
+            } else {
+                uint32_t bits = 0; for (size_t j = 0; j < 4; j++) bits = (bits << 8) | raw[j];
+                float f = 0.0f; std::memcpy(&f, &bits, sizeof(f)); durationValue = f;
+            }
+            if (std::isfinite(durationValue) && durationValue > 0.0) {
+                foundDuration = true;
+                // Stop at the first Duration in the Info element. Random 0x4489
+                // byte sequences inside media clusters are not EBML elements.
+                break;
+            }
+        }
+    }
+    if (!foundDuration) return false;
+    seconds = durationValue * (double)timecodeScale / 1000000000.0;
+    return std::isfinite(seconds) && seconds > 0.0;
 }
 
 // 计算文件 SHA-256（CryptoAPI，advapi32 已链接），返回小写 hex 串
@@ -3866,6 +5292,22 @@ static bool stopUpdateAccel() {
     return killed;
 }
 
+// Move the support page produced by the first updater version out of YeManCC/.
+// Never replace a page already installed at the shared root.
+static void migrate_legacy_support_page() {
+    wchar_t exePath[MAX_PATH]{};
+    if (!GetModuleFileNameW(nullptr, exePath, MAX_PATH)) return;
+    std::wstring exeStr(exePath);
+    auto exeDir = exeStr.substr(0, exeStr.find_last_of(L"\\"));
+    auto root = exeDir.substr(0, exeDir.find_last_of(L"\\"));
+    auto legacy = exeDir + L"\\YeMan-Support.html";
+    auto current = root + L"\\YeMan-Support.html";
+    std::error_code ec;
+    if (fspath::exists(legacy) && !fspath::exists(current)) {
+        fspath::copy_file(legacy, current, fspath::copy_options::skip_existing, ec);
+    }
+}
+
 static void reg_updater() {
     ipc_on("app.version", [](const json&) -> json {
         return APP_VER_STR;
@@ -3890,12 +5332,8 @@ static void reg_updater() {
         }
         return W2U(dest);
     });
-    // 安装：解压已下载的 package.zip → 写 update.bat 用 robocopy 合并覆盖
-    //   - 程序本体 → exe 所在目录（排除 app.config.json 与 config/，保留用户数据）
-    //   - 依赖包 PowerControl → C:\SOFT\YeMan\PowerControl（与前端 yeman.ts 的 PC_DIR 默认一致），
-    //     排除用户运行时数据（tdp-*.txt / FPS-*.txt / Power.txt / *.json / *.log / *.pid / *.hb / hwinfo-ok），
-    //     只覆盖代码/资产（bat/vbs/ps1/xml/reg/exe/png/md/pow 等）。
-    //   两段独立，PowerControl 部署失败不影响程序本体更新。
+    // Install the complete release payload into three fixed targets.
+    // Merge-copy only: files added by players and absent from the package remain.
     ipc_on("app.installUpdate", [](const json&) -> json {
         auto zip = app_data_dir() + L"\\update\\package.zip";
         if (!fspath::exists(zip)) throw std::runtime_error("No update package downloaded");
@@ -3905,32 +5343,75 @@ static void reg_updater() {
         wchar_t exePath[MAX_PATH]; GetModuleFileNameW(nullptr, exePath, MAX_PATH);
         std::wstring exeStr(exePath);
         std::wstring exedir = exeStr.substr(0, exeStr.find_last_of(L"\\"));
+        const auto packagedExe = staging + L"\\YeManCC.exe";
+        if (!fspath::exists(packagedExe))
+            throw std::runtime_error("Update package missing YeManCC.exe");
+        const auto packagedPowerControl = staging + L"\\PowerControl";
+        if (!fspath::exists(packagedPowerControl))
+            throw std::runtime_error("Update package missing PowerControl");
+        const auto packagedSupport = staging + L"\\YeMan-Support.html";
+        if (!fspath::exists(packagedSupport))
+            throw std::runtime_error("Update package missing YeMan-Support.html");
         // 依赖包固定目标目录（与前端 yeman.ts 的 PC_DIR 默认一致）
         std::wstring pcDir = L"C:\\SOFT\\YeMan\\PowerControl";
-        auto bat = app_data_dir() + L"\\update.bat";
+        std::wstring supportPath = L"C:\\SOFT\\YeMan\\YeMan-Support.html";
+        auto script = app_data_dir() + L"\\update.ps1";
+        auto psLiteral = [](const std::wstring& value) {
+            std::string s = W2U(value);
+            std::string out = "'";
+            for (char c : s) {
+                if (c == '\'') out += "''";
+                else out += c;
+            }
+            out += "'";
+            return out;
+        };
         {
-            std::ofstream f(bat);
-            f << "@echo off\n";
-            f << "timeout /t 1 /nobreak >nul\n";
-            f << "copy \"" << W2U(exePath) << "\" \"" << W2U(exePath) << ".old\" >nul 2>&1\n";
-            // 1) 程序本体：/E 递归；/XF 排除 app.config.json（保留已安装的）；/XD 排除 config 与 PowerControl
-            //    （PowerControl 单独部署，避免误入程序目录）
-            f << "robocopy \"" << W2U(staging) << "\" \"" << W2U(exedir)
-              << "\" /E /XF app.config.json /XD config PowerControl /NFL /NDL /NJH /NJS /NP\n";
-            // 2) 首次过渡清理：若旧版安装器曾把 PowerControl 误放进程序目录，清掉
-            f << "if exist \"" << W2U(exedir) << "\\PowerControl\" rmdir /S /Q \""
-              << W2U(exedir) << "\\PowerControl\"\n";
-            // 3) 依赖包 PowerControl：仅覆盖代码/资产，排除用户运行时数据（保留用户已保存的 TDP/FPS/配置）
-            f << "if exist \"" << W2U(staging) << "\\PowerControl\" (\n";
-            f << "  if not exist \"" << W2U(pcDir) << "\" mkdir \"" << W2U(pcDir) << "\"\n";
-            f << "  robocopy \"" << W2U(staging) << "\\PowerControl\" \"" << W2U(pcDir)
-              << "\" /E /XF tdp-ac.txt tdp-dc.txt tdp-lock-dc.txt FPS-ac.txt FPS-dc.txt Power.txt startup_trace.txt *.json *.log *.pid *.hb hwinfo-ok /NFL /NDL /NJH /NJS /NP\n";
-            f << ")\n";
-            f << "start \"\" \"" << W2U(exePath) << "\"\n";
-            f << "del \"%~f0\"\n";
+            std::ofstream f(script, std::ios::binary);
+            f.put((char)0xEF); f.put((char)0xBB); f.put((char)0xBF);
+            f << "$ErrorActionPreference = 'Stop'\n";
+            f << "$parentPid = " << GetCurrentProcessId() << "\n";
+            f << "$zip = " << psLiteral(zip) << "\n";
+            f << "$staging = " << psLiteral(staging) << "\n";
+            f << "$exePath = " << psLiteral(exePath) << "\n";
+            f << "$exeDir = " << psLiteral(exedir) << "\n";
+            f << "$packageExe = " << psLiteral(packagedExe) << "\n";
+            f << "$pcDir = " << psLiteral(pcDir) << "\n";
+            f << "$supportPath = " << psLiteral(supportPath) << "\n";
+            f << "$backup = $exePath + '.old'\n";
+            f << "$newExe = $exePath + '.new'\n";
+            f << "$state = Join-Path (Split-Path -Parent $staging) 'update-state.json'\n";
+            f << "$scriptPath = " << psLiteral(script) << "\n";
+            f << "while (Get-Process -Id $parentPid -ErrorAction SilentlyContinue) { Start-Sleep -Milliseconds 100 }\n";
+            f << "try {\n";
+            f << "  if (!(Test-Path -LiteralPath $packageExe)) { throw 'staged executable missing' }\n";
+            f << "  Set-Content -LiteralPath $state -Value '{\"phase\":\"copying\"}' -Encoding utf8\n";
+            f << "  Copy-Item -LiteralPath $exePath -Destination $backup -Force\n";
+            f << "  Copy-Item -LiteralPath $packageExe -Destination $newExe -Force\n";
+            f << "  Move-Item -LiteralPath $newExe -Destination $exePath -Force\n";
+            f << "  & robocopy $staging $exeDir /E /COPY:DAT /DCOPY:DAT /R:2 /W:1 /XJ /XF YeManCC.exe YeMan-Support.html /XD PowerControl /NFL /NDL /NJH /NJS /NP\n";
+            f << "  if ($LASTEXITCODE -ge 8) { throw ('program asset copy failed: ' + $LASTEXITCODE) }\n";
+            f << "  if (!(Test-Path -LiteralPath $pcDir)) { New-Item -ItemType Directory -Path $pcDir | Out-Null }\n";
+            f << "  & robocopy (Join-Path $staging 'PowerControl') $pcDir /E /COPY:DAT /DCOPY:DAT /R:2 /W:1 /XJ /NFL /NDL /NJH /NJS /NP\n";
+            f << "  if ($LASTEXITCODE -ge 8) { throw ('PowerControl copy failed: ' + $LASTEXITCODE) }\n";
+            f << "  Copy-Item -LiteralPath (Join-Path $staging 'YeMan-Support.html') -Destination $supportPath -Force\n";
+            f << "  Set-Content -LiteralPath $state -Value '{\"phase\":\"committed\"}' -Encoding utf8\n";
+            f << "  Start-Process -FilePath $exePath\n";
+            f << "} catch {\n";
+            f << "  if (Test-Path -LiteralPath $backup) { Copy-Item -LiteralPath $backup -Destination $exePath -Force }\n";
+            f << "  Set-Content -LiteralPath $state -Value ('{\"phase\":\"rolled-back\",\"error\":' + (ConvertTo-Json $_.Exception.Message -Compress) + '}') -Encoding utf8\n";
+            f << "} finally {\n";
+            f << "  Remove-Item -LiteralPath $newExe -Force -ErrorAction SilentlyContinue\n";
+            f << "  Remove-Item -LiteralPath $staging -Recurse -Force -ErrorAction SilentlyContinue\n";
+            f << "  Remove-Item -LiteralPath $scriptPath -Force -ErrorAction SilentlyContinue\n";
+            f << "}\n";
         }
-        ShellExecuteW(nullptr, L"open", bat.c_str(), nullptr, nullptr, SW_HIDE);
-        PostQuitMessage(0);
+        std::wstring psArgs = L"-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"" + script + L"\"";
+        if ((INT_PTR)ShellExecuteW(nullptr, L"open", L"powershell.exe", psArgs.c_str(), nullptr, SW_HIDE) <= 32)
+            throw std::runtime_error("Failed to launch update helper");
+        // 更新退出也必须走窗口统一清理链，不能直接 PostQuitMessage 绕过 WM_DESTROY。
+        if (g_hwnd && IsWindow(g_hwnd)) PostMessageW(g_hwnd, WM_APP_EXIT, 0, 0);
+        else PostQuitMessage(0);
         return true;
     });
 
@@ -4091,7 +5572,9 @@ static void reg_extras() {
             {"tdpShortcut", g_tdpShortcut},
             {"fpsShortcut", g_fpsShortcut},
             {"killGame", g_killGame},
-            {"openKeyboard", g_openKeyboard}
+            {"openKeyboard", g_openKeyboard},
+            {"returnDesktop", g_returnDesktop},
+            {"mouseToggle", g_mouseToggle}
         };
     });
     ipc_on("summon.set", [](const json& a) -> json {
@@ -4101,6 +5584,8 @@ static void reg_extras() {
         if (a.contains("fpsShortcut")) g_fpsShortcut = a.value("fpsShortcut", g_fpsShortcut);
         if (a.contains("killGame")) g_killGame = a.value("killGame", g_killGame);
         if (a.contains("openKeyboard")) g_openKeyboard = a.value("openKeyboard", g_openKeyboard);
+        if (a.contains("returnDesktop")) g_returnDesktop = a.value("returnDesktop", g_returnDesktop);
+        if (a.contains("mouseToggle")) g_mouseToggle = a.value("mouseToggle", g_mouseToggle);
         summonSave();
         return {
             {"enabled", g_summonEnabled},
@@ -4108,7 +5593,9 @@ static void reg_extras() {
             {"tdpShortcut", g_tdpShortcut},
             {"fpsShortcut", g_fpsShortcut},
             {"killGame", g_killGame},
-            {"openKeyboard", g_openKeyboard}
+            {"openKeyboard", g_openKeyboard},
+            {"returnDesktop", g_returnDesktop},
+            {"mouseToggle", g_mouseToggle}
         };
     });
 
@@ -4193,16 +5680,17 @@ static void reg_extras() {
         }
     });
 
-    // Window opacity
+    // Window opacity。无边框透明模式即使 alpha=255 也必须保留 WS_EX_LAYERED，
+    // 否则会破坏 WebView2 DefaultBackgroundColor alpha=0 的逐像素透明基线。
     ipc_on("window.setOpacity", [](const json& a) -> json {
-        double opacity = a.value("opacity", 1.0);
-        BYTE alpha = (BYTE)(opacity * 255);
-        auto style = GetWindowLongW(g_hwnd, GWL_EXSTYLE);
-        if (alpha < 255) {
-            SetWindowLongW(g_hwnd, GWL_EXSTYLE, style | WS_EX_LAYERED);
+        double opacity = std::clamp(a.value("opacity", 1.0), 0.0, 1.0);
+        BYTE alpha = static_cast<BYTE>(opacity * 255.0);
+        auto style = GetWindowLongPtrW(g_hwnd, GWL_EXSTYLE);
+        if (g_frameless || alpha < 255) {
+            SetWindowLongPtrW(g_hwnd, GWL_EXSTYLE, style | WS_EX_LAYERED);
             SetLayeredWindowAttributes(g_hwnd, 0, alpha, LWA_ALPHA);
         } else {
-            SetWindowLongW(g_hwnd, GWL_EXSTYLE, style & ~WS_EX_LAYERED);
+            SetWindowLongPtrW(g_hwnd, GWL_EXSTYLE, style & ~WS_EX_LAYERED);
         }
         return true;
     });
@@ -4266,9 +5754,11 @@ static void reg_extras() {
             if (GetSystemPowerStatus(&sps)) {
                 r["acLine"] = (int)sps.ACLineStatus;      // 0/1/255 原样给前端
                 r["powerMode"] = (sps.ACLineStatus == 0) ? "dc" : "ac";
+                r["hasBattery"] = sps.BatteryFlag != 128;
             } else {
                 r["acLine"] = 255;
                 r["powerMode"] = "ac";
+                r["hasBattery"] = false;
             }
         }
         // 公共启动目录 + 用户目录（取代 [Environment]::GetFolderPath / $env:USERPROFILE）
@@ -4379,6 +5869,10 @@ static void reg_extras() {
     ipc_on("shell.run", [](const json& a) -> json {
         auto program = a.value("program", std::string{});
         if (program.empty()) throw std::runtime_error("program is required");
+        int timeoutRaw = a.value("timeoutMs", 30000);
+        DWORD timeoutMs = static_cast<DWORD>((std::max)(100, (std::min)(600000, timeoutRaw)));
+        constexpr size_t MAX_CAPTURE_BYTES = 8u << 20;
+
         std::wstring cmdLine = quote_windows_arg(U2W(program));
         if (a.contains("args") && a["args"].is_array()) {
             for (auto& arg : a["args"]) {
@@ -4389,66 +5883,140 @@ static void reg_extras() {
         }
 
         SECURITY_ATTRIBUTES sa{sizeof(sa), nullptr, TRUE};
-        HANDLE hOutR, hOutW, hErrR, hErrW;
-        CreatePipe(&hOutR, &hOutW, &sa, 0);
-        CreatePipe(&hErrR, &hErrW, &sa, 0);
+        HANDLE hOutR = nullptr, hOutW = nullptr, hErrR = nullptr, hErrW = nullptr;
+        if (!CreatePipe(&hOutR, &hOutW, &sa, 0) || !CreatePipe(&hErrR, &hErrW, &sa, 0)) {
+            if (hOutR) CloseHandle(hOutR); if (hOutW) CloseHandle(hOutW);
+            if (hErrR) CloseHandle(hErrR); if (hErrW) CloseHandle(hErrW);
+            throw std::runtime_error("Failed to create process pipes");
+        }
         SetHandleInformation(hOutR, HANDLE_FLAG_INHERIT, 0);
         SetHandleInformation(hErrR, HANDLE_FLAG_INHERIT, 0);
-        // 写端 hOutW/hErrW 保持可继承：子进程需要它来写 stdout，shell.run 才能读回
-        // 命令输出（如 readPhysicalCores 读 NumberOfCores）。RTSS 经
-        // `start /B` 启动时会持有该管道导致阻塞的问题，已在前端启动命令用 `> NUL 2>&1`
-        // 把 RTSS 的 std 重定向到 NUL 来解决，无需在此断开写端继承。
+
+        HANDLE job = CreateJobObjectW(nullptr, nullptr);
+        if (job) {
+            JOBOBJECT_EXTENDED_LIMIT_INFORMATION info{};
+            info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+            if (!SetInformationJobObject(job, JobObjectExtendedLimitInformation, &info, sizeof(info))) {
+                CloseHandle(job);
+                job = nullptr;
+            }
+        }
 
         STARTUPINFOW si{sizeof(si)};
         si.dwFlags = STARTF_USESTDHANDLES;
         si.hStdOutput = hOutW;
         si.hStdError = hErrW;
+        si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
         PROCESS_INFORMATION pi{};
 
         std::vector<wchar_t> cmd(cmdLine.begin(), cmdLine.end());
         cmd.push_back(0);
+        const DWORD createFlags = CREATE_NO_WINDOW | (job ? CREATE_SUSPENDED : 0);
         if (!CreateProcessW(nullptr, cmd.data(), nullptr, nullptr, TRUE,
-            CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi)) {
+                            createFlags, nullptr, nullptr, &si, &pi)) {
             CloseHandle(hOutR); CloseHandle(hOutW);
             CloseHandle(hErrR); CloseHandle(hErrW);
+            if (job) CloseHandle(job);
             throw std::runtime_error("Failed to start process");
         }
         CloseHandle(hOutW);
         CloseHandle(hErrW);
 
-        auto readPipe = [](HANDLE h) -> std::string {
-            std::string result;
+        if (job) {
+            if (!AssignProcessToJobObject(job, pi.hProcess)) {
+                TerminateProcess(pi.hProcess, ERROR_ACCESS_DENIED);
+                WaitForSingleObject(pi.hProcess, 1000);
+                CloseHandle(hOutR); CloseHandle(hErrR);
+                CloseHandle(pi.hProcess); CloseHandle(pi.hThread); CloseHandle(job);
+                throw std::runtime_error("Failed to assign process job");
+            }
+            ResumeThread(pi.hThread);
+        }
+
+        struct PipeCapture {
+            HANDLE h = nullptr;
+            std::string data;
+            std::atomic<bool> overflow{false};
+            size_t maxBytes = 0;
+        };
+        auto readPipe = [](PipeCapture* capture) {
             char buf[4096];
-            DWORD rd;
-            while (ReadFile(h, buf, sizeof(buf), &rd, nullptr) && rd > 0)
-                result.append(buf, rd);
-            CloseHandle(h);
-            return result;
+            DWORD rd = 0;
+            while (ReadFile(capture->h, buf, sizeof(buf), &rd, nullptr) && rd > 0) {
+                const size_t available = capture->data.size() < capture->maxBytes
+                    ? capture->maxBytes - capture->data.size() : 0;
+                if (available > 0) capture->data.append(buf, (std::min)(available, static_cast<size_t>(rd)));
+                if (static_cast<size_t>(rd) > available) capture->overflow.store(true);
+            }
+            CloseHandle(capture->h);
+            capture->h = nullptr;
         };
 
-        // Read stderr in a background thread to prevent pipe deadlock
-        struct PipeCtx { HANDLE h; std::string data; };
-        auto* errCtx = new PipeCtx{hErrR, {}};
-        HANDLE hErrThread = CreateThread(nullptr, 0, [](LPVOID p) -> DWORD {
-            auto* c = (PipeCtx*)p;
-            char buf[4096]; DWORD rd;
-            while (ReadFile(c->h, buf, sizeof(buf), &rd, nullptr) && rd > 0)
-                c->data.append(buf, rd);
-            CloseHandle(c->h);
-            return 0;
-        }, errCtx, 0, nullptr);
-        auto stdout_ = oemToUtf8(readPipe(hOutR));
-        WaitForSingleObject(hErrThread, INFINITE);
-        CloseHandle(hErrThread);
-        auto stderr_ = oemToUtf8(std::move(errCtx->data));
-        delete errCtx;
-        WaitForSingleObject(pi.hProcess, INFINITE);
-        DWORD exitCode;
+        PipeCapture outCapture{hOutR, {}, false, MAX_CAPTURE_BYTES};
+        PipeCapture errCapture{hErrR, {}, false, MAX_CAPTURE_BYTES};
+        std::thread outReader;
+        std::thread errReader;
+        try {
+            outReader = std::thread(readPipe, &outCapture);
+            errReader = std::thread(readPipe, &errCapture);
+        } catch (...) {
+            if (job) CloseHandle(job); else TerminateProcess(pi.hProcess, ERROR_NOT_ENOUGH_MEMORY);
+            if (outReader.joinable()) outReader.join(); else if (outCapture.h) CloseHandle(outCapture.h);
+            if (errReader.joinable()) errReader.join(); else if (errCapture.h) CloseHandle(errCapture.h);
+            WaitForSingleObject(pi.hProcess, 1000);
+            CloseHandle(pi.hProcess); CloseHandle(pi.hThread);
+            throw std::runtime_error("Failed to start pipe readers");
+        }
+
+        bool timedOut = false;
+        bool outputOverflow = false;
+        const ULONGLONG deadline = GetTickCount64() + timeoutMs;
+        for (;;) {
+            DWORD waitMs = 50;
+            ULONGLONG now = GetTickCount64();
+            if (now >= deadline) {
+                timedOut = true;
+                break;
+            }
+            waitMs = static_cast<DWORD>((std::min)(static_cast<ULONGLONG>(waitMs), deadline - now));
+            DWORD wr = WaitForSingleObject(pi.hProcess, waitMs);
+            if (wr == WAIT_OBJECT_0) break;
+            if (wr == WAIT_FAILED) {
+                timedOut = true;
+                break;
+            }
+            if (outCapture.overflow.load() || errCapture.overflow.load()) {
+                outputOverflow = true;
+                break;
+            }
+        }
+
+        if (timedOut || outputOverflow) {
+            if (job) {
+                TerminateJobObject(job, timedOut ? ERROR_TIMEOUT : ERROR_BUFFER_OVERFLOW);
+            } else {
+                TerminateProcess(pi.hProcess, timedOut ? ERROR_TIMEOUT : ERROR_BUFFER_OVERFLOW);
+            }
+        } else if (job) {
+            // shell.run 只允许同步命令；根进程退出后关闭 Job，回收仍继承管道的后代，保证 reader 得到 EOF。
+            TerminateJobObject(job, ERROR_SUCCESS);
+        }
+        WaitForSingleObject(pi.hProcess, 1000);
+        if (job) CloseHandle(job);
+
+        if (outReader.joinable()) outReader.join();
+        if (errReader.joinable()) errReader.join();
+
+        DWORD exitCode = 0;
         GetExitCodeProcess(pi.hProcess, &exitCode);
         CloseHandle(pi.hProcess);
         CloseHandle(pi.hThread);
 
-        return json{{"exitCode", (int)exitCode}, {"stdout", stdout_}, {"stderr", stderr_}};
+        if (timedOut) throw std::runtime_error("Process timed out");
+        if (outputOverflow) throw std::runtime_error("Process output exceeded 8 MiB limit");
+        return json{{"exitCode", static_cast<int>(exitCode)},
+                    {"stdout", oemToUtf8(outCapture.data)},
+                    {"stderr", oemToUtf8(errCapture.data)}};
     });
 }
 
@@ -4713,8 +6281,22 @@ static void closeSplash() {
 //  WebView2 initialization
 // ================================================================
 
+static bool configureUserAssetsHost(ICoreWebView2* view) {
+    if (!view) return false;
+    ComPtr<ICoreWebView2_3> userAssetsView;
+    if (FAILED(view->QueryInterface(IID_PPV_ARGS(&userAssetsView)))) return false;
+    auto userAssets = background_assets_dir();
+    return SUCCEEDED(userAssetsView->SetVirtualHostNameToFolderMapping(
+        L"user-assets.localhost", userAssets.c_str(),
+        COREWEBVIEW2_HOST_RESOURCE_ACCESS_KIND_ALLOW));
+}
+
 static bool configureAppHost(ICoreWebView2* view) {
     if (!view) return false;
+    // 自定义背景是可选功能；映射失败不得阻断 app.localhost 主界面启动。
+    configureUserAssetsHost(view);
+    // 音乐目录映射（启动期恢复已配置目录，无需刷新）
+    configureMusicHost(view);
 
 #ifdef SINGLE_EXE
     if (!g_pakEntries.empty()) {
@@ -4794,12 +6376,12 @@ static bool configureAppHost(ICoreWebView2* view) {
     ComPtr<ICoreWebView2_3> v3;
     if (FAILED(view->QueryInterface(IID_PPV_ARGS(&v3))))
         return false;
-    v3->SetVirtualHostNameToFolderMapping(
-        L"app.localhost", dir.c_str(),
-        COREWEBVIEW2_HOST_RESOURCE_ACCESS_KIND_ALLOW);
-    v3->SetVirtualHostNameToFolderMapping(
-        L"app.local", dir.c_str(),
-        COREWEBVIEW2_HOST_RESOURCE_ACCESS_KIND_ALLOW);
+    if (FAILED(v3->SetVirtualHostNameToFolderMapping(
+            L"app.localhost", dir.c_str(),
+            COREWEBVIEW2_HOST_RESOURCE_ACCESS_KIND_ALLOW))) return false;
+    if (FAILED(v3->SetVirtualHostNameToFolderMapping(
+            L"app.local", dir.c_str(),
+            COREWEBVIEW2_HOST_RESOURCE_ACCESS_KIND_ALLOW))) return false;
     return true;
 }
 
@@ -4810,12 +6392,10 @@ static void setupWebView(ICoreWebView2Controller* ctrl) {
     RECT b; GetClientRect(g_hwnd, &b);
     g_ctrl->put_Bounds(b);
 
-    // Background color from config (alpha=255 for opaque)
+    // Background color from config。无边框透明基线固定 alpha=0；可见底板由前端分块 rgba 绘制。
     ComPtr<ICoreWebView2Controller2> ctrl2;
     if (SUCCEEDED(g_ctrl.As(&ctrl2))) {
         auto clr = currentWindowBackgroundColor();
-        // 普通 WebView2 客户区承担稳定的底版，局部透明度由 CSS 面板控制。
-        // 这避免透明子表面与 layered/鼠标命中发生冲突。
         BYTE alpha = g_frameless ? 0 : 255;
         ctrl2->put_DefaultBackgroundColor({alpha, GetRValue(clr), GetGValue(clr), GetBValue(clr)});
     }
@@ -4879,13 +6459,17 @@ static void setupWebView(ICoreWebView2Controller* ctrl) {
             COREWEBVIEW2_PROCESS_FAILED_KIND kind;
             args->get_ProcessFailedKind(&kind);
             if (kind == COREWEBVIEW2_PROCESS_FAILED_KIND_BROWSER_PROCESS_EXITED) {
-                // Auto-clean corrupted EBWebView data so next launch recovers
-                auto dataDir = app_data_dir();
-                auto ebw = dataDir + L"\\EBWebView";
-                if (fspath::exists(ebw)) {
-                    fspath::remove_all(ebw);
-                    fspath::create_directories(dataDir);
-                }
+                // Auto-clean corrupted EBWebView data so next launch recovers。文件系统异常不得穿越 COM 回调边界。
+                try {
+                    auto dataDir = app_data_dir();
+                    auto ebw = dataDir + L"\\EBWebView";
+                    std::error_code ec;
+                    if (fspath::exists(ebw, ec)) {
+                        fspath::remove_all(ebw, ec);
+                        ec.clear();
+                        fspath::create_directories(dataDir, ec);
+                    }
+                } catch (...) {}
                 MessageBoxW(g_hwnd,
                     L"WebView2 进程已崩溃。\n\n已自动清除损坏的缓存数据，\n下次启动将自动恢复。",
                     L"错误", MB_ICONERROR);
@@ -4904,24 +6488,21 @@ static void setupWebView(ICoreWebView2Controller* ctrl) {
             return S_OK;
         }).Get(), nullptr);
 
-    // Navigate
-    if (dev) {
-        g_view->Navigate(g_devUrl.c_str());
-    } else {
-        if (!configureAppHost(g_view.Get())) {
-            MessageBoxW(
-                g_hwnd,
-                L"未找到前端资源（index.html）。\n普通构建请保留 dist 目录；如需单文件分发，请使用 bun run build:single 或 bun run package:single。",
-                L"错误",
-                MB_ICONERROR);
-            PostMessageW(g_hwnd, WM_CLOSE, 0, 0);
-            return;
-        }
-        g_view->Navigate(L"https://app.localhost/index.html");
-    }
-    g_view->add_NavigationCompleted(
+    // 首次导航监听必须先注册；本地虚拟 host 很快，先 Navigate 会丢失完成事件并让窗口永久隐藏。
+    EventRegistrationToken navigationToken{};
+    HRESULT navHandlerHr = g_view->add_NavigationCompleted(
         Callback<ICoreWebView2NavigationCompletedEventHandler>(
-        [](ICoreWebView2*, ICoreWebView2NavigationCompletedEventArgs*) -> HRESULT {
+        [](ICoreWebView2*, ICoreWebView2NavigationCompletedEventArgs* args) -> HRESULT {
+            BOOL success = FALSE;
+            if (!args || FAILED(args->get_IsSuccess(&success)) || !success) {
+                COREWEBVIEW2_WEB_ERROR_STATUS status = COREWEBVIEW2_WEB_ERROR_STATUS_UNKNOWN;
+                if (args) args->get_WebErrorStatus(&status);
+                std::wstring msg = L"前端资源加载失败，YeManCC 无法显示界面。\n\nWebView2 错误码：" +
+                    std::to_wstring(static_cast<int>(status));
+                MessageBoxW(g_hwnd, msg.c_str(), L"界面加载失败", MB_ICONERROR);
+                PostQuitMessage(1);
+                return S_OK;
+            }
             // Wails hack: Hide+Show WebView2 controller to force render
             // https://github.com/MicrosoftEdge/WebView2Feedback/issues/1077
             g_ctrl->put_IsVisible(FALSE);
@@ -4936,7 +6517,35 @@ static void setupWebView(ICoreWebView2Controller* ctrl) {
                 UpdateWindow(g_hwnd);
             }
             return S_OK;
-        }).Get(), nullptr);
+        }).Get(), &navigationToken);
+    if (FAILED(navHandlerHr)) {
+        MessageBoxW(g_hwnd, L"无法注册 WebView2 页面加载监听。", L"界面加载失败", MB_ICONERROR);
+        PostQuitMessage(1);
+        return;
+    }
+
+    HRESULT navigateHr = E_FAIL;
+    if (dev) {
+        // 开发模式仍需注册 user-assets.localhost，否则自定义背景 URL 无法解析；失败只禁用可选背景，不阻断主界面。
+        configureUserAssetsHost(g_view.Get());
+        configureMusicHost(g_view.Get());
+        navigateHr = g_view->Navigate(g_devUrl.c_str());
+    } else {
+        if (!configureAppHost(g_view.Get())) {
+            MessageBoxW(
+                g_hwnd,
+                L"未找到或无法映射前端资源（index.html）。\n普通构建请保留 dist 目录；如需单文件分发，请使用 bun run build:single 或 bun run package:single。",
+                L"错误",
+                MB_ICONERROR);
+            PostQuitMessage(1);
+            return;
+        }
+        navigateHr = g_view->Navigate(L"https://app.localhost/index.html");
+    }
+    if (FAILED(navigateHr)) {
+        MessageBoxW(g_hwnd, L"WebView2 无法发起页面导航。", L"界面加载失败", MB_ICONERROR);
+        PostQuitMessage(1);
+    }
 }
 
 // If WebView2 Runtime is missing, download the evergreen bootstrapper and run it.
@@ -4969,16 +6578,20 @@ static void init_webview() {
     {
         auto crashDir = dataDir + L"\\EBWebView\\Crashpad\\reports";
         bool hasCrashDumps = false;
-        if (fspath::is_directory(crashDir)) {
-            for (auto const& e : fspath::directory_iterator(crashDir)) {
-                if (e.path().extension() == L".dmp") { hasCrashDumps = true; break; }
+        std::error_code ec;
+        if (fspath::is_directory(crashDir, ec)) {
+            fspath::directory_iterator it(crashDir, ec), end;
+            for (; !ec && it != end; it.increment(ec)) {
+                if (it->path().extension() == L".dmp") { hasCrashDumps = true; break; }
             }
         }
         if (hasCrashDumps) {
             auto ebw = dataDir + L"\\EBWebView";
-            if (fspath::exists(ebw)) {
-                fspath::remove_all(ebw);
-                fspath::create_directories(dataDir); // keep root dir for window-state.json
+            ec.clear();
+            if (fspath::exists(ebw, ec)) {
+                fspath::remove_all(ebw, ec);
+                ec.clear();
+                fspath::create_directories(dataDir, ec); // keep root dir for window-state.json
             }
         }
     }
@@ -4988,8 +6601,13 @@ static void init_webview() {
     //     without software fallback, any GPU hiccup (driver/DWM/VRAM) kills
     //     the entire browser process (BROWSER_PROCESS_EXITED).  Software
     //     rasterizer is a critical safety net for embedded/kiosk scenarios.
-    //   --disable-gpu-compositing: reduces GPU composition pressure on
-    //     high-refresh / multi-monitor / DWM-effect setups.
+    //   --disable-gpu-compositing: REMOVED. Forcing CPU (software) compositing made
+    //     the WS_EX_LAYERED frameless window re-composite the whole window bitmap on
+    //     the UI thread on every WebView2 repaint (HWiNFO live panel refreshes each
+    //     second) -> Windows shows the IDC_APPSTARTING busy cursor. Letting Chromium
+    //     use the GPU compositor offloads this to GPU/DWM so the UI thread is never
+    //     blocked. Software rasterization safety net (we do NOT pass
+    //     --disable-software-rasterizer) is still kept as a GPU fallback.
     //   --in-process-gpu: runs GPU in browser process so a renderer/GPU
     //     crash does NOT propagate to BROWSER_PROCESS_EXITED.
     //   --disable-gpu-sandbox kept: relaxes GPU process sandbox (helps some drivers).
@@ -4997,11 +6615,11 @@ static void init_webview() {
     options->put_AdditionalBrowserArguments(
         L"--disable-features=msSmartScreenProtection,RendererCodeIntegrity,msWebOOUI,msPdfOOUI"
         L" --disable-background-networking --no-proxy-server"
-        L" --disable-gpu-sandbox --disable-gpu-compositing --in-process-gpu"
+        L" --disable-gpu-sandbox --in-process-gpu"
         L" --disable-extensions --disable-component-extensions-with-background-pages"
         L" --no-default-browser-check --disable-client-side-phishing-detection"
         L" --disable-renderer-backgrounding");
-    CreateCoreWebView2EnvironmentWithOptions(nullptr, dataDir.c_str(), options.Get(),
+    HRESULT createHr = CreateCoreWebView2EnvironmentWithOptions(nullptr, dataDir.c_str(), options.Get(),
         Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(
         [](HRESULT hr, ICoreWebView2Environment* env) -> HRESULT {
             // GPU-fallback retry: if first init fails (common on some GPU drivers),
@@ -5030,14 +6648,32 @@ static void init_webview() {
                             return hr2;
                         }
                         g_env = env2;
-                        finishCreateController(g_env.Get());
+                        HRESULT controllerHr = finishCreateController(g_env.Get());
+                        if (FAILED(controllerHr)) {
+                            MessageBoxW(g_hwnd, L"WebView2 控制器创建失败，YeManCC 无法显示界面。",
+                                L"WebView2 初始化失败", MB_ICONERROR);
+                            PostQuitMessage(1);
+                            return controllerHr;
+                        }
                         return S_OK;
                     }).Get());
             }
             g_env = env;
-            finishCreateController(g_env.Get());
+            HRESULT controllerHr = finishCreateController(g_env.Get());
+            if (FAILED(controllerHr)) {
+                MessageBoxW(g_hwnd, L"WebView2 控制器创建失败，YeManCC 无法显示界面。",
+                    L"WebView2 初始化失败", MB_ICONERROR);
+                PostQuitMessage(1);
+                return controllerHr;
+            }
             return S_OK;
         }).Get());
+    if (FAILED(createHr)) {
+        MessageBoxW(g_hwnd,
+            L"WebView2 初始化请求失败，YeManCC 无法创建界面。\n\n请修复或重新安装 WebView2 Runtime。",
+            L"WebView2 初始化失败", MB_ICONERROR);
+        PostQuitMessage(1);
+    }
 }
 
 // Shared controller creation logic (used by both normal and GPU-fallback init paths).
@@ -5184,15 +6820,25 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         }
         if (w == RETURN_GAME_FOCUS_TIMER_ID) {
             const ULONGLONG now = GetTickCount64();
-            if (refocusPreviousWindow() || now >= g_returnFocusDeadline ||
-                !g_prevForeground || !IsWindow(g_prevForeground)) {
+            HWND target = resolvePreviousFocusWindow();
+            if (refocusPreviousWindow() || now >= g_returnFocusDeadline || !target) {
                 KillTimer(g_hwnd, RETURN_GAME_FOCUS_TIMER_ID);
                 g_returnFocusDeadline = 0;
                 g_prevForeground = nullptr;
+                g_prevForegroundPid = 0;
             }
         }
         if (w == MEM_TRAY_TIMER_ID) {
             refreshMemTrayIcon();
+        }
+        if (w == SG_RESLEEP_TIMER_ID) {
+            sgTryResleep();
+        }
+        if (w == SG_OVERHEAT_TIMER_ID) {
+            sgTryOverheatSleep();
+        }
+        if (w == GP_HOLD_TIMER_ID) {
+            gamepadEval();
         }
         return 0;
     case WM_SYSCOMMAND:
@@ -5204,26 +6850,52 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         }
         // 任务栏常驻(WS_EX_APPWINDOW)时允许最小化落到任务栏（按钮可恢复窗口）。
         break;
+    case WM_APP_EXIT:
+        stopTdpDaemonForExit();
+        stopTopMonitorForExit();
+        sgCleanupBeforeExit();
+        DestroyWindow(h);
+        return 0;
+    case WM_QUERYENDSESSION:
+        // 系统注销/关机前先恢复被冻结游戏；返回 TRUE 允许会话结束继续。
+        sgCleanupBeforeExit();
+        return TRUE;
+    case WM_ENDSESSION:
+        if (w) sgCleanupBeforeExit();
+        else g_sgCleanupDone = false; // 会话结束被取消，允许后续真正退出再次执行恢复
+        return 0;
     case WM_CLOSE:
         saveWindowState();
         ipc_emit("window.closing");
         // 托盘常驻 或 任务栏常驻：关闭=隐藏（托盘/任务栏按钮仍可作入口），不退出进程
         if (g_trayActive || g_taskbarResident) { hideWindowAnimated(h); return 0; }
         hideWindowAnimated(h);
+        stopTdpDaemonForExit();
+        stopTopMonitorForExit();
         DestroyWindow(h);
         return 0;
     case WM_DESTROY:
         // CCD worker 退出（收尾清理）
         g_ccdStop.store(true);
+        poolStop();
         // 取消电源通知订阅 + 清防抖定时器
         if (g_acdcNotify) { UnregisterPowerSettingNotification(g_acdcNotify); g_acdcNotify = nullptr; }
+        if (g_monitorNotify) { UnregisterPowerSettingNotification(g_monitorNotify); g_monitorNotify = nullptr; }
+        if (g_schemeNotify) { UnregisterPowerSettingNotification(g_schemeNotify); g_schemeNotify = nullptr; }
+        sgStopWorkThread();
+        sgStopResleepObservation();
         KillTimer(h, TIMER_ID_ACDC);
         KillTimer(h, SUMMON_FOCUS_TIMER_ID);
         KillTimer(h, RETURN_GAME_FOCUS_TIMER_ID);
         KillTimer(h, MEM_TRAY_TIMER_ID);
+        KillTimer(h, SG_RESLEEP_TIMER_ID);
+        KillTimer(h, SG_OVERHEAT_TIMER_ID);
+        KillTimer(h, GP_HOLD_TIMER_ID);
         if (g_memTrayIcon) { DestroyIcon(g_memTrayIcon); g_memTrayIcon = nullptr; }
-        // 退出前只恢复被冻结的进程（避免游戏卡死），不还原 TDP，防止退出时触发 PawnIO 安装检测/弹窗
-        sgResumeAll(false);
+        // 退出前恢复被冻结的进程；统一清理函数保证 app.exit/会话结束/窗口销毁只执行一次。
+        stopTdpDaemonForExit();
+        stopTopMonitorForExit();
+        sgCleanupBeforeExit();
         // Cleanup watchers
         for (auto& [id, w] : g_watchers) {
             if (stopWatcher(w, 1000))
@@ -5231,27 +6903,18 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         }
         g_watchers.clear();
         if (g_trayActive) Shell_NotifyIconW(NIM_DELETE, &g_nid);
-        // 按键呼出：通知后台手柄轮询线程退出并回收
+        // 按键呼出：已改为 Raw Input 事件驱动（gamepadRegisterRawInput + WndProc WM_INPUT），
+        // 无轮询线程；g_summonQuit 仍供掌机自动关闭后台线程 autoCloseThread 使用
         g_summonQuit = true;
-        if (g_summonThread) {
-            WaitForSingleObject(g_summonThread, 1000);
-            CloseHandle(g_summonThread);
-            g_summonThread = nullptr;
-        }
-        // Xbox/全屏检测线程退出并回收
-        if (g_xboxActive.load()) {
-            g_xboxActive = false;
-            if (g_xboxThread) {
-                WaitForSingleObject(g_xboxThread, 2000);
-                CloseHandle(g_xboxThread);
-                g_xboxThread = nullptr;
-            }
-        }
         // 掌机前端自动关闭：通知后台轮询线程退出并回收
         if (g_autoCloseThread) {
             WaitForSingleObject(g_autoCloseThread, 1000);
             CloseHandle(g_autoCloseThread);
             g_autoCloseThread = nullptr;
+        }
+        if (g_tdpDaemonJob) {
+            CloseHandle(g_tdpDaemonJob);
+            g_tdpDaemonJob = nullptr;
         }
         PostQuitMessage(0);
         return 0;
@@ -5271,6 +6934,35 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         delete resp;
         return 0;
     }
+    case WM_GAMEPAD_TDP_DELTA:
+        // 手柄后台线程 → UI 线程；PostWebMessageAsJson 仅允许 UI 线程调用
+        ipc_emit("gamepad.tdp-delta", json{{"delta", (int)w}});
+        return 0;
+    case WM_GAMEPAD_BRIGHTNESS:
+        nativeApplyBrightness((int)w);
+        return 0;
+    case WM_INPUT: {
+        // 手柄订阅唤醒：OS 仅在手柄状态变化时投递；RIDEV_INPUTSINK 使隐藏/托盘态也能收到。
+        // 用 XInputGetState 读权威按键态并处理全局快捷键（空闲无 WM_INPUT = 0 CPU）。
+        UINT dwSize = 0;
+        GetRawInputData((HRAWINPUT)l, RID_INPUT, nullptr, &dwSize, sizeof(RAWINPUTHEADER));
+        if (dwSize > 0 && dwSize <= sizeof(g_riBuf)) {
+            if (GetRawInputData((HRAWINPUT)l, RID_INPUT, g_riBuf, &dwSize, sizeof(RAWINPUTHEADER)) == dwSize) {
+                RAWINPUT* raw = (RAWINPUT*)g_riBuf;
+                if (raw->header.dwType == RIM_TYPEHID) {
+                    sgMarkInputActivity();
+                    gamepadEval();
+                } else if (raw->header.dwType == RIM_TYPEKEYBOARD || raw->header.dwType == RIM_TYPEMOUSE) {
+                    sgMarkInputActivity();
+                }
+            }
+        }
+        return 0;
+    }
+    case WM_INPUT_DEVICE_CHANGE:
+        // 手柄插拔：刷新连接态（前端用浏览器 Gamepad API 感知连接，无需 native 转发）
+        gamepadEval();
+        return 0;
     case WM_KEYDOWN:
         // F12 toggles DevTools (production 也允许，便于跨机排查黑屏)
         if (w == VK_F12) {
@@ -5347,7 +7039,9 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
                     g_lastAcState = ac;
                 } else if (ac != g_lastAcState) {
                     g_lastAcState = ac;
-                    // ── 熔断：5s 滑动窗口内真实切换 >10 次 → 硬退出，避免系统卡死 ──
+                    // 视频背景专用轻量事件：即时暂停/恢复；不触发 CPU/TDP 等重型链路。
+                    ipc_emit("power.sourceChanged", {{"ac", ac == 1}});
+                    // ── 熔断：5s 滑动窗口内真实切换 >10 次 → 请求完整退出，避免系统卡死且不绕过 Sleep Guard 恢复。──
                     DWORD now = GetTickCount();
                     g_acSwitchTicks.push_back(now);
                     g_acSwitchTicks.erase(
@@ -5356,7 +7050,8 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
                         g_acSwitchTicks.end());
                     if ((int)g_acSwitchTicks.size() > ACDC_BURST_LIMIT) {
                         KillTimer(h, TIMER_ID_ACDC);
-                        ExitProcess(0); // 立即退出，不再响应任何后续切换
+                        PostMessageW(h, WM_APP_EXIT, 0, 0);
+                        return 0;
                     }
                     // ── 尾防抖：连续切换只在最后一次之后 5s 触发一次刷新 ──
                     // SetTimer 同 id 会重置倒计时 → 天然实现「顺延到最后一次重新计时」。
@@ -5367,41 +7062,34 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
                         });
                 }
             }
+        else if (IsEqualGUID(pbs->PowerSetting, YM_GUID_ACTIVE_POWERSCHEME)) {
+                // Windows 活动电源方案变化广播：仅转发事件，方案是否恢复由前端 CPU guard 决定。
+                ipc_emit("power.schemeChanged", {});
+            }
             else if (IsEqualGUID(pbs->PowerSetting, YM_GUID_MONITOR_POWER_ON) &&
                      pbs->DataLength >= sizeof(DWORD)) {
                 DWORD on = *reinterpret_cast<DWORD*>(pbs->Data); // 0=显示器关 1=开
-                if (on == 0) {
-                    // 显示器关闭 → 进入睡眠（覆盖 S0 现代待机；S3 仍由 PBT_APMSUSPEND 处理）
-                    g_monitorOn = false;
-                    if (g_guardEnabled && !sgIsHibernateAction()) {
-                        // 隐藏规则：实际进入 S4 休眠（用户/系统把电源按钮/睡眠键/合盖配成休眠）→ 一切均不发生
-                        g_sgInSuspend = true;
-                        sgSuspendTarget(); // 冻结游戏 + 压 TDP（诊断日志已移除）
-                    }
-                } else {
-                    // 显示器亮起 → 唤醒（覆盖 S0 现代待机）：直接恢复游戏 + 还原 TDP
-                    g_monitorOn = true;
-                    if (g_sgInSuspend) sgRealWake("monitor_on");
-                }
+                // 显示器状态不等价于系统睡眠。普通超时关屏不得冻结进程或降低 TDP。
+                g_monitorOn = on != 0;
             }
         }
         // ── 睡眠守护：PBT_APM* 同样走 WM_POWERBROADCAST（窗口程序自动送达，无需额外注册）──
         else if (w == PBT_APMSUSPEND) {
-            if (g_guardEnabled && !sgIsHibernateAction()) {
-                g_sgInSuspend = true;
-                sgSuspendTarget(); // 冻结游戏 + 压 TDP（诊断日志已移除）
+            if (g_guardEnabled && !g_sgInSuspend.load()) {
+                // 只排队；冻结操作在线程中执行，避免阻塞窗口消息线程。
+                sgMarkSleepTrigger();
+                sgQueueWork(SgWork::Suspend);
             }
         }
         else if (w == PBT_APMRESUMEAUTOMATIC) {
-            // 自动/误唤醒候选：直接恢复游戏 + 还原 TDP（不做误唤醒判定、不重睡）
-            if (g_sgInSuspend) sgRealWake("resume_auto");
-            // 通知前端手柄引擎：唤醒后重置边沿并（若有手柄）重启循环，确保稳定
-            ipc_emit("gamepad.restart", {});
+            // 自动唤醒候选：恢复本周期资源，并进入最多30秒的输入静默观察。
+            sgQueueWork(SgWork::WakeAutomatic);
+            emitResumeEventsOnce();
         }
         else if (w == PBT_APMRESUMESUSPEND) {
-            // S3 确定性用户唤醒：直接恢复
-            if (g_sgInSuspend) sgRealWake("resume_suspend");
-            ipc_emit("gamepad.restart", {});
+            // S3 确定性用户唤醒：直接恢复并取消重睡观察。
+            sgQueueWork(SgWork::WakeSuspend);
+            emitResumeEventsOnce();
         }
         return TRUE;
 
@@ -5505,6 +7193,7 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
 int WINAPI wWinMain(HINSTANCE hi, HINSTANCE, LPWSTR, int ns) {
     g_hinst = hi;
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+    EnableMouseInPointer(TRUE);
     CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
 
     // Parse --dev <url>
@@ -5611,6 +7300,8 @@ int WINAPI wWinMain(HINSTANCE hi, HINSTANCE, LPWSTR, int ns) {
         // 整窗 alpha=255：整窗不淡化（不透明最小值）。透明观感完全由
         // 前端分块底板的 rgba 逐像素提供（空白区 alpha=0 透桌面、
         // 底板近实体 97-98%）。鼠标命中由前端 zoom 缩放修正。
+        // 合成路径：GPU 合成器（已去除 --disable-gpu-compositing），
+        // 每秒重绘（HWiNFO 面板）不再阻塞 UI 线程。
         if (g_frameless) {
             LONG_PTR exStyle = GetWindowLongPtrW(g_hwnd, GWL_EXSTYLE);
             SetWindowLongPtrW(g_hwnd, GWL_EXSTYLE, exStyle | WS_EX_LAYERED);
@@ -5670,6 +7361,9 @@ int WINAPI wWinMain(HINSTANCE hi, HINSTANCE, LPWSTR, int ns) {
     // Enable file drag-drop
     DragAcceptFiles(g_hwnd, TRUE);
 
+    // 手柄呼出：注册 Raw Input 订阅（后台/托盘态也能收到 WM_INPUT，零轮询占用）
+    gamepadRegisterRawInput();
+
     // 订阅 AC/DC 电源来源变化（推送式，零轮询）。系统会在注册后立即回调一次当前状态。
     g_acdcNotify = RegisterPowerSettingNotification(
         g_hwnd, &YM_GUID_ACDC_POWER_SOURCE, DEVICE_NOTIFY_WINDOW_HANDLE);
@@ -5677,17 +7371,27 @@ int WINAPI wWinMain(HINSTANCE hi, HINSTANCE, LPWSTR, int ns) {
     // 作为「进入睡眠 / 唤醒」信号（进 DRIPS 前必关显示器）。S3 桌面机两条路径都覆盖。
     g_monitorNotify = RegisterPowerSettingNotification(
         g_hwnd, &YM_GUID_MONITOR_POWER_ON, DEVICE_NOTIFY_WINDOW_HANDLE);
+    g_schemeNotify = RegisterPowerSettingNotification(
+        g_hwnd, &YM_GUID_ACTIVE_POWERSCHEME, DEVICE_NOTIFY_WINDOW_HANDLE);
 
     // ── 睡眠守护：加载持久化开关 + 孤儿恢复（上次崩溃残留的冻结进程）──
     sgInitNt();
+    sgStartWorkThread();
     sgLoadConfig();
+    sgLoadResleepCooldown();
     {
-        ProcessIdToSessionId(GetCurrentProcessId(), &g_sgSessionId);
+        DWORD sessionId = 0;
+        g_sgSessionValid = ProcessIdToSessionId(GetCurrentProcessId(), &sessionId) != FALSE;
+        g_sgSessionId = g_sgSessionValid ? sessionId : 0;
+        if (!g_sgSessionValid) {
+            OutputDebugStringW(L"YeMan Sleep Guard: unable to resolve process session; fail-closed.\n");
+        }
         std::string en = sgReadFile(SG_DIR + L"\\Enable.txt");
         g_guardEnabled = (en == "1");
+        sgUpdateOverheatTimer();
         if (fspath::exists(SG_DIR + L"\\suspended")) {
-            // 启动即恢复任何上次未恢复的冻结进程并还原 TDP（标记先于冻结写，故安全）
-            sgResumeAll(true);
+            // 启动即恢复任何上次未恢复的冻结进程。
+            sgResumeAll();
         }
     }
 
@@ -5700,9 +7404,12 @@ int WINAPI wWinMain(HINSTANCE hi, HINSTANCE, LPWSTR, int ns) {
     // ── 更新加速器：不会随程序自动启动，仅在前端手动触发 ──
 
     // Register all commands
+    reg_display();
     reg_window();
     reg_dialog();
     reg_fs();
+    reg_background();
+    reg_music();
     reg_clipboard();
     reg_shell_app();
     reg_tray();
@@ -5725,11 +7432,11 @@ int WINAPI wWinMain(HINSTANCE hi, HINSTANCE, LPWSTR, int ns) {
     reg_protocol();
     reg_log();
     reg_updater();
+    migrate_legacy_support_page();
     reg_multiwindow();
     reg_extras();
 
-    // ── 按键呼出：启动后台手柄轮询线程（即使窗口隐藏到托盘也持续检测 LB+RB 0.5 秒）──
-    g_summonThread = CreateThread(nullptr, 0, gamepadSummonThread, nullptr, 0, nullptr);
+    // ── 手柄呼出：已改为 Raw Input 事件驱动（gamepadRegisterRawInput + WndProc WM_INPUT），无需轮询线程 ──
 
     // ── 掌机前端自动关闭：启动后台轮询线程（5 秒一次，即使隐藏到托盘也持续工作）──
     g_autoCloseThread = CreateThread(nullptr, 0, autoCloseThread, nullptr, 0, nullptr);
@@ -5749,16 +7456,22 @@ int WINAPI wWinMain(HINSTANCE hi, HINSTANCE, LPWSTR, int ns) {
 
     // ── IPC 异步方案旋钮（环境变量；无变量时用编译默认值）──
     {
-        wchar_t eb[32];
+        wchar_t eb[64] = {};
         if (GetEnvironmentVariableW(L"YEMAN_ASYNC", eb, 32)) {
             int v = _wtoi(eb); if (v < 0) v = 0; if (v > 2) v = 2;
+            // 模式1(仅 shell.run 异步)对浮动调度不安全：每轮 fs 读/写与 shell.hidden 仍会
+            // 在 UI 线程同步执行，导致鼠标旁 IDC_APPSTARTING 转圈。因此历史遗留的 1 一律按
+            // 2(全异步)处理，避免环境变量悄悄降级回不安全模式。仅 0(强制全同步，调试用)
+            // 与 2(强制全异步) 生效。
+            if (v == 1) v = 2;
             g_asyncMode = v;
         }
         if (GetEnvironmentVariableW(L"YEMAN_POOL", eb, 32)) {
             int v = _wtoi(eb); if (v < 1) v = 1; if (v > 16) v = 16;
             g_poolSize = v;
         }
-        if (GetEnvironmentVariableW(L"YEMAN_TRACE", eb, 32) && _wtoi(eb)) {
+        if (GetEnvironmentVariableW(L"YEMAN_TRACE", eb, 64) &&
+            _wcsicmp(eb, L"debug") == 0) {
             traceInit();
             traceLog("BOOT async=%d pool=%d", g_asyncMode, g_poolSize);
             CreateThread(nullptr, 0, freezeMonitorThread, nullptr, 0, nullptr);
@@ -5773,6 +7486,10 @@ int WINAPI wWinMain(HINSTANCE hi, HINSTANCE, LPWSTR, int ns) {
         DispatchMessageW(&msg);
     }
 
+    // 兜底：即使通过 WM_QUIT 直接离开消息循环，也确保冻结进程被解除。
+    sgStopWorkThread();
+    poolStop();
+    sgCleanupBeforeExit();
     if (hMutex) CloseHandle(hMutex);
     CoUninitialize();
     return (int)msg.wParam;

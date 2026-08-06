@@ -1,11 +1,11 @@
 // yeman.ts — 语义化后端桥层（强强壳 shell.run / fs 封装）
 //
 // 所有 powercfg GUID、任务计划名、bat/vbs/ps1 路径、厂商识别逻辑都收在这里，
-// 前端只调语义化方法：setTdp('ac', 200) / toggleTask('TDP-插电AC模式TDP调节', true) / ...
+// 前端只调语义化方法：setTdp('ac', 200) / setRtssLimit(60) / toggleTask('任务名', true) / ...
 //
-// 配置真相源 = C:\SOFT\YeMan\PowerControl\ 下的 txt（与旧 HTA 共用）。
+// 程序控制配置由本桥统一记录，TDP/FPS 的用户值不再依赖 PowerControl 下的 txt。
 // 任务计划只识别状态、不解析内容（schtasks 创建，/Query 判断存在即=开关状态）。
-import { fs, shell, registry, type RunResult } from './api';
+import { fs, shell, registry, tdpDaemon, type RunResult } from './api';
 import { invoke } from './ipc';
 
 // ── 可配置根目录（自测时可指向临时目录） ──
@@ -21,6 +21,7 @@ function join(...parts: string[]): string {
 }
 
 // ── TDP 常量（对齐 HTA：TDP_CEILINGS / TDP_MIN） ──
+// 上限档位保持 200W（300 为错误值，已回退；性能调度编辑面板与 TDP 功耗页面上限一致）。
 export const TDP_CEILINGS = [20, 35, 55, 75, 120, 200];
 export const TDP_MIN = 2;
 export const TDP_MAX = 200;
@@ -33,62 +34,138 @@ export function smallestCeiling(val: number): number {
   return TDP_CEILINGS[TDP_CEILINGS.length - 1];
 }
 
-// ── 12 个任务计划（名称/触发/调用资产/XML模板，名称与 PLAN §七、HTA 完全一致） ──
+// ── 当前仍支持的任务计划（旧 AC/DC TDP 与 AC/DC 锁帧任务已移除）──
 export const TASK_FOLDER = '野蛮优化整合系统';
+export const BOOT_CONTROL_CENTER_TASK = '野蛮控制中心-开机启动';
+export const BOOT_RTSS_TASK = '监控-开机启动监控锁帧软件RTSS';
+export const BOOT_MIRROR_CHANGED_EVENT = 'boot-mirror:changed';
 export interface TaskDef {
   name: string;
   trigger: string;
   asset: string;
+  taskPath?: string;
   xml?: string; // XML 模板相对 PowerControl 的路径（缺省=无模板，仅能删除/查询）
 }
 export const TASKS: TaskDef[] = [
-  { name: 'TDP-开机启动野蛮快设TDP挡位', trigger: '开机', asset: 'AUTOPlan.bat(vbs 静默)', xml: 'TDP-开机启动野蛮快设TDP挡位.xml' },
-  { name: 'TDP-插电AC模式TDP调节', trigger: '电源事件 AC', asset: 'Plan-AC.bat', xml: 'TDP-插电AC模式TDP调节.xml' },
-  { name: 'TDP-离电DC模式TDP调节', trigger: '电源事件 DC', asset: 'Plan-DC.bat', xml: 'TDP-离电DC模式TDP调节.xml' },
-  { name: '唤醒后-执行任务', trigger: '唤醒', asset: 'YeManWake.bat', xml: '唤醒后-执行任务.xml' },
-  { name: '锁帧-插电AC模式锁帧', trigger: '电源事件 AC', asset: 'RTSS-FPS-AC.bat', xml: '锁帧-插电AC模式锁帧.xml' },
-  { name: '锁帧-离电DC模式锁帧', trigger: '电源事件 DC', asset: 'RTSS-FPS-DC.bat', xml: '锁帧-离电DC模式锁帧.xml' },
-  { name: '监控-开机启动监控锁帧软件RTSS', trigger: '开机', asset: 'YeManRTSS.bat', xml: '监控-开机启动监控锁帧软件RTSS.xml' },
+  { name: 'Steamcommunity_302', trigger: '开机', asset: 'C:\\SOFT\\steamcommunity\\steamcommunity_302.cli.exe', xml: 'Steamcommunity_302.xml', taskPath: 'Steamcommunity_302' },
+  { name: BOOT_RTSS_TASK, trigger: '开机', asset: 'YeManRTSS.bat', xml: '监控-开机启动监控锁帧软件RTSS.xml' },
   { name: 'Xbox大屏游戏模式', trigger: '开机', asset: 'YeManSteam.bat', xml: 'Xbox大屏游戏模式.xml' },
   { name: '桌面模式-开机设置为桌面模式', trigger: '开机', asset: '(内置)', xml: '桌面模式-开机设置为桌面模式.xml' },
   { name: '节能-能源之星', trigger: '开机', asset: 'EnergyStar.vbs', xml: '节能-能源之星.xml' },
   { name: '内存-开机自动内存清理并关闭', trigger: '开机', asset: 'MG-AUTO\\清理内存.bat', xml: '内存-开机自动内存清理并关闭.xml' },
-  { name: 'Bug修复-AMD-395', trigger: '开机', asset: 'C:\\SOFT\\3DMark\\YeMan-3DMark.bat', xml: 'Bug修复-AMD-395.xml' },
-  { name: '野蛮控制中心-开机启动', trigger: '开机', asset: 'YeManCC.exe --minimized', xml: '野蛮控制中心-开机启动.xml' },
+  { name: BOOT_CONTROL_CENTER_TASK, trigger: '开机', asset: 'YeManCC.exe', xml: '野蛮控制中心-开机启动.xml' },
 ];
 export function getTaskDef(name: string): TaskDef | undefined {
   return TASKS.find((t) => t.name === name);
 }
 
-// ── txt 配置读写（真相源） ──
-export async function saveTdp(mode: 'ac' | 'dc', watts: number): Promise<void> {
-  await fs.writeTextFile(join(PC_DIR, `tdp-${mode}.txt`), String(clampTdp(watts)));
+// ── 程序控制配置：TDP 最大值与 FPS 帧率上限统一由程序记录 ──
+function controlConfigPath(): string {
+  return join(PC_DIR, 'control-config.json');
 }
-export async function readTdp(mode: 'ac' | 'dc'): Promise<number | null> {
-  const p = join(PC_DIR, `tdp-${mode}.txt`);
-  if (!(await fs.exists(p))) return null;
-  const s = (await fs.readTextFile(p)).trim();
-  const n = Number(s);
-  return Number.isFinite(n) ? clampTdp(n) : null;
+interface ControlConfig {
+  tdpMax?: number;
+  fpsLimit?: number;
 }
+let controlConfigCache: ControlConfig | null = null;
+let controlConfigLoad: Promise<ControlConfig> | null = null;
+let controlConfigWrite: Promise<void> = Promise.resolve();
 
-
-export async function saveFps(mode: 'ac' | 'dc', fps: number): Promise<void> {
-  await fs.writeTextFile(join(PC_DIR, `FPS-${mode}.txt`), String(Math.max(0, Math.round(fps))));
+async function readControlConfig(): Promise<ControlConfig> {
+  if (controlConfigCache) return controlConfigCache;
+  if (!controlConfigLoad) {
+    controlConfigLoad = (async () => {
+      try {
+        const raw = await fs.readTextFile(controlConfigPath(), 16384);
+        const parsed = JSON.parse(raw) as ControlConfig;
+        // JSON 内容为字面 null / 非对象时视为损坏 → 抛出让 catch 走迁移/兜底路径，
+        // 避免缓存被置 null 后每次调用都重新读盘（2026-08-05 修复）。
+        if (!parsed || typeof parsed !== 'object') throw new Error('control-config.json 内容无效');
+        controlConfigCache = parsed;
+        return parsed;
+      } catch {
+        // control-config.json 尚不存在：一次性迁移旧的 tdp.txt / FPS-ac.txt（只读，不写回 txt）
+        const migrated: ControlConfig = {};
+        try {
+          if (await fs.exists(join(PC_DIR, 'tdp.txt'))) {
+            const t = Number((await fs.readTextFile(join(PC_DIR, 'tdp.txt'))).trim());
+            if (Number.isFinite(t)) migrated.tdpMax = clampTdp(t);
+          }
+        } catch { /* 忽略迁移失败 */ }
+        try {
+          if (await fs.exists(join(PC_DIR, 'FPS-ac.txt'))) {
+            const f = Number((await fs.readTextFile(join(PC_DIR, 'FPS-ac.txt'))).trim());
+            if (Number.isFinite(f)) migrated.fpsLimit = Math.max(0, Math.round(f));
+          }
+        } catch { /* 忽略迁移失败 */ }
+        const fallback: ControlConfig = migrated.tdpMax == null && migrated.fpsLimit == null
+          ? { tdpMax: 75, fpsLimit: 0 }
+          : migrated;
+        controlConfigCache = fallback;
+        return fallback;
+      } finally {
+        controlConfigLoad = null;
+      }
+    })();
+  }
+  return controlConfigLoad;
 }
-export async function readFps(mode: 'ac' | 'dc'): Promise<number | null> {
-  const p = join(PC_DIR, `FPS-${mode}.txt`);
-  if (!(await fs.exists(p))) return null;
-  const s = (await fs.readTextFile(p)).trim();
-  const n = Number(s);
-  return Number.isFinite(n) ? n : null;
+async function mutateControlConfig(patch: Partial<ControlConfig>): Promise<void> {
+  const run = controlConfigWrite.then(async () => {
+    const current = await readControlConfig();
+    const next = { ...current, ...patch };
+    await fs.writeTextFileAtomic(controlConfigPath(), JSON.stringify(next, null, 2));
+    // 只有磁盘提交成功后才更新缓存，避免本次运行与重启后的配置分叉。
+    controlConfigCache = next;
+  });
+  // 队列吞错（防止单次失败卡死后续写入），但返回值 run 仍向调用方抛出写入失败，
+  // 让 UI 能感知「保存失败」而不是假成功；失败后清缓存，下次读取强制重新读盘。
+  controlConfigWrite = run.catch(() => { controlConfigCache = null; });
+  return run;
 }
-export async function savePower(key: string, value: string): Promise<void> {
-  await fs.writeTextFile(join(PC_DIR, 'Power.txt'), `${key}=${value}\n`);
+export async function saveTdp(_mode: 'ac' | 'dc', watts: number): Promise<void> {
+  await mutateControlConfig({ tdpMax: clampTdp(watts) });
+}
+export async function readTdp(_mode: 'ac' | 'dc'): Promise<number | null> {
+  const cfg = await readControlConfig();
+  return cfg.tdpMax == null ? null : clampTdp(cfg.tdpMax);
+}
+export async function saveFps(_mode: 'ac' | 'dc', fps: number): Promise<void> {
+  await mutateControlConfig({ fpsLimit: Math.max(0, Math.round(fps)) });
+}
+export async function readFps(_mode: 'ac' | 'dc'): Promise<number | null> {
+  const cfg = await readControlConfig();
+  return cfg.fpsLimit == null ? null : Math.max(0, Math.round(cfg.fpsLimit));
+}
+// 合并写 Power.txt：统一队列化 read-modify-write，避免并发调用丢键。
+let powerWriteQueue: Promise<void> = Promise.resolve();
+export function savePower(key: string, value: string): Promise<void> {
+  const run = powerWriteQueue.then(async () => {
+    const p = join(PC_DIR, 'Power.txt');
+    const lines: string[] = [];
+    try {
+      for (const line of (await fs.readTextFile(p)).split(/\r?\n/)) {
+        const eq = line.indexOf('=');
+        if (eq <= 0) continue;
+        const k = line.slice(0, eq).trim();
+        if (k === key) continue;
+        lines.push(line);
+      }
+    } catch { /* 文件不存在/读失败时从空内容开始 */ }
+    lines.push(`${key}=${value}`);
+    await fs.writeTextFileAtomic(p, lines.join('\r\n'));
+  });
+  powerWriteQueue = run.catch(() => {});
+  return run;
 }
 export async function readPowerRaw(): Promise<string> {
   const p = join(PC_DIR, 'Power.txt');
-  return (await fs.exists(p)) ? await fs.readTextFile(p) : '';
+  try {
+    return await fs.readTextFile(p);
+  } catch {
+    // 文件不存在/被删：exists→read 之间存在竞态，直接按空处理
+    return '';
+  }
 }
 
 // ── 任务计划：只识别状态 ──
@@ -96,27 +173,29 @@ export async function readPowerRaw(): Promise<string> {
 // 因此首选检测任务文件是否存在（零权限、零崩溃），schtasks /Query 仅作后备。
 const TASK_FILE_ROOT = 'C:\\Windows\\System32\\Tasks';
 function taskPath(name: string): string {
-  return `${TASK_FOLDER}\\${name}`;
+  return getTaskDef(name)?.taskPath ?? `${TASK_FOLDER}\\${name}`;
 }
 function taskFilePath(name: string): string {
-  return `${TASK_FILE_ROOT}\\${TASK_FOLDER}\\${name}`;
+  return `${TASK_FILE_ROOT}\\${taskPath(name)}`;
 }
 export async function taskExists(name: string): Promise<boolean> {
-  // 方法1（首选，对齐 HTA）：检测任务文件是否存在
+  let fileExists = false;
   try {
-    if (await fs.exists(taskFilePath(name))) return true;
+    fileExists = await fs.exists(taskFilePath(name));
   } catch {
-    /* → fallback */
+    fileExists = false;
   }
-  // 方法2（后备）：schtasks /Query（可能在非提权下崩溃）
   try {
-    const r = await shell.run('schtasks', ['/Query', '/TN', taskPath(name), '/FO', 'CSV']);
-    if (r.exitCode === 0) return true;
-    if ((r.stdout || '').includes(name)) return true;
+    const r = await shell.run('schtasks', ['/Query', '/TN', taskPath(name), '/FO', 'CSV', '/V']);
+    if (r.exitCode === 0) {
+      const output = `${r.stdout}\n${r.stderr}`;
+      if (/[,"\t ](Disabled|已禁用|禁用)[,"\t ]/i.test(output)) return false;
+      return true;
+    }
   } catch {
-    /* 文件也不存在、schtasks 也失败 → 任务不存在 */
+    /* fallback below */
   }
-  return false;
+  return fileExists;
 }
 export async function deleteTask(name: string): Promise<boolean> {
   const r = await shell.run('schtasks', ['/Delete', '/TN', taskPath(name), '/F']);
@@ -152,11 +231,10 @@ function resolveAssetAbsolutePath(asset: string): string | null {
   if (/^[A-Za-z]:[\\/]/.test(firstToken) || firstToken.startsWith('\\\\')) return firstToken;
   return null;
 }
-// 依赖野蛮系统电源方案的任务（开机/唤醒任务会执行 powercfg -setactive YEMAN）
-const SCHEME_DEPENDENT_TASKS = new Set([
-  'TDP-开机启动野蛮快设TDP挡位',
-  '唤醒后-执行任务',
-]);
+// 依赖「野蛮系统电源」方案的任务白名单：创建前先 ensureYemanScheme 确保方案存在。
+// 目前为空（旧 AC/DC TDP/锁帧任务已移除，无任务依赖方案）；保留为扩展点——
+// 未来新增开机/唤醒任务若依赖 YEMAN 方案，在此登记即可（2026-08-05 澄清注释，非死代码）。
+const SCHEME_DEPENDENT_TASKS = new Set<string>();
 
 // toggle：开→建（有模板），关→删。返回最新状态
 export async function toggleTask(name: string, on: boolean): Promise<boolean> {
@@ -172,7 +250,30 @@ export async function toggleTask(name: string, on: boolean): Promise<boolean> {
     }
     return true;
   } else {
-    if (await taskExists(name)) await deleteTask(name);
+    if (await taskExists(name) && !(await deleteTask(name))) {
+      throw new Error('删除任务失败（可能需以管理员身份运行 YeManCC）');
+    }
+    return false;
+  }
+}
+
+// ── Xbox 全屏游戏模式「开机启动」：注册表 HKCU\Software\Microsoft\Windows\CurrentVersion\GamingConfiguration\StartupToGamingHome ──
+// 1 = 开机进入 Xbox 全屏游戏模式；0 = 正常启动。必须在 Xbox APP 可正常启动的前提下才生效。
+const GAMING_CFG_KEY = 'Software\\Microsoft\\Windows\\CurrentVersion\\GamingConfiguration';
+const GAMING_HOME_VALUE = 'StartupToGamingHome';
+export async function readGamingHomeStartup(): Promise<boolean> {
+  try {
+    const v = await registry.read('HKCU', GAMING_CFG_KEY, GAMING_HOME_VALUE);
+    return v === 1 || v === true;
+  } catch {
+    return false;
+  }
+}
+export async function writeGamingHomeStartup(on: boolean): Promise<boolean> {
+  try {
+    const ok = await registry.write('HKCU', GAMING_CFG_KEY, GAMING_HOME_VALUE, on ? 1 : 0);
+    return ok === true;
+  } catch {
     return false;
   }
 }
@@ -188,12 +289,12 @@ export async function deleteAllYemanTasks(): Promise<void> {
   }
 }
 
-// 从 PowerControl 根目录的全部 XML 恢复任务计划，任务名按 XML 文件名（去掉 .xml）导入到统一目录。
-// 返回成功/失败数量，便于 UI 给出准确提示；失败任务不会阻止其它 XML 继续导入。
+// 只有当前 TASKS 中明确保留的 XML 才允许批量恢复；旧 AC/DC TDP/锁帧 XML 不再恢复。
 export async function restoreAllYemanTasks(): Promise<{ imported: number; failed: string[] }> {
   const entries = await fs.readDir(PC_DIR);
+  const allowed = new Set(TASKS.map((t) => t.xml).filter((v): v is string => !!v));
   const xmlFiles = entries
-    .filter((entry: any) => entry?.isFile && /\\.xml$/i.test(String(entry?.name ?? '')))
+    .filter((entry: any) => entry?.isFile && allowed.has(String(entry?.name ?? '')))
     .map((entry: any) => String(entry.name));
   let imported = 0;
   const failed: string[] = [];
@@ -216,17 +317,21 @@ export interface GamepadSettings {
   enabled: boolean;          // LB+RB 呼出窗口
   bDoubleMinimize: boolean;  // 双击 B 最小化到托盘
   tdpShortcut: boolean;      // Start + 上/下 调节 TDP ±1W
-  fpsShortcut: boolean;      // Start + 左/右 调节 RTSS 锁帧 ±5
+  fpsShortcut: boolean;      // Start + 左右 调节野蛮系统电源亮度 ±5，AC/DC 跟随当前供电
   killGame: boolean;         // 选择 + B 长按 0.5s → 结束当前游戏（执行 KiLL-EXE.bat）
-  openKeyboard: boolean;     // 选择 + X 长按 0.5s → 呼出 Windows 触摸键盘
+  openKeyboard: boolean;      // 选择 + X 长按 0.5s → 打开 Windows 触摸键盘
+  returnDesktop: boolean;     // 选择 + A 组合按下瞬间 → 返回桌面
+  mouseToggle: boolean;       // 选择 + Y 长按 0.5s → 模拟鼠标开/关
 }
 const DEFAULT_GAMEPAD_SETTINGS: GamepadSettings = {
   enabled: true,
   bDoubleMinimize: true,
-  tdpShortcut: false,
-  fpsShortcut: false,
+  tdpShortcut: true,
+  fpsShortcut: true,
   killGame: false,
   openKeyboard: false,
+  returnDesktop: false,
+  mouseToggle: false,
 };
 export async function summonGet(): Promise<GamepadSettings> {
   try {
@@ -374,6 +479,7 @@ interface NativeSysInfo {
   totalMemoryBytes: number;
   acLine: number; // 0=DC 1=AC 255=未知
   powerMode: 'ac' | 'dc';
+  hasBattery?: boolean;
   commonStartup: string;
   userProfile: string;
 }
@@ -436,33 +542,124 @@ export async function detectCpuName(): Promise<string> {
   }
 }
 
-// ── TDP 下发（写 txt + 调 YeManTdpCtl.exe set <W> --vendor <vendor>） ──
-// opts.apply=false 时仅存档不写硬件（如改动的是非当前电源模式）。
+// ── TDP 下发（程序记录 + 安全命名管道 daemon / fallback 直连） ──
+// daemon 仅在浮动 TDP 接管期间常驻。前端调用专用 native IPC；native 固定可信 EXE 路径，
+// 再通过双向消息型命名管道与管理员 daemon 通信。每个请求等待真实硬件 rc，失败立即回退一次性 CLI。
 export interface SetTdpOpts {
-  apply?: boolean;   // 是否实时下发硬件（调 YeManTdpCtl.exe）
+  apply?: boolean;   // 是否实时下发硬件（调 YeManTdpCtl）
   vendor?: Vendor;
-  save?: boolean;    // 是否写 tdp-{mode}.txt（持久化配置）；默认 true。false=只下发不记忆（快速切换/手柄）
+  save?: boolean;    // 是否记录程序配置；默认 true。false=只下发不记忆（自动临时值）
 }
+const TDPCTL_EXE = (): string => join(PC_DIR, 'pawnio', 'YeManTdpCtl.exe');
+let tdpDaemonUp = false;      // 仅浮动接管期间使用 daemon
+let tdpDaemonStart: Promise<boolean> | null = null; // 并发调用共享同一个启动结果，禁止 daemon/直连抢硬件
+const TDP_FLOAT_ACTIVE = (): string => join(PC_DIR, 'float-active');
+
+async function floatTdpActive(): Promise<boolean> {
+  try {
+    const st = await fs.stat(TDP_FLOAT_ACTIVE());
+    const modifiedMs = Number(st.modified) * 1000;
+    return Number.isFinite(modifiedMs) && Date.now() - modifiedMs < 30000;
+  } catch {
+    return false;
+  }
+}
+
+async function tdpDaemonAlive(): Promise<boolean> {
+  try {
+    const r = await tdpDaemon.request('ping', {}, 500);
+    return r.ok && r.rc === 0;
+  } catch {
+    return false;
+  }
+}
+
+// 确保 daemon 常驻：安全管道 ping 成功则复用；否则由 native 固定可信路径拉起并等待最多 2s。
+// 拉起失败返回 false → 调用方走一次性 CLI 直连。
+export async function ensureTdpDaemon(): Promise<boolean> {
+  if (tdpDaemonUp) {
+    if (await tdpDaemonAlive()) return true;
+    tdpDaemonUp = false;
+  }
+  if (tdpDaemonStart) return tdpDaemonStart;
+  tdpDaemonStart = (async () => {
+    if (await tdpDaemonAlive()) {
+      tdpDaemonUp = true;
+      return true;
+    }
+    try {
+      await tdpDaemon.start();
+    } catch { /* 拉起失败 → 下方等待超时 → fallback */ }
+    for (let i = 0; i < 20; i++) {
+      await new Promise((r) => setTimeout(r, 100));
+      if (await tdpDaemonAlive()) {
+        tdpDaemonUp = true;
+        return true;
+      }
+    }
+    return false;
+  })();
+  try {
+    return await tdpDaemonStart;
+  } finally {
+    tdpDaemonStart = null;
+  }
+}
+
+async function tdpDaemonSet(watts: number): Promise<void> {
+  const r = await tdpDaemon.request('set', { watts: Math.round(watts) }, 5000);
+  if (!r.ok || r.rc !== 0) throw new Error(r.error || `TDP daemon rc=${r.rc}`);
+}
+
 export async function setTdp(
   mode: 'ac' | 'dc',
   watts: number,
   opts: SetTdpOpts = {}
 ): Promise<void> {
-  // 两个独立动作：save=写 tdp-{mode}.txt（持久化配置）；apply=实时下发硬件。
-  // 顶部「快速切换」/手柄用 { apply:true, save:false }（即时调当前 TDP，不记忆）；
-  // AC/DC 浮动上限滑块用 { apply:false, save:true }（纯后台写配置，靠开机/计划任务应用）。
+  // 两个独立动作：save=记录程序配置；apply=实时下发硬件。
+  // 顶部「快速切换」/手柄用 { apply:true, save:true }；
+  // 自动浮动临时值用 { apply:true, save:false }，不覆盖用户设定的 TDP 最大值。
   const w = clampTdp(watts);
   if (opts.save !== false) {
-    await saveTdp(mode, w); // 写 tdp-{mode}.txt（HTA 的 defaultAC/DCFile）
+    await saveTdp(mode, w); // 记录程序控制配置
   }
   if (opts.apply) {
-    const vendor = opts.vendor ?? (await detectVendor());
-    if (vendor !== 'unknown') {
-      const exe = join(PC_DIR, 'pawnio', 'YeManTdpCtl.exe');
-      const args = ['set', String(w), '--vendor', vendor];
-      await shell.run(exe, args);
+    const vendor = opts.vendor && opts.vendor !== 'unknown' ? opts.vendor : await detectVendor();
+    // vendor 检测失败（AMD.txt/intel.txt 缺失且注册表读不到）时不能静默跳过：
+    // 用户以为 TDP 已下发实际没动，且 YeManTdpCtl 也需要 vendor 才能选对 SMU 通道。
+    // 抛错让 UI 显示「TDP 下发失败」而不是假装成功（2026-08-05 修复）。
+    if (vendor === 'unknown') {
+      throw new Error('无法识别 CPU 厂商（AMD.txt/intel.txt 与注册表均不可用），TDP 下发已跳过');
+    }
+    // 只有浮动优化真正接管时才写 daemon 命令；普通低功耗调用始终按需直连，
+    // 不拉起常驻进程，也不增加额外 AC/DC 检测。
+    if (await floatTdpActive()) {
+      if (await ensureTdpDaemon().catch(() => false)) {
+        try {
+          await tdpDaemonSet(w);
+        } catch {
+          // 写命令失败时不能静默吞掉，否则硬件值会停在旧档位；立即退回单次直连。
+          tdpDaemonUp = false;
+          const direct = await shell.run(TDPCTL_EXE(), ['set', String(w), '--vendor', vendor]);
+          if (direct.exitCode !== 0) throw new Error(direct.stderr || direct.stdout || 'TDP 直连下发失败');
+        }
+      } else {
+        const direct = await shell.run(TDPCTL_EXE(), ['set', String(w), '--vendor', vendor]);
+        if (direct.exitCode !== 0) throw new Error(direct.stderr || direct.stdout || 'TDP 直连下发失败');
+      }
+    } else {
+      const direct = await shell.run(TDPCTL_EXE(), ['set', String(w), '--vendor', vendor]);
+      if (direct.exitCode !== 0) throw new Error(direct.stderr || direct.stdout || 'TDP 直连下发失败');
     }
   }
+}
+
+export async function stopTdpDaemon(): Promise<void> {
+  if (await tdpDaemonAlive().catch(() => false)) {
+    await tdpDaemon.request('quit', {}, 2000).catch(() => {});
+  }
+  tdpDaemonUp = false;
+  tdpDaemonStart = null;
 }
 
 // 手柄快捷：按当前 AC/DC 电源模式，将 TDP 增减 delta 并立即应用
@@ -536,8 +733,20 @@ export interface PowerParams {
   dcTurbo: boolean;
   acAggr: number; // 0-100 积极性
   dcAggr: number;
+  // 缺省为 AC+DC；CPU 锁定桥层可指定只应用锁定侧，避免覆盖未锁定侧。
+  sides?: Array<'ac' | 'dc'>;
 }
 
+// 已激活方案的缓存：setActiveScheme 同 GUID 重复调用时跳过 powercfg /setactive，
+// 避免浮动调节期每 ~2 秒触发系统电源策略变更通知（配合 --in-process-gpu 会引发 GPU
+// 驱动重初始化、浏览器进程瞬时卡顿 → WebView2 表面 IDC_APPSTARTING 转圈；该转圈与窗口
+// 是否前台无关，故「后台/隐藏也转」）。方案真被切换到不同 GUID 时仍会正常下发（自愈）。
+//
+// 切换/激活电源方案：每次都 /setactive，确保刚写入 YEMAN 方案的 CPU 调度（最大主频/积极性/
+// 最小CPU三联动等）被 OS 真正应用。setXvalueindex 仅写注册表，很多处理器性能设置需
+// /setactive 触发策略重应用才生效；跳过会导致「写入成功但频率不变化」（CPU 主频调不动的假象）。
+// 转圈根因是 YeManTdpCtl.exe 子进程（已 daemon 常驻化解决），与 /setactive 无关——确诊实验
+// 已排除 setactive 是 IDC_APPSTARTING 根因，故此处不 skip，对齐 CPUZQ 可用实现。
 export async function setActiveScheme(guid: string = PW.YEMAN): Promise<void> {
   const r = await shell.run('powercfg', ['/setactive', guid]);
   if (r.exitCode !== 0) {
@@ -590,6 +799,24 @@ export async function setAcValueIndex(subGroup: string, setting: string, value: 
 export async function setDcValueIndex(subGroup: string, setting: string, value: string, scheme?: string): Promise<RunResult> {
   return await shell.run('powercfg', ['/setdcvalueindex', scheme ?? PW.YEMAN, subGroup, setting, value]);
 }
+async function hasBatteryDevice(): Promise<boolean> {
+  const si = await nativeSysInfo();
+  if (typeof si?.hasBattery === 'boolean') return si.hasBattery;
+  try {
+    const r = await shell.run('powershell', ['-NoProfile', '-Command', '(Get-CimInstance Win32_Battery).Count -gt 0']);
+    return r.exitCode === 0 && (r.stdout || '').trim().toLowerCase() === 'true';
+  } catch {
+    return false;
+  }
+}
+async function setPowerValueIndex(ac: boolean, subGroup: string, setting: string, value: string): Promise<void> {
+  const result = ac
+    ? await setAcValueIndex(subGroup, setting, value)
+    : await setDcValueIndex(subGroup, setting, value);
+  if (result.exitCode !== 0) {
+    throw new Error(`powercfg ${ac ? '/setacvalueindex' : '/setdcvalueindex'} 失败：${(result.stderr || result.stdout).trim() || `exit ${result.exitCode}`}`);
+  }
+}
 export async function getActiveScheme(): Promise<string> {
   // 优先 native PowerGetActiveScheme API（毫秒级、纯 GUID、无中文文案解析）；
   // 兜底 powercfg /getactivescheme 子进程（旧 exe 兼容）。
@@ -628,46 +855,75 @@ export async function switchScheme(key: SchemeKey): Promise<void> {
   await savePower('scheme', tag);
 }
 
+// 把一组 powercfg /setXvalueindex 逐条下发（对齐 CPUZQ 参考实现 FPS-AutoCPU.ps1 /
+// HTA pw_applyNow：每条 shell.run('powercfg', [...])，参数独立传递）。
+//
+// ⚠️ 必须显式带 <SCHEME_GUID>：powercfg /setXvalueindex 语法为
+//    <SCHEME_GUID> <SUB_GUID> <SETTING_GUID> <SETTING_INDEX>，SCHEME 是必需的首参。
+//    曾漏掉它 → 参数整体错位、CPU 主频写入静默失败（「帧数目标浮动TDP 无法调节
+//    CPU 主频」回归根因）。
+// ⚠️ 不要改用 cmd /c 拼「&」整串：native shell.run 会对每个 arg 经 quote_windows_arg
+//    各自加引号，`cmd /c "<带&整串>"` 的引号/分隔符解析不可靠，曾导致整批写入静默
+//    失败（同样表现为主频调不动）。逐条独立参数 + 显式 scheme 才是验证可用的形式。
+// DC 在台式机无电池时逐条失败 → 由调用方 try/catch 静默忽略（与 CPUZQ 一致）。
+async function applyPowerValueBatch(ac: boolean, entries: Array<[string, number]>): Promise<void> {
+  if (entries.length === 0) return;
+  const S = PW.SUB;
+  const verb = ac ? '/setacvalueindex' : '/setdcvalueindex';
+  for (const [g, v] of entries) {
+    const r = await shell.run('powercfg', [verb, PW.YEMAN, S, g, String(v)]);
+    // 逐条校验退出码：某一条失败立即抛出，避免「睿频改成功但主频上限没改」的
+    // 半套写入静默生效；DC 台式机无电池的失败由调用方 try/catch 按既有语义吞掉
+    // （applyPowerParams 内 applyDc 分支已有 catch；AC 分支不再静默）。
+    if (r.exitCode !== 0) {
+      throw new Error(`powercfg ${verb} 失败 (exit=${r.exitCode}): ${g}=${v}`);
+    }
+  }
+}
+
 // 应用 CPU 调度参数（对齐 HTA pw_applyNow：setac/dcvalueindex 全量下发）
 // ⚠️ 台式机无电池时 DC 写入会失败，已用 try-catch 静默忽略——不影响 AC 下发。
 export async function applyPowerParams(p: PowerParams): Promise<void> {
+  const applyAc = !p.sides || p.sides.includes('ac');
+  const applyDc = !p.sides || p.sides.includes('dc');
   const acThrot = p.acFreq > 0 && p.acFreq <= 2000 ? 1 : 2;
   const dcThrot = p.dcFreq > 0 && p.dcFreq <= 2000 ? 1 : 2;
   const acTurbo = p.acTurbo ? 2 : 0;
   const dcTurbo = p.dcTurbo ? 2 : 0;
   const acSched = 100 - p.acAggr; // 滑块积极性 0-100 → 注册表(100 - 值)
   const dcSched = 100 - p.dcAggr;
-  const S = PW.SUB;
-  const run = (ac: boolean, g: string, v: number) =>
-    ac ? setAcValueIndex(S, g, String(v)) : setDcValueIndex(S, g, String(v));
-  // AC 写入（台式机必定成功）
-  await run(true, PW.G_SCHED1, acSched);
-  await run(true, PW.G_SCHED2, acSched);
-  await run(true, PW.G_EPP2, acSched); // 处理器能量性能首选项策略(EC2) — 随积极性联动
-  await run(true, PW.G_TURBO, acTurbo);
-  await run(true, PW.G_FREQ1, p.acFreq); // 仅 e100 真实最大频率设置
-  await run(true, PW.G_THROT, acThrot);
-  // DC 写入（台式机无电池时会失败 → 静默忽略）
-  try { await run(false, PW.G_SCHED1, dcSched); } catch { /* desktop no-battery */ }
-  try { await run(false, PW.G_SCHED2, dcSched); } catch { /* desktop no-battery */ }
-  try { await run(false, PW.G_EPP2, dcSched); } catch { /* desktop no-battery */ } // 能量性能首选项(EC2) DC
-  try { await run(false, PW.G_TURBO, dcTurbo); } catch { /* desktop no-battery */ }
-  try { await run(false, PW.G_FREQ1, p.dcFreq); } catch { /* desktop no-battery */ } // 仅 e100 真实最大频率设置
-  try { await run(false, PW.G_THROT, dcThrot); } catch { /* desktop no-battery */ }
 
   // ── 隐藏联动：最小处理器状态（3 个 GUID，AC+DC 各写） ──
   // ① 默认跟随最大主频：freqToMinState()（0/不限制→50，0–5000 线性，≥5000→50 封顶）
   // ② 积极性 ≥90 时联动：最小CPU = max(积极性%, 最大主频派生值)。
   //    积极性≥90 恒大于封顶50%的派生值，故等效为 最小CPU = 积极性%（90→90%、100→100%），
   //    即「5GHz+积极性90 → 听积极性」；积极性<90 仅走最大主频派生。AC/DC 各算各的。
-  // 与上方 G_THROT 隐藏联动同理；不展示 UI。
   const acMinState = Math.max(freqToMinState(p.acFreq), p.acAggr >= 90 ? p.acAggr : 0);
   const dcMinState = Math.max(freqToMinState(p.dcFreq), p.dcAggr >= 90 ? p.dcAggr : 0);
   const MIN_STATE_GUIDS = [PW.G_MIN1, PW.G_MIN2, PW.G_MIN3];
-  for (const g of MIN_STATE_GUIDS) {
-    await run(true, g, acMinState); // AC 必定成功
-    try { await run(false, g, dcMinState); } catch { /* desktop no-battery */ }
-  }
+
+  // AC 写入（台式机必定成功）—— 调度/联动全部拼进同一条脚本，一次 shell.run 下发
+  if (applyAc) await applyPowerValueBatch(true, [
+    [PW.G_SCHED1, acSched],
+    [PW.G_SCHED2, acSched],
+    [PW.G_EPP2, acSched], // 处理器能量性能首选项策略(EC2) — 随积极性联动
+    [PW.G_TURBO, acTurbo],
+    [PW.G_FREQ1, p.acFreq], // 仅 e100 真实最大频率设置
+    [PW.G_THROT, acThrot],
+    ...MIN_STATE_GUIDS.map((g) => [g, acMinState] as [string, number]),
+  ]);
+  // DC 写入（台式机无电池时会失败 → 静默忽略）
+  if (applyDc) try {
+    await applyPowerValueBatch(false, [
+      [PW.G_SCHED1, dcSched],
+      [PW.G_SCHED2, dcSched],
+      [PW.G_EPP2, dcSched], // 能量性能首选项(EC2) DC
+      [PW.G_TURBO, dcTurbo],
+      [PW.G_FREQ1, p.dcFreq], // 仅 e100 真实最大频率设置
+      [PW.G_THROT, dcThrot],
+      ...MIN_STATE_GUIDS.map((g) => [g, dcMinState] as [string, number]),
+    ]);
+  } catch { /* desktop no-battery */ }
 }
 
 // CPU 主频(MHz) → 最小处理器状态 联动值（隐藏，无极线性映射）
@@ -691,29 +947,29 @@ export async function setCoreMode(mode: CoreMode): Promise<void> {
   const [core, hetero, shortRun] = CORE_MAP[mode];
   const S = PW.SUB;
   // AC 写入（必定成功）
-  await setAcValueIndex(S, PW.G_CORE, String(core));
-  await setAcValueIndex(S, PW.G_HETERO, String(hetero));
-  await setAcValueIndex(S, PW.G_SHORT, String(shortRun));
+  await setPowerValueIndex(true, S, PW.G_CORE, String(core));
+  await setPowerValueIndex(true, S, PW.G_HETERO, String(hetero));
+  await setPowerValueIndex(true, S, PW.G_SHORT, String(shortRun));
   // DC 写入（台式机无电池时静默失败）
-  try { await setDcValueIndex(S, PW.G_CORE, String(core)); } catch { /* desktop no-battery */ }
-  try { await setDcValueIndex(S, PW.G_HETERO, String(hetero)); } catch { /* desktop no-battery */ }
-  try { await setDcValueIndex(S, PW.G_SHORT, String(shortRun)); } catch { /* desktop no-battery */ }
+  try { await setPowerValueIndex(false, S, PW.G_CORE, String(core)); } catch { /* desktop no-battery */ }
+  try { await setPowerValueIndex(false, S, PW.G_HETERO, String(hetero)); } catch { /* desktop no-battery */ }
+  try { await setPowerValueIndex(false, S, PW.G_SHORT, String(shortRun)); } catch { /* desktop no-battery */ }
 }
 
 // AC/DC 分离的大小核心调度写入（满足 UI 双排控制）
 export async function setCoreModeAc(mode: CoreMode): Promise<void> {
   const [core, hetero, shortRun] = CORE_MAP[mode];
   const S = PW.SUB;
-  await setAcValueIndex(S, PW.G_CORE, String(core));
-  await setAcValueIndex(S, PW.G_HETERO, String(hetero));
-  await setAcValueIndex(S, PW.G_SHORT, String(shortRun));
+  await setPowerValueIndex(true, S, PW.G_CORE, String(core));
+  await setPowerValueIndex(true, S, PW.G_HETERO, String(hetero));
+  await setPowerValueIndex(true, S, PW.G_SHORT, String(shortRun));
 }
 export async function setCoreModeDc(mode: CoreMode): Promise<void> {
   const [core, hetero, shortRun] = CORE_MAP[mode];
   const S = PW.SUB;
-  try { await setDcValueIndex(S, PW.G_CORE, String(core)); } catch { /* desktop no-battery */ }
-  try { await setDcValueIndex(S, PW.G_HETERO, String(hetero)); } catch { /* desktop no-battery */ }
-  try { await setDcValueIndex(S, PW.G_SHORT, String(shortRun)); } catch { /* desktop no-battery */ }
+  try { await setPowerValueIndex(false, S, PW.G_CORE, String(core)); } catch { /* desktop no-battery */ }
+  try { await setPowerValueIndex(false, S, PW.G_HETERO, String(hetero)); } catch { /* desktop no-battery */ }
+  try { await setPowerValueIndex(false, S, PW.G_SHORT, String(shortRun)); } catch { /* desktop no-battery */ }
 }
 // 读取当前大小核心调度模式（AC 或 DC）；读取不到/非标准组合返回 null
 export async function readCoreMode(ac: boolean): Promise<CoreMode | null> {
@@ -759,10 +1015,10 @@ export async function setActiveCoreCount(count: number, total: number): Promise<
   // 百分比下限 1（避免锁成 0 核导致系统冻结），上限 100（全核心）
   const pct = Math.max(1, Math.min(100, Math.round((c * 100) / total)));
   const S = PW.SUB;
-  await setAcValueIndex(S, PW.G_MINCORE, String(pct));
-  await setAcValueIndex(S, PW.G_MAXCORE, String(pct));
-  try { await setDcValueIndex(S, PW.G_MINCORE, String(pct)); } catch { /* desktop no-battery */ }
-  try { await setDcValueIndex(S, PW.G_MAXCORE, String(pct)); } catch { /* desktop no-battery */ }
+  await setPowerValueIndex(true, S, PW.G_MINCORE, String(pct));
+  await setPowerValueIndex(true, S, PW.G_MAXCORE, String(pct));
+  try { await setPowerValueIndex(false, S, PW.G_MINCORE, String(pct)); } catch { /* desktop no-battery */ }
+  try { await setPowerValueIndex(false, S, PW.G_MAXCORE, String(pct)); } catch { /* desktop no-battery */ }
 }
 
 export async function readActiveCoreCount(total: number): Promise<number | null> {
@@ -865,17 +1121,20 @@ export async function readPowerParams(): Promise<PowerParams | null> {
   }
 }
 
-// 重制电源（六档，运行 TPD 下对应 VBS，VBS 内部静默调用 BAT 修改电源）
+// 重制电源（四档，运行 TDP 下对应 VBS，VBS 内部静默调用 BAT 修改电源）
 export const RESET_PROFILES = [
-  { name: 'Extreme极致性能', sub: '猛吃CPU-注意过热', path: 'C:\\SOFT\\YeMan\\PowerControl\\TPD\\Extreme.vbs' },
-  { name: 'Elite精睿性能', sub: '笔记本推荐', path: 'C:\\SOFT\\YeMan\\PowerControl\\TPD\\Elite.vbs' },
-  { name: 'Turbo高性能', sub: '掌机推荐', path: 'C:\\SOFT\\YeMan\\PowerControl\\TPD\\Turbo.vbs' },
-  { name: 'Performance平衡', sub: 'SteamDeck推荐', path: 'C:\\SOFT\\YeMan\\PowerControl\\TPD\\Performance.vbs' },
+  { id: 'extreme', name: 'Extreme极致性能', sub: '猛吃CPU-注意过热', path: 'C:\\SOFT\\YeMan\\PowerControl\\TDP\\Extreme.vbs' },
+  { id: 'elite', name: 'Elite精睿性能', sub: '笔记本推荐', path: 'C:\\SOFT\\YeMan\\PowerControl\\TDP\\Elite.vbs' },
+  { id: 'turbo', name: 'Turbo高性能', sub: '掌机推荐', path: 'C:\\SOFT\\YeMan\\PowerControl\\TDP\\Turbo.vbs' },
+  { id: 'balanced', name: 'Performance平衡', sub: 'SteamDeck推荐', path: 'C:\\SOFT\\YeMan\\PowerControl\\TDP\\Performance.vbs' },
 ] as const;
 export async function runResetProfile(path: string): Promise<void> {
   // 用 cscript.exe（控制台模式）执行 VBS —— 不弹 GUI 对话框、无"内存资源不足"问题
   // VBS 内部 ws.Run "cmd /c ...bat", 0, True 静默调用 BAT 修改电源
-  await shell.run('cscript.exe', ['//nologo', path]);
+  const result = await shell.run('cscript.exe', ['//nologo', path]);
+  if (result.exitCode !== 0) {
+    throw new Error(result.stderr || result.stdout || `CPU 挡位脚本退出码 ${result.exitCode}`);
+  }
 }
 
 /* =========================================================================
@@ -884,9 +1143,10 @@ export async function runResetProfile(path: string): Promise<void> {
 const RTSS_DIR = 'C:\\Program Files (x86)\\RivaTuner Statistics Server';
 const RTSS_GLOBAL = `${RTSS_DIR}\\Profiles\\Global`;
 const RTSS_OVERLAY_CFG = `${RTSS_DIR}\\Plugins\\Client\\OverlayEditor.cfg`;
-export const FPS_CEILINGS = [30, 60, 90, 120, 200, 300];
+// FPS 上限档位：0 = 不锁帧（真实数值 0，RTSS Limit=0），其余 30~300（300 2026-08-04 起开放）。
+export const FPS_CEILINGS = [0, 30, 60, 90, 120, 200, 300];
 export const FPS_MIN = 20;
-export const FPS_MAX_DEFAULT = 200;
+export const FPS_MAX_DEFAULT = 300;
 
 export async function rtssRunning(): Promise<boolean> {
   // 优先 native Toolhelp32 枚举（毫秒级）；兜底 Get-Process 子进程（旧 exe 兼容）。
@@ -899,6 +1159,22 @@ export async function rtssRunning(): Promise<boolean> {
   ]);
   return (r.stdout || '').trim().toLowerCase() === 'true';
 }
+// HWiNFO 进程是否在运行：用于区分「有 HW 但共享内存未起来」(需重启修复)
+// 与「无 HW 进程」(未装/未启动) 两套补救逻辑。
+export async function hwiNfoRunning(): Promise<boolean> {
+  const p = await nativeProcRunning(['HWiNFO64']);
+  if (p) return !!p['HWiNFO64'];
+  try {
+    const r = await shell.run('powershell', [
+      '-NoProfile',
+      '-Command',
+      '(Get-Process HWiNFO64 -EA 0).Count -gt 0',
+    ]);
+    return (r.stdout || '').trim().toLowerCase() === 'true';
+  } catch {
+    return false;
+  }
+}
 export async function readRtssLimit(): Promise<number> {
   if (!(await fs.exists(RTSS_GLOBAL))) return 0;
   const txt = await fs.readTextFile(RTSS_GLOBAL);
@@ -908,26 +1184,42 @@ export async function readRtssLimit(): Promise<number> {
   }
   return 0;
 }
-export async function setRtssLimit(fps: number): Promise<void> {
-  if (!(await fs.exists(RTSS_GLOBAL))) return;
+let rtssConfigWriteQueue: Promise<void> = Promise.resolve();
+export function setRtssLimit(fps: number): Promise<void> {
+  const run = rtssConfigWriteQueue.then(async () => {
+    if (!(await fs.exists(RTSS_GLOBAL))) return;
+  // NaN/Infinity 防护：非法输入写入 0（不锁帧），绝不写坏 RTSS 配置（2026-08-05 修复）
+  const v = Number.isFinite(fps) ? Math.max(0, Math.round(fps)) : 0;
   const txt = await fs.readTextFile(RTSS_GLOBAL);
   const out = txt
     .split(/\r?\n/)
-    .map((l) => (l.match(/^Limit=\d+/) ? `Limit=${Math.max(0, Math.round(fps))}` : l))
+    .map((l) => (l.match(/^Limit=\d+/) ? `Limit=${v}` : l))
     .join('\r\n');
   await fs.writeTextFileAtomic(RTSS_GLOBAL, out);
   // 重载配置：外部改完文件后只 LoadProfile(重新载入磁盘) + UpdateProfiles(套用到运行中的游戏)。
   // ⚠ 不要 SaveProfile —— 它会把 RTSS 内存里的旧状态写回磁盘，覆盖刚改的内容甚至写坏（损坏根因）。
   await shell.run('rundll32', [`${RTSS_DIR}\\RTSSHooks64.dll`, 'LoadProfile']);
   await new Promise<void>((r) => setTimeout(r, 200)); // 等 RTSS 异步载入刚写的文件
-  await shell.run('rundll32', [`${RTSS_DIR}\\RTSSHooks64.dll`, 'UpdateProfiles']);
+    await shell.run('rundll32', [`${RTSS_DIR}\\RTSSHooks64.dll`, 'UpdateProfiles']);
+  });
+  rtssConfigWriteQueue = run.catch(() => {});
+  return run;
 }
 
-// 手柄快捷：RTSS 锁帧上限增减 delta（最低 FPS_MIN，最高 FPS_MAX_DEFAULT）
+// 手柄快捷：RTSS 锁帧上限增减 delta（0=不锁帧，其余 FPS_MIN~FPS_MAX_DEFAULT）。
+// 语义：0（不锁帧）→ 正向调到 FPS_MIN 起步；FPS_MIN → 负向回到 0（解锁）；
+// 其余在 FPS_MIN~MAX 间步进。原实现无法从 0 调起、也无法从 FPS_MIN 回到不锁帧
+// （2026-08-05 修复）。
 export async function adjustRtssLimit(delta: number): Promise<number | null> {
   const cur = await readRtssLimit();
-  const base = cur < FPS_MIN ? FPS_MIN : cur;
-  const next = Math.max(FPS_MIN, Math.min(FPS_MAX_DEFAULT, Math.round(base + delta)));
+  let next: number;
+  if (cur === 0) {
+    next = delta > 0 ? FPS_MIN : 0; // 不锁帧：仅正向可调起
+  } else if (cur === FPS_MIN) {
+    next = delta < 0 ? 0 : Math.min(FPS_MAX_DEFAULT, cur + delta); // 负向解锁回 0
+  } else {
+    next = Math.max(FPS_MIN, Math.min(FPS_MAX_DEFAULT, cur + delta));
+  }
   if (next === cur) return cur;
   await setRtssLimit(next);
   return next;
@@ -950,32 +1242,50 @@ export async function readRtssZoom(): Promise<number> {
   }
   return 5; // 文件存在但缺键 → 默认 100%
 }
-export async function setRtssZoom(ratio: number): Promise<void> {
-  const z = Math.max(RTSS_ZOOM_MIN, Math.min(RTSS_ZOOM_MAX, Math.round(ratio)));
+export function setRtssZoom(ratio: number): Promise<void> {
+  const run = rtssConfigWriteQueue.then(async () => {
+    const raw = Number(ratio);
+  const z = Number.isFinite(raw)
+    ? Math.max(RTSS_ZOOM_MIN, Math.min(RTSS_ZOOM_MAX, Math.round(raw)))
+    : 5;
   if (!(await fs.exists(RTSS_GLOBAL))) return;
   const lines = (await fs.readTextFile(RTSS_GLOBAL)).split(/\r?\n/);
   let inOsd = false;
   let done = false;
+  let osdIndex = -1; // 找到的 [OSD] 节起始行（用于节内首个键前插入）
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     if (line.startsWith('[')) {
       if (inOsd && !done) {
+        // 无 ZoomRatio 键：插到 [OSD] 节首行之后（保持键在节内，RTSS 才解析）
         lines.splice(i, 0, `ZoomRatio=${z}`);
         done = true;
         break;
       }
       inOsd = line.trim().toLowerCase() === '[osd]';
+      if (inOsd) osdIndex = i;
     } else if (inOsd && /^ZoomRatio=\d+/i.test(line)) {
       lines[i] = `ZoomRatio=${z}`;
       done = true;
     }
   }
-  if (!done) lines.push(`ZoomRatio=${z}`);
+  if (!done) {
+    if (osdIndex >= 0) {
+      // 存在 [OSD] 节但节内没键：插在节行之后；避免追加到文件末尾被 RTSS 忽略
+      lines.splice(osdIndex + 1, 0, `ZoomRatio=${z}`);
+    } else {
+      // 连 [OSD] 节都没有：补一节，保证写入一定生效（2026-08-05 修复追加末尾被忽略）
+      lines.push('[OSD]', `ZoomRatio=${z}`);
+    }
+  }
   await fs.writeTextFileAtomic(RTSS_GLOBAL, lines.join('\r\n'));
   // 强制 RTSS 重载配置：LoadProfile(重新载入磁盘) + UpdateProfiles(套用)。同样不要 SaveProfile（会把内存旧状态写回磁盘）。
   await shell.run('rundll32', [`${RTSS_DIR}\\RTSSHooks64.dll`, 'LoadProfile']);
   await new Promise<void>((r) => setTimeout(r, 200));
-  await shell.run('rundll32', [`${RTSS_DIR}\\RTSSHooks64.dll`, 'UpdateProfiles']);
+    await shell.run('rundll32', [`${RTSS_DIR}\\RTSSHooks64.dll`, 'UpdateProfiles']);
+  });
+  rtssConfigWriteQueue = run.catch(() => {});
+  return run;
 }
 
 export async function toggleRtss(on: boolean): Promise<void> {
@@ -986,13 +1296,14 @@ export async function toggleRtss(on: boolean): Promise<void> {
     // 关监控 = 结束整个 RTSS 家族（主程序 + 钩子加载器 64/32 + 编码服务），避免 RTSSHooksLoader64.exe 残留
     await shell.run('cmd', [
       '/c',
-      'taskkill /F /IM RTSS.exe /IM RTSSHooksLoader64.exe /IM RTSSHooksLoader32.exe /IM EncoderServer64.exe /IM EncoderServer.exe & taskkill /IM HWiNFO64.exe /F',
+      'taskkill /F /IM RTSS.exe /IM RTSSHooksLoader64.exe /IM RTSSHooksLoader32.exe /IM EncoderServer64.exe /IM EncoderServer.exe',
     ]);
   }
 }
-export type OverlayLayout = 'W' | 'L' | 'off';
+export type OverlayLayout = 'W' | 'L' | 'J' | 'off';
 const OVL_W = 'YeManOBS-W-1.ovl';
 const OVL_L = 'YeManOBS-L-1.ovl';
+const OVL_J = 'YeManOBS-JJ-1.ovl';
 const OVL_EMPTY = 'Empty.ovl';
 export async function readOverlayLayout(): Promise<string> {
   if (!(await fs.exists(RTSS_OVERLAY_CFG))) return '';
@@ -1004,7 +1315,7 @@ export async function readOverlayLayout(): Promise<string> {
 }
 export async function setOverlayLayout(layout: OverlayLayout): Promise<void> {
   if (!(await fs.exists(RTSS_OVERLAY_CFG))) return;
-  const target = layout === 'W' ? OVL_W : layout === 'L' ? OVL_L : OVL_EMPTY;
+  const target = layout === 'W' ? OVL_W : layout === 'L' ? OVL_L : layout === 'J' ? OVL_J : OVL_EMPTY;
   const txt = await fs.readTextFile(RTSS_OVERLAY_CFG);
   const lines = txt.split(/\r?\n/);
   let found = false;
@@ -1058,9 +1369,8 @@ async function restartRtss(): Promise<void> {
   }
   // 2. 脱离式启动主程序（与 BAT 的 `start "" /B` 一致；绝不用 Start-Process，会被宿主进程收走导致 RTSS 起不来）。
   // 必须拆成多个参数：整行作为单个参数传会被 native 的 quote_windows_arg 转义内部引号，导致 cmd 解析错乱、弹窗“找不到 \\”。
-  // 末尾 `> NUL 2>&1` 把 RTSS 的 std 重定向到 NUL —— 否则 RTSS 经 start 拉起后持有 shell.run 的管道写端，
-  // 导致 ReadFile 等不到 EOF 而永久阻塞（前端界面卡死、但 RTSS 已正常启动）。现在管道仅由外层 cmd 持有、退出即 EOF。
-  await shell.run('cmd', ['/c', 'start', '""', '/B', exe, '>', 'NUL', '2>&1']);
+  // 后台常驻程序必须走 shell.hidden；shell.run 的同步语义会在命令结束后回收整个子进程树。
+  await shell.hidden(exe);
   // 3. 轮询确认主程序已拉起（最多 ~8 秒）
   for (let i = 0; i < 80; i++) {
     if (await rtssRunning()) break;
@@ -1085,14 +1395,28 @@ export async function monitorOn(): Promise<boolean> {
  * ========================================================================= */
 export type SleepGuardMode = 'off' | 'custom';
 export interface SleepGuardStatus {
+  overheatSleepEnabled: boolean;
+  overheatTempC: number;
   enabled: boolean;             // 总开关
   mode: SleepGuardMode;         // 总开关模式：关闭 / 自选
   suspended: number;            // 当前被冻结任务数
   pauseResume: boolean;         // 睡眠时暂停 + 唤醒自动恢复（绑定）
-  sleepTdp: { mode: 'lock' | 'off'; watts: number }; // 入睡调低 TDP
+  killListEnabled: boolean;     // 入睡前清除 Sleep\\睡眠击杀名单.txt 中的指定 exe
+  resleepEnabled: boolean;       // 入睡后异常唤醒：30s 内连续 10s 无手柄/键盘输入则重睡；重睡后 5 分钟抑制再次重睡
+
 }
 export async function sleepGuardGet(): Promise<SleepGuardStatus> {
-  return await invoke<SleepGuardStatus>('sleepGuard.get');
+  const r = await invoke<Partial<SleepGuardStatus>>('sleepGuard.get');
+  return {
+    enabled: !!r.enabled,
+    mode: r.mode === 'custom' ? 'custom' : 'off',
+    suspended: Number(r.suspended) || 0,
+    pauseResume: r.pauseResume !== false,
+    killListEnabled: !!r.killListEnabled,
+    resleepEnabled: !!r.resleepEnabled,
+    overheatSleepEnabled: !!r.overheatSleepEnabled,
+    overheatTempC: Math.max(85, Math.min(100, Number(r.overheatTempC) || 95)),
+  };
 }
 export async function sleepGuardSet(on: boolean): Promise<void> {
   await invoke('sleepGuard.set', { on });
@@ -1144,13 +1468,12 @@ export async function getPowerBtnIdx(isAC: boolean): Promise<PowerBtnIdx> {
   }
 }
 export async function setPowerBtnIdx(isAC: boolean, idx: PowerBtnIdx): Promise<void> {
-  const setFn = isAC ? setAcValueIndex : setDcValueIndex;
+  if (!isAC && !(await hasBatteryDevice())) return;
   try {
-    await setFn(PW_BTN_SUB, PW_BTN_ITEM, POWER_BTN_QUEUE[idx].val);
+    await setPowerValueIndex(isAC, PW_BTN_SUB, PW_BTN_ITEM, POWER_BTN_QUEUE[idx].val);
   } catch (e) {
     // 台式机无电池 → DC 电源按钮写入失败，静默忽略（不影响 AC）
-    if (isAC) throw e; // AC 失败仍需抛出
-    return; // DC 失败则静默跳过
+    throw e;
   }
   // 注意：不再此处立即激活——由前端做 2 秒防抖重新激活（与 CPU 调度调节器一致），
   // 避免快速多次切换电源按钮时反复激活导致闪烁/卡顿。
@@ -1201,8 +1524,15 @@ export async function isHibernateOff(): Promise<boolean | null> {
 }
 export async function setHibernate(on: boolean): Promise<RunResult> {
   const r1 = await shell.run('powercfg', on ? ['/hibernate', 'on'] : ['/hibernate', 'off']);
+  if (r1.exitCode !== 0) {
+    throw new Error(`powercfg /hibernate ${on ? 'on' : 'off'} 失败：${(r1.stderr || r1.stdout).trim() || `exit ${r1.exitCode}`}`);
+  }
   if (on) {
-    return await shell.run('powercfg', ['/hibernate', '/type', 'reduced']);
+    const r2 = await shell.run('powercfg', ['/hibernate', '/type', 'reduced']);
+    if (r2.exitCode !== 0) {
+      throw new Error(`powercfg /hibernate /type reduced 失败：${(r2.stderr || r2.stdout).trim() || `exit ${r2.exitCode}`}`);
+    }
+    return r2;
   }
   return r1;
 }
@@ -1217,8 +1547,14 @@ export async function readHibernateSize(): Promise<number> {
   return 50;
 }
 export async function setHibernateSize(pct: number): Promise<void> {
-  await shell.run('powercfg', ['/hibernate', '/type', 'reduced']);
-  await shell.run('powercfg', ['/hibernate', '/size', String(Math.max(30, Math.min(100, pct)))]);
+  const typeResult = await shell.run('powercfg', ['/hibernate', '/type', 'reduced']);
+  if (typeResult.exitCode !== 0) {
+    throw new Error(`powercfg /hibernate /type reduced 失败：${(typeResult.stderr || typeResult.stdout).trim() || `exit ${typeResult.exitCode}`}`);
+  }
+  const sizeResult = await shell.run('powercfg', ['/hibernate', '/size', String(Math.max(30, Math.min(100, pct)))]);
+  if (sizeResult.exitCode !== 0) {
+    throw new Error(`powercfg /hibernate /size 失败：${(sizeResult.stderr || sizeResult.stdout).trim() || `exit ${sizeResult.exitCode}`}`);
+  }
 }
 
 // 物理内存总量（GB，浮点）。用于"休眠文件大小预估 = 内存 × 休眠文件百分比"。
@@ -1269,14 +1605,58 @@ export async function fxSet(on: boolean): Promise<void> {
   const startDir = await commonStartupDir();
   const linkPath = `${startDir}\\FxSound.lnk`;
   if (on) {
-    await shell.run('powershell', [
+    const r = await shell.run('powershell', [
       '-NoProfile',
       '-Command',
       `$s=(New-Object -ComObject WScript.Shell).CreateShortcut('${linkPath}');$s.TargetPath='${FX_LINK}';$s.WorkingDirectory='C:\\Program Files\\FxSound LLC\\FxSound';$s.Description='FxSound 音质优化';$s.Save()`,
     ]);
+    if (r.exitCode !== 0 || !(await fs.exists(linkPath))) {
+      throw new Error((r.stderr || r.stdout || '创建 FxSound 启动快捷方式失败').trim());
+    }
   } else {
-    if (await fs.exists(linkPath)) await shell.run('cmd', ['/c', `del /F /Q "${linkPath}"`]);
+    if (await fs.exists(linkPath)) {
+      const removed = await fs.remove(linkPath);
+      if (!removed && await fs.exists(linkPath)) {
+        throw new Error('无法删除 FxSound 启动快捷方式：' + linkPath);
+      }
+    }
   }
+}
+
+const GPU_SCHED_KEY = 'SYSTEM\\CurrentControlSet\\Control\\GraphicsDrivers';
+const GPU_SCHED_VALUE = 'HwSchMode';
+export async function readHardwareGpuSchedule(): Promise<boolean> {
+  try {
+    const v = await registry.read('HKLM', GPU_SCHED_KEY, GPU_SCHED_VALUE);
+    return Number(v) === 2;
+  } catch {
+    return false;
+  }
+}
+export async function writeHardwareGpuSchedule(on: boolean): Promise<boolean> {
+  const ok = await registry.write('HKLM', GPU_SCHED_KEY, GPU_SCHED_VALUE, on ? 2 : 1);
+  return ok === true;
+}
+
+// 控制中心与 RTSS 开机启动分别管理，各自读取和切换对应的任务计划。
+export async function bootMirrorExists(): Promise<boolean> {
+  return taskExists(BOOT_CONTROL_CENTER_TASK);
+}
+
+export async function readBootMirrorState(): Promise<boolean> {
+  return taskExists(BOOT_CONTROL_CENTER_TASK);
+}
+
+export async function toggleBootMirror(on: boolean): Promise<boolean> {
+  return toggleTask(BOOT_CONTROL_CENTER_TASK, on);
+}
+
+export async function readBootRtssState(): Promise<boolean> {
+  return taskExists(BOOT_RTSS_TASK);
+}
+
+export async function toggleBootRtss(on: boolean): Promise<boolean> {
+  return toggleTask(BOOT_RTSS_TASK, on);
 }
 
 // Joyxoff：HKCU\...\Run
@@ -1295,11 +1675,6 @@ export async function joySet(on: boolean): Promise<void> {
   } else {
     await shell.run('reg', ['delete', 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run', '/v', 'Joyxoff', '/f']);
   }
-}
-
-// AMD-395 前置检测：需 3DMark.exe
-export async function threeMarkExists(): Promise<boolean> {
-  return fs.exists('C:\\SOFT\\3DMark\\3DMark.exe');
 }
 
 // 旋转检测（HKLM\...\AutoRotation\Enable）
@@ -1330,7 +1705,6 @@ export async function openSearchFolder(): Promise<void> {
 const STEAM_DIR = 'C:\\SOFT\\YeMan\\PowerControl\\YeManSteam';
 export const STEAM_ADDONS = [
   { key: 'steamcss', name: 'Steam 美化（CSSLoader）', exe: 'C:\\SOFT\\CSSLoader Desktop\\CssLoader-Standalone-Headless.exe', url: '' },
-  { key: 'steamnet', name: '网络加速（steamcommunity）', exe: 'C:\\SOFT\\steamcommunity\\steamcommunity_302.cli.exe', url: '' },
   { key: 'steamscale', name: '小黄鸭缩放插帧（Lossless Scaling）', exe: 'C:\\SOFT\\Lossless.Scaling\\LosslessScaling.exe', url: '' },
   { key: 'steamcheat', name: '游戏修改器合集（Game-Cheats-Manager）', exe: 'C:\\SOFT\\Game Cheats Manager\\Game Cheats Manager.exe', url: 'https://github.com/dyang886/Game-Cheats-Manager' },
   { key: 'steamspeed', name: '游戏变速器（OpenSpeedy）', exe: 'C:\\SOFT\\YeMan\\PowerControl\\OpenSpeedy\\openspeedy.exe', url: '' },
@@ -1431,17 +1805,21 @@ export async function steamEarlyStartFile(): Promise<string> {
   const si = await nativeSysInfo();
   if (si && si.userProfile) return `${si.userProfile}\\.earlystart`;
   const r = await shell.run('powershell', ['-NoProfile', '-Command', '$env:USERPROFILE + "\\.earlystart"']);
-  return (r.stdout || '').trim() || 'C:\\Users\\DaVe\\.earlystart';
+  // 不硬编码开发者机器路径：取不到就返回空串，由调用方按「无早启开关」处理，
+  // 避免在其它机器上静默读写错误的 C:\Users\DaVe\（2026-08-05 修复）。
+  return (r.stdout || '').trim() || '';
 }
 export const STEAM_EARLYSTART_CONTENT = '"C:\\SOFT\\YeMan\\PowerControl\\YeManSteam.bat"';
 export async function steamMasterOn(): Promise<boolean> {
   const f = await steamEarlyStartFile();
+  if (!f) return false; // 取不到用户目录 → 视为未启用
   if (!(await fs.exists(f))) return false;
   const c = (await fs.readTextFile(f)).replace(/\s+/g, '');
   return c.length > 0;
 }
 export async function steamMasterSet(on: boolean): Promise<void> {
   const f = await steamEarlyStartFile();
+  if (!f) throw new Error('无法定位用户目录，不能设置开机启动'); // 明确报错而非写错路径
   await fs.writeTextFile(f, on ? STEAM_EARLYSTART_CONTENT + '\r\n' : '');
 }
 export async function steamRunning(): Promise<boolean> {
