@@ -11,14 +11,16 @@
     "predev": "node scripts/write-version.mjs",
     "dev": "vite",
     "prebuild": "node scripts/write-version.mjs",
-    "build": "vite build && node scripts/postbuild-dist.mjs",
-    "preview": "vite preview",
+    "build": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/build-workspace.ps1",
+    "package": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/package-release.ps1",
+    "release": "pnpm run build && pnpm run package",
+    "preview": "vite preview --outDir ../../Build/App/Web",
     "type-check": "vue-tsc --noEmit",
-    "test:m2": "esbuild tools/m2_selftest.ts --bundle --platform=node --format=cjs --outfile=build/m2_selftest.cjs --alias:@=./src && node build/m2_selftest.cjs",
-    "test:speedhack": "esbuild tools/speedhack_selftest.ts --bundle --platform=node --format=cjs --outfile=build/speedhack_selftest.cjs --alias:@=./src && node build/speedhack_selftest.cjs",
-    "test:power-resume": "esbuild tools/power_resume_selftest.ts --bundle --platform=node --format=cjs --outfile=build/power_resume_selftest.cjs --alias:@=./src && node build/power_resume_selftest.cjs",
-    "test:schedule-tdp": "esbuild tools/performance_schedule_tdp_selftest.ts --bundle --platform=node --format=cjs --outfile=build/performance_schedule_tdp_selftest.cjs --alias:@=./src && node build/performance_schedule_tdp_selftest.cjs",
-    "publish": "powershell -ExecutionPolicy Bypass -File tools/publish.ps1"
+    "test:m2": "esbuild tools/m2_selftest.ts --bundle --platform=node --format=cjs --outfile=../../Build/Validation/SelfTests/m2_selftest.cjs --alias:@=./src && node ../../Build/Validation/SelfTests/m2_selftest.cjs",
+    "test:speedhack": "esbuild tools/speedhack_selftest.ts --bundle --platform=node --format=cjs --outfile=../../Build/Validation/SelfTests/speedhack_selftest.cjs --alias:@=./src && node ../../Build/Validation/SelfTests/speedhack_selftest.cjs",
+    "test:power-resume": "esbuild tools/power_resume_selftest.ts --bundle --platform=node --format=cjs --outfile=../../Build/Validation/SelfTests/power_resume_selftest.cjs --alias:@=./src && node ../../Build/Validation/SelfTests/power_resume_selftest.cjs",
+    "test:schedule-tdp": "esbuild tools/performance_schedule_tdp_selftest.ts --bundle --platform=node --format=cjs --outfile=../../Build/Validation/SelfTests/performance_schedule_tdp_selftest.cjs --alias:@=./src && node ../../Build/Validation/SelfTests/performance_schedule_tdp_selftest.cjs",
+    "publish": "pnpm run release"
   },
   "dependencies": {
     "pinia": "^2.1.7",

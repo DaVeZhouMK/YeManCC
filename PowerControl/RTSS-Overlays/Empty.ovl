@@ -1,0 +1,17 @@
+[Master]
+Implementation=2
+FontFace=Terminal
+FontHeight=-7
+FontWeight=700
+ZoomRatio=2
+[Settings]
+Name=
+EnvVars=
+RefreshPeriod=1000
+LockUserSettings=0
+EmbeddedImage=
+PingAddr=
+[General]
+Sources=0
+Tables=0
+Layers=0

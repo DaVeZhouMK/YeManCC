@@ -16,6 +16,9 @@ PowerControl/**/*.bak_*
 !deps/webview2/build/
 pkg/
 YeManCC.zip
+/Build/
+/Release/
+/Backup/
 
 # 自动更新暂存（native 写入 %LOCALAPPDATA%，不在此）
 # 运行时日志

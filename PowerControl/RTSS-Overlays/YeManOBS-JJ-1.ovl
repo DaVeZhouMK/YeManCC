@@ -1,0 +1,416 @@
+[Master]
+Implementation=2
+FontFace=Terminal
+FontHeight=-7
+FontWeight=700
+ZoomRatio=2
+[Settings]
+Name=
+EnvVars=
+RefreshPeriod=1000
+LockUserSettings=0
+EmbeddedImage=
+PingAddr=
+[General]
+Sources=46
+Tables=0
+Layers=1
+[Source0]
+Name=FPS
+Units=FPS
+Format=
+Formula=X
+Provider=HwInfo
+SensorInst=0
+ReadingType=8
+ReadingName=Framerate (Presented)
+[Source1]
+Name=Framerate Presented (avg)
+Units=FPS
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=0
+ReadingType=8
+ReadingName=Framerate Presented (avg)
+[Source2]
+Name=Framerate Presented (1%)
+Units=FPS
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=0
+ReadingType=8
+ReadingName=Framerate Presented (1%)
+[Source3]
+Name=TDP Power
+Units=W
+Format=
+Formula=x-0.49
+Provider=HwInfo
+SensorInst=0
+ReadingType=5
+ReadingName=CPU Package Power
+[Source4]
+Name=GPU1 power
+Units=W
+Format=
+Formula=
+Provider=HAL
+ID=GPU1 power
+[Source5]
+Name=GPU2 power
+Units=W
+Format=
+Formula=
+Provider=HAL
+ID=GPU2 power
+[Source6]
+Name=Core 0 Clock
+Units=GHz
+Format=%0.1f
+Formula=X/1000
+Provider=HwInfo
+SensorInst=0
+ReadingType=6
+ReadingName=Core 0 Clock
+[Source7]
+Name=P-core 0 Clock
+Units=GHz
+Format=%0.1f
+Formula=X/1000
+Provider=HwInfo
+SensorInst=0
+ReadingType=6
+ReadingName=P-core 0 Clock
+[Source8]
+Name=CPU clock
+Units=GHz
+Format=%0.1f
+Formula=X/1000
+Provider=HAL
+ID=CPU clock
+[Source9]
+Name=Zen5 Core 1
+Units=GHz
+Format=%0.1f
+Formula=X/1000
+Provider=HwInfo
+SensorInst=0
+ReadingType=6
+ReadingName=Zen5 Core 0 Clock (perf #1)
+[Source10]
+Name=Zen5 Core 2
+Units=GHz
+Format=%0.1f
+Formula=X/1000
+Provider=HwInfo
+SensorInst=0
+ReadingType=6
+ReadingName=Zen5 Core 0 Clock (perf #2)
+[Source11]
+Name=Zen5 Core 3
+Units=GHz
+Format=%0.1f
+Formula=X/1000
+Provider=HwInfo
+SensorInst=0
+ReadingType=6
+ReadingName=Zen5 Core 0 Clock (perf #3)
+[Source12]
+Name=Zen5 Core 4
+Units=GHz
+Format=%0.1f
+Formula=X/1000
+Provider=HwInfo
+SensorInst=0
+ReadingType=6
+ReadingName=Zen5 Core 0 Clock (perf #4)
+[Source13]
+Name=Zen5 Core 5
+Units=GHz
+Format=%0.1f
+Formula=X/1000
+Provider=HwInfo
+SensorInst=0
+ReadingType=6
+ReadingName=Zen5 Core 0 Clock (perf #5)
+[Source14]
+Name=Zen5 Core 6
+Units=GHz
+Format=%0.1f
+Formula=X/1000
+Provider=HwInfo
+SensorInst=0
+ReadingType=6
+ReadingName=Zen5 Core 0 Clock (perf #6)
+[Source15]
+Name=Zen5 Core 7
+Units=GHz
+Format=%0.1f
+Formula=X/1000
+Provider=HwInfo
+SensorInst=0
+ReadingType=6
+ReadingName=Zen5 Core 0 Clock (perf #7)
+[Source16]
+Name=Zen5 Core 8
+Units=GHz
+Format=%0.1f
+Formula=X/1000
+Provider=HwInfo
+SensorInst=0
+ReadingType=6
+ReadingName=Zen5 Core 0 Clock (perf #8)
+[Source17]
+Name=Core 0 Clock (perf #0)
+Units=GHz
+Format=%0.1f
+Formula=X/1000
+Provider=HwInfo
+SensorInst=0
+ReadingType=6
+ReadingName=Core 0 Clock (perf #0)
+[Source18]
+Name=Core 0 Clock (perf #1)
+Units=Ghz
+Format=%0.1f
+Formula=X/1000
+Provider=HwInfo
+SensorInst=0
+ReadingType=6
+ReadingName=Core 0 Clock (perf #1)
+[Source19]
+Name=Core 0 Clock (perf #2)
+Units=GHz
+Format=%0.1f
+Formula=X/1000
+Provider=HwInfo
+SensorInst=0
+ReadingType=6
+ReadingName=Core 0 Clock (perf #2)
+[Source20]
+Name=Core 0 Clock (perf #3)
+Units=GHz
+Format=%0.1f
+Formula=X/1000
+Provider=HwInfo
+SensorInst=0
+ReadingType=6
+ReadingName=Core 0 Clock (perf #3)
+[Source21]
+Name=CPU usage max
+Units=%
+Format=
+Formula=
+Provider=HAL
+ID=CPU usage max
+[Source22]
+Name=GPU1 clock
+Units=GHz
+Format=%0.1f
+Formula=x/1000
+Provider=HAL
+ID=GPU1 clock
+[Source23]
+Name=GPU2 clock
+Units=GHz
+Format=%0.1f
+Formula=x/1000
+Provider=HwInfo
+SensorInst=0
+ReadingType=6
+ReadingName=GPU Clock
+[Source24]
+Name=GPU D3D Usage
+Units=%
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=0
+ReadingType=7
+ReadingName=GPU D3D Usage
+[Source25]
+Name=AMD GPU1 memory usage
+Units=GB
+Format=
+Formula=x/1000
+Provider=HAL
+ID=GPU1 memory usage
+[Source26]
+Name=AMD GPU1 memory usage percent
+Units=%
+Format=
+Formula=
+Provider=HAL
+ID=GPU1 memory usage percent
+[Source27]
+Name=CPU TEMP
+Units=¡æ
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=0
+ReadingType=1
+ReadingName=CPU (Tctl/Tdie)
+[Source28]
+Name=CPU Package
+Units=¡æ
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=0
+ReadingType=1
+ReadingName=CPU Package
+[Source29]
+Name=HDD TEMP MAX
+Units=C
+Format=
+Formula=max("HDD1 temperature", "HDD1 temperature 2")
+Provider=HAL
+ID=HDD TEMP MAX
+[Source30]
+Name=HDD1 temperature
+Units=C
+Format=
+Formula=
+Provider=HAL
+ID=HDD1 temperature
+[Source31]
+Name=HDD1 temperature 2
+Units=C
+Format=
+Formula=
+Provider=HAL
+ID=HDD1 temperature 2
+[Source32]
+Name=WIFI
+Units=" MB"
+Format=%0.1f
+Formula=("Current DL rate"+ "Current UP rate")
+Provider=HAL
+ID=CPU1 usage
+[Source33]
+Name=Current DL rate
+Units=MB/s
+Format=%0.1f
+Formula=x/1000
+Provider=HwInfo
+SensorInst=0
+ReadingType=8
+ReadingName=Current DL rate
+[Source34]
+Name=Current UP rate
+Units=MB/s
+Format=%0.1f
+Formula=x/1000
+Provider=HwInfo
+SensorInst=0
+ReadingType=8
+ReadingName=Current UP rate
+[Source35]
+Name=IPv4 Datagrams
+Units=
+Format=
+Formula=
+Provider=PerfCounter
+ObjectName=IPv4
+CounterName=Datagrams/sec
+Dynamic=1
+[Source36]
+Name=IPv6 Datagrams
+Units=
+Format=
+Formula=
+Provider=PerfCounter
+ObjectName=IPv6
+CounterName=Datagrams/sec
+Dynamic=1
+[Source37]
+Name=HDD
+Units=MB
+Format=%0.1f
+Formula=""FileSystem Bytes Written"+ "FileSystem Bytes Read""
+Provider=HAL
+ID=HDD
+[Source38]
+Name=FileSystem Bytes Written
+Units=MB
+Format=%0.1f
+Formula=X/1000000
+Provider=PerfCounter
+ObjectName=FileSystem Disk Activity
+InstanceIndex=0
+CounterName=FileSystem Bytes Written
+Dynamic=1
+[Source39]
+Name=FileSystem Bytes Read
+Units=MB
+Format=%0.1f
+Formula=X/1000000
+Provider=PerfCounter
+ObjectName=FileSystem Disk Activity
+InstanceIndex=0
+CounterName=FileSystem Bytes Read
+Dynamic=1
+[Source40]
+Name=Estimated Remaining Time
+Units=
+Format=%0.1f
+Formula=x/60
+Provider=HwInfo
+SensorInst=0
+ReadingType=8
+ReadingName=Estimated Remaining Time
+[Source41]
+Name=Charge Rate
+Units=W
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=0
+ReadingType=8
+ReadingName=Charge Rate
+[Source42]
+Name=Charge Level
+Units=%
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=0
+ReadingType=8
+ReadingName=Charge Level
+[Source43]
+Name=RAM usage percent
+Units=%
+Format=
+Formula=X
+Provider=HAL
+ID=RAM usage percent
+[Source44]
+Name=RAM usage
+Units=GB
+Format=%0.1f
+Formula=x/1000
+Provider=HAL
+ID=RAM usage
+[Source45]
+Name=Total Errors
+Units=
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=0
+ReadingType=8
+ReadingName=Total Errors
+[Layer0]
+Name=Framerate
+Text=FPS-%Framerate Presented (avg)%
+PositionSticky=1
+ExtentX=-16
+ExtentY=-2
+ExtentOrigin=1
+Size=80
+TextColor=FFFFFF
+RefreshPeriod=1000
+MarginTop=2
