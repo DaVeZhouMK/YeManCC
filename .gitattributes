@@ -1,0 +1,31 @@
+* text=auto
+
+# Windows scripts keep native line endings.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+*.vbs text eol=crlf
+
+# Web and source files use stable LF endings across local and CI builds.
+*.css text eol=lf
+*.html text eol=lf
+*.js text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.mjs text eol=lf
+*.ts text eol=lf
+*.vue text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+
+# Runtime and SDK payloads are binary.
+*.bin binary
+*.dll binary
+*.exe binary
+*.ico binary
+*.lib binary
+*.ovl binary
+*.png binary
+*.pow binary
+*.pyd binary
+*.sys binary

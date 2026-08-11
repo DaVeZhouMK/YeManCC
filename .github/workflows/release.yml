@@ -1,0 +1,140 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm 11.16.0
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.16.0
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Setup MSVC + Windows SDK
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Install frontend deps
+        run: pnpm install --frozen-lockfile
+
+      - name: Build frontend (生成 version.ts/version.h + dist)
+        run: pnpm run build
+
+      - name: Compile native shell (WebView2 静态链接 /MT)
+        shell: pwsh
+        run: |
+          $root = $env:GITHUB_WORKSPACE
+          $native = Join-Path $root 'native'
+          # 追加 deps 的 include/lib（WebView2 SDK + nlohmann/json，已提交进仓库，位于仓库根 deps/）
+          $env:INCLUDE = "$env:INCLUDE;$root\deps\webview2\build\native\include;$root\deps\json"
+          $env:LIB     = "$env:LIB;$root\deps\webview2\build\native\x64"
+          Set-Location $native
+          rc.exe /nologo /Fo app.res app.rc
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cl.exe /nologo /std:c++20 /utf-8 /EHsc /MT /O2 /DNDEBUG /DUNICODE /D_UNICODE main.cpp /Fe:YeManCC.exe /Fo:main.obj /link /SUBSYSTEM:WINDOWS $root\deps\webview2\build\native\x64\WebView2LoaderStatic.lib app.res user32.lib gdi32.lib shell32.lib shlwapi.lib ole32.lib oleaut32.lib dwmapi.lib winhttp.lib advapi32.lib version.lib psapi.lib PowrProf.lib
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (-not (Test-Path YeManCC.exe)) { exit 1 }
+
+      - name: Package complete YeManCC update
+        shell: pwsh
+        run: |
+          $root = $env:GITHUB_WORKSPACE
+          $pkg = Join-Path $root 'pkg'
+          New-Item -ItemType Directory -Force -Path $pkg | Out-Null
+          $powerControlSrc = Join-Path $root 'PowerControl'
+          $forbiddenNestedArtifacts = Get-ChildItem -LiteralPath $powerControlSrc -Recurse -Force -ErrorAction SilentlyContinue |
+            Where-Object {
+              $relative = $_.FullName.Substring($powerControlSrc.Length).TrimStart('\\')
+              $relative -match '(^|\\)(build|dist|__pycache__|KX\.bak_removed|product-old-files-[^\\]+)(\\|$)' -or
+                $_.Name -match '\.bak(?:_|$)'
+            }
+          if ($forbiddenNestedArtifacts) {
+            $names = ($forbiddenNestedArtifacts | Select-Object -First 20 -ExpandProperty FullName) -join "`n"
+            throw "Forbidden build/backup artifacts are present in PowerControl source:`n$names"
+          }
+          # dist is the complete C:\SOFT\YeMan\YeManCC payload.
+          Copy-Item (Join-Path $root 'dist\*') $pkg -Recurse -Force
+          Copy-Item (Join-Path $root 'native\YeManCC.exe') $pkg
+          Copy-Item (Join-Path $root 'app.config.json') $pkg
+          Copy-Item (Join-Path $root 'version.json') $pkg
+          Copy-Item (Join-Path $root 'PowerControl') (Join-Path $pkg 'PowerControl') -Recurse -Force
+          Copy-Item (Join-Path $root 'YeMan-Support.html') $pkg
+          $requiredPawnio = @(
+            'PowerControl\pawnio\YeManTdpCtl.exe',
+            'PowerControl\pawnio\PawnIO_setup.exe',
+            'PowerControl\pawnio\AMDFamily17.bin',
+            'PowerControl\pawnio\IntelMSR.bin',
+            'PowerControl\pawnio\LpcIO.bin',
+            'PowerControl\pawnio\RyzenSMU.bin',
+            'PowerControl\pawnio\_internal\python313.dll'
+          )
+          foreach ($relative in $requiredPawnio) {
+            if (-not (Test-Path -LiteralPath (Join-Path $pkg $relative) -PathType Leaf)) {
+              throw "Package missing PawnIO runtime: $relative"
+            }
+          }
+          # PowerControl is a separate install target. It may exist in the
+          # archive staging root, but never under the program directory.
+          $forbiddenSourceDirs = @('TPD', 'intel', 'ryzenadj', 'tools')
+          foreach ($name in $forbiddenSourceDirs) {
+            if (Test-Path -LiteralPath (Join-Path $root (Join-Path 'PowerControl' $name))) {
+              throw "Forbidden PowerControl directory exists: $name"
+            }
+          }
+          $nestedPowerControl = Join-Path (Join-Path $pkg 'YeManCC') 'PowerControl'
+          if (Test-Path -LiteralPath $nestedPowerControl) { throw 'Invalid nested PowerControl in package' }
+          $required = @('YeManCC.exe', 'index.html', 'app.config.json', 'version.json', 'PowerControl', 'YeMan-Support.html')
+          foreach ($name in $required) {
+            if (-not (Test-Path -LiteralPath (Join-Path $pkg $name))) { throw "Package missing $name" }
+          }
+          Compress-Archive -Path (Join-Path $pkg '*') -DestinationPath (Join-Path $root 'YeManCC.zip') -Force
+
+      - name: Calculate package sha256 and update version manifest
+        shell: pwsh
+        run: |
+          $root = $env:GITHUB_WORKSPACE
+          $zip = Join-Path $root 'YeManCC.zip'
+          $hash = (Get-FileHash -Path $zip -Algorithm SHA256).Hash
+          $verPath = Join-Path $root 'version.json'
+          $ver = Get-Content $verPath -Raw | ConvertFrom-Json
+          $ver.sha256 = $hash
+          $ver.publishedAt = (Get-Date -Format 'yyyy-MM-dd')
+          $ver | ConvertTo-Json -Depth 3 | Set-Content -Path $verPath -Encoding utf8
+          Write-Host "sha256=$hash"
+
+      - name: Commit version manifest back to main
+        shell: bash
+        run: |
+          git fetch origin main
+          git checkout main
+          git add version.json
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git commit -m "chore: 更新 version.json sha256 (${{ github.ref_name }})" || echo "no change"
+          git push origin main
+
+      - name: 发布 GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: YeManCC.zip
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

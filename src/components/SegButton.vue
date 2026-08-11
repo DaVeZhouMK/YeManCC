@@ -1,0 +1,119 @@
+<script setup lang="ts">
+interface Opt {
+  value: string | number;
+  label: string;
+  detail?: string;
+}
+const props = withDefaults(
+  defineProps<{
+    modelValue: string | number;
+    options: Opt[];
+    color?: 'ac' | 'dc' | 'accent';
+    full?: boolean;
+    disabled?: boolean;
+  }>(),
+  { color: 'accent', full: false, disabled: false }
+);
+const emit = defineEmits<{ (e: 'update:modelValue', v: string | number): void }>();
+function pick(v: string | number) {
+  if (props.disabled) return;
+  emit('update:modelValue', v);
+}
+const accentVar = props.color === 'dc' ? 'var(--dc-accent)' : 'var(--accent)';
+</script>
+
+<template>
+  <div class="seg" :class="{ full: full, disabled: disabled }" :style="{ '--seg-accent': accentVar }">
+    <button
+      v-for="o in options"
+      :key="o.value"
+      type="button"
+      class="seg-btn"
+      :class="{ active: o.value === modelValue }"
+      :disabled="disabled"
+      @click="pick(o.value)"
+    >
+      <span class="seg-main">{{ o.label }}</span>
+      <span v-if="o.detail" class="seg-detail">{{ o.detail }}</span>
+    </button>
+  </div>
+</template>
+
+<style scoped>
+.seg {
+  display: inline-flex;
+  background: var(--bg-input);
+  border-radius: var(--radius-ctrl);
+  padding: 3px;
+  gap: 2px;
+  flex-wrap: nowrap;
+}
+.seg.full {
+  display: flex;
+  width: 100%;
+}
+.seg.full .seg-btn {
+  flex: 1 1 0;
+  justify-content: center;
+  min-width: 0;
+  padding-left: 4px;
+  padding-right: 4px;
+}
+.seg-btn {
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-size: var(--btn-font-size);
+  line-height: var(--btn-line-height);
+  padding: var(--btn-py) 10px;
+  min-height: var(--btn-min-h);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+  white-space: nowrap;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+}
+.seg-main {
+  line-height: 1.15;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+.seg-detail {
+  max-width: 100%;
+  font-size: 10px;
+  line-height: 1.15;
+  font-weight: 500;
+  opacity: 0.78;
+  text-align: center;
+  white-space: normal;
+  font-variant-numeric: tabular-nums;
+}
+.seg-btn:hover {
+  color: var(--text);
+}
+.seg-btn.active {
+  background: var(--seg-accent);
+  color: #06121d;
+  font-weight: 600;
+}
+.seg-btn:focus-visible {
+  box-shadow: var(--focus-ring);
+}
+/* 禁用态：整体变暗 + 取消鼠标响应，视觉上明确表达"已锁定" */
+.seg.disabled {
+  opacity: 0.45;
+  pointer-events: none;
+}
+.seg.disabled .seg-btn {
+  cursor: default;
+}
+.seg.disabled .seg-btn.active {
+  opacity: 0.65;
+}
+</style>

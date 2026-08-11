@@ -1,0 +1,68 @@
+# 依赖
+node_modules/
+
+# 构建产物（vite 输出、esbuild 临时产物、本地打包）
+dist/
+build/
+PowerControl/pawnio/build/
+PowerControl/pawnio/dist/
+PowerControl/pawnio/__pycache__/
+PowerControl/pawnio/KX.bak_removed/
+PowerControl/**/product-old-files-*/
+PowerControl/**/*.bak
+PowerControl/**/*.bak_*
+# 放行 WebView2 SDK 的 build 目录：上面的 build/ 会误伤 deps/webview2/build，
+# 其头文件(include/)与静态库(x64/*.lib)必须随仓库提交，否则 CI 无法编译原生壳
+!deps/webview2/build/
+pkg/
+YeManCC.zip
+
+# 自动更新暂存（native 写入 %LOCALAPPDATA%，不在此）
+# 运行时日志
+debug.log
+*.log
+
+# 构建期自动生成的文件（scripts/write-version.mjs 产出，勿提交）
+src/version.ts
+native/version.h
+native/app.res
+native/main.obj
+native/YeManCC.exe
+native/*.ilk
+native/*.pdb
+
+# 测试/临时
+testrun/
+native/testrun/
+outputs/
+*.obj
+*.rar
+store1091500.html
+_nul
+
+# 原生壳本地构建与预览
+native/main.exe
+native/deploy_bak/
+native/*.bak_*
+native/*_preview_*.png
+native/*_icon_check.png
+
+# PowerControl 运行状态（不得进入源码基线或 Release）
+PowerControl/FPS-*.txt
+PowerControl/tdp-*.txt
+PowerControl/fps-monitor.hb
+PowerControl/fps-monitor.pid
+PowerControl/fps-monitor.log
+PowerControl/hwinfo-ok
+PowerControl/speedhack.log
+PowerControl/startup_trace.txt
+PowerControl/Test-AutoRotation-Repair.bat
+PowerControl/Test-AutoRotation-Repair.vbs
+
+# 工具/IDE 数据
+.workbuddy/
+.vscode/
+
+# 系统
+Thumbs.db
+Desktop.ini

@@ -1,0 +1,33 @@
+{
+  "window": {
+    "title": "YeManCC",
+    "width": 580,
+    "height": 780,
+    "minWidth": 480,
+    "minHeight": 540,
+    "frameless": true,
+    "backgroundColor": "#0b0e13",
+    "lightBackgroundColor": "#0b0e13",
+    "darkBackgroundColor": "#0b0e13",
+    "followSystemTheme": false,
+    "resizable": true,
+    "alwaysOnTop": false,
+    "singleInstance": true,
+    "rounded": true,
+    "center": true,
+    "showWhenReady": true,
+    "splash": true,
+    "saveWindowState": false,
+    "fullHeight": true,
+    "visible": true
+  },
+  "dev": {
+    "command": "pnpm run dev",
+    "port": 5173,
+    "waitForPort": 5173
+  },
+  "build": {
+    "command": "pnpm run build",
+    "outDir": "dist"
+  }
+}

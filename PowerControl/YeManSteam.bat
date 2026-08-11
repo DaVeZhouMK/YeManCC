@@ -1,0 +1,1 @@
+"C:\SOFT\NirCmd\nircmd.exe" exec hide "C:\SOFT\YeMan\PowerControl\YeManSteam2.bat"
