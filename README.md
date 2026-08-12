@@ -43,5 +43,6 @@
 
 
       双击运行：
+双击执行程序
 C:\SOFT\YeMan\YeManCC\YeManCC.exe
 
