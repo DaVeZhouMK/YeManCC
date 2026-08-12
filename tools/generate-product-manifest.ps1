@@ -47,6 +47,20 @@ function Get-Category([string]$rootName, [string]$relativePath) {
   }
 }
 
+function Get-Sha256([string]$Path) {
+  $sha = [Security.Cryptography.SHA256]::Create()
+  try {
+    $stream = [IO.File]::OpenRead($Path)
+    try {
+      return ([BitConverter]::ToString($sha.ComputeHash($stream))).Replace('-', '')
+    } finally {
+      $stream.Dispose()
+    }
+  } finally {
+    $sha.Dispose()
+  }
+}
+
 $records = @()
 foreach ($root in $roots.GetEnumerator()) {
   if (-not (Test-Path -LiteralPath $root.Value -PathType Container)) {
@@ -55,7 +69,7 @@ foreach ($root in $roots.GetEnumerator()) {
   $rootPath = (Resolve-Path -LiteralPath $root.Value).Path.TrimEnd('\')
   foreach ($file in (Get-ChildItem -LiteralPath $rootPath -Recurse -File -Force | Sort-Object FullName)) {
     $relative = $file.FullName.Substring($rootPath.Length).TrimStart('\').Replace('\', '/')
-    $hash = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash
+    $hash = Get-Sha256 $file.FullName
     $records += [pscustomobject]@{
       Root = $root.Key
       Category = Get-Category $root.Key $relative

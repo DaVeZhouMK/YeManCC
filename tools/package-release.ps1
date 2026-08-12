@@ -25,6 +25,20 @@ function Assert-ChildPath([string]$Child, [string]$Parent, [string]$Label) {
   }
 }
 
+function Get-Sha256([string]$Path) {
+  $sha = [Security.Cryptography.SHA256]::Create()
+  try {
+    $stream = [IO.File]::OpenRead($Path)
+    try {
+      return ([BitConverter]::ToString($sha.ComputeHash($stream))).Replace('-', '')
+    } finally {
+      $stream.Dispose()
+    }
+  } finally {
+    $sha.Dispose()
+  }
+}
+
 function Copy-DirectoryContents([string]$Source, [string]$Destination) {
   if (-not (Test-Path -LiteralPath $Source -PathType Container)) {
     throw "Copy source is missing: $Source"
@@ -161,7 +175,7 @@ foreach ($entry in $assetLock.files) {
     Join-Path $ProjectRoot ([string]$entry.fallbackPath).Replace('/', '\')
   }
   if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { throw "Release asset is missing: $source" }
-  $hash = (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash
+  $hash = Get-Sha256 $source
   if ($hash -ne [string]$entry.sha256) { throw "Release asset hash mismatch: $source" }
   $destination = Join-Path $StagingPowerControl ([string]$entry.releasePath).Replace('/', '\')
   New-Item -ItemType Directory -Force -Path (Split-Path -Parent $destination) | Out-Null
@@ -196,8 +210,8 @@ $pawnioExpected = @($assetLock.files | Where-Object component -eq 'PawnIO' | For
 $pawnioActual = @(Get-ChildItem -LiteralPath (Join-Path $StagingPowerControl 'pawnio') -Recurse -File | ForEach-Object { Get-RelativePath (Join-Path $StagingPowerControl 'pawnio') $_.FullName } | Sort-Object)
 if (Compare-Object $pawnioExpected $pawnioActual) { throw 'PawnIO runtime does not exactly match the locked atomic file set' }
 
-$topLpc = (Get-FileHash -LiteralPath (Join-Path $StagingPowerControl 'pawnio\LpcIO.bin') -Algorithm SHA256).Hash
-$internalLpc = (Get-FileHash -LiteralPath (Join-Path $StagingPowerControl 'pawnio\_internal\LpcIO.bin') -Algorithm SHA256).Hash
+$topLpc = Get-Sha256 (Join-Path $StagingPowerControl 'pawnio\LpcIO.bin')
+$internalLpc = Get-Sha256 (Join-Path $StagingPowerControl 'pawnio\_internal\LpcIO.bin')
 if ($topLpc -ne $internalLpc) { throw 'PawnIO top-level and _internal LpcIO.bin do not match' }
 
 $forbidden = @()
@@ -239,7 +253,7 @@ $versionedPackage = Join-Path $ReleasePackages "YeManCC-$version.zip"
 $compatPackage = Join-Path $ReleasePackages 'YeManCC.zip'
 Compress-Archive -Path (Join-Path $UpdateRoot '*') -DestinationPath $versionedPackage -CompressionLevel Optimal -Force
 Copy-Item -LiteralPath $versionedPackage -Destination $compatPackage -Force
-$packageHash = (Get-FileHash -LiteralPath $compatPackage -Algorithm SHA256).Hash
+$packageHash = Get-Sha256 $compatPackage
 
 $releaseVersion = [ordered]@{
   version = $version
@@ -284,7 +298,7 @@ foreach ($rootInfo in @(
       root = [string]$rootInfo.Name
       path = (Get-RelativePath $rootPath $file.FullName).Replace('\', '/')
       size = [int64]$file.Length
-      sha256 = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash
+      sha256 = Get-Sha256 $file.FullName
     }
   }
 }
@@ -294,7 +308,7 @@ foreach ($name in @('version.json', 'TESTING.md')) {
     root = 'Release'
     path = $name
     size = [int64]$file.Length
-    sha256 = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash
+    sha256 = Get-Sha256 $file.FullName
   }
 }
 
@@ -311,7 +325,7 @@ $manifest = [ordered]@{
 }
 $manifestPath = Join-Path $ReleaseRoot 'release-manifest.json'
 $manifest | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $manifestPath -Encoding UTF8
-$manifestHash = (Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256).Hash
+$manifestHash = Get-Sha256 $manifestPath
 "$manifestHash  release-manifest.json" | Set-Content -LiteralPath (Join-Path $ReleaseRoot 'release-manifest.sha256') -Encoding ASCII
 
 Write-Output 'PACKAGE_OK'

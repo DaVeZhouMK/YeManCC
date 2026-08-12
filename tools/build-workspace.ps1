@@ -28,6 +28,20 @@ function Assert-ChildPath([string]$Child, [string]$Parent, [string]$Label) {
   }
 }
 
+function Get-Sha256([string]$Path) {
+  $sha = [Security.Cryptography.SHA256]::Create()
+  try {
+    $stream = [IO.File]::OpenRead($Path)
+    try {
+      return ([BitConverter]::ToString($sha.ComputeHash($stream))).Replace('-', '')
+    } finally {
+      $stream.Dispose()
+    }
+  } finally {
+    $sha.Dispose()
+  }
+}
+
 $ProjectRoot = Get-FullPath (Split-Path -Parent $PSScriptRoot)
 if ([string]::IsNullOrWhiteSpace($WorkspaceRoot)) {
   $WorkspaceRoot = Get-FullPath (Join-Path $ProjectRoot '..\..')
@@ -85,7 +99,7 @@ foreach ($path in $required) {
 }
 
 $exe = Get-Item -LiteralPath (Join-Path $NativeBuild 'YeManCC.exe')
-$hash = (Get-FileHash -LiteralPath $exe.FullName -Algorithm SHA256).Hash
+$hash = Get-Sha256 $exe.FullName
 Write-Output "BUILD_OK"
 Write-Output "Workspace: $WorkspaceRoot"
 Write-Output "Web:       $WebBuild"
