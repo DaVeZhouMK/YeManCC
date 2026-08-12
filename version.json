@@ -1,6 +1,7 @@
-{
-  "version": "0.0.6",
-  "notes": "Fix in-app updater path: install PowerControl beside YeManCC and preserve player files.",
-  "sha256": "",
-  "publishedAt": ""
+﻿{
+    "version":  "0.0.6",
+    "notes":  "Fix in-app updater path: install PowerControl beside YeManCC and preserve player files.",
+    "sha256":  "B8CA4F6D465463DDE1BD5FC64A89BE63C8DBB2A97B146EE193106DA45B6D5588",
+    "publishedAt":  "2026-08-12",
+    "package":  "Packages/YeManCC.zip"
 }
