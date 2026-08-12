@@ -52,14 +52,30 @@ jobs:
             'Release\PowerControl\pawnio\LpcIO.bin',
             'Release\PowerControl\pawnio\_internal\python313.dll',
             'Release\Packages\YeManCC.zip',
-            'Release\version.json',
-            'Release\release-manifest.json',
-            'Release\release-manifest.sha256'
+            'Release\version.json'
           )
           foreach ($relative in $required) {
             if (-not (Test-Path -LiteralPath (Join-Path $root $relative))) {
               throw "Release output missing: $relative"
             }
+          }
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $zip = [IO.Compression.ZipFile]::OpenRead((Join-Path $root 'Release\Packages\YeManCC.zip'))
+          try {
+            $roots = @($zip.Entries | ForEach-Object {
+              $normalized = $_.FullName.Replace('\', '/').TrimStart('/')
+              if ($normalized) { ($normalized -split '/')[0] }
+            } | Sort-Object -Unique)
+            if ($roots.Count -ne 2 -or $roots[0] -ne 'PowerControl' -or $roots[1] -ne 'YeManCC') {
+              throw "YeManCC.zip root must contain exactly PowerControl and YeManCC; got: $($roots -join ', ')"
+            }
+            $flat = @($zip.Entries | Where-Object {
+              $normalized = $_.FullName.Replace('\', '/').TrimStart('/')
+              $normalized -match '^(YeManCC\.exe|YeMan-Support\.html|assets/)'
+            })
+            if ($flat.Count -gt 0) { throw 'YeManCC.zip contains flattened YeManCC entries.' }
+          } finally {
+            $zip.Dispose()
           }
 
       - name: Publish GitHub Release
@@ -67,9 +83,6 @@ jobs:
         with:
           files: |
             Release/Packages/YeManCC.zip
-            Release/Packages/YeManCC-*.zip
-            Release/release-manifest.json
-            Release/release-manifest.sha256
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

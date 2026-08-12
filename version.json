@@ -1,8 +1,6 @@
-﻿{
-    "version":  "0.0.5",
-    "notes":  "同步更新 YeManCC、PowerControl 和 YeMan-Support.html；保留玩家自定义文件。",
-    "sha256":  "AD5986F9F539CABE0E98E7E4EE764BBA2403146CD9276405F4AED6D5B6144C5C",
-    "publishedAt":  "2026-08-12",
-    "package":  "Packages/YeManCC.zip",
-    "versionedPackage":  "Packages/YeManCC-0.0.5.zip"
+{
+  "version": "0.0.6",
+  "notes": "Fix in-app updater path: install PowerControl beside YeManCC and preserve player files.",
+  "sha256": "",
+  "publishedAt": ""
 }

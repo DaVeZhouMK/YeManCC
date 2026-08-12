@@ -49,6 +49,7 @@
 #include <winhttp.h>
 #include <wincrypt.h>
 #include <cctype>
+#include <cwctype>
 #include <mutex>
 #include <atomic>
 #include <cstdio>
@@ -315,20 +316,9 @@ static std::wstring resolve_power_control_dir() {
         if (fspath::is_directory(candidate, ec) && !ec)
             return candidate.wstring();
     }
-    std::vector<std::wstring> candidates;
-    candidates.push_back(fixed);
-    const auto app = fspath::path(exe_dir());
-    candidates.push_back((app / "PowerControl").wstring());
-    candidates.push_back((app.parent_path() / "PowerControl").wstring());
-    candidates.push_back((app.parent_path().parent_path() / "PowerControl").wstring());
-    for (const auto& candidate : candidates) {
-        std::error_code ec;
-        if (fspath::is_directory(candidate, ec) &&
-            (fspath::exists(fspath::path(candidate) / "pawnio" / "YeManTdpCtl.exe", ec) ||
-             fspath::exists(fspath::path(candidate) / "YeManHWiNFO.bat", ec))) {
-            return candidate;
-        }
-    }
+    // Production always uses the shared sibling directory. The old fallback
+    // to <YeManCC>\PowerControl made a malformed legacy update look healthy
+    // while silently splitting runtime files across two locations.
     return fixed;
 }
 
@@ -9332,6 +9322,63 @@ static void migrate_legacy_support_page() {
     }
 }
 
+static bool is_legacy_power_control_user_file(const fspath::path& relative) {
+    auto value = relative.generic_wstring();
+    std::transform(value.begin(), value.end(), value.begin(), [](wchar_t ch) {
+        return static_cast<wchar_t>(std::towlower(ch));
+    });
+    if (value.ends_with(L".json") || value.ends_with(L".json.bak") || value.ends_with(L".bak")) return true;
+    if (value.rfind(L"ui-background/", 0) == 0) return true;
+    if (value.rfind(L"steamcharts/", 0) == 0) return true;
+    return false;
+}
+
+// v0.0.3 and earlier local updater builds could leave the packaged dependency
+// directory beside YeManCC.exe. Move only release files to the canonical
+// sibling directory, preserving user state and media if an old folder contains
+// any of those files. A successful package-only migration removes the stale
+// directory so future launches cannot use it again.
+static void migrate_legacy_power_control_dir() {
+    const fspath::path fixed(L"C:\\SOFT\\YeMan\\PowerControl");
+    const fspath::path legacy = fspath::path(exe_dir()) / "PowerControl";
+    std::error_code ec;
+    if (!fspath::is_directory(legacy, ec)) return;
+    ec.clear();
+    if (fspath::equivalent(legacy, fixed, ec)) return;
+
+    ec.clear();
+    fspath::create_directories(fixed, ec);
+    if (ec) {
+        traceLog("legacy PowerControl migration could not create target");
+        return;
+    }
+
+    bool failed = false;
+    for (fspath::recursive_directory_iterator it(legacy, ec), end; it != end && !ec; it.increment(ec)) {
+        const auto relative = fspath::relative(it->path(), legacy, ec);
+        if (ec) break;
+        if (it->is_directory(ec)) continue;
+        if (ec) break;
+        const bool isUserFile = is_legacy_power_control_user_file(relative);
+        const auto destination = fixed / relative;
+        fspath::create_directories(destination.parent_path(), ec);
+        if (ec) { failed = true; break; }
+        const auto copyMode = isUserFile
+            ? fspath::copy_options::skip_existing
+            : fspath::copy_options::overwrite_existing;
+        fspath::copy_file(it->path(), destination, copyMode, ec);
+        if (ec) { failed = true; break; }
+    }
+    if (ec) failed = true;
+    if (failed) {
+        traceLog("legacy PowerControl migration failed; keeping old directory");
+        return;
+    }
+    ec.clear();
+    fspath::remove_all(legacy, ec);
+    if (ec) traceLog("legacy PowerControl migrated but stale directory cleanup failed");
+}
+
 static void reg_updater() {
     ipc_on("app.version", [](const json&) -> json {
         return APP_VER_STR;
@@ -9356,7 +9403,8 @@ static void reg_updater() {
         }
         return W2U(dest);
     });
-    // Install the complete release payload into three fixed targets.
+    // Install the complete release payload into the sibling YeManCC and
+    // PowerControl targets while preserving player-owned files.
     // Merge-copy only: files added by players and absent from the package remain.
     ipc_on("app.installUpdate", [](const json&) -> json {
         auto zip = app_data_dir() + L"\\update\\package.zip";
@@ -9367,13 +9415,16 @@ static void reg_updater() {
         wchar_t exePath[MAX_PATH]; GetModuleFileNameW(nullptr, exePath, MAX_PATH);
         std::wstring exeStr(exePath);
         std::wstring exedir = exeStr.substr(0, exeStr.find_last_of(L"\\"));
-        const auto packagedExe = staging + L"\\YeManCC.exe";
+        const auto packagedYeManCC = staging + L"\\YeManCC";
+        if (!fspath::is_directory(packagedYeManCC))
+            throw std::runtime_error("Update package missing YeManCC directory");
+        const auto packagedExe = packagedYeManCC + L"\\YeManCC.exe";
         if (!fspath::exists(packagedExe))
             throw std::runtime_error("Update package missing YeManCC.exe");
         const auto packagedPowerControl = staging + L"\\PowerControl";
         if (!fspath::exists(packagedPowerControl))
             throw std::runtime_error("Update package missing PowerControl");
-        const auto packagedSupport = staging + L"\\YeMan-Support.html";
+        const auto packagedSupport = packagedYeManCC + L"\\YeMan-Support.html";
         if (!fspath::exists(packagedSupport))
             throw std::runtime_error("Update package missing YeMan-Support.html");
         // 依赖包固定目标目录（与前端 yeman.ts 的 PC_DIR 默认一致）
@@ -9399,6 +9450,7 @@ static void reg_updater() {
             f << "$staging = " << psLiteral(staging) << "\n";
             f << "$exePath = " << psLiteral(exePath) << "\n";
             f << "$exeDir = " << psLiteral(exedir) << "\n";
+            f << "$programSource = " << psLiteral(packagedYeManCC) << "\n";
             f << "$packageExe = " << psLiteral(packagedExe) << "\n";
             f << "$pcDir = " << psLiteral(pcDir) << "\n";
             f << "$supportPath = " << psLiteral(supportPath) << "\n";
@@ -9491,8 +9543,8 @@ static void reg_updater() {
             f << "  Copy-Item -LiteralPath $exePath -Destination $backup -Force\n";
             f << "  Copy-Item -LiteralPath $packageExe -Destination $newExe -Force\n";
             f << "  Move-Item -LiteralPath $newExe -Destination $exePath -Force\n";
-            f << "  Copy-TreeChecked $staging $exeDir @('/XF','YeManCC.exe','YeMan-Support.html','/XD','PowerControl')\n";
-            f << "  Copy-Item -LiteralPath (Join-Path $staging 'YeMan-Support.html') -Destination $supportPath -Force\n";
+            f << "  Copy-TreeChecked $programSource $exeDir @('/XF','YeManCC.exe','YeMan-Support.html')\n";
+            f << "  Copy-Item -LiteralPath (Join-Path $programSource 'YeMan-Support.html') -Destination $supportPath -Force\n";
             f << "  Set-Content -LiteralPath $state -Value '{\"phase\":\"launching\"}' -Encoding utf8\n";
             f << "  $newProcess = Start-Process -FilePath $exePath -ArgumentList @('--update-handshake', ('\"' + $handshakePath + '\"'), '--update-handshake-token', $handshakeToken) -PassThru\n";
             f << "  $handshakeDeadline = (Get-Date).AddSeconds($handshakeTimeoutSeconds)\n";
@@ -12383,6 +12435,8 @@ int WINAPI wWinMain(HINSTANCE hi, HINSTANCE, LPWSTR, int ns) {
     // Clear them after acquiring the single-instance lock so the frontend
     // cannot treat stale monitor/float files as a live session.
     cleanupExitArtifacts();
+    // Repair the first updater layout before startup workers read PowerControl.
+    migrate_legacy_power_control_dir();
     int  width     = winCfg.value("width", 1024);
     int  height    = winCfg.value("height", 768);
     g_frameless    = winCfg.value("frameless", false);

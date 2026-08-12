@@ -243,16 +243,50 @@ Move-Item -LiteralPath $StagingPowerControl -Destination $ReleasePowerControl
 if (Test-Path -LiteralPath $StagingRoot) { Remove-Item -LiteralPath $StagingRoot -Recurse -Force }
 New-Item -ItemType Directory -Force -Path $ReleasePackages | Out-Null
 
-Copy-DirectoryContents $ReleaseYeManCC $UpdateRoot
+# Keep both product directories at the ZIP root so extraction to C:\SOFT\YeMan
+# produces sibling C:\SOFT\YeMan\YeManCC and C:\SOFT\YeMan\PowerControl.
+$UpdateYeManCC = Join-Path $UpdateRoot 'YeManCC'
+Copy-Item -LiteralPath $ReleaseYeManCC -Destination $UpdateYeManCC -Recurse -Force
 Copy-Item -LiteralPath $ReleasePowerControl -Destination (Join-Path $UpdateRoot 'PowerControl') -Recurse -Force
+
+$updateTopLevel = @(Get-ChildItem -LiteralPath $UpdateRoot -Force | Select-Object -ExpandProperty Name | Sort-Object)
+if ($updateTopLevel.Count -ne 2 -or
+    $updateTopLevel[0] -ne 'PowerControl' -or
+    $updateTopLevel[1] -ne 'YeManCC') {
+  throw "Update ZIP root must contain exactly YeManCC and PowerControl; got: $($updateTopLevel -join ', ')"
+}
+if (-not (Test-Path -LiteralPath (Join-Path $UpdateYeManCC 'YeManCC.exe') -PathType Leaf)) {
+  throw 'Update ZIP YeManCC directory is missing YeManCC.exe'
+}
+if (-not (Test-Path -LiteralPath (Join-Path $UpdateRoot 'PowerControl\pawnio\YeManTdpCtl.exe') -PathType Leaf)) {
+  throw 'Update ZIP PowerControl directory is missing PawnIO runtime'
+}
 
 $versionInfo = Get-Content -LiteralPath (Join-Path $ProjectRoot 'version.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $version = [string]$versionInfo.version
 if ([string]::IsNullOrWhiteSpace($version)) { throw 'version.json has no version' }
-$versionedPackage = Join-Path $ReleasePackages "YeManCC-$version.zip"
 $compatPackage = Join-Path $ReleasePackages 'YeManCC.zip'
-Compress-Archive -Path (Join-Path $UpdateRoot '*') -DestinationPath $versionedPackage -CompressionLevel Optimal -Force
-Copy-Item -LiteralPath $versionedPackage -Destination $compatPackage -Force
+Compress-Archive -Path (Join-Path $UpdateRoot '*') -DestinationPath $compatPackage -CompressionLevel Optimal -Force
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+$zipArchive = [IO.Compression.ZipFile]::OpenRead($compatPackage)
+try {
+  $zipRoots = @($zipArchive.Entries | ForEach-Object {
+    $normalized = $_.FullName.Replace('\', '/').TrimStart('/')
+    if ($normalized) { ($normalized -split '/')[0] }
+  } | Sort-Object -Unique)
+  if ($zipRoots.Count -ne 2 -or $zipRoots[0] -ne 'PowerControl' -or $zipRoots[1] -ne 'YeManCC') {
+    throw "YeManCC.zip root must contain exactly PowerControl and YeManCC; got: $($zipRoots -join ', ')"
+  }
+  $flatEntries = @($zipArchive.Entries | Where-Object {
+    $normalized = $_.FullName.Replace('\', '/').TrimStart('/')
+    $normalized -match '^(YeManCC\.exe|YeMan-Support\.html|assets/)'
+  })
+  if ($flatEntries.Count -gt 0) {
+    throw "YeManCC.zip contains flattened YeManCC entries: $($flatEntries.FullName -join ', ')"
+  }
+} finally {
+  $zipArchive.Dispose()
+}
 $packageHash = Get-Sha256 $compatPackage
 
 $releaseVersion = [ordered]@{
@@ -261,16 +295,8 @@ $releaseVersion = [ordered]@{
   sha256 = $packageHash
   publishedAt = (Get-Date -Format 'yyyy-MM-dd')
   package = 'Packages/YeManCC.zip'
-  versionedPackage = "Packages/YeManCC-$version.zip"
 }
 $releaseVersion | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $ReleaseRoot 'version.json') -Encoding UTF8
-
-$gitCommit = ''
-$gitDirty = $true
-try {
-  $gitCommit = (& git -C $ProjectRoot rev-parse HEAD).Trim()
-  $gitDirty = -not [string]::IsNullOrWhiteSpace((& git -C $ProjectRoot status --short | Out-String))
-} catch {}
 
 $testingLines = @(
   '# YeManCC Release Testing', '',
@@ -286,52 +312,9 @@ $testingLines = @(
 )
 $testingLines | Set-Content -LiteralPath (Join-Path $ReleaseRoot 'TESTING.md') -Encoding UTF8
 
-$records = @()
-foreach ($rootInfo in @(
-  @{ Name = 'YeManCC'; Path = $ReleaseYeManCC },
-  @{ Name = 'PowerControl'; Path = $ReleasePowerControl },
-  @{ Name = 'Packages'; Path = $ReleasePackages }
-)) {
-  $rootPath = [string]$rootInfo.Path
-  foreach ($file in Get-ChildItem -LiteralPath $rootPath -Recurse -Force -File | Sort-Object FullName) {
-    $records += [ordered]@{
-      root = [string]$rootInfo.Name
-      path = (Get-RelativePath $rootPath $file.FullName).Replace('\', '/')
-      size = [int64]$file.Length
-      sha256 = Get-Sha256 $file.FullName
-    }
-  }
-}
-foreach ($name in @('version.json', 'TESTING.md')) {
-  $file = Get-Item -LiteralPath (Join-Path $ReleaseRoot $name)
-  $records += [ordered]@{
-    root = 'Release'
-    path = $name
-    size = [int64]$file.Length
-    sha256 = Get-Sha256 $file.FullName
-  }
-}
-
-$manifest = [ordered]@{
-  schemaVersion = 1
-  version = $version
-  generatedAt = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss zzz')
-  sourceCommit = $gitCommit
-  sourceDirty = $gitDirty
-  packageSha256 = $packageHash
-  assetSource = $assetSources
-  fileCount = $records.Count
-  files = $records
-}
-$manifestPath = Join-Path $ReleaseRoot 'release-manifest.json'
-$manifest | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $manifestPath -Encoding UTF8
-$manifestHash = Get-Sha256 $manifestPath
-"$manifestHash  release-manifest.json" | Set-Content -LiteralPath (Join-Path $ReleaseRoot 'release-manifest.sha256') -Encoding ASCII
-
 Write-Output 'PACKAGE_OK'
 Write-Output "Release YeManCC:      $ReleaseYeManCC"
 Write-Output "Release PowerControl: $ReleasePowerControl"
 Write-Output "Update package:       $compatPackage"
 Write-Output "Package SHA256:       $packageHash"
-Write-Output "Manifest SHA256:      $manifestHash"
 Write-Output "Assets:               $($assetSources.Values -join ', ')"
