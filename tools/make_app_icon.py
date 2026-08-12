@@ -1,4 +1,5 @@
 import math
+from pathlib import Path
 from PIL import Image, ImageDraw
 
 BG = (14, 19, 28, 255)        # #0e131c dark navy tile
@@ -29,7 +30,7 @@ def make(size):
 sizes = [16, 20, 24, 32, 40, 48, 64, 128, 256]
 # ICO writer emits multiple entries by downsampling a single high-res source
 # via the `sizes` parameter (append_images is ignored for ICO).
-out = r'C:\SOFT\YeMan\YeManCC4\YeManCC3\native\app.ico'
+out = str(Path(__file__).resolve().parents[1] / 'native' / 'app.ico')
 base = make(256)
 base.save(out, format='ICO', sizes=[(s, s) for s in sizes])
 print('wrote', out, base.size)

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, onActivated, onDeactivated } from 'vue';
+import { ref, computed, nextTick, onMounted, onUnmounted, onActivated, onDeactivated } from 'vue';
 import {
   oneClickFrameGen,
   optiscalerStatus,
@@ -9,6 +9,8 @@ import {
 } from '@/bridge/quickapp';
 import {
   subscribeGameStatus,
+  detectGame,
+  refreshGameStatus,
   detectedGameName,
   type DetectedGame,
 } from '@/bridge/gamedetect';
@@ -20,6 +22,7 @@ import {
 } from '@/bridge/speedhack';
 import {
   closeGame,
+  waitForProcessExit,
 } from '@/bridge/gameproc';
 import { fs, shell, dialog, display, registry, type DisplayMode, type DisplayTopology } from '@/bridge/api';
 import { readSettingsSection, saveSettingsSection } from '@/bridge/settingsRepository';
@@ -52,6 +55,128 @@ const busy = ref(false);
 const errMsg = ref('');
 const statusMsg = ref('');
 
+type FsrDialogKind = 'confirm' | 'message';
+type FsrDialogTone = 'info' | 'error' | 'success';
+interface FsrDialogOptions {
+  kind: FsrDialogKind;
+  title: string;
+  description: string;
+  tone?: FsrDialogTone;
+  confirmLabel?: string;
+  cancelLabel?: string;
+}
+
+// FSR 操作使用页面内弹窗，保持与性能调度“配置重制”一致；原生 dialog 只保留给文件选择器。
+const fsrDialogOpen = ref(false);
+const fsrDialogKind = ref<FsrDialogKind>('message');
+const fsrDialogTone = ref<FsrDialogTone>('info');
+const fsrDialogTitle = ref('');
+const fsrDialogDescription = ref('');
+const fsrDialogConfirmLabel = ref('知道了');
+const fsrDialogCancelLabel = ref('取消');
+const fsrDialogStyle = ref<Record<string, string>>({ position: 'fixed' });
+const fsrDialogAbove = ref(false);
+const fsrTriggerEl = ref<HTMLElement | null>(null);
+const fsrPanelEl = ref<HTMLElement | null>(null);
+const fsrMessageActionEl = ref<HTMLElement | null>(null);
+const fsrCancelEl = ref<HTMLElement | null>(null);
+let fsrDialogResolve: ((value: boolean) => void) | null = null;
+const fsrDialogIcon = computed(() => {
+  if (fsrDialogTone.value === 'error') return 'warning';
+  if (fsrDialogTone.value === 'success') return 'check';
+  return 'bolt';
+});
+
+function focusFsrTrigger() {
+  nextTick(() => {
+    const trigger = fsrTriggerEl.value;
+    if (!trigger || trigger.hasAttribute('disabled')) return;
+    document.querySelectorAll('.focused').forEach((n) => n.classList.remove('focused'));
+    trigger.focus({ preventScroll: true });
+    trigger.classList.add('focused');
+  });
+}
+
+function positionFsrDialog() {
+  const trigger = fsrTriggerEl.value;
+  const style: Record<string, string> = { position: 'fixed' };
+  const r = trigger?.getBoundingClientRect();
+  const POP_W = 300;
+  const POP_H = 210;
+  if (!r) {
+    style.left = Math.max(8, (window.innerWidth - POP_W) / 2) + 'px';
+    style.top = Math.max(8, (window.innerHeight - POP_H) / 2) + 'px';
+    fsrDialogAbove.value = false;
+  } else {
+    const spaceBelow = window.innerHeight - r.bottom;
+    const above = spaceBelow < POP_H + 8 && r.top > spaceBelow;
+    fsrDialogAbove.value = above;
+    if (above) {
+      style.bottom = window.innerHeight - r.top + 10 + 'px';
+      style.top = 'auto';
+    } else {
+      style.top = r.bottom + 8 + 'px';
+      style.bottom = 'auto';
+    }
+    style.left = Math.max(8, Math.min(r.right - POP_W, window.innerWidth - POP_W - 8)) + 'px';
+  }
+  style.width = POP_W + 'px';
+  fsrDialogStyle.value = style;
+}
+
+function openFsrDialog(options: FsrDialogOptions): Promise<boolean> {
+  if (fsrDialogResolve) fsrDialogResolve(false);
+  fsrDialogKind.value = options.kind;
+  fsrDialogTone.value = options.tone || 'info';
+  fsrDialogTitle.value = options.title;
+  fsrDialogDescription.value = options.description;
+  fsrDialogConfirmLabel.value = options.confirmLabel || (options.kind === 'message' ? '知道了' : '确认');
+  fsrDialogCancelLabel.value = options.cancelLabel || '取消';
+  positionFsrDialog();
+  fsrDialogOpen.value = true;
+  nextTick(() => {
+    positionFsrDialog();
+    const target = fsrDialogKind.value === 'confirm' ? fsrCancelEl.value : fsrMessageActionEl.value;
+    target?.focus({ preventScroll: true });
+    target?.classList.add('focused');
+  });
+  return new Promise<boolean>((resolve) => {
+    fsrDialogResolve = resolve;
+  });
+}
+
+function closeFsrDialog(result: boolean) {
+  if (!fsrDialogOpen.value && !fsrDialogResolve) return;
+  fsrDialogOpen.value = false;
+  const resolve = fsrDialogResolve;
+  fsrDialogResolve = null;
+  resolve?.(result);
+  focusFsrTrigger();
+}
+
+function cancelFsrDialog() {
+  closeFsrDialog(false);
+}
+
+function confirmFsrDialog() {
+  closeFsrDialog(true);
+}
+
+function onFsrDialogPointer(e: PointerEvent) {
+  if (!fsrDialogOpen.value) return;
+  const target = e.target as Node;
+  if (fsrPanelEl.value?.contains(target)) return;
+  cancelFsrDialog();
+}
+
+function showFsrMessage(title: string, description: string, tone: FsrDialogTone = 'info'): Promise<boolean> {
+  return openFsrDialog({ kind: 'message', title, description, tone });
+}
+
+function showFsrConfirm(title: string, description: string, confirmLabel = '确认'): Promise<boolean> {
+  return openFsrDialog({ kind: 'confirm', title, description, tone: 'info', confirmLabel });
+}
+
 const displayModes = ref<DisplayMode[]>([]);
 const displayCurrent = ref('');
 const displayBusy = ref(false);
@@ -61,10 +186,73 @@ const scaleOptions = [100, 125, 150, 175, 200, 225, 250, 300].map((value) => ({
   value,
   label: `${value}%`,
 }));
-const displayOptions = computed(() => displayModes.value.map((m) => ({
-  value: m.id,
-  label: `${m.width} × ${m.height} · ${m.refresh}Hz${m.orientation === 1 || m.orientation === 3 ? ' · 竖屏' : ''}`,
-})));
+const currentDisplayMode = computed(() => displayModes.value.find((m) => m.id === displayCurrent.value) || null);
+const currentDisplayIsLandscape = computed(() => {
+  const current = currentDisplayMode.value;
+  return current ? current.width >= current.height : null;
+});
+const displayModesByDirection = computed(() => {
+  const landscape = currentDisplayIsLandscape.value;
+  if (landscape === null) return displayModes.value;
+  return displayModes.value.filter((mode) => (mode.width >= mode.height) === landscape);
+});
+function displayResolutionKey(mode: Pick<DisplayMode, 'width' | 'height'>): string {
+  return `${mode.width}x${mode.height}`;
+}
+const displayModesByResolution = computed(() => {
+  const groups = new Map<string, DisplayMode[]>();
+  for (const mode of displayModesByDirection.value) {
+    const key = displayResolutionKey(mode);
+    const group = groups.get(key) || [];
+    group.push(mode);
+    groups.set(key, group);
+  }
+  return groups;
+});
+const displayResolutionOptions = computed(() => Array.from(displayModesByResolution.value.entries())
+  .map(([value, modes]) => ({
+    value,
+    label: `${modes[0].width} × ${modes[0].height}`,
+  }))
+  .sort((a, b) => {
+    const [aw, ah] = a.value.split('x').map(Number);
+    const [bw, bh] = b.value.split('x').map(Number);
+    return aw - bw || ah - bh;
+  }));
+const displayResolution = computed(() => {
+  const current = currentDisplayMode.value;
+  return current ? displayResolutionKey(current) : displayResolutionOptions.value[0]?.value || '';
+});
+const displayRefreshModes = computed(() => displayModesByResolution.value.get(displayResolution.value) || []);
+const displayRefreshOptions = computed(() => Array.from(new Map(
+  displayRefreshModes.value.map((mode) => [mode.refresh, mode]),
+).entries())
+  .map(([value]) => ({ value, label: `${value}Hz` }))
+  .sort((a, b) => Number(a.value) - Number(b.value)));
+const displayRefresh = computed(() => currentDisplayMode.value?.refresh || displayRefreshOptions.value[0]?.value || '');
+
+function chooseDisplayMode(modes: DisplayMode[], preferredRefresh: number, current: DisplayMode | null): DisplayMode | null {
+  if (modes.length === 0) return null;
+  return [...modes].sort((a, b) => {
+    const orientationA = current ? Number(a.orientation !== current.orientation) : 0;
+    const orientationB = current ? Number(b.orientation !== current.orientation) : 0;
+    return orientationA - orientationB
+      || Math.abs(a.refresh - preferredRefresh) - Math.abs(b.refresh - preferredRefresh)
+      || a.refresh - b.refresh;
+  })[0];
+}
+
+function modeForResolution(key: string): DisplayMode | null {
+  const modes = displayModesByResolution.value.get(key) || [];
+  const current = currentDisplayMode.value;
+  return chooseDisplayMode(modes, current?.refresh || 60, current);
+}
+
+function modeForRefresh(refresh: number): DisplayMode | null {
+  const current = currentDisplayMode.value;
+  const modes = displayRefreshModes.value.filter((mode) => mode.refresh === refresh);
+  return chooseDisplayMode(modes, refresh, current);
+}
 const displayTopology = ref<DisplayTopology | null>(null);
 const displayTopologyOptions: Array<{ value: DisplayTopology; label: string; detail: string }> = [
   { value: 'internal', label: '仅显示 1', detail: '关闭外接显示器' },
@@ -117,9 +305,13 @@ async function refreshDisplayModes() {
   }
 }
 
-async function applyDisplayMode(id: string | number) {
-  const selected = displayModes.value.find((m) => m.id === String(id));
+async function applyDisplayMode(selected: DisplayMode | null) {
   if (!selected || selected.id === displayCurrent.value) return;
+  const current = currentDisplayMode.value;
+  if (current && (selected.width >= selected.height) !== (current.width >= current.height)) {
+    errMsg.value = '已拦截与当前桌面方向相反的分辨率';
+    return;
+  }
   displayBusy.value = true;
   errMsg.value = '';
   try {
@@ -132,6 +324,16 @@ async function applyDisplayMode(id: string | number) {
   } finally {
     displayBusy.value = false;
   }
+}
+
+async function applyDisplayResolution(value: string | number) {
+  await applyDisplayMode(modeForResolution(String(value)));
+}
+
+async function applyDisplayRefresh(value: string | number) {
+  const refresh = Number(value);
+  if (!Number.isFinite(refresh)) return;
+  await applyDisplayMode(modeForRefresh(refresh));
 }
 
 async function applyDisplayTopology(topology: DisplayTopology) {
@@ -269,125 +471,120 @@ async function onLaunchLs() {
   }
 }
 
-// ── 公共 OptiScaler 安装/卸载逻辑 ──
-// gamePath: 游戏 exe 全路径；gameName: 显示名；runningPid: 若该游戏正在运行则需先关闭
-async function applyOptiScalerTo(
-  gamePath: string,
-  gameName: string,
-  runningPid: number | null
-) {
-  // 1) 刷新该目录的 OptiScaler 安装状态
-  let localStatus = false;
-  try {
-    localStatus = await optiscalerStatus(gamePath);
-  } catch {
-    localStatus = false;
-  }
-
-  // 2) 游戏正在运行 -> 文件被占用无法热更改，必须先确认关闭
-  if (runningPid) {
-    const ok = await dialog.confirm(
-      '游戏正在运行',
-      '「' + gameName + '」正在运行，其文件被占用无法热更改。\n是否先关闭游戏再应用？'
-    );
-    if (!ok) {
-      errMsg.value = '已取消：游戏运行时无法修改文件，请先关闭游戏。';
-      return;
-    }
-    busy.value = true;
-    try {
-      const cr = await closeGame(runningPid, gameName);
-      if (!cr.ok) {
-        errMsg.value =
-          '关闭游戏失败：' +
-          (cr.msgs?.join('；') || '未知错误') +
-          '，文件仍可能被占用。';
-        return;
-      }
-      statusMsg.value = '已关闭 ' + gameName + '，正在应用…';
-      await sleep(900); // 等待进程完全释放被占用的文件
-      if (game.value && game.value.path === gamePath) {
-        game.value = null; // 当前识别游戏已退，识别状态归零
-      }
-    } catch (e) {
-      errMsg.value = '关闭游戏失败：' + (e as Error).message;
-      return;
-    } finally {
-      busy.value = false;
-    }
-  }
-
-  // 3) 应用 安装 / 卸载
+// ── 当前游戏 OptiScaler 安装/卸载 ──
+// 当前游戏、PID 和路径来自同一次强制识别；关闭后只检查原 PID 是否消失，
+// 不重新识别游戏，避免把新启动的进程误当成刚才的目标。
+async function onOptiScalerCurrent() {
+  if (busy.value) return;
+  errMsg.value = '';
+  statusMsg.value = '';
+  // 从强制识别开始就锁定按钮，避免双击并发启动两条安装/卸载事务。
   busy.value = true;
+
+  // A button click must use a fresh detection result. refreshGameStatus may
+  // intentionally retain the last shared state after a transient poll error;
+  // that is useful for the page, but unsafe for a destructive file operation.
+  const current = await detectGame(true).catch((e) => {
+    errMsg.value = '识别当前游戏失败：' + (e as Error).message;
+    return null;
+  });
+  const gamePath = current?.path?.trim() || '';
+  const gamePid = Number(current?.pid) || 0;
+  if (!current || gamePid <= 0 || !gamePath || !/\.exe$/i.test(gamePath)) {
+    errMsg.value = '未识别到当前游戏，已取消 FSR4.1 操作。';
+    busy.value = false;
+    return;
+  }
+
+  const gameName = detectedGameName(current) || basename(gamePath);
   try {
-    if (localStatus) {
-      // 已安装 -> 弹窗确认后卸载
-      const ok = await dialog.confirm(
-        '确认卸载 OptiScaler',
-        '确定要从「' +
-          gameName +
-          '」卸载 OptiScaler (FSR4.1) 吗？\n游戏目录中被覆盖的原始文件会自动还原。'
+    const state = await optiscalerStatus(gamePath);
+    if (!state.ok) {
+      const detail = state.msgs?.filter(Boolean).join('；');
+      errMsg.value = '无法读取当前游戏的 FSR4.1 状态' + (detail ? '：' + detail : '。');
+      await showFsrMessage('FSR4.1 操作失败', errMsg.value, 'error');
+      return;
+    }
+
+    const uninstall = state.installed;
+    const action = uninstall ? '卸载' : '安装';
+    const confirmed = await showFsrConfirm(
+      `确认${action} FSR4.1`,
+      uninstall
+        ? `当前游戏为「${gameName}」。\n确定卸载 OptiScaler (FSR4.1) 吗？\n原始文件将按安装清单还原。`
+        : `当前游戏为「${gameName}」。\n确定安装 OptiScaler (FSR4.1) 吗？`,
+      `确认${action}`,
+    );
+    if (!confirmed) {
+      statusMsg.value = `已取消${action}。`;
+      return;
+    }
+
+    const terminate = await showFsrConfirm(
+      '需要结束当前游戏',
+      `「${gameName}」正在运行，${action}前必须结束游戏并释放文件。\n是否立即结束当前游戏？`,
+      '结束游戏并继续',
+    );
+    if (!terminate) {
+      statusMsg.value = `已取消${action}，游戏未结束。`;
+      return;
+    }
+
+    statusMsg.value = `正在结束 ${gameName}…`;
+    const closed = await closeGame(gamePid, gameName);
+    if (!closed.ok) {
+      errMsg.value = '关闭游戏失败：' + (closed.msgs?.join('；') || '未知错误');
+      await showFsrMessage('FSR4.1 操作失败', errMsg.value, 'error');
+      return;
+    }
+    if (!(await waitForProcessExit(gamePid))) {
+      errMsg.value = `已发送结束命令，但原游戏 PID ${gamePid} 仍在运行，已终止${action}。`;
+      await showFsrMessage('FSR4.1 操作失败', errMsg.value, 'error');
+      return;
+    }
+    // 这里只清除显示状态，不触发第二次识别；安装目标仍是上面保存的路径。
+    if (game.value?.pid === gamePid) game.value = null;
+
+    statusMsg.value = `${action}中，请稍候…`;
+    const result = await oneClickOptiScaler(gamePath, uninstall);
+    if (!result.ok) {
+      errMsg.value = `${action}失败：${result.msgs?.join('；') || '未知错误'}`;
+      await showFsrMessage(`FSR4.1 ${action}失败`, errMsg.value, 'error');
+      return;
+    }
+
+    const detail = uninstall
+      ? `已卸载当前游戏的 OptiScaler (FSR4.1)。${result.restored ? `\n还原 ${result.restored} 个原文件。` : ''}${result.removed ? `\n清理 ${result.removed} 个文件。` : ''}`
+      : `已为当前游戏安装 OptiScaler (FSR4.1)。${result.written ? `\n写入 ${result.written} 个文件。` : ''}`;
+    statusMsg.value = detail.replace(/\n/g, '');
+    await showFsrMessage(`FSR4.1 ${action}成功`, detail, 'success');
+
+    if (!uninstall) {
+      const restart = await showFsrConfirm(
+        '是否重启游戏',
+        `「${gameName}」已安装完成。\n是否现在启动游戏？`,
+        '启动游戏',
       );
-      if (!ok) {
-        statusMsg.value = '已取消卸载。';
-        return;
-      }
-      const r = await oneClickOptiScaler(gamePath, true);
-      if (r.ok) {
-        statusMsg.value =
-          '已卸载 OptiScaler' +
-          (r.restored ? '（还原 ' + r.restored + ' 个原文件）' : '') +
-          (r.removed ? '，清理 ' + r.removed + ' 个文件' : '') +
-          '。';
+      if (restart) {
+        try {
+          await shell.execute(gamePath, []);
+          statusMsg.value = `已启动：${gameName}`;
+        } catch (e) {
+          errMsg.value = '重启游戏失败：' + (e as Error).message;
+          await showFsrMessage('重启游戏失败', errMsg.value, 'error');
+        }
       } else {
-        errMsg.value =
-          '卸载失败：' +
-          (r.msgs?.join('；') || '未知错误') +
-          (runningPid ? '（若仍提示文件被占用，请确认游戏已完全退出）' : '');
-      }
-    } else {
-      // 未安装 -> 直接安装
-      const r = await oneClickOptiScaler(gamePath, false);
-      if (r.ok) {
-        statusMsg.value =
-          '已为 ' + gameName + ' 安装 OptiScaler (FSR4.1)' +
-          (r.written ? '，写入 ' + r.written + ' 个文件' : '') +
-          '。';
-      } else {
-        errMsg.value =
-          '安装失败：' +
-          (r.msgs?.join('；') || '未知错误') +
-          (runningPid ? '（若仍提示文件被占用，请确认游戏已完全退出）' : '');
+        statusMsg.value = '已完成安装，未重启游戏。';
       }
     }
   } catch (e) {
-    errMsg.value = '操作失败：' + (e as Error).message;
+    errMsg.value = 'FSR4.1 操作失败：' + (e as Error).message;
+    await showFsrMessage('FSR4.1 操作失败', errMsg.value, 'error').catch(() => {});
   } finally {
     busy.value = false;
+    void refreshGameStatus();
+    focusFsrTrigger();
   }
-}
-
-// 唯一按钮：任意选择 exe 安装/卸载（强制选择）
-async function onOptiScalerAny() {
-  errMsg.value = '';
-  // 引导玩家参考程序读取到的真实进程地址去选 exe
-  if (game.value && game.value.path) {
-    statusMsg.value =
-      '当前识别到的真实游戏路径：' + game.value.path + '\n请选择该目录下的游戏 exe';
-  } else {
-    statusMsg.value = '请选择游戏主程序（.exe）…';
-  }
-  const picked = await dialog.openFile([
-    { name: '游戏可执行文件', extensions: ['exe'] },
-  ]);
-  if (!picked) {
-    statusMsg.value = '已取消选择。';
-    return;
-  }
-  const gameName = basename(picked);
-  // 如果选中的正好是当前识别到的游戏，则复用其 pid 做「运行中关闭」逻辑
-  const runningPid = game.value && game.value.path === picked ? game.value.pid : null;
-  await applyOptiScalerTo(picked, gameName, runningPid);
 }
 
 // ── 启动应用（图标形式，自动衍生）──
@@ -489,6 +686,11 @@ function closeMenu() {
 }
 
 function onGamepadBack(e: Event) {
+  if (fsrDialogOpen.value) {
+    cancelFsrDialog();
+    e.preventDefault();
+    return;
+  }
   if (!menuOpen.value) return;
   closeMenu();
   // 菜单打开时，B 只做取消，不继续执行全局失焦/返回。
@@ -558,6 +760,7 @@ function onVolumeChange() {
 
 onMounted(async () => {
   window.addEventListener('ipc:gamepad-back', onGamepadBack);
+  document.addEventListener('pointerdown', onFsrDialogPointer);
   await loadLaunchApps();
   await refreshDisplayModes();
   await refreshScale();
@@ -579,6 +782,7 @@ onDeactivated(() => {
     unsubGame = null;
   }
   closeMenu();
+  if (fsrDialogOpen.value) cancelFsrDialog();
 });
 
 onUnmounted(() => {
@@ -587,6 +791,7 @@ onUnmounted(() => {
     unsubGame = null;
   }
   window.removeEventListener('ipc:gamepad-back', onGamepadBack);
+  document.removeEventListener('pointerdown', onFsrDialogPointer);
 });
 </script>
 
@@ -638,11 +843,15 @@ onUnmounted(() => {
           <button class="add-app-btn" :disabled="displayBusy" @click="refreshDisplayModes">刷新</button>
         </div>
         <div class="display-row">
-          <div class="display-control">
+          <div class="display-control display-control-resolution">
             <span class="display-control-label">分辨率</span>
-            <Dropdown :model-value="displayCurrent" :options="displayOptions" :disabled="displayBusy || displayOptions.length === 0" color="accent" aria-label="当前显示器分辨率" @change="applyDisplayMode" />
+            <Dropdown :model-value="displayResolution" :options="displayResolutionOptions" :disabled="displayBusy || displayResolutionOptions.length === 0" color="accent" aria-label="当前显示器分辨率" @change="applyDisplayResolution" />
           </div>
-          <div class="display-control">
+          <div class="display-control display-control-refresh">
+            <span class="display-control-label">刷新率 (hz)</span>
+            <Dropdown :model-value="displayRefresh" :options="displayRefreshOptions" :disabled="displayBusy || displayRefreshOptions.length === 0" color="accent" aria-label="当前显示器刷新率" @change="applyDisplayRefresh" />
+          </div>
+          <div class="display-control display-control-scale">
             <span class="display-control-label">缩放和布局</span>
             <Dropdown :model-value="scalePct" :options="scaleOptions" :disabled="scaleBusy" color="accent" aria-label="Windows缩放和布局" @change="applyScale" />
           </div>
@@ -667,7 +876,7 @@ onUnmounted(() => {
       <h3 class="card-title"><InlineIcon name="settings" /> 快捷功能</h3>
       <div class="frame-actions">
         <button class="quick-btn" :disabled="busy" @click="onLaunchLs"><InlineIcon name="rocket" /> 小黄鸭一键插帧<span class="quick-sub">写入 LS 插帧预设并启动</span></button>
-        <button class="quick-btn opti-btn opti-any" :disabled="busy" @click="onOptiScalerAny"><InlineIcon name="bolt" /> 一键安装FSR4.1<span class="quick-sub">选择游戏 exe 后安装</span></button>
+        <button ref="fsrTriggerEl" class="quick-btn opti-btn opti-any" :disabled="busy" @click="onOptiScalerCurrent"><InlineIcon name="bolt" /> 当前游戏安装<span class="quick-sub">自动识别当前游戏并安装/卸载 FSR4.1</span></button>
       </div>
 
       <div class="sub-block">
@@ -687,41 +896,71 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <div class="sub-block launch-block">
-        <div class="sub-head">
-          <span class="sub-title"><InlineIcon name="rocket" /> 启动应用</span>
-          <button class="add-app-btn" :disabled="launchBusy" @click="addLaunchApp">+ 添加应用</button>
-        </div>
-        <div class="launch-grid">
-          <button
-            v-for="(app, i) in launchApps"
-            :key="app.path"
-            class="launch-card"
-            type="button"
-            :disabled="launchBusy"
-            @click="openMenu(i, $event)"
-            @contextmenu.prevent="openMenu(i, $event)"
-          >
-            <div class="launch-icon" :style="{ background: iconColor(app.path) }">
-              {{ app.name.charAt(0).toUpperCase() }}
-            </div>
-            <span class="launch-name">{{ app.name.replace(/\.exe$/i, '') }}</span>
-          </button>
-        </div>
-        <!-- 点击/右键弹出菜单 -->
-        <Teleport to="body">
-          <div v-if="menuOpen" class="launch-menu-mask" @click="closeMenu" @contextmenu.prevent="closeMenu"></div>
-          <Transition name="pop">
-            <div v-if="menuOpen" class="launch-menu" :style="{ left: menuPos.x + 'px', top: menuPos.y + 'px' }">
-              <button class="launch-menu-item" @click="launchApp(menuAppIndex)"><InlineIcon name="play" /> 启动</button>
-              <button class="launch-menu-item" @click="renameApp(menuAppIndex)"><InlineIcon name="edit" /> 重命名</button>
-              <button class="launch-menu-item launch-menu-danger" @click="deleteApp(menuAppIndex)"><InlineIcon name="close" /> 删除</button>
-              <button class="launch-menu-item launch-menu-cancel" @click="closeMenu"><InlineIcon name="close" /> 取消</button>
-            </div>
-          </Transition>
-        </Teleport>
-      </div>
     </section>
+
+    <!-- 页面最底部独立气泡：应用启动 -->
+    <section class="card launch-apps-card">
+      <div class="sub-head">
+        <span class="sub-title"><InlineIcon name="rocket" /> 启动应用</span>
+        <button class="add-app-btn" :disabled="launchBusy" @click="addLaunchApp">+ 添加应用</button>
+      </div>
+      <div class="launch-grid">
+        <button
+          v-for="(app, i) in launchApps"
+          :key="app.path"
+          class="launch-card"
+          type="button"
+          :disabled="launchBusy"
+          @click="openMenu(i, $event)"
+          @contextmenu.prevent="openMenu(i, $event)"
+        >
+          <div class="launch-icon" :style="{ background: iconColor(app.path) }">
+            {{ app.name.charAt(0).toUpperCase() }}
+          </div>
+          <span class="launch-name">{{ app.name.replace(/\.exe$/i, '') }}</span>
+        </button>
+      </div>
+      <!-- 点击/右键弹出菜单 -->
+      <Teleport to="body">
+        <div v-if="menuOpen" class="launch-menu-mask" @click="closeMenu" @contextmenu.prevent="closeMenu"></div>
+        <Transition name="pop">
+          <div v-if="menuOpen" class="launch-menu" :style="{ left: menuPos.x + 'px', top: menuPos.y + 'px' }">
+            <button class="launch-menu-item" @click="launchApp(menuAppIndex)"><InlineIcon name="play" /> 启动</button>
+            <button class="launch-menu-item" @click="renameApp(menuAppIndex)"><InlineIcon name="edit" /> 重命名</button>
+            <button class="launch-menu-item launch-menu-danger" @click="deleteApp(menuAppIndex)"><InlineIcon name="close" /> 删除</button>
+            <button class="launch-menu-item launch-menu-cancel" @click="closeMenu"><InlineIcon name="close" /> 取消</button>
+          </div>
+        </Transition>
+      </Teleport>
+    </section>
+
+    <Teleport to="body">
+      <Transition name="fsr-pop">
+        <div
+          v-if="fsrDialogOpen"
+          ref="fsrPanelEl"
+          class="reset-confirm fsr-confirm"
+          :class="[{ above: fsrDialogAbove }, `tone-${fsrDialogTone}`]"
+          :style="fsrDialogStyle"
+          role="alertdialog"
+          aria-modal="true"
+          aria-label="FSR4.1 操作确认"
+          data-gp-modal
+          @pointerdown.stop
+          @keydown.esc.prevent="cancelFsrDialog"
+        >
+          <div class="rc-title"><InlineIcon :name="fsrDialogIcon" />{{ fsrDialogTitle }}</div>
+          <p class="rc-desc">{{ fsrDialogDescription }}</p>
+          <div class="rc-actions" data-gp-group="fsr-dialog">
+            <template v-if="fsrDialogKind === 'confirm'">
+              <button ref="fsrCancelEl" type="button" data-gp-group="fsr-dialog" @click="cancelFsrDialog">{{ fsrDialogCancelLabel }}</button>
+              <button type="button" data-gp-group="fsr-dialog" :class="{ danger: fsrDialogTone === 'error' }" @click="confirmFsrDialog">{{ fsrDialogConfirmLabel }}</button>
+            </template>
+            <button v-else ref="fsrMessageActionEl" type="button" data-gp-group="fsr-dialog" @click="confirmFsrDialog">{{ fsrDialogConfirmLabel }}</button>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
 
   </div>
 </template>
@@ -929,7 +1168,7 @@ onUnmounted(() => {
   background: rgba(229, 72, 77, 0.12);
 }
 /* ── 启动应用（图标形式）── */
-.launch-block { margin-top: 12px; }
+.launch-apps-card { order: 3; }
 .add-app-btn {
   flex: 0 0 auto;
   padding: 5px 12px;
@@ -1037,10 +1276,109 @@ onUnmounted(() => {
 .pop-leave-active { transition: opacity 0.12s ease, transform 0.12s ease; }
 .pop-enter-from,
 .pop-leave-to { opacity: 0; transform: scale(0.95); }
+/* ── FSR4.1 页面内确认/消息弹窗：与性能调度“配置重制”保持同一模板 ── */
+.fsr-confirm {
+  z-index: 1200;
+  background: #161d29;
+  border: 1px solid #2a3342;
+  border-radius: 12px;
+  padding: 12px 12px 11px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.fsr-confirm::before {
+  content: '';
+  position: absolute;
+  width: 11px;
+  height: 11px;
+  background: #161d29;
+  border-left: 1px solid #2a3342;
+  border-top: 1px solid #2a3342;
+  transform: rotate(45deg);
+  top: -6px;
+  right: 26px;
+}
+.fsr-confirm.above::before {
+  top: auto;
+  bottom: -6px;
+  border-left: none;
+  border-top: none;
+  border-right: 1px solid #2a3342;
+  border-bottom: 1px solid #2a3342;
+}
+.fsr-confirm .rc-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text);
+}
+.fsr-confirm .rc-title :deep(svg) {
+  width: 14px;
+  height: 14px;
+  color: var(--accent);
+}
+.fsr-confirm.tone-error .rc-title :deep(svg) { color: var(--danger); }
+.fsr-confirm.tone-success .rc-title :deep(svg) { color: #5dd39e; }
+.fsr-confirm .rc-desc {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 10px;
+  line-height: 1.55;
+  white-space: pre-line;
+}
+.fsr-confirm .rc-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 7px;
+  margin-top: 2px;
+}
+.fsr-confirm .rc-actions:has(> button:only-child) { grid-template-columns: 1fr; }
+.fsr-confirm .rc-actions button {
+  min-height: 34px;
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 8px;
+  background: var(--bg-input);
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.fsr-confirm .rc-actions button:hover {
+  background: rgba(46, 166, 255, 0.14);
+  border-color: var(--accent);
+}
+.fsr-confirm .rc-actions button.danger {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 46%, transparent);
+  background: color-mix(in srgb, var(--danger) 8%, var(--bg-input));
+}
+.fsr-confirm .rc-actions button.danger:hover {
+  background: color-mix(in srgb, var(--danger) 16%, var(--bg-input));
+  border-color: var(--danger);
+}
+.fsr-pop-enter-active,
+.fsr-pop-leave-active {
+  transition: opacity 0.14s ease, transform 0.14s ease;
+}
+.fsr-pop-enter-from,
+.fsr-pop-leave-to {
+  opacity: 0;
+  transform: translateY(-5px);
+}
 /* ── 音乐播放 ── */
-.display-row { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 8px; }
+.display-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.75fr) minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px;
+}
 .display-control { min-width: 0; }
 .display-control-label { display: block; margin: 0 0 5px; font-size: 11px; color: var(--text-dim); }
+.display-control-refresh,
+.display-control-scale { min-width: 0; }
 .display-tip { display: block; margin-top: 6px; line-height: 1.35; }
 .music-empty { margin-top: 4px; }
 .music-now {

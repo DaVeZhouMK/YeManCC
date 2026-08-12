@@ -67,6 +67,7 @@ const DEFAULTS: UnifiedSettings = {
     backgroundBlur: 0,
     videoBatteryPause: true,
     scheduleMonitor: true,
+    steamChartAutoRefresh: 'none',
   },
   background: { asset: {}, dynamic: {} },
   music: { folder: 'C:\\SOFT\\YeMan\\Demo\\MP3', mode: 'random', volume: 0.11 },
@@ -79,7 +80,7 @@ const DEFAULTS: UnifiedSettings = {
     openKeyboard: true,
     returnDesktop: true,
     mouseToggle: true,
-    mouseBackend: 'gamebar',
+    mouseBackend: 'joyxoff',
   },
   performanceSchedule: {
     version: 2,
@@ -192,7 +193,6 @@ async function migrateLegacySettings(): Promise<UnifiedSettings> {
   const summon = await readLegacyJson('summon.json');
   const music = await readLegacyJson('music_player.json');
   const schedule = await readLegacyJson('performance-schedule.json');
-  const gameCustom = await readLegacyJson('game-custom.json');
   const control = await readLegacyJson('control-config.json');
   const legacyTdp = await readLegacyNumber('tdp.txt');
   const legacyFps = await readLegacyNumber('FPS-ac.txt');
@@ -215,7 +215,6 @@ async function migrateLegacySettings(): Promise<UnifiedSettings> {
   set('gamepad', summon);
   set('music', music);
   set('performanceSchedule', schedule);
-  set('gameCustom', gameCustom);
   set('tdp', {
     ...(control || {}),
     ...(control ? {} : legacyTdp == null ? {} : { tdpMax: legacyTdp }),
@@ -316,6 +315,24 @@ export async function saveSettingsSection(section: SettingsSection, value: JsonO
     const current = await loadSettings();
     const next = normalize(current);
     next[section] = mergeSettings(next[section], value);
+    await writeSettings(next);
+    cache = next;
+  });
+  writeQueue = run.catch(() => {});
+  await run;
+}
+
+/** Replace one section instead of recursively merging it.
+ *
+ * This is intentionally narrow: standalone user documents use it to retire
+ * a legacy section after a one-time migration. Normal feature saves continue
+ * to use saveSettingsSection so unknown fields remain forward-compatible.
+ */
+export async function replaceSettingsSection(section: SettingsSection, value: JsonObject): Promise<void> {
+  const run = writeQueue.then(async () => {
+    const current = await loadSettings();
+    const next = normalize(current);
+    next[section] = structuredClone(value);
     await writeSettings(next);
     cache = next;
   });

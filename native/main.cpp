@@ -354,6 +354,8 @@ static UINT64                            g_webviewCompletedNavigationId = 0;
 static unsigned long long                g_webviewRenderReadyGeneration = 0;
 static UINT64                            g_webviewRenderReadyNavigationId = 0;
 static bool                              g_webviewNeedsShowNudge = false;
+static std::wstring                      g_updateHandshakePath;
+static std::string                       g_updateHandshakeToken;
 
 enum class WebViewGpuMode : uint8_t { Default, Legacy, Software };
 enum class WebViewDeferredRecovery : uint8_t { None, Reload, RecreateController };
@@ -816,6 +818,19 @@ static bool sgWriteFileAtomic(const std::wstring& path, const std::string& conte
     DeleteFileW(tmp.c_str());
     return false;
 }
+
+static void signalUpdateHandshake() {
+    if (g_updateHandshakePath.empty() || g_updateHandshakeToken.empty()) return;
+    json marker = {
+        {"phase", "started"},
+        {"pid", GetCurrentProcessId()},
+        {"token", g_updateHandshakeToken}
+    };
+    if (!sgWriteFileAtomic(g_updateHandshakePath, marker.dump())) {
+        traceLog("UPDATE handshake marker write failed");
+    }
+}
+
 static std::string sgReadFile(const std::wstring& path) {
     std::ifstream f(path, std::ios::binary);
     if (!f) return {};
@@ -1703,6 +1718,388 @@ static std::string nextTdpRequestId() {
     return std::to_string(GetCurrentProcessId()) + "-" +
            std::to_string(g_tdpRequestSeq.fetch_add(1, std::memory_order_relaxed));
 }
+
+// ================================================================
+// OpenSpeedy native client
+// ================================================================
+// The native persistent OpenSpeedy client was disabled after it caused
+// process freezes on some games. The verified renderer-side transaction
+// remains the only game-speed path.
+#if 0
+// Keep one pipe per architecture and one authoritative target lifecycle in
+// the native host. The renderer must never start PowerShell or send INJECT.
+static constexpr wchar_t kSpeedBridgePipe32[] = L"\\\\.\\pipe\\OpenSpeedyBridge32";
+static constexpr wchar_t kSpeedBridgePipe64[] = L"\\\\.\\pipe\\OpenSpeedyBridge64";
+
+struct SpeedHackPipe {
+    HANDLE handle = nullptr;
+    // Only set for a bridge process launched by this YeManCC instance.  An
+    // already-running OpenSpeedy bridge is never terminated by us.
+    HANDLE ownedProcess = nullptr;
+};
+struct SpeedHackProcessIdentity {
+    bool x86 = false;
+    ULONGLONG creationTime = 0;
+};
+struct SpeedHackActive {
+    bool injected = false;
+    bool enabled = false;
+    DWORD pid = 0;
+    bool x86 = false;
+    double factor = 1.0;
+    ULONGLONG creationTime = 0;
+};
+
+static SpeedHackPipe g_speedBridge32;
+static SpeedHackPipe g_speedBridge64;
+static SpeedHackActive g_speedHackActive;
+static std::mutex g_speedHackMx;
+static std::thread g_speedHackPrewarmThread;
+static std::atomic<bool> g_speedHackStopping{false};
+
+static SpeedHackPipe& speedHackPipe(bool x86) { return x86 ? g_speedBridge32 : g_speedBridge64; }
+static const wchar_t* speedHackPipeName(bool x86) { return x86 ? kSpeedBridgePipe32 : kSpeedBridgePipe64; }
+static std::wstring speedHackBridgePath(bool x86) {
+    return POWER_CONTROL_DIR + L"\\OpenSpeedy\\" + (x86 ? L"bridge32.exe" : L"bridge64.exe");
+}
+
+static void speedHackClosePipe(SpeedHackPipe& pipe) {
+    if (pipe.handle) { CloseHandle(pipe.handle); pipe.handle = nullptr; }
+    if (pipe.ownedProcess) {
+        if (WaitForSingleObject(pipe.ownedProcess, 0) == WAIT_TIMEOUT) {
+            TerminateProcess(pipe.ownedProcess, 0);
+            WaitForSingleObject(pipe.ownedProcess, 1000);
+        }
+        CloseHandle(pipe.ownedProcess);
+        pipe.ownedProcess = nullptr;
+    }
+}
+
+static bool speedHackResponseOk(const std::string& response) {
+    return response == "OK" || response.rfind("OK ", 0) == 0;
+}
+
+static HANDLE speedHackOpenPipe(const wchar_t* name, DWORD timeoutMs) {
+    if (!WaitNamedPipeW(name, timeoutMs)) return nullptr;
+    HANDLE handle = CreateFileW(name, GENERIC_READ | GENERIC_WRITE,
+        FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING,
+        FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (handle == INVALID_HANDLE_VALUE) return nullptr;
+    DWORD mode = PIPE_READMODE_MESSAGE;
+    if (!SetNamedPipeHandleState(handle, &mode, nullptr, nullptr)) {
+        CloseHandle(handle); return nullptr;
+    }
+    return handle;
+}
+
+static bool speedHackLaunchBridge(bool x86, HANDLE* ownedProcessOut = nullptr) {
+    if (ownedProcessOut) *ownedProcessOut = nullptr;
+    const auto bridge = speedHackBridgePath(x86);
+    if (!file_exists(bridge)) return false;
+    std::wstring command = quote_windows_arg(bridge);
+    std::vector<wchar_t> commandLine(command.begin(), command.end());
+    commandLine.push_back(L'\0');
+    STARTUPINFOW startup{sizeof(startup)};
+    startup.dwFlags = STARTF_USESHOWWINDOW;
+    startup.wShowWindow = SW_HIDE;
+    PROCESS_INFORMATION process{};
+    const auto workingDir = fspath::path(bridge).parent_path().wstring();
+    const BOOL created = CreateProcessW(nullptr, commandLine.data(), nullptr, nullptr,
+        FALSE, CREATE_NO_WINDOW, nullptr, workingDir.c_str(), &startup, &process);
+    if (!created) return false;
+    CloseHandle(process.hThread);
+    if (ownedProcessOut) *ownedProcessOut = process.hProcess;
+    else CloseHandle(process.hProcess);
+    return true;
+}
+
+static bool speedHackPipeBelongsToUs(HANDLE pipe, bool x86) {
+    DWORD serverPid = 0;
+    if (!GetNamedPipeServerProcessId(pipe, &serverPid) || !serverPid) return true;
+    const auto image = processImagePath(serverPid);
+    return image.empty() || sameFinalPath(image, speedHackBridgePath(x86));
+}
+
+static bool speedHackEnsurePipe(bool x86) {
+    auto& cached = speedHackPipe(x86);
+    if (cached.handle) return true;
+    const auto name = speedHackPipeName(x86);
+    HANDLE handle = speedHackOpenPipe(name, 80);
+    HANDLE ownedProcess = nullptr;
+    if (!handle) {
+        if (!speedHackLaunchBridge(x86, &ownedProcess)) return false;
+        const ULONGLONG deadline = GetTickCount64() + 3000;
+        while (GetTickCount64() < deadline) {
+            handle = speedHackOpenPipe(name, 120);
+            if (handle) break;
+            Sleep(30);
+        }
+    }
+    if (!handle) {
+        if (ownedProcess) {
+            TerminateProcess(ownedProcess, 0);
+            WaitForSingleObject(ownedProcess, 1000);
+            CloseHandle(ownedProcess);
+        }
+        return false;
+    }
+    if (!speedHackPipeBelongsToUs(handle, x86)) {
+        CloseHandle(handle);
+        if (ownedProcess) {
+            TerminateProcess(ownedProcess, 0);
+            WaitForSingleObject(ownedProcess, 1000);
+            CloseHandle(ownedProcess);
+        }
+        return false;
+    }
+    cached.handle = handle;
+    cached.ownedProcess = ownedProcess;
+    return true;
+}
+
+static bool speedHackSend(SpeedHackPipe& pipe, const std::string& command, std::string& response) {
+    if (!pipe.handle) return false;
+    const std::string wire = command + "\n";
+    DWORD written = 0;
+    if (!WriteFile(pipe.handle, wire.data(), static_cast<DWORD>(wire.size()), &written, nullptr) ||
+        written != wire.size()) return false;
+    constexpr DWORD timeoutMs = 10000;
+    const ULONGLONG deadline = GetTickCount64() + timeoutMs;
+    std::string received;
+    char buffer[4096]{};
+    for (;;) {
+        DWORD available = 0;
+        if (!PeekNamedPipe(pipe.handle, nullptr, 0, nullptr, &available, nullptr)) {
+            response = "OpenSpeedy pipe peek failed"; return false;
+        }
+        if (!available) {
+            if (GetTickCount64() >= deadline) {
+                response = "OpenSpeedy bridge response timeout"; return false;
+            }
+            Sleep(10); continue;
+        }
+        DWORD read = 0;
+        const BOOL ok = ReadFile(pipe.handle, buffer, sizeof(buffer), &read, nullptr);
+        if (!ok && GetLastError() != ERROR_MORE_DATA) return false;
+        if (read) received.append(buffer, buffer + read);
+        if (ok) break;
+    }
+    response = trim_ascii(received);
+    return !response.empty();
+}
+
+static bool speedHackCommand(bool x86, const std::string& command, std::string& response) {
+    auto& pipe = speedHackPipe(x86);
+    if (!speedHackEnsurePipe(x86)) { response = "OpenSpeedy bridge unavailable"; return false; }
+    if (speedHackSend(pipe, command, response)) return true;
+    // Never retry a command after it was written: retrying INJECT can create a
+    // second hook while the first remote operation is still completing.
+    speedHackClosePipe(pipe);
+    if (response.empty()) response = "OpenSpeedy pipe communication failed";
+    return false;
+}
+
+static void speedHackWaitForDisableSettle() { Sleep(300); }
+
+static void speedHackPrewarmProc() {
+    if (g_speedHackStopping.load(std::memory_order_acquire)) return;
+    std::lock_guard<std::mutex> lock(g_speedHackMx);
+    for (const bool x86 : {false, true}) {
+        if (g_speedHackStopping.load(std::memory_order_acquire)) break;
+        std::string response;
+        const bool ok = speedHackCommand(x86, "GETSPEED", response) && speedHackResponseOk(response);
+        traceLog("OpenSpeedy prewarm arch=%s ok=%d response=%s", x86 ? "x86" : "x64", ok ? 1 : 0, response.c_str());
+    }
+}
+
+static void speedHackStartPrewarm() {
+    g_speedHackStopping.store(false, std::memory_order_release);
+    if (!g_speedHackPrewarmThread.joinable()) g_speedHackPrewarmThread = std::thread(speedHackPrewarmProc);
+}
+
+static bool speedHackReadProcessIdentity(DWORD pid, SpeedHackProcessIdentity& identity) {
+    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, FALSE, pid);
+    if (!process) return false;
+    DWORD exitCode = 0;
+    if (!GetExitCodeProcess(process, &exitCode) || exitCode != STILL_ACTIVE) {
+        CloseHandle(process);
+        return false;
+    }
+    FILETIME creation{}, exitTime{}, kernelTime{}, userTime{};
+    if (!GetProcessTimes(process, &creation, &exitTime, &kernelTime, &userTime)) {
+        CloseHandle(process);
+        return false;
+    }
+    BOOL wow64 = FALSE;
+    const BOOL ok = IsWow64Process(process, &wow64);
+    CloseHandle(process);
+    if (!ok) return false;
+    ULARGE_INTEGER stamp{};
+    stamp.LowPart = creation.dwLowDateTime;
+    stamp.HighPart = creation.dwHighDateTime;
+    identity.x86 = wow64 != FALSE;
+    identity.creationTime = stamp.QuadPart;
+    return identity.creationTime != 0;
+}
+
+static bool speedHackActiveMatches(const SpeedHackProcessIdentity& identity, DWORD pid) {
+    return g_speedHackActive.injected && g_speedHackActive.pid == pid &&
+        g_speedHackActive.x86 == identity.x86 &&
+        g_speedHackActive.creationTime == identity.creationTime;
+}
+
+static void speedHackAddMessage(json& messages, const std::string& command, const std::string& response) {
+    if (!response.empty()) messages.push_back(command + ": " + response);
+}
+
+static json speedHackClearLocked(DWORD requestedPid) {
+    if (!g_speedHackActive.injected)
+        return json{{"ok", true}, {"msgs", json::array({"no active speed target"})}};
+    if (requestedPid && requestedPid != g_speedHackActive.pid)
+        return json{{"ok", true}, {"skipped", true}, {"safeFallback", true},
+                    {"msgs", json::array({"stale speed target ignored"})}};
+    const DWORD pid = g_speedHackActive.pid;
+    const bool x86 = g_speedHackActive.x86;
+    SpeedHackProcessIdentity identity{};
+    if (!speedHackReadProcessIdentity(pid, identity) ||
+        !speedHackActiveMatches(identity, pid)) {
+        traceLog("OpenSpeedy clear stale target pid=%lu; local state discarded", static_cast<unsigned long>(pid));
+        g_speedHackActive = {};
+        return json{{"ok", true}, {"safeFallback", true},
+                    {"msgs", json::array({"target exited or PID was reused; local state cleared"})}};
+    }
+    json messages = json::array();
+    std::string response;
+    bool ok = true;
+    if (g_speedHackActive.enabled) {
+        const bool disableOk = speedHackCommand(x86, "DISABLE " + std::to_string(pid), response) && speedHackResponseOk(response);
+        speedHackAddMessage(messages, "DISABLE", response);
+        ok = ok && disableOk;
+    }
+    // Do not retain an "injected but disabled" local state.  OpenSpeedy starts
+    // a fresh enable path with INJECT -> ENABLE on the next activation, which
+    // is safer than trusting a stale renderer-side module snapshot.
+    if (ok) g_speedHackActive = {};
+    return json{{"ok", ok}, {"safeFallback", true}, {"reason", ok ? "" : "operation_failed"}, {"msgs", messages}};
+}
+
+static json speedHackResetLocked(DWORD requestedPid) {
+    if (!g_speedHackActive.injected)
+        return json{{"ok", true}, {"msgs", json::array({"no active speed target"})}};
+    if (requestedPid && requestedPid != g_speedHackActive.pid)
+        return json{{"ok", true}, {"skipped", true}, {"safeFallback", true},
+                    {"msgs", json::array({"stale speed target ignored"})}};
+    SpeedHackProcessIdentity identity{};
+    if (!speedHackReadProcessIdentity(g_speedHackActive.pid, identity) ||
+        !speedHackActiveMatches(identity, g_speedHackActive.pid)) {
+        traceLog("OpenSpeedy reset stale target pid=%lu; local state discarded", static_cast<unsigned long>(g_speedHackActive.pid));
+        g_speedHackActive = {};
+        return json{{"ok", true}, {"safeFallback", true},
+                    {"msgs", json::array({"target exited or PID was reused; local state cleared"})}};
+    }
+    std::string response;
+    const bool ok = speedHackCommand(g_speedHackActive.x86, "SETSPEED 1", response) && speedHackResponseOk(response);
+    if (ok) g_speedHackActive.factor = 1.0;
+    json messages = json::array();
+    speedHackAddMessage(messages, "SETSPEED 1", response);
+    return json{{"ok", ok}, {"safeFallback", !ok}, {"reason", ok ? "" : "operation_failed"}, {"msgs", messages}};
+}
+
+static json speedHackApplyLocked(DWORD pid, double factor) {
+    SpeedHackProcessIdentity identity{};
+    if (!speedHackReadProcessIdentity(pid, identity))
+        throw std::runtime_error("target process is not running or cannot be queried");
+    const bool x86 = identity.x86;
+    json messages = json::array();
+    std::string response;
+    if (speedHackActiveMatches(identity, pid)) {
+        if (std::abs(g_speedHackActive.factor - factor) < 0.000001 && (factor == 1.0 || g_speedHackActive.enabled))
+            return json{{"ok", true}, {"msgs", json::array({"speed already applied"})}};
+        if (factor == 1.0) return speedHackResetLocked(pid);
+        if (!g_speedHackActive.enabled) {
+            if (!speedHackCommand(x86, "ENABLE " + std::to_string(pid), response) || !speedHackResponseOk(response))
+                return json{{"ok", false}, {"safeFallback", true}, {"reason", "operation_failed"},
+                            {"msgs", json::array({"ENABLE failed: " + response})}};
+            g_speedHackActive.enabled = true;
+        }
+        if (!speedHackCommand(x86, "SETSPEED " + std::to_string(factor), response) || !speedHackResponseOk(response)) {
+            // A failed/timeout pipe operation may still be executing inside
+            // the bridge. Do not immediately send rollback commands on the
+            // same connection or a newly spawned replacement bridge.
+            g_speedHackActive = {};
+            traceLog("OpenSpeedy SETSPEED failed pid=%lu response=%s; local state reset",
+                     static_cast<unsigned long>(pid), response.c_str());
+            return json{{"ok", false}, {"safeFallback", true}, {"reason", "operation_failed"},
+                        {"msgs", json::array({"SETSPEED failed: " + response})}};
+        }
+        g_speedHackActive.factor = factor;
+        speedHackAddMessage(messages, "SETSPEED", response);
+        return json{{"ok", true}, {"msgs", messages}};
+    }
+    if (g_speedHackActive.injected) {
+        const auto cleared = speedHackClearLocked(0);
+        if (!cleared.value("ok", false)) return cleared;
+    }
+    auto fail = [&](const std::string& command) -> json {
+        // The bridge processes commands serially.  If a command times out or
+        // its pipe breaks, sending rollback commands can race a still-running
+        // remote operation.  Drop local state and require a fresh INJECT path.
+        traceLog("OpenSpeedy %s failed pid=%lu response=%s; local state reset",
+                 command.c_str(), static_cast<unsigned long>(pid), response.c_str());
+        g_speedHackActive = {};
+        return json{{"ok", false}, {"safeFallback", true}, {"reason", "operation_failed"},
+                    {"msgs", json::array({command + ": " + response})}};
+    };
+    // Match OpenSpeedy's activation path.  INJECT is idempotent for an already
+    // loaded module (Windows reuses the module), while it avoids relying on a
+    // permission-sensitive Toolhelp module snapshot after a long wait.
+    if (!speedHackCommand(x86, "INJECT " + std::to_string(pid), response) || !speedHackResponseOk(response)) return fail("INJECT");
+    if (!speedHackCommand(x86, "ENABLE " + std::to_string(pid), response) || !speedHackResponseOk(response)) return fail("ENABLE");
+    if (!speedHackCommand(x86, "SETSPEED " + std::to_string(factor), response) || !speedHackResponseOk(response)) return fail("SETSPEED");
+    speedHackAddMessage(messages, "SETSPEED", response);
+    g_speedHackActive = {true, true, pid, x86, factor, identity.creationTime};
+    return json{{"ok", true}, {"msgs", messages}};
+}
+
+static json speedHackApply(const json& args) {
+    const int pid = args.value("pid", 0);
+    const double factor = args.value("factor", 0.0);
+    if (pid <= 0) throw std::runtime_error("invalid speed target PID");
+    if (!std::isfinite(factor) || factor <= 0.0 || factor > 16.0) throw std::runtime_error("invalid speed factor");
+    std::lock_guard<std::mutex> lock(g_speedHackMx);
+    return speedHackApplyLocked(static_cast<DWORD>(pid), factor);
+}
+
+static json speedHackReset(const json& args) {
+    const int pid = args.value("pid", 0);
+    std::lock_guard<std::mutex> lock(g_speedHackMx);
+    return speedHackResetLocked(pid > 0 ? static_cast<DWORD>(pid) : 0);
+}
+
+static json speedHackClear(const json& args) {
+    const int pid = args.value("pid", 0);
+    std::lock_guard<std::mutex> lock(g_speedHackMx);
+    return speedHackClearLocked(pid > 0 ? static_cast<DWORD>(pid) : 0);
+}
+
+static void speedHackCloseAll() {
+    g_speedHackStopping.store(true, std::memory_order_release);
+    {
+        std::lock_guard<std::mutex> lock(g_speedHackMx);
+        if (g_speedHackActive.injected) {
+            std::string response;
+            speedHackCommand(g_speedHackActive.x86, "SETSPEED 1", response);
+            if (g_speedHackActive.enabled)
+                speedHackCommand(g_speedHackActive.x86, "DISABLE " + std::to_string(g_speedHackActive.pid), response);
+        }
+        speedHackClosePipe(g_speedBridge32);
+        speedHackClosePipe(g_speedBridge64);
+        g_speedHackActive = {};
+    }
+    if (g_speedHackPrewarmThread.joinable()) g_speedHackPrewarmThread.join();
+}
+
+#endif
 
 static HANDLE ensureTdpDaemonJob() {
     if (g_tdpDaemonJob) return g_tdpDaemonJob;
@@ -2945,7 +3342,7 @@ static bool floatActive() {
 static void runKillBat();          // 选择 + B → 执行 KiLL-EXE.bat 结束当前游戏
 static void openTouchKeyboard();   // 选择 + X → 呼出 Windows 触摸键盘
 static void returnToDesktop();     // 选择 + A → 内部 Win+D 立即返回桌面
-static void toggleMouseMode();     // 选择 + Y → 启停 JoyXoff 模拟鼠标
+static void toggleMouseMode();     // 选择 + Y → 启停当前选中的模拟鼠标后端
 static void ipc_emit(const std::string& ev, const json& data);
 // 后台手柄轮询线程：
 //  - 按住 LB+RB 满 0.5 秒 → 呼出程序（仅当窗口隐藏在托盘时；全局免点击，绕开 Chromium Gamepad API 需先点击的限制）
@@ -4350,6 +4747,19 @@ static json sgResumeGameByPids(const json& values, const std::wstring& markerDir
 static json sgSuspendGameByPid(DWORD rootPid) {
     std::lock_guard<std::mutex> opLock(g_sgOpMtx);
     // 前端 game.detect 结果可能已缓存 5 秒；执行前重新选取最大候选。
+    std::string validationError;
+    if (!sgValidatePauseTarget(rootPid, &validationError)) {
+        return json{
+            {"paused", false},
+            {"rootPid", static_cast<int>(rootPid)},
+            {"pids", json::array()},
+            {"processes", json::array()},
+            {"failedPids", json::array()},
+            {"okCount", 0},
+            {"failCount", 1},
+            {"error", validationError}
+        };
+    }
     return sgSuspendGameByPidUnlocked(rootPid, SG_MANUAL_DIR);
 }
 
@@ -4439,6 +4849,18 @@ static SgResumeResult sgResumeManualAll(bool allowEligibleFallback = false) {
     return result;
 }
 
+// 启动和正常退出需要同时处理睡眠、手动两套 PID 标记。只有两套记录都没有
+// 恢复成功时才执行一次高内存游戏兜底，避免分别扫描两次并重复 Resume 同一 PID。
+static SgResumeResult sgResumeTrackedAll(bool allowEligibleFallback = false) {
+    std::lock_guard<std::mutex> opLock(g_sgOpMtx);
+    SgResumeResult result = sgResumeMarkedDirectoryUnlocked(SG_DIR + L"\\suspended");
+    const SgResumeResult manual = sgResumeMarkedDirectoryUnlocked(SG_MANUAL_DIR);
+    result.count += manual.count;
+    if (allowEligibleFallback && result.count == 0)
+        result.count = sgResumeEligibleProcessesFallback();
+    return result;
+}
+
 static std::thread g_startupResumeThread;
 
 static void joinStartupResumeThread() {
@@ -4448,8 +4870,8 @@ static void joinStartupResumeThread() {
 static void startStartupResumeThread() {
     joinStartupResumeThread();
     g_startupResumeThread = std::thread([] {
-        sgResumeAll();
-        sgResumeManualAll();
+        // PID 记录缺失、失效或恢复数为 0 时，也要尽最大可能解除遗留挂起。
+        sgResumeTrackedAll(true);
     });
 }
 
@@ -4466,9 +4888,8 @@ static void sgCleanupBeforeExit() {
     if (g_sgCleanupDone) return;
     g_sgCleanupDone = true;
     // 正常退出必须解除所有由本程序挂起的进程。
-    SgResumeResult rr = sgResumeAll();
-    const SgResumeResult manual = sgResumeManualAll();
-    (void)manual;
+    SgResumeResult rr = sgResumeTrackedAll(true);
+    (void)rr;
     // 若仍有标记，说明恢复失败；允许 WM_DESTROY/消息循环退出再重试一次。
     const bool pending = sgHasMarkerFiles(SG_DIR + L"\\suspended") ||
         sgHasMarkerFiles(SG_MANUAL_DIR);
@@ -4668,6 +5089,7 @@ static void scheduleWebViewRecoveryAction(WebViewDeferredRecovery action);
 static void resetWebViewRenderState();
 static void finalizeWebViewRenderReady(unsigned long long generation, UINT64 navigationId, const char* source);
 static void probeWebViewRenderState(unsigned long long generation, UINT64 navigationId);
+static void signalUpdateHandshake();
 static void armPowerResumeWatchdog(unsigned long long generation, UINT delayMs = POWER_RESUME_WATCHDOG_DELAY_MS);
 static void stopPowerResumeWatchdog();
 static void nudgeWebViewAfterResume(bool resetVisibility = true);
@@ -6377,6 +6799,15 @@ struct DisplayModeInfo {
     int orientation = 0;
 };
 
+// Resolution choices must follow the direction of the currently active desktop
+// mode. Do not use dmDisplayOrientation alone: a portrait panel can be rotated
+// into landscape while the driver still reports a rotated mode flag.
+static bool sameDisplayDirection(int width, int height, int currentWidth, int currentHeight) {
+    if (width <= 0 || height <= 0 || currentWidth <= 0 || currentHeight <= 0) return true;
+    const bool currentLandscape = currentWidth >= currentHeight;
+    return (width >= height) == currentLandscape;
+}
+
 static bool currentDisplayDevice(std::wstring& device, DEVMODEW& current) {
     if (!g_hwnd) return false;
     HMONITOR mon = MonitorFromWindow(g_hwnd, MONITOR_DEFAULTTONEAREST);
@@ -6407,6 +6838,8 @@ static std::vector<DisplayModeInfo> enumerateCurrentDisplayModes(std::wstring* d
         dm.dmSize = sizeof(dm);
         if (!EnumDisplaySettingsExW(device.c_str(), i, &dm, EDS_ROTATEDMODE)) break;
         if (dm.dmPelsWidth == 0 || dm.dmPelsHeight == 0) continue;
+        if (!sameDisplayDirection((int)dm.dmPelsWidth, (int)dm.dmPelsHeight,
+                                  (int)current.dmPelsWidth, (int)current.dmPelsHeight)) continue;
         const int hz = dm.dmDisplayFrequency > 1 ? (int)dm.dmDisplayFrequency :
                        (current.dmDisplayFrequency > 1 ? (int)current.dmDisplayFrequency : 60);
         const int orientation = (int)dm.dmDisplayOrientation;
@@ -7774,7 +8207,8 @@ static void reg_http() {
         }
         const bool steamHost = isSteamHostName(host) || steamHostHeader;
         HINTERNET hSession = WinHttpOpen(L"QQ/1.0",
-                                          steamHost ? WINHTTP_ACCESS_TYPE_NO_PROXY : WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
+                                          steamHost ? WINHTTP_ACCESS_TYPE_NO_PROXY
+                                                    : WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
                                           WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
         if (!hSession) throw std::runtime_error("WinHttpOpen failed");
         setHttpTimeouts(hSession);
@@ -8978,11 +9412,40 @@ static void reg_updater() {
             // main executable update.
             f << "$copyRetries = 60\n";
             f << "$copyWaitSeconds = 2\n";
-            f << "$tdpSource = Join-Path $staging 'PowerControl\\pawnio'\n";
+            f << "$powerControlSource = Join-Path $staging 'PowerControl'\n";
+            f << "$tdpSource = Join-Path $powerControlSource 'pawnio'\n";
             f << "$tdpTarget = Join-Path $pcDir 'pawnio'\n";
+            f << "$tdpTransactionId = [guid]::NewGuid().ToString('N')\n";
+            f << "$tdpStage = Join-Path $pcDir ('pawnio.update-' + $tdpTransactionId)\n";
+            f << "$tdpBackup = Join-Path $pcDir ('pawnio.rollback-' + $tdpTransactionId)\n";
+            f << "$tdpOriginalMoved = $false\n";
+            f << "$tdpCommitted = $false\n";
+            f << "$updateCommitted = $false\n";
+            f << "$newProcess = $null\n";
+            f << "$handshakeToken = [guid]::NewGuid().ToString('N')\n";
+            f << "$handshakePath = Join-Path (Split-Path -Parent $staging) ('update-handshake-' + $handshakeToken + '.json')\n";
+            f << "$handshakeTimeoutSeconds = 90\n";
             f << "function Copy-TreeChecked([string]$source, [string]$destination, [string[]]$extraArgs) {\n";
             f << "  & robocopy $source $destination /E /COPY:DAT /DCOPY:DAT /R:$copyRetries /W:$copyWaitSeconds /XJ @extraArgs /NFL /NDL /NJH /NJS /NP\n";
             f << "  if ($LASTEXITCODE -ge 8) { throw ('copy failed: ' + $source + ' -> ' + $destination + ' (robocopy=' + $LASTEXITCODE + ')') }\n";
+            f << "}\n";
+            f << "function Rename-DirectoryChecked([string]$source, [string]$destination, [string]$label) {\n";
+            f << "  if ((Split-Path -Parent $source) -ne (Split-Path -Parent $destination)) { throw ($label + ' must stay in one parent directory') }\n";
+            f << "  $destinationName = Split-Path -Leaf $destination\n";
+            f << "  $lastError = ''\n";
+            f << "  for ($attempt = 1; $attempt -le $copyRetries; $attempt++) {\n";
+            f << "    try {\n";
+            f << "      if (!(Test-Path -LiteralPath $source -PathType Container)) { throw ($label + ' source directory missing') }\n";
+            f << "      if (Test-Path -LiteralPath $destination) { throw ($label + ' destination already exists') }\n";
+            f << "      Rename-Item -LiteralPath $source -NewName $destinationName -ErrorAction Stop\n";
+            f << "      if ((Test-Path -LiteralPath $source) -or !(Test-Path -LiteralPath $destination -PathType Container)) { throw ($label + ' rename verification failed') }\n";
+            f << "      return\n";
+            f << "    } catch {\n";
+            f << "      $lastError = $_.Exception.Message\n";
+            f << "      if ($attempt -lt $copyRetries) { Start-Sleep -Seconds $copyWaitSeconds }\n";
+            f << "    }\n";
+            f << "  }\n";
+            f << "  throw ($label + ' failed after ' + $copyRetries + ' attempts: ' + $lastError)\n";
             f << "}\n";
             f << "function Assert-FileMatch([string]$source, [string]$destination, [string]$label) {\n";
             f << "  if (!(Test-Path -LiteralPath $source -PathType Leaf)) { throw ($label + ' source missing') }\n";
@@ -9012,32 +9475,63 @@ static void reg_updater() {
             f << "  if (!(Test-Path -LiteralPath (Join-Path $tdpSource 'YeManTdpCtl.exe'))) { throw 'staged YeManTdpCtl.exe missing' }\n";
             f << "  if (!(Test-Path -LiteralPath (Join-Path $tdpSource '_internal') -PathType Container)) { throw 'staged YeManTdpCtl _internal missing' }\n";
             f << "  Set-Content -LiteralPath $state -Value '{\"phase\":\"copying\"}' -Encoding utf8\n";
-            // Copy all PowerControl files first.  The main executable is not
-            // committed until this succeeds and the TDP runtime is exact.
+            // Copy non-PawnIO PowerControl assets first. PawnIO is staged and
+            // committed as one directory transaction below.
             f << "  if (!(Test-Path -LiteralPath $pcDir -PathType Container)) { New-Item -ItemType Directory -Path $pcDir -Force | Out-Null }\n";
-            f << "  Copy-TreeChecked (Join-Path $staging 'PowerControl') $pcDir @()\n";
-            // Remove stale Python major-version DLLs only after the matching
-            // package has been copied; this prevents python312/python313
-            // leftovers from making a new controller fail to start.
+            f << "  Copy-TreeChecked $powerControlSource $pcDir @('/XD', $tdpSource)\n";
             f << "  $sourcePython = @(Get-ChildItem -LiteralPath (Join-Path $tdpSource '_internal') -Filter 'python*.dll' -File | ForEach-Object Name)\n";
             f << "  if ($sourcePython.Count -eq 0) { throw 'TDP runtime has no Python DLL' }\n";
-            f << "  Copy-TreeChecked (Join-Path $tdpSource '_internal') (Join-Path $tdpTarget '_internal') @('/PURGE')\n";
-            f << "  foreach ($oldPython in @(Get-ChildItem -LiteralPath (Join-Path $tdpTarget '_internal') -Filter 'python*.dll' -File -ErrorAction SilentlyContinue)) { if ($oldPython.Name -notin $sourcePython) { Remove-Item -LiteralPath $oldPython.FullName -Force } }\n";
-            f << "  Assert-FileMatch (Join-Path $tdpSource 'YeManTdpCtl.exe') (Join-Path $tdpTarget 'YeManTdpCtl.exe') 'YeManTdpCtl.exe'\n";
-            f << "  Assert-TreeMatch (Join-Path $tdpSource '_internal') (Join-Path $tdpTarget '_internal') 'YeManTdpCtl._internal'\n";
+            f << "  Copy-TreeChecked $tdpSource $tdpStage @('/PURGE')\n";
+            f << "  Assert-TreeMatch $tdpSource $tdpStage 'YeManTdpCtl.runtime.stage'\n";
+            f << "  if (Test-Path -LiteralPath $tdpTarget -PathType Container) { Rename-DirectoryChecked $tdpTarget $tdpBackup 'PawnIO backup'; $tdpOriginalMoved = $true }\n";
+            f << "  Rename-DirectoryChecked $tdpStage $tdpTarget 'PawnIO commit'\n";
+            f << "  $tdpCommitted = $true\n";
+            f << "  Assert-TreeMatch $tdpSource $tdpTarget 'YeManTdpCtl.runtime.committed'\n";
             f << "  Set-Content -LiteralPath $state -Value '{\"phase\":\"tdp-verified\"}' -Encoding utf8\n";
             f << "  Copy-Item -LiteralPath $exePath -Destination $backup -Force\n";
             f << "  Copy-Item -LiteralPath $packageExe -Destination $newExe -Force\n";
             f << "  Move-Item -LiteralPath $newExe -Destination $exePath -Force\n";
             f << "  Copy-TreeChecked $staging $exeDir @('/XF','YeManCC.exe','YeMan-Support.html','/XD','PowerControl')\n";
             f << "  Copy-Item -LiteralPath (Join-Path $staging 'YeMan-Support.html') -Destination $supportPath -Force\n";
-            f << "  Set-Content -LiteralPath $state -Value '{\"phase\":\"committed\"}' -Encoding utf8\n";
-            f << "  Start-Process -FilePath $exePath\n";
+            f << "  Set-Content -LiteralPath $state -Value '{\"phase\":\"launching\"}' -Encoding utf8\n";
+            f << "  $newProcess = Start-Process -FilePath $exePath -ArgumentList @('--update-handshake', ('\"' + $handshakePath + '\"'), '--update-handshake-token', $handshakeToken) -PassThru\n";
+            f << "  $handshakeDeadline = (Get-Date).AddSeconds($handshakeTimeoutSeconds)\n";
+            f << "  $handshakeOk = $false\n";
+            f << "  while ((Get-Date) -lt $handshakeDeadline) {\n";
+            f << "    if ($newProcess.HasExited) { break }\n";
+            f << "    if (Test-Path -LiteralPath $handshakePath -PathType Leaf) {\n";
+            f << "      try {\n";
+            f << "        $marker = Get-Content -LiteralPath $handshakePath -Raw -ErrorAction Stop | ConvertFrom-Json\n";
+            f << "        $markerPid = [int]$marker.pid\n";
+            f << "        $markerProcess = Get-Process -Id $markerPid -ErrorAction SilentlyContinue\n";
+            f << "        if ($marker.phase -eq 'started' -and [string]$marker.token -eq $handshakeToken -and $markerPid -eq $newProcess.Id -and $markerProcess) { $handshakeOk = $true; break }\n";
+            f << "      } catch { }\n";
+            f << "    }\n";
+            f << "    Start-Sleep -Milliseconds 250\n";
+            f << "  }\n";
+            f << "  if (!$handshakeOk) { throw 'new YeManCC process did not complete startup handshake' }\n";
+            f << "  Set-Content -LiteralPath $state -Value ('{\"phase\":\"started\",\"pid\":' + $newProcess.Id + '}') -Encoding utf8\n";
+            f << "  $updateCommitted = $true\n";
+            f << "  if (Test-Path -LiteralPath $tdpBackup) { Remove-Item -LiteralPath $tdpBackup -Recurse -Force -ErrorAction SilentlyContinue }\n";
             f << "} catch {\n";
-            f << "  if (Test-Path -LiteralPath $backup) { Copy-Item -LiteralPath $backup -Destination $exePath -Force }\n";
-            f << "  Set-Content -LiteralPath $state -Value ('{\"phase\":\"rolled-back\",\"error\":' + (ConvertTo-Json $_.Exception.Message -Compress) + '}') -Encoding utf8\n";
+            f << "  $installError = $_.Exception.Message\n";
+            f << "  $rollbackError = $null\n";
+            f << "  if (!$updateCommitted -and $newProcess) { try { if (!$newProcess.HasExited) { Stop-Process -Id $newProcess.Id -Force -ErrorAction SilentlyContinue; $newProcess.WaitForExit(5000) } } catch { } }\n";
+            f << "  if (!$updateCommitted -and ($tdpCommitted -or $tdpOriginalMoved)) {\n";
+            f << "    try {\n";
+            f << "      if (Test-Path -LiteralPath $tdpTarget) { Remove-Item -LiteralPath $tdpTarget -Recurse -Force -ErrorAction Stop }\n";
+            f << "      if (Test-Path -LiteralPath $tdpBackup -PathType Container) { Rename-DirectoryChecked $tdpBackup $tdpTarget 'PawnIO rollback' }\n";
+            f << "      elseif ($tdpOriginalMoved) { throw 'PawnIO rollback directory missing' }\n";
+            f << "    } catch { $rollbackError = $_.Exception.Message }\n";
+            f << "  }\n";
+            f << "  try { if (Test-Path -LiteralPath $backup) { Copy-Item -LiteralPath $backup -Destination $exePath -Force -ErrorAction Stop } } catch { if (!$rollbackError) { $rollbackError = $_.Exception.Message } else { $rollbackError += '; EXE rollback: ' + $_.Exception.Message } }\n";
+            f << "  $errorMessage = $installError\n";
+            f << "  if ($rollbackError) { $errorMessage += '; rollback: ' + $rollbackError }\n";
+            f << "  Set-Content -LiteralPath $state -Value ('{\"phase\":\"rolled-back\",\"error\":' + (ConvertTo-Json $errorMessage -Compress) + '}') -Encoding utf8\n";
             f << "} finally {\n";
             f << "  Remove-Item -LiteralPath $newExe -Force -ErrorAction SilentlyContinue\n";
+            f << "  Remove-Item -LiteralPath $tdpStage -Recurse -Force -ErrorAction SilentlyContinue\n";
+            f << "  Remove-Item -LiteralPath $handshakePath -Force -ErrorAction SilentlyContinue\n";
             f << "  Remove-Item -LiteralPath $staging -Recurse -Force -ErrorAction SilentlyContinue\n";
             f << "  Remove-Item -LiteralPath $scriptPath -Force -ErrorAction SilentlyContinue\n";
             f << "}\n";
@@ -10335,6 +10829,7 @@ static void finalizeWebViewRenderReady(
 
     KillTimer(g_hwnd, WEBVIEW_RENDER_READY_TIMER_ID);
     g_webviewReady = true;
+    signalUpdateHandshake();
     g_webviewRenderReadyGeneration = generation;
     g_webviewRenderReadyNavigationId = navigationId;
     appendWebViewDiagnostic({
@@ -11841,6 +12336,12 @@ int WINAPI wWinMain(HINSTANCE hi, HINSTANCE, LPWSTR, int ns) {
     for (int i = 1; i < argc; i++) {
         if (wcscmp(argv[i], L"--dev") == 0 && i + 1 < argc) { g_devUrl = argv[i + 1]; }
         else if (wcscmp(argv[i], L"--minimized") == 0) { g_startMinimized = true; }
+        else if (wcscmp(argv[i], L"--update-handshake") == 0 && i + 1 < argc) {
+            g_updateHandshakePath = argv[++i];
+        }
+        else if (wcscmp(argv[i], L"--update-handshake-token") == 0 && i + 1 < argc) {
+            g_updateHandshakeToken = W2U(argv[++i]);
+        }
     }
     LocalFree(argv);
 
@@ -12168,9 +12669,9 @@ int WINAPI wWinMain(HINSTANCE hi, HINSTANCE, LPWSTR, int ns) {
         CloseHandle(g_autoCloseThread);
         g_autoCloseThread = nullptr;
     }
-    stopTdpDaemonForExit();
-    stopTopMonitorForExit();
-    sgCleanupBeforeExit();
+            stopTdpDaemonForExit();
+            stopTopMonitorForExit();
+            sgCleanupBeforeExit();
     closeWebViewsForExit();
     if (hMutex) CloseHandle(hMutex);
     CoUninitialize();

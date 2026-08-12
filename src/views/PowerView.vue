@@ -368,7 +368,7 @@ onActivated(() => {
       <h3 class="card-title"><InlineIcon name="rocket" /> 启动模式</h3>
       <p class="muted small">{{ rotText }}</p>
       <Toggle v-model="tasks.desktopMode" label="桌面模式" description="开机设置为桌面模式" color="accent" :disabled="busy" @update:model-value="(v: boolean) => toggleTaskSafe('桌面模式-开机设置为桌面模式', v, 'desktopMode')" />
-      <Toggle v-model="tasks.xboxMode" label="Xbox全屏游戏模式" description="大屏游戏模式（启动全屏检测；开启后自动联动任务栏常驻）" color="accent" :disabled="busy" @update:model-value="onXbox" />
+      <Toggle v-model="tasks.xboxMode" label="Xbox全屏游戏模式" description="大屏游戏任务与界面联动；开启后自动联动任务栏常驻" color="accent" :disabled="busy" @update:model-value="onXbox" />
       <Toggle v-model="startupGamingHome" label="开机启动Xbox全屏游戏模式" description="必须能正常启动Xbox APP 也是联动" color="accent" :disabled="busy || !tasks.xboxMode" @update:model-value="onStartupGamingHome" />
       <Toggle v-model="trayResident" label="任务栏常驻" description="Xbox全屏游戏模式的联动入口" color="accent" :disabled="busy || !tasks.xboxMode" @update:model-value="onTrayResident" />
       <WarnBar v-if="tasks.xboxMode && !trayResident" text="如关闭任务栏常驻无法在Xbox全屏中弹出野蛮系统控制台" />

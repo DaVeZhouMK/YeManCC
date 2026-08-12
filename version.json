@@ -1,6 +1,6 @@
 {
-  "version": "0.0.3",
-  "notes": "升级包现可同步更新 YeManCC、PowerControl 和 YeMan-Support.html；玩家自定义文件保留。",
+  "version": "0.0.5",
+  "notes": "同步更新 YeManCC、PowerControl 和 YeMan-Support.html；保留玩家自定义文件。",
   "sha256": "",
   "publishedAt": ""
 }

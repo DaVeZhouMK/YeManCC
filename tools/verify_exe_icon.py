@@ -1,7 +1,9 @@
+from pathlib import Path
 import win32gui, win32ui, win32con
 import PIL.Image
 
-exe = r'C:\SOFT\YeMan\YeManCC4\YeManCC3\native\YeManCC.exe'
+project_root = Path(__file__).resolve().parents[1]
+exe = str(project_root / 'native' / 'YeManCC.exe')
 hicons, _ = win32gui.ExtractIconEx(exe, 0)
 print('icon groups extracted:', len(hicons))
 hicon = hicons[0]
@@ -20,6 +22,6 @@ memdc.SelectObject(old)
 info = hbmp.GetInfo()
 bits = hbmp.GetBitmapBits(True)
 img = PIL.Image.frombuffer('RGBA', (info['bmWidth'], info['bmHeight']), bits, 'raw', 'BGRA', 0, 1)
-out = r'C:\SOFT\YeMan\YeManCC4\YeManCC3\native\YeManCC_exe_icon_check.png'
+out = str(project_root / 'native' / 'YeManCC_exe_icon_check.png')
 img.save(out)
 print('wrote', out, img.size)

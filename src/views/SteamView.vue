@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount, onActivated, onDeactivated, nextTick, inject, watch, type Ref } from 'vue';
+import { ref, onMounted, onBeforeUnmount, onActivated, onDeactivated, inject, watch, type Ref } from 'vue';
 import Toggle from '@/components/Toggle.vue';
 import StateCard from '@/components/StateCard.vue';
 import InlineIcon from '@/components/InlineIcon.vue';
@@ -42,7 +42,6 @@ let stopUiVisibility: (() => void) | null = null;
 
 const STEAM_POLL_INTERVAL_MS = 2000;
 const STEAM_POLL_TIMEOUT_MS = 20000;
-
 function showNotice(message: string) {
   if (noticeTimer) clearTimeout(noticeTimer);
   errMsg.value = message;
@@ -345,7 +344,7 @@ onMounted(() => {
   stopUiVisibility = onUiVisibilityChange(({ visible }) => {
     if (!visible) stopSteamPolling();
   });
-  void nextTick(refresh);
+  void refresh();
 });
 onActivated(() => {
   steamActive = true;
@@ -430,6 +429,7 @@ onBeforeUnmount(() => {
         <span class="add-addon-plus">+</span> 添加程序
       </button>
     </section>
+
   </div>
 </template>
 

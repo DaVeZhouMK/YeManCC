@@ -5,7 +5,8 @@ param(
   [string]$ExeName = 'YeManCC-gate-test.exe'
 )
 $ErrorActionPreference = 'Stop'
-$gateRoot = 'C:\SOFT\YeMan\YeManCC4\YeManCC3\native\testrun\gate_test'
+$projectRoot = Split-Path -Parent $PSScriptRoot
+$gateRoot = Join-Path $projectRoot 'native\testrun\gate_test'
 $dataDir = Join-Path $gateRoot $DataName
 $exe = Join-Path $gateRoot $ExeName
 foreach ($name in @('started.json', 'suspend-result.json', 'result.json', 'duplicate-result.json')) {

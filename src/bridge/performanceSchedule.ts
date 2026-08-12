@@ -1,5 +1,5 @@
 import { fs } from './api';
-import { readSettingsSection, saveSettingsSection } from './settingsRepository';
+import { readSettingsSection, replaceSettingsSection, saveSettingsSection } from './settingsRepository';
 import { detectGame } from './gamedetect';
 import {
   PW,
@@ -144,6 +144,7 @@ export async function runOptionalPerformanceScheduleTdp(
     await apply();
     return null;
   } catch (error) {
+    if (error instanceof SkipApplyError) throw error;
     const warning = describePerformanceScheduleTdpError(error, side, watts);
     publishPerformanceScheduleWarning(warning);
     return warning;
@@ -162,7 +163,7 @@ export function onPerformanceScheduleWarning(
   return () => warningListeners.delete(listener);
 }
 
-// 配置重制的四档基线：性能调度统一由 FPS、TDP、CPU 浮动值三者组成。
+// 配置重制的六档基线：性能调度统一由 FPS、TDP、CPU 浮动值三者组成。
 // CPU 浮动值与 TDP 浮动幅度保持同档语义，避免选择档位后出现 CPU/TDP 两套方向。
 export const DEFAULT_SCHEDULE_PROFILES: Record<ScheduleMode, ScheduleProfile> = {
   eco: {
@@ -357,19 +358,24 @@ function cpuProfilePath(preset: CpuPreset): string {
 }
 
 async function applyCpuPresetBaseline(preset: CpuPreset): Promise<void> {
+  assertScheduleOpCurrent();
   await runResetProfile(cpuProfilePath(preset));
   // CPU 浮动旧版本曾错误写入最大处理器状态。基线应用时只恢复这个
   // 全局安全上限，动态浮动本身不再触碰该参数。
   const params = await readPowerParams();
+  assertScheduleOpCurrent();
   if (params) await applyPowerParams(params);
+  assertScheduleOpCurrent();
   await setActiveScheme();
 }
 
 async function applyCoreModeIfHybrid(side: PowerSide, mode: CoreMode): Promise<boolean> {
+  assertScheduleOpCurrent();
   const architecture = await detectCoreArchitecture();
   // Unknown/uniform CPUs are read-only no-op: never write hybrid-only values
   // merely because a powercfg subgroup happens to exist.
   if (!architecture?.heterogeneous) return false;
+  assertScheduleOpCurrent();
   if (side === 'ac') await setCoreModeAc(mode);
   else await setCoreModeDc(mode);
   return true;
@@ -379,10 +385,14 @@ async function applyCoreModeIfHybrid(side: PowerSide, mode: CoreMode): Promise<b
 // 避免并发写配置/硬件。带 generation 令牌，进入手动模式时使在途切档请求立刻短路。
 let scheduleOpQueue: Promise<void> = Promise.resolve();
 let scheduleOpGen = 0;
+let runningScheduleOpGen = 0;
 
 async function withScheduleOp<T>(enabled: boolean, fn: () => Promise<T>): Promise<T> {
-  if (!enabled) scheduleOpGen++;
-  const gen = scheduleOpGen;
+  // Every new scheduling request supersedes work that has not reached its
+  // next commit point. `enabled` remains in the signature for call-site
+  // compatibility; manual mode still uses the same invalidation path.
+  void enabled;
+  const gen = ++scheduleOpGen;
   let resolveNext: (() => void) | null = null;
   const ticket = new Promise<void>((r) => { resolveNext = r; });
   const prev = scheduleOpQueue;
@@ -393,9 +403,17 @@ async function withScheduleOp<T>(enabled: boolean, fn: () => Promise<T>): Promis
   await prev;
   try {
     if (gen !== scheduleOpGen) throw new SkipApplyError();
+    runningScheduleOpGen = gen;
     return await fn();
   } finally {
+    if (runningScheduleOpGen === gen) runningScheduleOpGen = 0;
     resolveNext!();
+  }
+}
+
+function assertScheduleOpCurrent(): void {
+  if (!runningScheduleOpGen || runningScheduleOpGen !== scheduleOpGen) {
+    throw new SkipApplyError();
   }
 }
 
@@ -434,12 +452,16 @@ async function applyPerformanceScheduleUnsafe(
   const current = config ? normalizeConfig(config) : await loadPerformanceSchedule();
   // Automatic scheduling owns YeMan power scheme. Restore that ownership
   // before writing CPU/TDP values so they always land on the active scheme.
+  assertScheduleOpCurrent();
   await ensureRememberedYemanSchemeActive();
   current.configured = true;
   current.enabled = true;
+  assertScheduleOpCurrent();
   current.active[side] = mode;
   const actualSide = await detectPowerMode();
+  assertScheduleOpCurrent();
   if (actualSide !== side) {
+    assertScheduleOpCurrent();
     await savePerformanceSchedule(current);
     return false;
   }
@@ -450,6 +472,9 @@ async function applyPerformanceScheduleUnsafe(
   // 两路不得叠加：cpuTarget!=='none' 不调用 runResetProfile，避免 preset 基线被压制层覆盖。
   const cpuTarget: FloatProfile = profile.cpuTarget;
 
+  assertScheduleOpCurrent();
+  if ((await detectPowerMode()) !== side) return false;
+
   if (getFloatInfo().enabled) {
     // 浮动调度已运行：保留守护、daemon、HWiNFO 与 RTSS 原始快照，只增量更新当前目标。
     // 热切档统一先下发 TDP，再重新下发 CPU：cpuTarget==='none' 时重设 cpuPreset；
@@ -457,12 +482,18 @@ async function applyPerformanceScheduleUnsafe(
     // 写硬件前二次校验电源侧：detectPowerMode 与下发之间若插拔电源，直接中止，
     // 避免 AC 配置被写到 DC（或反之）造成电池下跑极端档（2026-08-05 修复 TOCTOU）。
     if ((await detectPowerMode()) !== side) return false;
+    assertScheduleOpCurrent();
     await runOptionalPerformanceScheduleTdp(side, profile.tdpMax, () =>
       setTdp(side, profile.tdpMax, { apply: false, save: true }));
+    assertScheduleOpCurrent();
     await notifyTdpMaxChanged(profile.tdpMax);
+    assertScheduleOpCurrent();
     if (cpuTarget === 'none') await applyCpuPresetBaseline(profile.cpuPreset);
+    assertScheduleOpCurrent();
     await applyFloatSettings(profile.fpsTarget, cpuTarget, profile.tdpStrategy);
+    assertScheduleOpCurrent();
     await applyCoreModeIfHybrid(side, profile.coreMode);
+    assertScheduleOpCurrent();
     await savePerformanceSchedule(current);
     return true;
   }
@@ -470,15 +501,20 @@ async function applyPerformanceScheduleUnsafe(
   // 首次开启走完整初始化。
   if ((await detectPowerMode()) !== side) return false;
   // 新预设统一按 TDP 优先：先写入并应用当前侧 TDP，再套用 CPU 浮动/CPU 挡位。
+  assertScheduleOpCurrent();
   await runOptionalPerformanceScheduleTdp(side, profile.tdpMax, () =>
     setTdp(side, profile.tdpMax, { apply: true, save: true }));
+  assertScheduleOpCurrent();
   if (cpuTarget === 'none') await applyCpuPresetBaseline(profile.cpuPreset);
+  assertScheduleOpCurrent();
   await enableFloat(
     profile.fpsTarget,
     cpuTarget,
     profile.tdpStrategy,
   );
+  assertScheduleOpCurrent();
   await applyCoreModeIfHybrid(side, profile.coreMode);
+  assertScheduleOpCurrent();
   await savePerformanceSchedule(current);
   return true;
 }
@@ -491,7 +527,9 @@ export async function disablePerformanceSchedule(config?: PerformanceScheduleCon
     current.configured = true;
     current.enabled = false;
     // 先停止现有 CPU 浮动控制；TDP/RTSS/监控资源保持交给后续 CPU 挡位逻辑接管。
+    assertScheduleOpCurrent();
     if (getFloatInfo().enabled) await disableFloat();
+    assertScheduleOpCurrent();
     await savePerformanceSchedule(current);
   });
 }
@@ -507,7 +545,9 @@ export async function restorePerformanceScheduleIfConfigured(): Promise<Performa
     const config = await loadPerformanceSchedule();
     if (!config.configured) return 'none';
     if (!config.enabled) {
+      assertScheduleOpCurrent();
       if (getFloatInfo().enabled) await disableFloat();
+      assertScheduleOpCurrent();
       return 'manual';
     }
 
@@ -547,6 +587,7 @@ export async function applyPerformanceScheduleForCurrentPower(): Promise<boolean
 // manual settings.
 export async function refreshPerformanceScheduleCoreMode(): Promise<boolean> {
   return withScheduleOp(true, async () => {
+    assertScheduleOpCurrent();
     const config = await loadPerformanceSchedule();
     if (!config.configured || !config.enabled) return false;
     const game = await detectGame(true).catch(() => null);
@@ -561,6 +602,7 @@ export async function refreshPerformanceScheduleCoreMode(): Promise<boolean> {
       }
     }
     const side = await detectPowerMode();
+    assertScheduleOpCurrent();
     return applyCoreModeIfHybrid(side, config.profiles[side][config.active[side]].coreMode);
   });
 }
@@ -617,6 +659,8 @@ export interface GameCustomConfig {
 }
 
 const GAME_CUSTOM_PATH = 'C:\\SOFT\\YeMan\\PowerControl\\game-custom.json';
+const GAME_CUSTOM_BACKUP_PATH = `${GAME_CUSTOM_PATH}.bak`;
+const GAME_CUSTOM_MAX_BYTES = 4 * 1024 * 1024;
 
 function defaultGameCustomConfig(): GameCustomConfig {
   return { version: 1, entries: {} };
@@ -648,17 +692,59 @@ function normalizeGameCustom(value: unknown): GameCustomConfig {
 
 let gameCustomCache: GameCustomConfig | null = null;
 
+async function readStandaloneGameCustom(path: string): Promise<GameCustomConfig | null> {
+  try {
+    const raw = await fs.readTextFile(path, GAME_CUSTOM_MAX_BYTES);
+    return normalizeGameCustom(JSON.parse(raw));
+  } catch {
+    return null;
+  }
+}
+
+async function writeStandaloneGameCustom(config: GameCustomConfig): Promise<void> {
+  await fs.writeTextFileAtomic(GAME_CUSTOM_PATH, JSON.stringify(config, null, 2));
+}
+
 export function getGameCustomConfig(): GameCustomConfig {
   return gameCustomCache ? structuredClone(gameCustomCache) : defaultGameCustomConfig();
 }
 
 export async function loadGameCustomConfig(): Promise<GameCustomConfig> {
   if (gameCustomCache) return structuredClone(gameCustomCache);
-  try {
-    gameCustomCache = normalizeGameCustom(await readSettingsSection('gameCustom'));
-  } catch {
-    gameCustomCache = defaultGameCustomConfig();
+
+  const standaloneExists = await fs.exists(GAME_CUSTOM_PATH).catch(() => false);
+  if (standaloneExists) {
+    const standalone = await readStandaloneGameCustom(GAME_CUSTOM_PATH);
+    if (standalone) {
+      gameCustomCache = standalone;
+      return structuredClone(gameCustomCache);
+    }
+
+    // A malformed main file must not fall back to the legacy unified section:
+    // doing so would resurrect entries the user deliberately removed. Prefer
+    // the last known standalone backup, otherwise expose an empty config while
+    // retaining the damaged file for diagnosis.
+    const backup = await readStandaloneGameCustom(GAME_CUSTOM_BACKUP_PATH);
+    gameCustomCache = backup ?? defaultGameCustomConfig();
+    return structuredClone(gameCustomCache);
   }
+
+  // One-time migration only. Once the standalone document exists, it is the
+  // sole runtime source and the old unified section can never revive entries.
+  let migrated: GameCustomConfig;
+  try {
+    migrated = normalizeGameCustom(await readSettingsSection('gameCustom'));
+  } catch {
+    migrated = defaultGameCustomConfig();
+  }
+  try {
+    await writeStandaloneGameCustom(migrated);
+    await replaceSettingsSection('gameCustom', defaultGameCustomConfig() as any);
+  } catch {
+    // Keep the migrated snapshot usable for this session. The next save or
+    // startup will retry persistence instead of making the UI unusable.
+  }
+  gameCustomCache = migrated;
   return structuredClone(gameCustomCache);
 }
 
@@ -669,7 +755,14 @@ export async function saveGameCustomConfig(config: GameCustomConfig): Promise<vo
   // 队列吞错保活（一次 I/O 失败不再卡死后续写入）；但 run 本身仍向调用方抛出写入失败，
   // 让 UI 能感知「保存失败」而非静默丢失（修复：首败后所有保存永久失效 —— 2026-08-05）。
   const run = gameCustomWriteQueue.then(async () => {
-    await saveSettingsSection('gameCustom', snapshot as any);
+    // Preserve the previous standalone document before replacing it. This is
+    // deliberately independent from yeman-settings.json so deleting an entry
+    // cannot be undone by a later unified-settings merge.
+    if (await fs.exists(GAME_CUSTOM_PATH).catch(() => false)) {
+      const previous = await fs.readTextFile(GAME_CUSTOM_PATH, GAME_CUSTOM_MAX_BYTES);
+      await fs.writeTextFileAtomic(GAME_CUSTOM_BACKUP_PATH, previous);
+    }
+    await writeStandaloneGameCustom(snapshot);
     gameCustomCache = snapshot;
   });
   gameCustomWriteQueue = run.catch(() => {});
@@ -693,26 +786,40 @@ async function applyGameCustomProfilesUnsafe(
   const profile = side === 'ac' ? acProfile : dcProfile;
   const cpuTarget: FloatProfile = profile.cpuTarget;
 
+  assertScheduleOpCurrent();
+  if ((await detectPowerMode()) !== side) return false;
+
   // 所有耗时硬件阶段前后都复核电源侧，避免插拔窗口中把旧 AC/DC 档位继续写入。
   if ((await detectPowerMode()) !== side) return false;
   if (getFloatInfo().enabled) {
     if ((await detectPowerMode()) !== side) return false;
+    assertScheduleOpCurrent();
     await runOptionalPerformanceScheduleTdp(side, profile.tdpMax, () =>
       setTdp(side, profile.tdpMax, { apply: false, save: true }));
+    assertScheduleOpCurrent();
     if ((await detectPowerMode()) !== side) return false;
     await notifyTdpMaxChanged(profile.tdpMax);
+    assertScheduleOpCurrent();
     if (cpuTarget === 'none') await applyCpuPresetBaseline(profile.cpuPreset);
+    assertScheduleOpCurrent();
     await applyFloatSettings(profile.fpsTarget, cpuTarget, profile.tdpStrategy);
+    assertScheduleOpCurrent();
     await applyCoreModeIfHybrid(side, profile.coreMode);
+    assertScheduleOpCurrent();
     return true;
   }
   if ((await detectPowerMode()) !== side) return false;
+  assertScheduleOpCurrent();
   await runOptionalPerformanceScheduleTdp(side, profile.tdpMax, () =>
     setTdp(side, profile.tdpMax, { apply: true, save: true }));
+  assertScheduleOpCurrent();
   if (cpuTarget === 'none') await applyCpuPresetBaseline(profile.cpuPreset);
   if ((await detectPowerMode()) !== side) return false;
+  assertScheduleOpCurrent();
   await enableFloat(profile.fpsTarget, cpuTarget, profile.tdpStrategy);
+  assertScheduleOpCurrent();
   await applyCoreModeIfHybrid(side, profile.coreMode);
+  assertScheduleOpCurrent();
   return true;
 }
 
@@ -724,7 +831,9 @@ export async function applyGameCustomProfiles(
   const schedule = await loadPerformanceSchedule();
   if (!schedule.enabled) return false;
   return withScheduleOp(true, async () => {
+    assertScheduleOpCurrent();
     await ensureRememberedYemanSchemeActive();
+    assertScheduleOpCurrent();
     const side = await detectPowerMode();
     return applyGameCustomProfilesUnsafe(side, acProfile, dcProfile);
   });

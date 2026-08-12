@@ -8,7 +8,7 @@ param(
     [int]$SecondsPerCycle = 120,
     [int]$SampleSeconds = 5,
     [string]$ExePath = "C:\SOFT\YeMan\YeManCC\YeManCC.exe",
-    [string]$ReportPath = "C:\SOFT\YeMan\YeManCC4\YeManCC3\stability-report.jsonl",
+    [string]$ReportPath = (Join-Path (Split-Path -Parent $PSCommandPath) 'stability-report.jsonl'),
     [switch]$KeepResident,
     [switch]$NoPreCleanup
 )

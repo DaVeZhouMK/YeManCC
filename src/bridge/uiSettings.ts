@@ -7,6 +7,7 @@ export interface UiSettings {
   backgroundBlur: number;
   videoBatteryPause: boolean;
   scheduleMonitor: boolean;
+  steamChartAutoRefresh: 'none' | 'steam' | 'steamdeck';
 }
 
 const DEFAULTS: UiSettings = {
@@ -16,6 +17,7 @@ const DEFAULTS: UiSettings = {
   backgroundBlur: 0,
   videoBatteryPause: true,
   scheduleMonitor: true,
+  steamChartAutoRefresh: 'none',
 };
 
 let settings: UiSettings = { ...DEFAULTS };
@@ -34,6 +36,8 @@ function normalize(input: Partial<UiSettings>): UiSettings {
     backgroundBlur: Number.isFinite(blur) ? Math.min(24, Math.max(0, Math.round(blur))) : DEFAULTS.backgroundBlur,
     videoBatteryPause: input.videoBatteryPause !== false,
     scheduleMonitor: input.scheduleMonitor !== false,
+    steamChartAutoRefresh: input.steamChartAutoRefresh === 'steam' || input.steamChartAutoRefresh === 'steamdeck'
+      ? input.steamChartAutoRefresh : 'none',
   };
 }
 

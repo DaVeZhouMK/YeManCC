@@ -161,6 +161,32 @@ export async function closeGame(rootPid: number, name: string): Promise<GameCtlR
   return { ok: true, okCount: 1, failCount: 0, msgs: [] };
 }
 
+/**
+ * Wait until the exact PID used by closeGame is gone.
+ * This deliberately does not run game detection again: a newly launched
+ * process must never be mistaken for the game that was just closed.
+ */
+export async function waitForProcessExit(pid: number, timeoutMs = 10000): Promise<boolean> {
+  if (!Number.isInteger(pid) || pid <= 0) return true;
+  const deadline = Date.now() + Math.max(0, timeoutMs);
+  const filter = `PID eq ${pid}`;
+  while (Date.now() <= deadline) {
+    try {
+      const result = await shell.run('tasklist', ['/FI', filter, '/FO', 'CSV', '/NH'], 3000);
+      const stillRunning = (result.stdout || '').split(/\r?\n/).some((line) => {
+        const fields = line.match(/^\s*"[^"]*"\s*,\s*"(\d+)"\s*,/);
+        return fields ? Number(fields[1]) === pid : false;
+      });
+      if (!stillRunning) return true;
+    } catch {
+      // A transient tasklist failure is not proof that the process exited.
+    }
+    if (Date.now() >= deadline) break;
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+  return false;
+}
+
 export async function hasSuspendedState(rootPid?: number): Promise<{ suspended: boolean; name?: string }> {
   try {
     if (await fs.exists(SUSPEND_STATE)) {

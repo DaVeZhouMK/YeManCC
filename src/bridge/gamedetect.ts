@@ -60,19 +60,18 @@ const CACHE_MS = 5000;
 let detectInFlight: Promise<DetectedGame | null> | null = null;
 
 async function runDetection(): Promise<DetectedGame | null> {
-  try {
-    const raw = await invoke<Partial<DetectedGame> | null>('game.detect');
-    if (!raw || Number(raw.pid) <= 0) return null;
-    return {
-      pid: Number(raw.pid),
-      name: String(raw.name || ''),
-      title: String(raw.title || ''),
-      path: String(raw.path || ''),
-      ts: Number(raw.ts) || Date.now(),
-    };
-  } catch {
-    return null;
-  }
+  // Keep transport/WebView failures distinct from a successful "no game"
+  // result. Treating a transient IPC failure as null used to clear the active
+  // speed target, so a later click could operate on stale injection state.
+  const raw = await invoke<Partial<DetectedGame> | null>('game.detect');
+  if (!raw || Number(raw.pid) <= 0) return null;
+  return {
+    pid: Number(raw.pid),
+    name: String(raw.name || ''),
+    title: String(raw.title || ''),
+    path: String(raw.path || ''),
+    ts: Number(raw.ts) || Date.now(),
+  };
 }
 
 export async function detectGame(force = false): Promise<DetectedGame | null> {
@@ -108,6 +107,7 @@ const listeners = new Set<GameStatusListener>();
 let currentGame: DetectedGame | null = null;
 let stopPollSchedule: (() => void) | null = null;
 let pollBusy = false;
+let refreshInFlight: Promise<DetectedGame | null> | null = null;
 const POLL_MS = 2500;
 
 function sameGame(a: DetectedGame | null, b: DetectedGame | null): boolean {
@@ -126,17 +126,25 @@ function emitGame(game: DetectedGame | null): void {
 }
 
 export async function refreshGameStatus(): Promise<DetectedGame | null> {
+  if (refreshInFlight) return refreshInFlight;
   if (pollBusy) return currentGame;
   pollBusy = true;
+  refreshInFlight = (async () => {
+    try {
+      clearGameCache();
+      const game = await detectGame(true);
+      emitGame(game);
+      return game;
+    } catch {
+      return currentGame;
+    } finally {
+      pollBusy = false;
+    }
+  })();
   try {
-    clearGameCache();
-    const game = await detectGame(true);
-    emitGame(game);
-    return game;
-  } catch {
-    return currentGame;
+    return await refreshInFlight;
   } finally {
-    pollBusy = false;
+    refreshInFlight = null;
   }
 }
 

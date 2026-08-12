@@ -96,7 +96,7 @@ def check_intel_encoding(module):
 
 
 def check_daemon_client_allowlist(module):
-    parent = r"C:\SOFT\YeMan\YeManCC4\YeManCC3\native\testrun\sleep_cycles_current\YeManCC-sleep-cycles.exe"
+    parent = str(Path(__file__).resolve().parents[1] / "native" / "testrun" / "sleep_cycles_current" / "YeManCC-sleep-cycles.exe")
     allowed = module._daemon_allowed_client_paths(parent)
     assert module._canonical_exe_path(parent) in allowed
     assert module._canonical_exe_path(r"C:\arbitrary\other-host.exe") not in allowed

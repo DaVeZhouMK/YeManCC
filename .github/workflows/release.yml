@@ -62,22 +62,6 @@ jobs:
             }
           }
 
-      - name: Preserve generated version manifest
-        shell: pwsh
-        run: Copy-Item -LiteralPath Release\version.json -Destination $env:RUNNER_TEMP\version.json -Force
-
-      - name: Commit version manifest back to main
-        shell: bash
-        run: |
-          git fetch origin main
-          git checkout main
-          cp "$RUNNER_TEMP/version.json" version.json
-          git add version.json
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git commit -m "chore: update version manifest (${{ github.ref_name }})" || echo "no change"
-          git push origin main
-
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -89,3 +73,30 @@ jobs:
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify published package before advertising the version
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $release = gh release view "${{ github.ref_name }}" --repo "${{ github.repository }}" --json assets | ConvertFrom-Json
+          $asset = @($release.assets | Where-Object { $_.name -eq 'YeManCC.zip' })
+          if ($asset.Count -ne 1) {
+            throw 'GitHub Release does not contain exactly one YeManCC.zip asset.'
+          }
+
+      - name: Preserve generated version manifest
+        shell: pwsh
+        run: Copy-Item -LiteralPath Release\version.json -Destination $env:RUNNER_TEMP\version.json -Force
+
+      - name: Commit version manifest back to main
+        shell: bash
+        run: |
+          git fetch origin main
+          git checkout -B main origin/main
+          cp "$RUNNER_TEMP/version.json" version.json
+          git add version.json
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git commit -m "chore: update version manifest (${{ github.ref_name }})" || echo "no change"
+          git push origin HEAD:main

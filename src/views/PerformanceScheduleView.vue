@@ -1629,7 +1629,7 @@ onUnmounted(() => {
           @keydown.esc.prevent="cancelResetConfirm"
         >
           <div class="rc-title"><AppIcon name="warning" />确认配置重制</div>
-          <p class="rc-desc">将重制 AC / DC 下节能、平衡、高性能、极致性能的 CPU、大小核心、TDP、帧率和浮动设置。此操作不可撤销，是否继续？</p>
+          <p class="rc-desc">将重制 AC / DC 下节能、平衡、中等、高性能、精睿、极致性能六档的 CPU、大小核心、TDP、帧率和浮动设置。此操作不可撤销，是否继续？</p>
           <div class="rc-actions" data-gp-group="schedule-reset-confirm">
             <button ref="resetCancelEl" type="button" data-gp-group="schedule-reset-confirm" @click="cancelResetConfirm">取消</button>
             <button type="button" data-gp-group="schedule-reset-confirm" class="danger" @click="confirmResetProfiles">确认重制</button>

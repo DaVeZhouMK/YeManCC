@@ -303,16 +303,32 @@ export function dirnameOf(p: string): string {
 }
 
 // 查询游戏目录是否已注入 OptiScaler（dxgi.dll 哈希匹配缓存 OptiScaler.dll）
-export async function optiscalerStatus(gamePath: string): Promise<boolean> {
+export interface OptiStatus {
+  ok: boolean;
+  installed: boolean;
+  reason?: string;
+  msgs?: string[];
+  source?: string;
+  version?: string;
+}
+
+export async function optiscalerStatus(gamePath: string): Promise<OptiStatus> {
   const gameDir = dirnameOf(gamePath);
   try {
     const r = await shell.run(TDPCTL_EXE_OPTI, ['optiscaler', 'status', gameDir], 20000);
     const txt = (r.stdout || '').trim();
-    if (!txt) return false;
+    if (!txt) return { ok: false, installed: false, msgs: [(r.stderr || 'FSR4.1 状态读取无输出').trim()] };
     const obj = JSON.parse(txt);
-    return !!(obj && obj.installed);
+    return {
+      ok: obj?.ok !== false,
+      installed: !!obj?.installed,
+      reason: typeof obj?.reason === 'string' ? obj.reason : undefined,
+      msgs: Array.isArray(obj?.msgs) ? obj.msgs.map(String) : undefined,
+      source: typeof obj?.source === 'string' ? obj.source : undefined,
+      version: typeof obj?.version === 'string' ? obj.version : undefined,
+    };
   } catch {
-    return false;
+    return { ok: false, installed: false, msgs: ['无法启动 YeManTdpCtl.exe 读取 FSR4.1 状态'] };
   }
 }
 
@@ -320,6 +336,8 @@ export interface OptiResult {
   ok: boolean;
   msgs?: string[];
   via?: string;
+  source?: string;
+  version?: string;
   written?: number;
   removed?: number;
   restored?: number;
@@ -343,6 +361,8 @@ export async function oneClickOptiScaler(
       ok: !!(obj && obj.ok),
       msgs: obj.msgs,
       via: obj.via,
+      source: obj.source,
+      version: obj.version,
       written: obj.written,
       removed: obj.removed,
       restored: obj.restored,

@@ -3,7 +3,8 @@ param(
   [string]$ExeName = 'YeManCC-wake-race.exe'
 )
 $ErrorActionPreference = 'Stop'
-$testRoot = 'C:\SOFT\YeMan\YeManCC4\YeManCC3\native\testrun\wake_race_test'
+$projectRoot = Split-Path -Parent $PSScriptRoot
+$testRoot = Join-Path $projectRoot 'native\testrun\wake_race_test'
 $exe = Join-Path $testRoot $ExeName
 Get-ChildItem -LiteralPath $testRoot -Filter 'cycle-*.json' -File -ErrorAction SilentlyContinue |
   Remove-Item -Force

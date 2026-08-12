@@ -81,12 +81,21 @@ async function main() {
   assert(script.includes('function Invoke-SafeRollback'), 'transaction must contain rollback');
   passed++;
 
+  shellStdout = 'ARCH:x64\nRESP:OK 1.000000\nSAFE_FALLBACK:1\nRESULT:ok\n';
+  const reset = await speedhack.clearGameSpeed(333);
+  assert(reset.ok && reset.safeFallback, 'X1 reset should succeed');
+  const resetScript = shellScripts.at(-1) || '';
+  assert(resetScript.includes("Send-BridgeCommand 'SETSPEED 1'"), 'X1 must set speed to 1');
+  const resetTransaction = resetScript.slice(resetScript.lastIndexOf("$resp = Send-BridgeCommand 'SETSPEED 1'"));
+  assert(!resetTransaction.includes('DISABLE 333') && !resetTransaction.includes('EJECT 333'), 'X1 must not unload the game hook');
+  passed++;
+
   shellStdout = 'ARCH:x64\nRESP:OK\nRESP:ERROR injection failed\nRESP:OK\nSAFE_FALLBACK:1\nRESULT:failed\n';
   const failed = await speedhack.applyGameSpeed(444, 8, { pid: 444, name: 'safe-game.exe' });
   assert(!failed.ok && failed.safeFallback && failed.reason === 'operation_failed', 'failed injection must report 1x fallback');
   passed++;
 
-  console.log(`OpenSpeedy safety self-test: ${passed}/5 passed`);
+  console.log(`OpenSpeedy safety self-test: ${passed}/6 passed`);
 }
 
 main().catch((error) => {

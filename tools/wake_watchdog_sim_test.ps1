@@ -1,6 +1,7 @@
 param([string]$ExeName = 'YeManCC-wake-watchdog.exe')
 $ErrorActionPreference = 'Stop'
-$testRoot = 'C:\SOFT\YeMan\YeManCC4\YeManCC3\native\testrun\wake_watchdog_test'
+$projectRoot = Split-Path -Parent $PSScriptRoot
+$testRoot = Join-Path $projectRoot 'native\testrun\wake_watchdog_test'
 $exe = Join-Path $testRoot $ExeName
 foreach ($name in @('started.json', 'result.json')) {
   Remove-Item -LiteralPath (Join-Path $testRoot $name) -Force -ErrorAction SilentlyContinue

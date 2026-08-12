@@ -1,4 +1,5 @@
-import { fs, http, registry, type HttpResponse } from './api';
+import { fs, registry, type HttpResponse } from './api';
+import { requestSteamHttp, requestSteamJson } from './steamHttp';
 import {
   dynamicBackgroundGet,
   dynamicBackgroundInstallOnline,
@@ -196,21 +197,6 @@ function cacheAppId(titleKey: string, appId: number): void {
   } catch { /* use the live result only */ }
 }
 
-async function requestJsonOnce<T>(url: string): Promise<T> {
-  let response: HttpResponse;
-  try {
-    response = await requestSteamHttp(url, { headers: { Accept: 'application/json' } });
-  } catch (error) {
-    throw new Error(`Steam 网络访问失败：${(error as Error).message}`);
-  }
-  if (response.status < 200 || response.status >= 300) throw new Error(`Steam 资料请求失败（HTTP ${response.status}）`);
-  try {
-    return JSON.parse(response.body) as T;
-  } catch {
-    throw new Error('Steam 返回的资料格式无法读取');
-  }
-}
-
 function decodeHtml(value: string): string {
   return value
     .replace(/&amp;/gi, '&')
@@ -221,15 +207,7 @@ function decodeHtml(value: string): string {
 }
 
 async function requestJson<T>(url: string): Promise<T> {
-  return requestJsonOnce<T>(url);
-}
-
-async function requestSteamHttp(url: string, options: { method?: string; headers?: Record<string, string>; body?: string } = {}): Promise<HttpResponse> {
-  // Dynamic background metadata uses one direct Steam request. Do not route
-  // through local accelerator ports or wait in a retry loop.
-  const direct = await http.request(url, options);
-  if (direct.status < 200 || direct.status >= 300) throw new Error(`Steam HTTP ${direct.status}`);
-  return direct;
+  return requestSteamJson<T>(url);
 }
 
 /* function steamHttpCandidates(
