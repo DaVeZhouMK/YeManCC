@@ -1,7 +1,7 @@
-﻿{
-    "version":  "0.0.9",
-    "notes":  "弱网下载自动重试：每 5 秒重试一次，最长持续 5 分钟，并回报每次重试。",
-    "sha256":  "238624DE7163839099FEF059DA0A252CC27583AF3D1BC1D49314B5B2A82E8D1C",
-    "publishedAt":  "2026-08-13",
-    "package":  "Packages/YeManCC.zip"
+{
+  "version": "0.0.10",
+  "notes": "弱网下载自动重试：每 5 秒重试一次，最长持续 5 分钟，并回报每次重试。",
+  "sha256": "",
+  "publishedAt": "",
+  "package": "Packages/YeManCC.zip"
 }
