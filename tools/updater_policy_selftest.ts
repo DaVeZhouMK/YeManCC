@@ -29,8 +29,8 @@ const root = process.cwd();
 const native = readFileSync(resolve(root, 'native/main.cpp'), 'utf8');
 const release = readFileSync(resolve(root, 'tools/package-release.ps1'), 'utf8');
 const workflow = readFileSync(resolve(root, '.github/workflows/release.yml'), 'utf8');
-const packageInfo = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8'));
-const versionInfo = JSON.parse(readFileSync(resolve(root, 'version.json'), 'utf8'));
+const packageInfo = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8').replace(/^\uFEFF/, ''));
+const versionInfo = JSON.parse(readFileSync(resolve(root, 'version.json'), 'utf8').replace(/^\uFEFF/, ''));
 
 assert.equal(packageInfo.version, versionInfo.version, 'package.json and version.json must match');
 
@@ -47,9 +47,31 @@ for (const token of [
   '$rollbackAddedFiles',
   'Remove-Item -LiteralPath $rollbackRoot -Recurse -Force',
   'elseif ($rollbackSucceeded)',
+  'UPDATE_RETRY_WINDOW_MS = 5ULL * 60ULL * 1000ULL',
+  'UPDATE_RETRY_INTERVAL_MS = 5000',
+  'downloadFileAttempt(url, dest',
+  'retryDeadline - now <= UPDATE_RETRY_INTERVAL_MS',
+  '下载失败，正在重新尝试第 ',
+  '下载失败，已尝试 ',
+  '5 分钟内仍未成功',
+  '{"retryInSeconds", UPDATE_RETRY_INTERVAL_MS / 1000}',
+  '{"lastError", lastFailure.error}',
 ]) {
   assert.ok(native.includes(token), `native updater policy missing: ${token}`);
 }
+
+const updaterStart = native.indexOf('ipc_on("app.downloadUpdate"');
+const updaterEnd = native.indexOf('ipc_on("app.installUpdate"', updaterStart);
+assert.ok(updaterStart >= 0 && updaterEnd > updaterStart, 'native download updater block must exist');
+const updater = native.slice(updaterStart, updaterEnd);
+assert.ok(
+  updater.indexOf('downloadFileAttempt(url, dest') < updater.indexOf('const auto got = sha256File(dest)'),
+  'each downloaded package must be checksummed inside the retry loop',
+);
+assert.ok(
+  updater.includes('{"phase", "downloading"}') && updater.includes('{"message", retryMessage}'),
+  'retry wait must remain in the downloading phase and report every retry',
+);
 
 assert.ok(release.includes('Version mismatch: version.json=$version, package.json=$packageVersion'));
 assert.ok(workflow.includes("$expectedTag = \"v$version\""));

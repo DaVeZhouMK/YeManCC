@@ -1,7 +1,7 @@
-﻿{
-    "version":  "0.0.8",
-    "notes":  "更新器验收版本：以 0.0.7 为基线验证完整升级流程。",
-    "sha256":  "0F40BC4B09C954D60049B4264699B0408E647854076DBF1100558CBB21E0B054",
-    "publishedAt":  "2026-08-13",
-    "package":  "Packages/YeManCC.zip"
+{
+  "version": "0.0.9",
+  "notes": "弱网下载自动重试：每 5 秒重试一次，最长持续 5 分钟，并回报每次重试。",
+  "sha256": "",
+  "publishedAt": "",
+  "package": "Packages/YeManCC.zip"
 }

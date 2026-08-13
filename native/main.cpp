@@ -146,11 +146,14 @@ static bool isSteamHostName(const wchar_t* host) {
            value == "eccdnx.com" || value.ends_with(".eccdnx.com");
 }
 
-static void setHttpTimeouts(HINTERNET session) {
-    DWORD resolveTimeout = 10000;
-    DWORD connectTimeout = 15000;
-    DWORD sendTimeout = 30000;
-    DWORD receiveTimeout = 30000;
+static constexpr DWORD DEFAULT_HTTP_TIMEOUT_MS = 30000;
+
+static void setHttpTimeouts(HINTERNET session, DWORD maxTimeoutMs = DEFAULT_HTTP_TIMEOUT_MS) {
+    maxTimeoutMs = (std::max)(static_cast<DWORD>(1), maxTimeoutMs);
+    DWORD resolveTimeout = (std::min)(static_cast<DWORD>(10000), maxTimeoutMs);
+    DWORD connectTimeout = (std::min)(static_cast<DWORD>(15000), maxTimeoutMs);
+    DWORD sendTimeout = (std::min)(static_cast<DWORD>(30000), maxTimeoutMs);
+    DWORD receiveTimeout = (std::min)(static_cast<DWORD>(30000), maxTimeoutMs);
     WinHttpSetTimeouts(session, resolveTimeout, connectTimeout, sendTimeout, receiveTimeout);
 }
 
@@ -7309,6 +7312,26 @@ static void reg_fs() {
 
 static std::mutex g_backgroundMtx;
 
+// Update downloads are deliberately conservative for unreliable networks:
+// keep retrying the complete package at a fixed cadence, but never let one
+// update operation wait indefinitely.
+static constexpr ULONGLONG UPDATE_RETRY_WINDOW_MS = 5ULL * 60ULL * 1000ULL;
+static constexpr DWORD UPDATE_RETRY_INTERVAL_MS = 5000;
+
+struct DownloadAttemptResult {
+    bool ok = false;
+    bool retryable = true;
+    std::string error;
+    DWORD win32Error = ERROR_SUCCESS;
+    DWORD httpStatus = 0;
+    uint64_t receivedBytes = 0;
+    uint64_t expectedBytes = 0;
+};
+
+static DownloadAttemptResult downloadFileAttempt(
+    const std::string& url, const std::wstring& dest,
+    const std::function<void(uint64_t, uint64_t)>& progress,
+    ULONGLONG deadline);
 static bool downloadFile(const std::string& url, const std::wstring& dest,
                          const std::function<void(uint64_t, uint64_t)>& progress = {});
 static bool webmDurationSeconds(const std::wstring& path, double& seconds);
@@ -9127,89 +9150,195 @@ static json httpGet(const std::string& url) {
     return json::parse(body);
 }
 
-static bool downloadFile(const std::string& url, const std::wstring& dest,
-                         const std::function<void(uint64_t, uint64_t)>& progress) {
+static std::string downloadWinHttpError(const char* operation, DWORD error) {
+    return std::string(operation) + " failed (WinHTTP/Win32 " + std::to_string(error) + ")";
+}
+
+static DownloadAttemptResult downloadFileAttempt(
+    const std::string& url, const std::wstring& dest,
+    const std::function<void(uint64_t, uint64_t)>& progress,
+    ULONGLONG deadline) {
+    DownloadAttemptResult result;
     URL_COMPONENTS uc;
     wchar_t host[256]{}, path[2048]{}, extra[2048]{};
     std::wstring objectPath;
-    if (!crackHttpUrl(url, uc, host, path, extra, objectPath)) return false;
-    if (uc.nScheme != INTERNET_SCHEME_HTTPS) return false;
+    HINTERNET hS = nullptr;
+    HINTERNET hC = nullptr;
+    HINTERNET hR = nullptr;
+    std::ofstream out;
+
+    auto closeHandles = [&]() {
+        if (hR) { WinHttpCloseHandle(hR); hR = nullptr; }
+        if (hC) { WinHttpCloseHandle(hC); hC = nullptr; }
+        if (hS) { WinHttpCloseHandle(hS); hS = nullptr; }
+    };
+    auto removePartial = [&]() {
+        std::error_code ec;
+        fspath::remove(dest, ec);
+    };
+    auto fail = [&](std::string error, DWORD win32Error = ERROR_SUCCESS,
+                    bool retryable = true) -> DownloadAttemptResult {
+        if (out.is_open()) out.close();
+        closeHandles();
+        removePartial();
+        result.ok = false;
+        result.retryable = retryable;
+        result.error = std::move(error);
+        result.win32Error = win32Error;
+        return result;
+    };
+    auto remainingMs = [&]() -> DWORD {
+        const ULONGLONG now = GetTickCount64();
+        if (now >= deadline) return 0;
+        return static_cast<DWORD>((std::min)(deadline - now, static_cast<ULONGLONG>(0xFFFFFFFFu)));
+    };
+    auto attemptTimeoutMs = [&]() -> DWORD {
+        return (std::min)(remainingMs(), DEFAULT_HTTP_TIMEOUT_MS);
+    };
+
     std::error_code cleanupEc;
-    std::filesystem::remove(dest, cleanupEc);
-    bool https = true;
+    fspath::remove(dest, cleanupEc);
+    if (cleanupEc)
+        return fail("Cannot remove the previous download package", ERROR_ACCESS_DENIED, false);
+    if (g_poolCancel.load(std::memory_order_acquire))
+        return fail("Download cancelled", ERROR_CANCELLED, false);
+    if (!crackHttpUrl(url, uc, host, path, extra, objectPath))
+        return fail("Invalid download URL", ERROR_INVALID_PARAMETER, false);
+    if (uc.nScheme != INTERNET_SCHEME_HTTPS)
+        return fail("Only HTTPS download URLs are supported", ERROR_INVALID_PARAMETER, false);
+    if (remainingMs() == 0)
+        return fail("Download retry window expired", ERROR_WINHTTP_TIMEOUT, true);
+
     const bool steamHost = isSteamHostName(host);
-    HINTERNET hS = WinHttpOpen(L"QQ/1.0", steamHost ? WINHTTP_ACCESS_TYPE_NO_PROXY : WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
+    hS = WinHttpOpen(L"QQ/1.0",
+        steamHost ? WINHTTP_ACCESS_TYPE_NO_PROXY : WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
         WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
-    if (!hS) return false;
-    setHttpTimeouts(hS);
+    if (!hS) {
+        const DWORD error = GetLastError();
+        return fail(downloadWinHttpError("WinHttpOpen", error), error);
+    }
+    setHttpTimeouts(hS, attemptTimeoutMs());
     DWORD redirectPolicy = WINHTTP_OPTION_REDIRECT_POLICY_ALWAYS;
-    WinHttpSetOption(hS, WINHTTP_OPTION_REDIRECT_POLICY, &redirectPolicy, sizeof(redirectPolicy));
-    HINTERNET hC = WinHttpConnect(hS, host, uc.nPort, 0);
-    if (!hC) { WinHttpCloseHandle(hS); return false; }
-    HINTERNET hR = WinHttpOpenRequest(hC, L"GET", objectPath.c_str(), nullptr,
-        WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, https ? WINHTTP_FLAG_SECURE : 0);
-    if (!hR) { WinHttpCloseHandle(hC); WinHttpCloseHandle(hS); return false; }
-    if (steamHost && https) {
+    if (!WinHttpSetOption(hS, WINHTTP_OPTION_REDIRECT_POLICY, &redirectPolicy, sizeof(redirectPolicy))) {
+        const DWORD error = GetLastError();
+        return fail(downloadWinHttpError("WinHttpSetOption(redirect)", error), error);
+    }
+    hC = WinHttpConnect(hS, host, uc.nPort, 0);
+    if (!hC) {
+        const DWORD error = GetLastError();
+        return fail(downloadWinHttpError("WinHttpConnect", error), error);
+    }
+    hR = WinHttpOpenRequest(hC, L"GET", objectPath.c_str(), nullptr,
+        WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, WINHTTP_FLAG_SECURE);
+    if (!hR) {
+        const DWORD error = GetLastError();
+        return fail(downloadWinHttpError("WinHttpOpenRequest", error), error);
+    }
+    if (steamHost) {
         DWORD securityFlags = SECURITY_FLAG_IGNORE_UNKNOWN_CA |
                               SECURITY_FLAG_IGNORE_CERT_DATE_INVALID |
                               SECURITY_FLAG_IGNORE_CERT_CN_INVALID;
-        WinHttpSetOption(hR, WINHTTP_OPTION_SECURITY_FLAGS, &securityFlags, sizeof(securityFlags));
+        if (!WinHttpSetOption(hR, WINHTTP_OPTION_SECURITY_FLAGS, &securityFlags, sizeof(securityFlags))) {
+            const DWORD error = GetLastError();
+            return fail(downloadWinHttpError("WinHttpSetOption(security)", error), error);
+        }
     }
     const wchar_t* requestHeaders =
         L"Accept: video/webm,video/mp4,application/octet-stream,*/*\r\n"
         L"Accept-Encoding: identity\r\n"
         L"User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0 Safari/537.36\r\n"
         L"Referer: https://store.steampowered.com/\r\n";
-    WinHttpAddRequestHeaders(hR, requestHeaders, (DWORD)-1, WINHTTP_ADDREQ_FLAG_ADD);
+    if (!WinHttpAddRequestHeaders(hR, requestHeaders, (DWORD)-1, WINHTTP_ADDREQ_FLAG_ADD)) {
+        const DWORD error = GetLastError();
+        return fail(downloadWinHttpError("WinHttpAddRequestHeaders", error), error);
+    }
+    if (remainingMs() == 0)
+        return fail("Download retry window expired", ERROR_WINHTTP_TIMEOUT, true);
+    setHttpTimeouts(hR, attemptTimeoutMs());
     if (!WinHttpSendRequest(hR, WINHTTP_NO_ADDITIONAL_HEADERS, 0,
-        WINHTTP_NO_REQUEST_DATA, 0, 0, 0) || !WinHttpReceiveResponse(hR, nullptr)) {
-        WinHttpCloseHandle(hR); WinHttpCloseHandle(hC); WinHttpCloseHandle(hS);
-        return false;
+        WINHTTP_NO_REQUEST_DATA, 0, 0, 0)) {
+        const DWORD error = GetLastError();
+        return fail(downloadWinHttpError("WinHttpSendRequest", error), error);
+    }
+    if (!WinHttpReceiveResponse(hR, nullptr)) {
+        const DWORD error = GetLastError();
+        return fail(downloadWinHttpError("WinHttpReceiveResponse", error), error);
     }
     DWORD statusCode = 0;
     DWORD statusSize = sizeof(statusCode);
     if (!WinHttpQueryHeaders(hR, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
-        WINHTTP_HEADER_NAME_BY_INDEX, &statusCode, &statusSize, WINHTTP_NO_HEADER_INDEX) ||
-        statusCode < 200 || statusCode >= 300) {
-        WinHttpCloseHandle(hR); WinHttpCloseHandle(hC); WinHttpCloseHandle(hS);
-        return false;
+        WINHTTP_HEADER_NAME_BY_INDEX, &statusCode, &statusSize, WINHTTP_NO_HEADER_INDEX)) {
+        const DWORD error = GetLastError();
+        return fail(downloadWinHttpError("WinHttpQueryHeaders(status)", error), error);
+    }
+    result.httpStatus = statusCode;
+    if (statusCode < 200 || statusCode >= 300) {
+        const bool retryable = statusCode == 408 || statusCode == 425 || statusCode == 429 || statusCode >= 500;
+        return fail("HTTP " + std::to_string(statusCode), ERROR_SUCCESS, retryable);
     }
     DWORD expectedLength = 0;
     DWORD expectedLengthSize = sizeof(expectedLength);
     const bool hasExpectedLength = WinHttpQueryHeaders(
         hR, WINHTTP_QUERY_CONTENT_LENGTH | WINHTTP_QUERY_FLAG_NUMBER,
         WINHTTP_HEADER_NAME_BY_INDEX, &expectedLength, &expectedLengthSize, WINHTTP_NO_HEADER_INDEX) != FALSE;
-    std::ofstream out(dest, std::ios::binary);
-    if (!out) {
-        WinHttpCloseHandle(hR); WinHttpCloseHandle(hC); WinHttpCloseHandle(hS);
-        return false;
-    }
-    bool ok = true;
+    result.expectedBytes = hasExpectedLength ? expectedLength : 0;
+    out.open(dest, std::ios::binary | std::ios::trunc);
+    if (!out)
+        return fail("Cannot open download destination for writing", ERROR_ACCESS_DENIED, false);
+
     uint64_t receivedLength = 0;
-    const ULONGLONG deadline = GetTickCount64() + 15ULL * 60ULL * 1000ULL;
     DWORD avail = 0, rd = 0;
     while (true) {
-        if (g_poolCancel.load(std::memory_order_acquire) || GetTickCount64() >= deadline) {
-            ok = false;
-            break;
+        if (g_poolCancel.load(std::memory_order_acquire))
+            return fail("Download cancelled", ERROR_CANCELLED, false);
+        if (remainingMs() == 0)
+            return fail("Download attempt timed out", ERROR_WINHTTP_TIMEOUT, true);
+        setHttpTimeouts(hR, attemptTimeoutMs());
+        if (!WinHttpQueryDataAvailable(hR, &avail)) {
+            const DWORD error = GetLastError();
+            result.receivedBytes = receivedLength;
+            return fail(downloadWinHttpError("WinHttpQueryDataAvailable", error), error);
         }
-        if (!WinHttpQueryDataAvailable(hR, &avail)) { ok = false; break; }
         if (avail == 0) break;
-        std::string chunk(avail, 0);
-        if (!WinHttpReadData(hR, chunk.data(), avail, &rd)) { ok = false; break; }
+        const DWORD readSize = (std::min)(avail, static_cast<DWORD>(1u << 20));
+        std::string chunk(readSize, 0);
+        setHttpTimeouts(hR, attemptTimeoutMs());
+        if (!WinHttpReadData(hR, chunk.data(), readSize, &rd)) {
+            const DWORD error = GetLastError();
+            result.receivedBytes = receivedLength;
+            return fail(downloadWinHttpError("WinHttpReadData", error), error);
+        }
+        if (rd == 0) {
+            result.receivedBytes = receivedLength;
+            return fail("WinHttpReadData returned no data", ERROR_WINHTTP_CONNECTION_ERROR, true);
+        }
         out.write(chunk.data(), rd);
         receivedLength += rd;
-        if (!out) { ok = false; break; }
+        result.receivedBytes = receivedLength;
+        if (!out)
+            return fail("Failed to write the downloaded package", ERROR_WRITE_FAULT, false);
         if (progress) progress(receivedLength, hasExpectedLength ? expectedLength : 0);
     }
     out.close();
-    WinHttpCloseHandle(hR); WinHttpCloseHandle(hC); WinHttpCloseHandle(hS);
-    if (ok && hasExpectedLength && receivedLength != expectedLength) ok = false;
-    if (!ok) {
-        std::error_code ec;
-        std::filesystem::remove(dest, ec);
+    closeHandles();
+    result.receivedBytes = receivedLength;
+    if (hasExpectedLength && receivedLength != expectedLength) {
+        result.error = "Downloaded size mismatch (received " + std::to_string(receivedLength) +
+            ", expected " + std::to_string(expectedLength) + ")";
+        result.retryable = true;
+        removePartial();
+        return result;
     }
-    return ok;
+    result.ok = true;
+    result.retryable = false;
+    result.error.clear();
+    return result;
+}
+
+static bool downloadFile(const std::string& url, const std::wstring& dest,
+                         const std::function<void(uint64_t, uint64_t)>& progress) {
+    const ULONGLONG deadline = GetTickCount64() + 15ULL * 60ULL * 1000ULL;
+    return downloadFileAttempt(url, dest, progress, deadline).ok;
 }
 
 static bool webmReadVint(const std::vector<unsigned char>& data, size_t pos, size_t& width, uint64_t& value) {
@@ -9569,39 +9698,102 @@ static void reg_updater() {
             {"updatedAt", static_cast<int64_t>(time(nullptr) * 1000)}
         });
         try {
-            ULONGLONG lastTick = GetTickCount64();
-            uint64_t lastBytes = 0;
-            if (!downloadFile(url, dest, [&](uint64_t received, uint64_t total) {
+            const ULONGLONG retryDeadline = GetTickCount64() + UPDATE_RETRY_WINDOW_MS;
+            uint64_t attempt = 0;
+            DownloadAttemptResult lastFailure;
+            bool downloaded = false;
+            while (!downloaded) {
+                if (g_poolCancel.load(std::memory_order_acquire))
+                    throw std::runtime_error("Download cancelled during shutdown");
+                const ULONGLONG attemptStarted = GetTickCount64();
+                if (attemptStarted >= retryDeadline)
+                    break;
+                attempt++;
+                ULONGLONG lastTick = attemptStarted;
+                uint64_t lastBytes = 0;
+                auto result = downloadFileAttempt(url, dest, [&](uint64_t received, uint64_t total) {
+                    const ULONGLONG now = GetTickCount64();
+                    if (now - lastTick < 250 && received != total) return;
+                    const double seconds = (std::max)(0.001, (now - lastTick) / 1000.0);
+                    const uint64_t delta = received >= lastBytes ? received - lastBytes : 0;
+                    const double speed = delta / seconds;
+                    const double percent = total > 0 ? (std::min)(100.0, received * 100.0 / total) : 0.0;
+                    const int64_t eta = total > received && speed > 1.0
+                        ? static_cast<int64_t>((total - received) / speed) : 0;
+                    updateProgressPost({
+                        {"operationId", operationId}, {"phase", "downloading"},
+                        {"version", version}, {"attempt", attempt},
+                        {"downloadedBytes", received}, {"totalBytes", total},
+                        {"percent", percent}, {"speedBps", speed}, {"etaSeconds", eta},
+                        {"message", "正在下载更新包（第 " + std::to_string(attempt) + " 次尝试）"},
+                        {"updatedAt", static_cast<int64_t>(time(nullptr) * 1000)}
+                    });
+                    lastTick = now;
+                    lastBytes = received;
+                }, retryDeadline);
+                if (result.ok) {
+                    updateProgressPost({
+                        {"operationId", operationId}, {"phase", "validating"},
+                        {"version", version}, {"attempt", attempt},
+                        {"downloadedBytes", result.receivedBytes},
+                        {"totalBytes", result.expectedBytes},
+                        {"percent", 100}, {"speedBps", 0}, {"etaSeconds", 0},
+                        {"message", "正在校验更新包（第 " + std::to_string(attempt) + " 次尝试）"},
+                        {"updatedAt", static_cast<int64_t>(time(nullptr) * 1000)}
+                    });
+                    const auto got = sha256File(dest);
+                    if (isStrictUpdateSha256(got) && _stricmp(got.c_str(), sha.c_str()) == 0) {
+                        downloaded = true;
+                        break;
+                    }
+                    result.ok = false;
+                    result.retryable = true;
+                    result.error = "Checksum mismatch (expected " + sha + ", got " + got + ")";
+                    std::error_code checksumEc;
+                    fspath::remove(dest, checksumEc);
+                }
+                lastFailure = std::move(result);
+                if (!lastFailure.retryable) {
+                    throw std::runtime_error("下载失败，已尝试 " + std::to_string(attempt) +
+                        " 次：" + lastFailure.error);
+                }
+
                 const ULONGLONG now = GetTickCount64();
-                if (now - lastTick < 250 && received != total) return;
-                const double seconds = (std::max)(0.001, (now - lastTick) / 1000.0);
-                const uint64_t delta = received >= lastBytes ? received - lastBytes : 0;
-                const double speed = delta / seconds;
-                const double percent = total > 0 ? (std::min)(100.0, received * 100.0 / total) : 0.0;
-                const int64_t eta = total > received && speed > 1.0
-                    ? static_cast<int64_t>((total - received) / speed) : 0;
+                if (now >= retryDeadline || retryDeadline - now <= UPDATE_RETRY_INTERVAL_MS)
+                    break;
+                const uint64_t nextAttempt = attempt + 1;
+                const ULONGLONG remainingAfterWaitMs = retryDeadline - now - UPDATE_RETRY_INTERVAL_MS;
+                const uint64_t remainingMinutes = (std::max)(1ULL,
+                    (remainingAfterWaitMs + 59999ULL) / 60000ULL);
+                const std::string retryMessage = "下载失败，正在重新尝试第 " +
+                    std::to_string(nextAttempt) + " 次（剩余约 " +
+                    std::to_string(remainingMinutes) + " 分钟）";
                 updateProgressPost({
                     {"operationId", operationId}, {"phase", "downloading"},
-                    {"version", version},
-                    {"downloadedBytes", received}, {"totalBytes", total},
-                    {"percent", percent}, {"speedBps", speed}, {"etaSeconds", eta},
-                    {"message", "正在下载更新包"},
+                    {"version", version}, {"attempt", attempt}, {"nextAttempt", nextAttempt},
+                    {"retryInSeconds", UPDATE_RETRY_INTERVAL_MS / 1000},
+                    {"remainingRetrySeconds", static_cast<uint64_t>((retryDeadline - now) / 1000ULL)},
+                    {"downloadedBytes", lastFailure.receivedBytes},
+                    {"totalBytes", lastFailure.expectedBytes},
+                    {"percent", 0}, {"speedBps", 0}, {"etaSeconds", 0},
+                    {"lastError", lastFailure.error}, {"message", retryMessage},
                     {"updatedAt", static_cast<int64_t>(time(nullptr) * 1000)}
                 });
-                lastTick = now;
-                lastBytes = received;
-            })) {
-                throw std::runtime_error("Download failed");
+
+                const ULONGLONG waitDeadline = GetTickCount64() + UPDATE_RETRY_INTERVAL_MS;
+                while (GetTickCount64() < waitDeadline) {
+                    if (g_poolCancel.load(std::memory_order_acquire))
+                        throw std::runtime_error("Download cancelled during shutdown");
+                    const ULONGLONG waitRemaining = waitDeadline - GetTickCount64();
+                    Sleep(static_cast<DWORD>((std::min)(waitRemaining, 100ULL)));
+                }
             }
-            updateProgressPost({
-                {"operationId", operationId}, {"phase", "validating"},
-                {"version", version},
-                {"percent", 100}, {"message", "正在校验更新包"},
-                {"updatedAt", static_cast<int64_t>(time(nullptr) * 1000)}
-            });
-            auto got = sha256File(dest);
-            if (!isStrictUpdateSha256(got) || _stricmp(got.c_str(), sha.c_str()) != 0)
-                throw std::runtime_error("Checksum mismatch (expected " + sha + ", got " + got + ")");
+            if (!downloaded) {
+                const std::string detail = lastFailure.error.empty()
+                    ? std::string("Download retry window expired") : lastFailure.error;
+                throw std::runtime_error("下载失败，已尝试 " + std::to_string(attempt) +
+                    " 次，5 分钟内仍未成功：" + detail);
+            }
             updateProgressPost({
                 {"operationId", operationId}, {"phase", "downloaded"},
                 {"version", version},

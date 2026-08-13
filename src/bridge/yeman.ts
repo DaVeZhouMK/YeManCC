@@ -635,11 +635,16 @@ export interface UpdateProgressState {
   operationId?: string;
   phase?: string;
   version?: string;
+  attempt?: number;
+  nextAttempt?: number;
+  retryInSeconds?: number;
+  remainingRetrySeconds?: number;
   downloadedBytes?: number;
   totalBytes?: number;
   percent?: number;
   speedBps?: number;
   etaSeconds?: number;
+  lastError?: string;
   message?: string;
   error?: string;
   updatedAt?: number;

@@ -63,8 +63,9 @@ function merge(next: UpdateProgressState): void {
   if (incomingId) updateSnapshot.operationId = incomingId;
   if (next.phase) updateSnapshot.phase = next.phase as UpdatePhase;
   for (const key of [
-    'version', 'downloadedBytes', 'totalBytes', 'percent', 'speedBps',
-    'etaSeconds', 'message', 'error', 'updatedAt',
+    'version', 'attempt', 'nextAttempt', 'retryInSeconds', 'remainingRetrySeconds',
+    'downloadedBytes', 'totalBytes', 'percent', 'speedBps',
+    'etaSeconds', 'lastError', 'message', 'error', 'updatedAt',
   ] as const) {
     if (next[key] !== undefined) updateSnapshot[key] = next[key] as never;
   }

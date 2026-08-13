@@ -1,7 +1,7 @@
 {
   "name": "yemancc",
   "private": true,
-  "version": "0.0.8",
+  "version": "0.0.9",
   "packageManager": "pnpm@11.16.0",
   "type": "module",
   "description": "YeManCC — 野蛮系统控制中心 (Vue3 + QiangQiang WebView2 shell)",
@@ -21,6 +21,7 @@
     "test:power-resume": "esbuild tools/power_resume_selftest.ts --bundle --platform=node --format=cjs --outfile=../../Build/Validation/SelfTests/power_resume_selftest.cjs --alias:@=./src && node ../../Build/Validation/SelfTests/power_resume_selftest.cjs",
     "test:schedule-tdp": "esbuild tools/performance_schedule_tdp_selftest.ts --bundle --platform=node --format=cjs --outfile=../../Build/Validation/SelfTests/performance_schedule_tdp_selftest.cjs --alias:@=./src && node ../../Build/Validation/SelfTests/performance_schedule_tdp_selftest.cjs",
     "test:updater": "esbuild tools/updater_policy_selftest.ts --bundle --platform=node --format=cjs --outfile=../../Build/Validation/SelfTests/updater_policy_selftest.cjs --alias:@=./src && node ../../Build/Validation/SelfTests/updater_policy_selftest.cjs",
+    "test:updater-retry": "esbuild tools/updater_retry_selftest.ts --bundle --platform=node --format=cjs --outfile=../../Build/Validation/SelfTests/updater_retry_selftest.cjs && node ../../Build/Validation/SelfTests/updater_retry_selftest.cjs",
     "test:updater-rollback": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/updater_rollback_selftest.ps1",
     "publish": "pnpm run release"
   },
