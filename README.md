@@ -16,13 +16,13 @@
 - 支持自定义游戏配置，为不同游戏保存独立的性能方案。
 
 
-![Uploading 屏幕截图 2026-08-13 133255.png…]()
+<img width="1036" height="1029" alt="屏幕截图 2026-08-13 133255" src="https://github.com/user-attachments/assets/bd6294c8-3edc-44fe-bc93-8c44d97b63ee" />
+
 
 ## 下载
 
 推荐从野蛮系统主页下载完整系统和手动优化包：
 
-[https://link3.cc/yeman](https://link3.cc/yeman)
 
 请优先使用主页提供的完整系统包，避免因缺少运行组件导致程序无法正常工作。
 
