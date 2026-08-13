@@ -1,7 +1,7 @@
-﻿{
-    "version":  "0.0.7",
-    "notes":  "全局更新进度、页面切换不中断；更新包固定为 YeManCC 与 PowerControl 双目录结构。",
-    "sha256":  "083E2057ECAC1F67AB5F9D522C7F495C81C054EC8E09F4F37427CE30C068F50D",
-    "publishedAt":  "2026-08-13",
-    "package":  "Packages/YeManCC.zip"
+{
+  "version": "0.0.8",
+  "notes": "更新器验收版本：以 0.0.7 为基线验证完整升级流程。",
+  "sha256": "",
+  "publishedAt": "",
+  "package": "Packages/YeManCC.zip"
 }
