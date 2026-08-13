@@ -17,6 +17,9 @@
 #define _UNICODE
 #endif
 #define WIN32_LEAN_AND_MEAN
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #define _WIN32_WINNT 0x0A00
 
 #include <windows.h>
@@ -62,6 +65,7 @@
 #include <cstdarg>
 #include <cmath>
 #include <chrono>
+#include <ctime>
 #include <new>
 #pragma comment(lib, "shlwapi.lib")
 #pragma comment(lib, "shell32.lib")
@@ -346,6 +350,11 @@ static UINT64                            g_webviewRenderReadyNavigationId = 0;
 static bool                              g_webviewNeedsShowNudge = false;
 static std::wstring                      g_updateHandshakePath;
 static std::string                       g_updateHandshakeToken;
+static std::mutex                        g_updateProgressMtx;
+static json                               g_updateProgress = json::object();
+
+static void updateProgressPost(const json& data);
+static json updateProgressRead();
 
 enum class WebViewGpuMode : uint8_t { Default, Legacy, Software };
 enum class WebViewDeferredRecovery : uint8_t { None, Reload, RecreateController };
@@ -559,6 +568,7 @@ static int g_nextWatchId = 1;
 #define WM_POWER_RESUME_COMMIT (WM_USER + 9) // 前端完成恢复事务，UI 线程统一开放硬件闸门
 #define WM_WEBVIEW_PROCESS_FAILED (WM_USER + 10) // COM 回调只采集信息，UI 线程统一记录和处置
 #define WM_WEBVIEW_RECOVERY_RESTART (WM_USER + 11) // browser 数据目录隔离完成，UI 线程重建 environment
+#define WM_UPDATE_PROGRESS (WM_USER + 12) // 更新线程 -> UI 线程转发进度
 
 // ================================================================
 //  AC/DC 电源插拔订阅（推送/零轮询）+ 尾防抖 + 频繁切换熔断
@@ -2691,7 +2701,7 @@ static bool focusWindowCoversMonitor(HWND hwnd, RECT monitorRect) {
                                   static_cast<long long>(monitorRect.bottom - monitorRect.top);
     const long long intersectionArea = static_cast<long long>(intersection.right - intersection.left) *
                                        static_cast<long long>(intersection.bottom - intersection.top);
-    const int tolerance = max(3, MulDiv(3, static_cast<int>(GetDpiForWindow(hwnd)), 96));
+    const int tolerance = (std::max)(3, MulDiv(3, static_cast<int>(GetDpiForWindow(hwnd)), 96));
     const bool edgeMatch = abs(windowRect.left - monitorRect.left) <= tolerance &&
                            abs(windowRect.top - monitorRect.top) <= tolerance &&
                            abs(windowRect.right - monitorRect.right) <= tolerance &&
@@ -6471,6 +6481,37 @@ static void ipc_emit(const std::string& ev, const json& data = {}) {
     g_view->PostWebMessageAsJson(U2W(m.dump()).c_str());
 }
 
+static std::wstring updateProgressPath() {
+    return app_data_dir() + L"\\update\\update-progress.json";
+}
+
+static void updateProgressPost(const json& data) {
+    {
+        std::lock_guard<std::mutex> lock(g_updateProgressMtx);
+        g_updateProgress = data;
+        sgWriteFileAtomic(updateProgressPath(), data.dump());
+    }
+    if (!g_hwnd || !IsWindow(g_hwnd)) return;
+    auto* heap = new json(data);
+    if (!PostMessageW(g_hwnd, WM_UPDATE_PROGRESS, 0, reinterpret_cast<LPARAM>(heap)))
+        delete heap;
+}
+
+static json updateProgressRead() {
+    {
+        std::lock_guard<std::mutex> lock(g_updateProgressMtx);
+        if (!g_updateProgress.empty()) return g_updateProgress;
+    }
+    const auto raw = sgReadFile(updateProgressPath());
+    if (raw.empty()) return json::object();
+    try {
+        auto parsed = json::parse(raw);
+        return parsed.is_object() ? parsed : json::object();
+    } catch (...) {
+        return json::object();
+    }
+}
+
 static void ipc_dispatch(LPCWSTR raw) {
     try {
         auto req = json::parse(W2U(raw));
@@ -7268,7 +7309,8 @@ static void reg_fs() {
 
 static std::mutex g_backgroundMtx;
 
-static bool downloadFile(const std::string& url, const std::wstring& dest);
+static bool downloadFile(const std::string& url, const std::wstring& dest,
+                         const std::function<void(uint64_t, uint64_t)>& progress = {});
 static bool webmDurationSeconds(const std::wstring& path, double& seconds);
 
 static std::wstring background_assets_dir() {
@@ -9085,7 +9127,8 @@ static json httpGet(const std::string& url) {
     return json::parse(body);
 }
 
-static bool downloadFile(const std::string& url, const std::wstring& dest) {
+static bool downloadFile(const std::string& url, const std::wstring& dest,
+                         const std::function<void(uint64_t, uint64_t)>& progress) {
     URL_COMPONENTS uc;
     wchar_t host[256]{}, path[2048]{}, extra[2048]{};
     std::wstring objectPath;
@@ -9157,6 +9200,7 @@ static bool downloadFile(const std::string& url, const std::wstring& dest) {
         out.write(chunk.data(), rd);
         receivedLength += rd;
         if (!out) { ok = false; break; }
+        if (progress) progress(receivedLength, hasExpectedLength ? expectedLength : 0);
     }
     out.close();
     WinHttpCloseHandle(hR); WinHttpCloseHandle(hC); WinHttpCloseHandle(hS);
@@ -9234,17 +9278,120 @@ static std::string sha256File(const std::wstring& path) {
     if (!CryptCreateHash(h, CALG_SHA_256, 0, 0, &hh)) { CryptReleaseContext(h, 0); return {}; }
     HANDLE f = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (f == INVALID_HANDLE_VALUE) { CryptDestroyHash(hh); CryptReleaseContext(h, 0); return {}; }
-    BYTE buf[65536]; DWORD rd;
-    while (ReadFile(f, buf, sizeof(buf), &rd, nullptr) && rd > 0) CryptHashData(hh, buf, rd, 0);
+    BYTE buf[65536]; DWORD rd = 0;
+    bool ok = true;
+    while (true) {
+        if (!ReadFile(f, buf, sizeof(buf), &rd, nullptr)) { ok = false; break; }
+        if (rd == 0) break;
+        if (!CryptHashData(hh, buf, rd, 0)) { ok = false; break; }
+    }
     CloseHandle(f);
     BYTE dig[32]; DWORD diglen = sizeof(dig);
     std::string out;
-    if (CryptGetHashParam(hh, HP_HASHVAL, dig, &diglen, 0)) {
+    if (ok && CryptGetHashParam(hh, HP_HASHVAL, dig, &diglen, 0)) {
         wchar_t hex[3];
         for (int i = 0; i < 32; i++) { wsprintfW(hex, L"%02x", dig[i]); out += (char)hex[0]; out += (char)hex[1]; }
     }
     CryptDestroyHash(hh); CryptReleaseContext(h, 0);
     return out;
+}
+
+struct StrictUpdateVersion {
+    uint32_t major = 0;
+    uint32_t minor = 0;
+    uint32_t patch = 0;
+};
+
+static bool parseStrictUpdateVersion(const std::string& value, StrictUpdateVersion& out) {
+    if (value.empty()) return false;
+    uint32_t parts[3]{};
+    size_t start = 0;
+    for (size_t index = 0; index < 3; index++) {
+        const size_t end = index < 2 ? value.find('.', start) : value.size();
+        if (end == std::string::npos || end == start) return false;
+        if (index == 2 && value.find('.', start) != std::string::npos) return false;
+        if (index < 2 && end == value.size() - 1) return false;
+        if (end - start > 1 && value[start] == '0') return false;
+        uint64_t part = 0;
+        for (size_t cursor = start; cursor < end; cursor++) {
+            const unsigned char ch = static_cast<unsigned char>(value[cursor]);
+            if (!std::isdigit(ch)) return false;
+            const uint64_t digit = static_cast<uint64_t>(ch - '0');
+            const uint64_t limit = static_cast<uint64_t>(std::numeric_limits<int32_t>::max());
+            if (part > (limit - digit) / 10) return false;
+            part = part * 10 + digit;
+        }
+        parts[index] = static_cast<uint32_t>(part);
+        start = end + 1;
+    }
+    out = {parts[0], parts[1], parts[2]};
+    return true;
+}
+
+static int compareStrictUpdateVersions(const StrictUpdateVersion& left, const StrictUpdateVersion& right) {
+    if (left.major != right.major) return left.major < right.major ? -1 : 1;
+    if (left.minor != right.minor) return left.minor < right.minor ? -1 : 1;
+    if (left.patch != right.patch) return left.patch < right.patch ? -1 : 1;
+    return 0;
+}
+
+static StrictUpdateVersion requireStrictUpdateVersion(const std::string& value, const char* label) {
+    StrictUpdateVersion parsed{};
+    if (!parseStrictUpdateVersion(value, parsed))
+        throw std::runtime_error(std::string(label) + " must be a strict x.y.z version");
+    return parsed;
+}
+
+static StrictUpdateVersion requireNewerUpdateVersion(const std::string& value) {
+    const auto requested = requireStrictUpdateVersion(value, "Requested update version");
+    const auto current = requireStrictUpdateVersion(APP_VER_STR, "Current application version");
+    if (compareStrictUpdateVersions(requested, current) <= 0)
+        throw std::runtime_error("Update version must be newer than the installed version");
+    return requested;
+}
+
+static bool isStrictUpdateSha256(const std::string& value) {
+    return value.size() == 64 && std::all_of(value.begin(), value.end(), [](unsigned char ch) {
+        return std::isxdigit(ch) != 0;
+    });
+}
+
+static std::string readPackagedUpdateVersion(const std::wstring& staging) {
+    auto raw = sgReadFile(staging + L"\\YeManCC\\version.json");
+    if (raw.size() >= 3 && static_cast<unsigned char>(raw[0]) == 0xEF &&
+        static_cast<unsigned char>(raw[1]) == 0xBB && static_cast<unsigned char>(raw[2]) == 0xBF) {
+        raw.erase(0, 3);
+    }
+    if (raw.empty()) throw std::runtime_error("Update package missing YeManCC/version.json");
+    try {
+        const auto manifest = json::parse(raw);
+        if (!manifest.is_object()) throw std::runtime_error("Update package version.json is not an object");
+        const auto version = manifest.value("version", std::string{});
+        requireStrictUpdateVersion(version, "Update package version");
+        return version;
+    } catch (const json::exception& e) {
+        throw std::runtime_error(std::string("Update package version.json is invalid: ") + e.what());
+    }
+}
+
+static bool updatePackageLayoutIsSafe(const std::wstring& staging) {
+    std::error_code ec;
+    const fspath::path root(staging);
+    for (fspath::directory_iterator it(root, ec), end; it != end && !ec; it.increment(ec)) {
+        const auto name = it->path().filename().wstring();
+        if (_wcsicmp(name.c_str(), L"YeManCC") != 0 && _wcsicmp(name.c_str(), L"PowerControl") != 0)
+            return false;
+    }
+    if (ec) return false;
+    for (fspath::recursive_directory_iterator it(root, fspath::directory_options::skip_permission_denied, ec), end;
+         it != end && !ec; it.increment(ec)) {
+        if (it->is_symlink(ec)) return false;
+        if (ec) return false;
+        if (it->is_directory(ec)) { if (ec) return false; continue; }
+        if (it->is_regular_file(ec)) { if (ec) return false; continue; }
+        return false;
+    }
+    return !ec;
 }
 
 // 用系统 tar.exe 解压 zip 到目标目录（Windows 10+ 自带，无需第三方库）
@@ -9388,48 +9535,193 @@ static void reg_updater() {
         if (url.empty()) throw std::runtime_error("url is required");
         return httpGet(url);
     });
-    // 下载完整更新包（exe + index.html + assets + ...）到 %LOCALAPPDATA%\YeManCC\update\package.zip，可选 sha256 校验
+    ipc_on("app.updateState", [](const json&) -> json {
+        return updateProgressRead();
+    });
+    // 下载完整更新包（exe + index.html + assets + ...）到 %LOCALAPPDATA%\YeManCC\update\package.zip，强制 SHA-256 校验
     ipc_on("app.downloadUpdate", [](const json& a) -> json {
         auto url = a.value("url", std::string{});
         if (url.empty()) throw std::runtime_error("url is required");
         auto sha = a.value("sha256", std::string{});
+        auto operationId = a.value("operationId", std::string{});
+        auto version = a.value("version", std::string{});
+        if (operationId.empty()) operationId = "update-" + std::to_string(GetTickCount64());
+        auto failBeforeDownload = [&](const std::string& error) -> void {
+            updateProgressPost({
+                {"operationId", operationId}, {"phase", "failed"}, {"version", version},
+                {"error", error}, {"message", std::string("无法开始更新：") + error},
+                {"updatedAt", static_cast<int64_t>(time(nullptr) * 1000)}
+            });
+            throw std::runtime_error(error);
+        };
+        if (!isStrictUpdateSha256(sha)) failBeforeDownload("A valid SHA-256 is required");
+        try { requireNewerUpdateVersion(version); }
+        catch (const std::exception& e) { failBeforeDownload(e.what()); }
         std::error_code ec; fspath::create_directories(app_data_dir() + L"\\update", ec);
+        if (ec) throw std::runtime_error("Failed to create update directory");
         auto dest = app_data_dir() + L"\\update\\package.zip";
-        if (!downloadFile(url, dest)) throw std::runtime_error("Download failed");
-        if (!sha.empty()) {
+        fspath::remove(dest, ec);
+        updateProgressPost({
+            {"operationId", operationId}, {"phase", "downloading"},
+            {"version", version},
+            {"downloadedBytes", 0}, {"totalBytes", 0}, {"percent", 0},
+            {"speedBps", 0}, {"etaSeconds", 0}, {"message", "正在下载更新包"},
+            {"updatedAt", static_cast<int64_t>(time(nullptr) * 1000)}
+        });
+        try {
+            ULONGLONG lastTick = GetTickCount64();
+            uint64_t lastBytes = 0;
+            if (!downloadFile(url, dest, [&](uint64_t received, uint64_t total) {
+                const ULONGLONG now = GetTickCount64();
+                if (now - lastTick < 250 && received != total) return;
+                const double seconds = (std::max)(0.001, (now - lastTick) / 1000.0);
+                const uint64_t delta = received >= lastBytes ? received - lastBytes : 0;
+                const double speed = delta / seconds;
+                const double percent = total > 0 ? (std::min)(100.0, received * 100.0 / total) : 0.0;
+                const int64_t eta = total > received && speed > 1.0
+                    ? static_cast<int64_t>((total - received) / speed) : 0;
+                updateProgressPost({
+                    {"operationId", operationId}, {"phase", "downloading"},
+                    {"version", version},
+                    {"downloadedBytes", received}, {"totalBytes", total},
+                    {"percent", percent}, {"speedBps", speed}, {"etaSeconds", eta},
+                    {"message", "正在下载更新包"},
+                    {"updatedAt", static_cast<int64_t>(time(nullptr) * 1000)}
+                });
+                lastTick = now;
+                lastBytes = received;
+            })) {
+                throw std::runtime_error("Download failed");
+            }
+            updateProgressPost({
+                {"operationId", operationId}, {"phase", "validating"},
+                {"version", version},
+                {"percent", 100}, {"message", "正在校验更新包"},
+                {"updatedAt", static_cast<int64_t>(time(nullptr) * 1000)}
+            });
             auto got = sha256File(dest);
-            if (_stricmp(got.c_str(), sha.c_str()) != 0)
+            if (!isStrictUpdateSha256(got) || _stricmp(got.c_str(), sha.c_str()) != 0)
                 throw std::runtime_error("Checksum mismatch (expected " + sha + ", got " + got + ")");
+            updateProgressPost({
+                {"operationId", operationId}, {"phase", "downloaded"},
+                {"version", version},
+                {"percent", 100}, {"message", "更新包校验通过"},
+                {"updatedAt", static_cast<int64_t>(time(nullptr) * 1000)}
+            });
+        } catch (const std::exception& e) {
+            std::error_code cleanupEc;
+            fspath::remove(dest, cleanupEc);
+            updateProgressPost({
+                {"operationId", operationId}, {"phase", "failed"},
+                {"version", version},
+                {"error", e.what()}, {"message", std::string("下载失败：") + e.what()},
+                {"updatedAt", static_cast<int64_t>(time(nullptr) * 1000)}
+            });
+            throw;
         }
         return W2U(dest);
     });
     // Install the complete release payload into the sibling YeManCC and
     // PowerControl targets while preserving player-owned files.
     // Merge-copy only: files added by players and absent from the package remain.
-    ipc_on("app.installUpdate", [](const json&) -> json {
+    ipc_on("app.installUpdate", [](const json& a) -> json {
+        const auto operationId = a.value("operationId", std::string{});
+        const auto version = a.value("version", std::string{});
+        const auto sha = a.value("sha256", std::string{});
+        auto failBeforeInstall = [&](const std::string& error, const std::string& message) -> void {
+            updateProgressPost({
+                {"operationId", operationId}, {"phase", "failed"}, {"version", version},
+                {"error", error}, {"message", message},
+                {"updatedAt", static_cast<int64_t>(time(nullptr) * 1000)}
+            });
+            throw std::runtime_error(error);
+        };
+        if (!isStrictUpdateSha256(sha)) failBeforeInstall("A valid SHA-256 is required", "更新包 SHA-256 无效");
+        try { requireNewerUpdateVersion(version); }
+        catch (const std::exception& e) { failBeforeInstall(e.what(), "目标版本不是可安装的新版本"); }
+        updateProgressPost({
+            {"operationId", operationId}, {"phase", "installing"},
+            {"version", version},
+            {"percent", 100}, {"message", "正在安装并重启程序"},
+            {"updatedAt", static_cast<int64_t>(time(nullptr) * 1000)}
+        });
         auto zip = app_data_dir() + L"\\update\\package.zip";
-        if (!fspath::exists(zip)) throw std::runtime_error("No update package downloaded");
+        if (!fspath::exists(zip)) {
+            updateProgressPost({{"operationId", operationId}, {"phase", "failed"},
+                {"error", "No update package downloaded"}, {"message", "更新包不存在"}});
+            throw std::runtime_error("No update package downloaded");
+        }
+        const auto installHash = sha256File(zip);
+        if (!isStrictUpdateSha256(installHash) || _stricmp(installHash.c_str(), sha.c_str()) != 0) {
+            std::error_code cleanupEc;
+            fspath::remove(zip, cleanupEc);
+            updateProgressPost({{"operationId", operationId}, {"phase", "failed"},
+                {"error", "Update package checksum mismatch before installation"}, {"message", "安装前校验更新包失败"}});
+            throw std::runtime_error("Update package checksum mismatch before installation");
+        }
         auto staging = app_data_dir() + L"\\update\\staging";
         std::error_code ec; fspath::remove_all(staging, ec);
-        if (!unzipTar(zip, staging)) throw std::runtime_error("Failed to extract update package");
+        if (!unzipTar(zip, staging)) {
+            fspath::remove_all(staging, ec);
+            fspath::remove(zip, ec);
+            updateProgressPost({{"operationId", operationId}, {"phase", "failed"},
+                {"error", "Failed to extract update package"}, {"message", "更新包解压失败"}});
+            throw std::runtime_error("Failed to extract update package");
+        }
+        if (!updatePackageLayoutIsSafe(staging)) {
+            fspath::remove_all(staging, ec);
+            fspath::remove(zip, ec);
+            updateProgressPost({{"operationId", operationId}, {"phase", "failed"}, {"version", version},
+                {"error", "Update package contains an unsafe or unexpected layout"}, {"message", "更新包目录结构不安全"}});
+            throw std::runtime_error("Update package contains an unsafe or unexpected layout");
+        }
+        std::string packagedVersion;
+        try {
+            packagedVersion = readPackagedUpdateVersion(staging);
+        } catch (const std::exception& e) {
+            fspath::remove_all(staging, ec);
+            fspath::remove(zip, ec);
+            updateProgressPost({{"operationId", operationId}, {"phase", "failed"}, {"version", version},
+                {"error", e.what()}, {"message", "更新包内版本清单无效"}});
+            throw;
+        }
+        if (packagedVersion != version) {
+            fspath::remove_all(staging, ec);
+            fspath::remove(zip, ec);
+            updateProgressPost({{"operationId", operationId}, {"phase", "failed"},
+                {"error", "Update package version does not match requested version"}, {"message", "更新包版本与请求版本不一致"}});
+            throw std::runtime_error("Update package version does not match requested version");
+        }
         wchar_t exePath[MAX_PATH]; GetModuleFileNameW(nullptr, exePath, MAX_PATH);
         std::wstring exeStr(exePath);
         std::wstring exedir = exeStr.substr(0, exeStr.find_last_of(L"\\"));
         const auto packagedYeManCC = staging + L"\\YeManCC";
-        if (!fspath::is_directory(packagedYeManCC))
+        if (!fspath::is_directory(packagedYeManCC)) {
+            updateProgressPost({{"operationId", operationId}, {"phase", "failed"},
+                {"error", "Update package missing YeManCC directory"}, {"message", "更新包缺少 YeManCC 目录"}});
             throw std::runtime_error("Update package missing YeManCC directory");
+        }
         const auto packagedExe = packagedYeManCC + L"\\YeManCC.exe";
-        if (!fspath::exists(packagedExe))
+        if (!fspath::exists(packagedExe)) {
+            updateProgressPost({{"operationId", operationId}, {"phase", "failed"},
+                {"error", "Update package missing YeManCC.exe"}, {"message", "更新包缺少 YeManCC.exe"}});
             throw std::runtime_error("Update package missing YeManCC.exe");
+        }
         const auto packagedPowerControl = staging + L"\\PowerControl";
-        if (!fspath::exists(packagedPowerControl))
+        if (!fspath::exists(packagedPowerControl)) {
+            updateProgressPost({{"operationId", operationId}, {"phase", "failed"},
+                {"error", "Update package missing PowerControl"}, {"message", "更新包缺少 PowerControl 目录"}});
             throw std::runtime_error("Update package missing PowerControl");
+        }
         const auto packagedSupport = packagedYeManCC + L"\\YeMan-Support.html";
-        if (!fspath::exists(packagedSupport))
+        if (!fspath::exists(packagedSupport)) {
+            updateProgressPost({{"operationId", operationId}, {"phase", "failed"},
+                {"error", "Update package missing YeMan-Support.html"}, {"message", "更新包缺少支持页面"}});
             throw std::runtime_error("Update package missing YeMan-Support.html");
+        }
         // 依赖包固定目标目录（与前端 yeman.ts 的 PC_DIR 默认一致）
         std::wstring pcDir = L"C:\\SOFT\\YeMan\\PowerControl";
-        std::wstring supportPath = L"C:\\SOFT\\YeMan\\YeManCC\\YeMan-Support.html";
+        std::wstring supportPath = exedir + L"\\YeMan-Support.html";
         auto script = app_data_dir() + L"\\update.ps1";
         auto psLiteral = [](const std::wstring& value) {
             std::string s = W2U(value);
@@ -9457,7 +9749,18 @@ static void reg_updater() {
             f << "$backup = $exePath + '.old'\n";
             f << "$newExe = $exePath + '.new'\n";
             f << "$state = Join-Path (Split-Path -Parent $staging) 'update-state.json'\n";
+            f << "$rollbackRoot = Join-Path (Split-Path -Parent $staging) ('rollback-' + [guid]::NewGuid().ToString('N'))\n";
+            f << "$rollbackFiles = Join-Path $rollbackRoot 'files'\n";
+            f << "$rollbackAddedFiles = New-Object 'System.Collections.Generic.List[string]'\n";
+            f << "$ordinaryRollbackPrepared = $false\n";
             f << "$scriptPath = " << psLiteral(script) << "\n";
+            f << "$progressPath = " << psLiteral(updateProgressPath()) << "\n";
+            f << "$operationId = " << psLiteral(U2W(operationId)) << "\n";
+            f << "$version = " << psLiteral(U2W(version)) << "\n";
+            f << "function Set-UpdateProgress([string]$phase, [string]$message, [string]$error = '') {\n";
+            f << "  $obj = [ordered]@{ operationId = $operationId; version = $version; phase = $phase; percent = 100; message = $message; error = $error; updatedAt = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() }\n";
+            f << "  $obj | ConvertTo-Json -Compress | Set-Content -LiteralPath $progressPath -Encoding utf8\n";
+            f << "}\n";
             // YeManTdpCtl.exe and its PyInstaller _internal directory are a
             // single runtime.  Give transient file locks enough time to
             // clear, then verify every TDP runtime file before committing the
@@ -9473,10 +9776,12 @@ static void reg_updater() {
             f << "$tdpOriginalMoved = $false\n";
             f << "$tdpCommitted = $false\n";
             f << "$updateCommitted = $false\n";
+            f << "$rollbackSucceeded = $false\n";
             f << "$newProcess = $null\n";
             f << "$handshakeToken = [guid]::NewGuid().ToString('N')\n";
             f << "$handshakePath = Join-Path (Split-Path -Parent $staging) ('update-handshake-' + $handshakeToken + '.json')\n";
             f << "$handshakeTimeoutSeconds = 90\n";
+            f << "$parentExitTimeoutSeconds = 60\n";
             f << "function Copy-TreeChecked([string]$source, [string]$destination, [string[]]$extraArgs) {\n";
             f << "  & robocopy $source $destination /E /COPY:DAT /DCOPY:DAT /R:$copyRetries /W:$copyWaitSeconds /XJ @extraArgs /NFL /NDL /NJH /NJS /NP\n";
             f << "  if ($LASTEXITCODE -ge 8) { throw ('copy failed: ' + $source + ' -> ' + $destination + ' (robocopy=' + $LASTEXITCODE + ')') }\n";
@@ -9521,11 +9826,72 @@ static void reg_updater() {
             f << "    Assert-FileMatch $item.FullName (Join-Path $destination $relative) ($label + '\\' + $relative)\n";
             f << "  }\n";
             f << "}\n";
-            f << "while (Get-Process -Id $parentPid -ErrorAction SilentlyContinue) { Start-Sleep -Milliseconds 100 }\n";
+            f << "function Register-FileForRollback([string]$sourceFile, [string]$sourceRoot, [string]$targetRoot, [string]$bucket) {\n";
+            f << "  $relative = $sourceFile.Substring($sourceRoot.Length).TrimStart('\\')\n";
+            f << "  if ([string]::IsNullOrWhiteSpace($relative)) { throw 'rollback relative path is empty' }\n";
+            f << "  $target = Join-Path $targetRoot $relative\n";
+            f << "  if (Test-Path -LiteralPath $target -PathType Container) { throw ('update target is a directory but package entry is a file: ' + $target) }\n";
+            f << "  if (Test-Path -LiteralPath $target -PathType Leaf) {\n";
+            f << "    $backupFile = Join-Path (Join-Path $rollbackFiles $bucket) $relative\n";
+            f << "    $backupParent = Split-Path -Parent $backupFile\n";
+            f << "    if (!(Test-Path -LiteralPath $backupParent -PathType Container)) { New-Item -ItemType Directory -Path $backupParent -Force | Out-Null }\n";
+            f << "    Copy-Item -LiteralPath $target -Destination $backupFile -Force -ErrorAction Stop\n";
+            f << "    Assert-FileMatch $target $backupFile ('rollback backup ' + $bucket + '\\' + $relative)\n";
+            f << "  } else {\n";
+            f << "    $rollbackAddedFiles.Add($target) | Out-Null\n";
+            f << "  }\n";
+            f << "}\n";
+            f << "function Register-TreeForRollback([string]$sourceRoot, [string]$targetRoot, [string]$bucket, [string[]]$excludedTopLevel) {\n";
+            f << "  foreach ($item in Get-ChildItem -LiteralPath $sourceRoot -Recurse -File) {\n";
+            f << "    $relative = $item.FullName.Substring($sourceRoot.Length).TrimStart('\\')\n";
+            f << "    $topLevel = ($relative -split '\\\\', 2)[0]\n";
+            f << "    if ($topLevel -in $excludedTopLevel) { continue }\n";
+            f << "    Register-FileForRollback $item.FullName $sourceRoot $targetRoot $bucket\n";
+            f << "  }\n";
+            f << "}\n";
+            f << "function Restore-OrdinaryFiles {\n";
+            f << "  if (!$ordinaryRollbackPrepared) { return }\n";
+            f << "  for ($index = $rollbackAddedFiles.Count - 1; $index -ge 0; $index--) {\n";
+            f << "    $added = $rollbackAddedFiles[$index]\n";
+            f << "    if (Test-Path -LiteralPath $added -PathType Leaf) { Remove-Item -LiteralPath $added -Force -ErrorAction Stop }\n";
+            f << "    elseif (Test-Path -LiteralPath $added) { throw ('rollback expected an added file but found another item: ' + $added) }\n";
+            f << "  }\n";
+            f << "  $programBackup = Join-Path $rollbackFiles 'YeManCC'\n";
+            f << "  if (Test-Path -LiteralPath $programBackup -PathType Container) { Copy-TreeChecked $programBackup $exeDir @() }\n";
+            f << "  $powerControlBackup = Join-Path $rollbackFiles 'PowerControl'\n";
+            f << "  if (Test-Path -LiteralPath $powerControlBackup -PathType Container) { Copy-TreeChecked $powerControlBackup $pcDir @() }\n";
+            f << "  $supportBackup = Join-Path $rollbackFiles 'Support'\n";
+            f << "  if (Test-Path -LiteralPath $supportBackup -PathType Leaf) { Copy-Item -LiteralPath $supportBackup -Destination $supportPath -Force -ErrorAction Stop }\n";
+            f << "  foreach ($backupFile in Get-ChildItem -LiteralPath $rollbackFiles -Recurse -File) {\n";
+            f << "    $relative = $backupFile.FullName.Substring($rollbackFiles.Length).TrimStart('\\')\n";
+            f << "    if ($relative -eq 'Support') { $target = $supportPath }\n";
+            f << "    elseif ($relative.StartsWith('YeManCC\\')) { $target = Join-Path $exeDir $relative.Substring('YeManCC\\'.Length) }\n";
+            f << "    elseif ($relative.StartsWith('PowerControl\\')) { $target = Join-Path $pcDir $relative.Substring('PowerControl\\'.Length) }\n";
+            f << "    else { throw ('unknown rollback bucket: ' + $relative) }\n";
+            f << "    Assert-FileMatch $backupFile.FullName $target ('rollback restored ' + $relative)\n";
+            f << "  }\n";
+            f << "}\n";
             f << "try {\n";
+            f << "  $parentExitDeadline = (Get-Date).AddSeconds($parentExitTimeoutSeconds)\n";
+            f << "  while (Get-Process -Id $parentPid -ErrorAction SilentlyContinue) {\n";
+            f << "    if ((Get-Date) -ge $parentExitDeadline) { throw ('parent YeManCC process did not exit within ' + $parentExitTimeoutSeconds + ' seconds') }\n";
+            f << "    Start-Sleep -Milliseconds 100\n";
+            f << "  }\n";
             f << "  if (!(Test-Path -LiteralPath $packageExe)) { throw 'staged executable missing' }\n";
             f << "  if (!(Test-Path -LiteralPath (Join-Path $tdpSource 'YeManTdpCtl.exe'))) { throw 'staged YeManTdpCtl.exe missing' }\n";
             f << "  if (!(Test-Path -LiteralPath (Join-Path $tdpSource '_internal') -PathType Container)) { throw 'staged YeManTdpCtl _internal missing' }\n";
+            f << "  Set-UpdateProgress 'installing' '正在复制更新文件'\n";
+            f << "  New-Item -ItemType Directory -Path $rollbackFiles -Force | Out-Null\n";
+            f << "  Register-TreeForRollback $programSource $exeDir 'YeManCC' @('YeManCC.exe','YeMan-Support.html')\n";
+            f << "  Register-FileForRollback $packageExe $programSource $exeDir 'YeManCC'\n";
+            f << "  Register-TreeForRollback $powerControlSource $pcDir 'PowerControl' @('pawnio')\n";
+            f << "  if (Test-Path -LiteralPath $supportPath -PathType Leaf) {\n";
+            f << "    Copy-Item -LiteralPath $supportPath -Destination (Join-Path $rollbackFiles 'Support') -Force -ErrorAction Stop\n";
+            f << "    Assert-FileMatch $supportPath (Join-Path $rollbackFiles 'Support') 'rollback backup support page'\n";
+            f << "  } else {\n";
+            f << "    $rollbackAddedFiles.Add($supportPath) | Out-Null\n";
+            f << "  }\n";
+            f << "  $ordinaryRollbackPrepared = $true\n";
             f << "  Set-Content -LiteralPath $state -Value '{\"phase\":\"copying\"}' -Encoding utf8\n";
             // Copy non-PawnIO PowerControl assets first. PawnIO is staged and
             // committed as one directory transaction below.
@@ -9539,12 +9905,14 @@ static void reg_updater() {
             f << "  Rename-DirectoryChecked $tdpStage $tdpTarget 'PawnIO commit'\n";
             f << "  $tdpCommitted = $true\n";
             f << "  Assert-TreeMatch $tdpSource $tdpTarget 'YeManTdpCtl.runtime.committed'\n";
+            f << "  Set-UpdateProgress 'installing' 'TDP 运行时校验通过'\n";
             f << "  Set-Content -LiteralPath $state -Value '{\"phase\":\"tdp-verified\"}' -Encoding utf8\n";
-            f << "  Copy-Item -LiteralPath $exePath -Destination $backup -Force\n";
+            f << "  if (Test-Path -LiteralPath $exePath -PathType Leaf) { Copy-Item -LiteralPath $exePath -Destination $backup -Force }\n";
             f << "  Copy-Item -LiteralPath $packageExe -Destination $newExe -Force\n";
             f << "  Move-Item -LiteralPath $newExe -Destination $exePath -Force\n";
             f << "  Copy-TreeChecked $programSource $exeDir @('/XF','YeManCC.exe','YeMan-Support.html')\n";
             f << "  Copy-Item -LiteralPath (Join-Path $programSource 'YeMan-Support.html') -Destination $supportPath -Force\n";
+            f << "  Set-UpdateProgress 'installing' '正在启动新版本'\n";
             f << "  Set-Content -LiteralPath $state -Value '{\"phase\":\"launching\"}' -Encoding utf8\n";
             f << "  $newProcess = Start-Process -FilePath $exePath -ArgumentList @('--update-handshake', ('\"' + $handshakePath + '\"'), '--update-handshake-token', $handshakeToken) -PassThru\n";
             f << "  $handshakeDeadline = (Get-Date).AddSeconds($handshakeTimeoutSeconds)\n";
@@ -9562,12 +9930,13 @@ static void reg_updater() {
             f << "    Start-Sleep -Milliseconds 250\n";
             f << "  }\n";
             f << "  if (!$handshakeOk) { throw 'new YeManCC process did not complete startup handshake' }\n";
-            f << "  Set-Content -LiteralPath $state -Value ('{\"phase\":\"started\",\"pid\":' + $newProcess.Id + '}') -Encoding utf8\n";
             f << "  $updateCommitted = $true\n";
-            f << "  if (Test-Path -LiteralPath $tdpBackup) { Remove-Item -LiteralPath $tdpBackup -Recurse -Force -ErrorAction SilentlyContinue }\n";
+            f << "  Set-Content -LiteralPath $state -Value ('{\"phase\":\"started\",\"pid\":' + $newProcess.Id + '}') -Encoding utf8\n";
+            f << "  Set-UpdateProgress 'completed' '更新已完成'\n";
             f << "} catch {\n";
             f << "  $installError = $_.Exception.Message\n";
             f << "  $rollbackError = $null\n";
+            f << "  $rollbackAttempted = $ordinaryRollbackPrepared -or $tdpCommitted -or $tdpOriginalMoved -or (Test-Path -LiteralPath $backup)\n";
             f << "  if (!$updateCommitted -and $newProcess) { try { if (!$newProcess.HasExited) { Stop-Process -Id $newProcess.Id -Force -ErrorAction SilentlyContinue; $newProcess.WaitForExit(5000) } } catch { } }\n";
             f << "  if (!$updateCommitted -and ($tdpCommitted -or $tdpOriginalMoved)) {\n";
             f << "    try {\n";
@@ -9576,13 +9945,28 @@ static void reg_updater() {
             f << "      elseif ($tdpOriginalMoved) { throw 'PawnIO rollback directory missing' }\n";
             f << "    } catch { $rollbackError = $_.Exception.Message }\n";
             f << "  }\n";
-            f << "  try { if (Test-Path -LiteralPath $backup) { Copy-Item -LiteralPath $backup -Destination $exePath -Force -ErrorAction Stop } } catch { if (!$rollbackError) { $rollbackError = $_.Exception.Message } else { $rollbackError += '; EXE rollback: ' + $_.Exception.Message } }\n";
+            f << "  if (!$updateCommitted) {\n";
+            f << "    try { Restore-OrdinaryFiles } catch { if (!$rollbackError) { $rollbackError = $_.Exception.Message } else { $rollbackError += '; ordinary rollback: ' + $_.Exception.Message } }\n";
+            f << "    try { if (Test-Path -LiteralPath $backup) { Copy-Item -LiteralPath $backup -Destination $exePath -Force -ErrorAction Stop } } catch { if (!$rollbackError) { $rollbackError = $_.Exception.Message } else { $rollbackError += '; EXE rollback: ' + $_.Exception.Message } }\n";
+            f << "    if (!$rollbackError) { $rollbackSucceeded = $true }\n";
+            f << "  }\n";
             f << "  $errorMessage = $installError\n";
             f << "  if ($rollbackError) { $errorMessage += '; rollback: ' + $rollbackError }\n";
-            f << "  Set-Content -LiteralPath $state -Value ('{\"phase\":\"rolled-back\",\"error\":' + (ConvertTo-Json $errorMessage -Compress) + '}') -Encoding utf8\n";
+            f << "  Set-UpdateProgress 'failed' ('更新失败：' + $errorMessage) $errorMessage\n";
+            f << "  $failurePhase = if ($rollbackAttempted) { 'rolled-back' } else { 'failed' }\n";
+            f << "  Set-Content -LiteralPath $state -Value ('{\"phase\":\"' + $failurePhase + '\",\"error\":' + (ConvertTo-Json $errorMessage -Compress) + '}') -Encoding utf8\n";
             f << "} finally {\n";
             f << "  Remove-Item -LiteralPath $newExe -Force -ErrorAction SilentlyContinue\n";
             f << "  Remove-Item -LiteralPath $tdpStage -Recurse -Force -ErrorAction SilentlyContinue\n";
+            f << "  if ($updateCommitted) {\n";
+            f << "    foreach ($cleanupPath in @($backup, $tdpBackup, $rollbackRoot)) {\n";
+            f << "      try { if (Test-Path -LiteralPath $cleanupPath) { Remove-Item -LiteralPath $cleanupPath -Recurse -Force -ErrorAction Stop } } catch { }\n";
+            f << "    }\n";
+            f << "  } elseif ($rollbackSucceeded) {\n";
+            f << "    Remove-Item -LiteralPath $backup -Force -ErrorAction SilentlyContinue\n";
+            f << "    Remove-Item -LiteralPath $tdpBackup -Recurse -Force -ErrorAction SilentlyContinue\n";
+            f << "    Remove-Item -LiteralPath $rollbackRoot -Recurse -Force -ErrorAction SilentlyContinue\n";
+            f << "  }\n";
             f << "  Remove-Item -LiteralPath $handshakePath -Force -ErrorAction SilentlyContinue\n";
             f << "  Remove-Item -LiteralPath $staging -Recurse -Force -ErrorAction SilentlyContinue\n";
             f << "  Remove-Item -LiteralPath $scriptPath -Force -ErrorAction SilentlyContinue\n";
@@ -12096,6 +12480,14 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
             result->generation == g_webviewGeneration.load(std::memory_order_acquire))
             g_view->PostWebMessageAsJson(U2W(result->response.dump()).c_str());
         delete result;
+        return 0;
+    }
+    case WM_UPDATE_PROGRESS: {
+        auto* progress = reinterpret_cast<json*>(l);
+        if (progress) {
+            ipc_emit("update.progress", *progress);
+            delete progress;
+        }
         return 0;
     }
     case WM_GAMEPAD_TDP_DELTA:

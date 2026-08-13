@@ -4,10 +4,13 @@ on:
   push:
     tags:
       - 'v*'
-  workflow_dispatch:
 
 permissions:
   contents: write
+
+concurrency:
+  group: yemancc-release-manifest
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -15,6 +18,30 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Verify tag and source versions
+        shell: pwsh
+        run: |
+          if ('${{ github.ref_type }}' -ne 'tag') {
+            throw 'Release workflow must run from a Git tag.'
+          }
+          $manifest = Get-Content -LiteralPath version.json -Raw -Encoding UTF8 | ConvertFrom-Json
+          $package = Get-Content -LiteralPath package.json -Raw -Encoding UTF8 | ConvertFrom-Json
+          $version = [string]$manifest.version
+          if ($version -notmatch '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$') {
+            throw "version.json has an invalid strict version: $version"
+          }
+          $versionParts = @([int64]$Matches[1], [int64]$Matches[2], [int64]$Matches[3])
+          if (@($versionParts | Where-Object { $_ -gt [int]::MaxValue }).Count -gt 0) {
+            throw "version.json version part is out of range: $version"
+          }
+          if ([string]$package.version -ne $version) {
+            throw "Version mismatch: version.json=$version, package.json=$($package.version)"
+          }
+          $expectedTag = "v$version"
+          if ('${{ github.ref_name }}' -ne $expectedTag) {
+            throw "Tag mismatch: expected $expectedTag, got ${{ github.ref_name }}"
+          }
 
       - name: Setup pnpm 11.16.0
         uses: pnpm/action-setup@v4
@@ -59,6 +86,11 @@ jobs:
               throw "Release output missing: $relative"
             }
           }
+          $releaseManifest = Get-Content -LiteralPath (Join-Path $root 'Release\version.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+          $localHash = (Get-FileHash -LiteralPath (Join-Path $root 'Release\Packages\YeManCC.zip') -Algorithm SHA256).Hash
+          if ($localHash -ne [string]$releaseManifest.sha256) {
+            throw "Release manifest SHA-256 mismatch: expected $($releaseManifest.sha256), got $localHash"
+          }
           Add-Type -AssemblyName System.IO.Compression.FileSystem
           $zip = [IO.Compression.ZipFile]::OpenRead((Join-Path $root 'Release\Packages\YeManCC.zip'))
           try {
@@ -97,19 +129,61 @@ jobs:
           if ($asset.Count -ne 1) {
             throw 'GitHub Release does not contain exactly one YeManCC.zip asset.'
           }
+          $manifest = Get-Content -LiteralPath Release\version.json -Raw -Encoding UTF8 | ConvertFrom-Json
+          $downloadRoot = Join-Path $env:RUNNER_TEMP 'published-yemancc'
+          New-Item -ItemType Directory -Path $downloadRoot -Force | Out-Null
+          gh release download "${{ github.ref_name }}" --repo "${{ github.repository }}" --pattern 'YeManCC.zip' --dir $downloadRoot --clobber
+          $publishedHash = (Get-FileHash -LiteralPath (Join-Path $downloadRoot 'YeManCC.zip') -Algorithm SHA256).Hash
+          if ($publishedHash -ne [string]$manifest.sha256) {
+            throw "Published asset SHA-256 mismatch: expected $($manifest.sha256), got $publishedHash"
+          }
 
       - name: Preserve generated version manifest
         shell: pwsh
         run: Copy-Item -LiteralPath Release\version.json -Destination $env:RUNNER_TEMP\version.json -Force
 
+      - name: Check main manifest publish order
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $generated = Get-Content -LiteralPath Release\version.json -Raw -Encoding UTF8 | ConvertFrom-Json
+          $currentText = gh api "repos/${{ github.repository }}/contents/version.json?ref=main" --jq .content
+          $currentText = ($currentText -replace '\s', '')
+          $currentJson = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($currentText)) | ConvertFrom-Json
+          $parse = {
+            param([string]$value)
+            if ($value -notmatch '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$') { throw "Invalid manifest version: $value" }
+            $parts = @([int64]$Matches[1], [int64]$Matches[2], [int64]$Matches[3])
+            if (@($parts | Where-Object { $_ -gt [int]::MaxValue }).Count -gt 0) { throw "Manifest version part is out of range: $value" }
+            return $parts
+          }
+          $incoming = & $parse ([string]$generated.version)
+          $current = & $parse ([string]$currentJson.version)
+          $compare = 0
+          for ($i = 0; $i -lt 3; $i++) {
+            if ($incoming[$i] -lt $current[$i]) { $compare = -1; break }
+            if ($incoming[$i] -gt $current[$i]) { $compare = 1; break }
+          }
+          if ($compare -lt 0) {
+            throw "Refusing to replace main/version.json $($currentJson.version) with older $($generated.version)"
+          }
+
       - name: Commit version manifest back to main
-        shell: bash
+        shell: pwsh
         run: |
           git fetch origin main
           git checkout -B main origin/main
-          cp "$RUNNER_TEMP/version.json" version.json
+          Copy-Item -LiteralPath (Join-Path $env:RUNNER_TEMP 'version.json') -Destination version.json -Force
           git add version.json
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git commit -m "chore: update version manifest (${{ github.ref_name }})" || echo "no change"
-          git push origin HEAD:main
+          git diff --cached --quiet
+          if ($LASTEXITCODE -eq 0) {
+            Write-Output 'no change'
+          } else {
+            git commit -m "chore: update version manifest (${{ github.ref_name }})"
+            if ($LASTEXITCODE -ne 0) { throw 'Failed to commit generated version manifest' }
+            git push origin HEAD:main
+            if ($LASTEXITCODE -ne 0) { throw 'Failed to push generated version manifest' }
+          }

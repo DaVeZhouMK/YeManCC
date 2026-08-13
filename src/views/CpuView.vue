@@ -1055,41 +1055,42 @@ onMounted(() =>
 }
 .smt-modal {
   width: 100%;
-  max-width: 300px;
+  max-width: 440px;
   background: #121a26;
   border: 1px solid #2a3342;
-  border-radius: 10px;
+  border-radius: 12px;
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
-  padding: 16px;
+  padding: 24px;
 }
 .smt-modal-title {
-  font-size: 13px;
+  font-size: 18px;
   font-weight: 700;
   color: var(--text);
-  margin-bottom: 10px;
+  margin-bottom: 14px;
 }
 .smt-modal-msg {
-  font-size: 13px;
+  font-size: 16px;
   color: var(--text);
   line-height: 1.5;
 }
 .smt-modal-sub {
-  font-size: 11px;
+  font-size: 14px;
   color: #8a97a8;
-  margin-top: 6px;
-  line-height: 1.4;
+  margin-top: 8px;
+  line-height: 1.55;
 }
 .smt-modal-actions {
   display: flex;
-  gap: 10px;
-  margin-top: 16px;
+  gap: 12px;
+  margin-top: 22px;
 }
 .smt-btn {
   flex: 1;
   border: none;
   border-radius: var(--radius-ctrl);
-  padding: 9px;
-  font-size: 12px;
+  padding: 11px;
+  min-height: 44px;
+  font-size: 14px;
   font-weight: 700;
   cursor: pointer;
 }

@@ -665,14 +665,14 @@ onUnmounted(() => {
   border: 1px solid rgba(229, 72, 77, 0.4);
   color: #ff9ea1;
   border-radius: var(--radius-ctrl);
-  padding: 10px;
-  margin-bottom: 8px;
-  font-size: 11px;
-  line-height: 1.5;
+  padding: 12px 14px;
+  margin-bottom: 10px;
+  font-size: 13px;
+  line-height: 1.55;
 }
 .confirm-text {
   display: block;
-  margin-bottom: 8px;
+  margin-bottom: 10px;
 }
 .confirm-actions {
   display: flex;
@@ -682,6 +682,8 @@ onUnmounted(() => {
   width: auto;
   flex: 1;
   margin: 0;
+  min-height: 36px;
+  font-size: 13px;
   background: #e5484d;
   color: #fff;
 }

@@ -3,7 +3,7 @@ import { ref, onMounted, onActivated, onBeforeUnmount, computed } from 'vue';
 import Toggle from '@/components/Toggle.vue';
 import SegButton from '@/components/SegButton.vue';
 import GamepadVisualizer from '@/components/GamepadVisualizer.vue';
-import { summonGet, summonSet, autocloseGet, autocloseSet, updateAccelGet, updateAccelToggle, type GamepadSettings, type AutoCloseConfig, type UpdateAccelState, checkUpdate, downloadUpdate, installUpdate, compareVersions, UPDATE_MANIFEST_URL, updatePackageUrl } from '@/bridge/yeman';
+import { summonGet, summonSet, autocloseGet, autocloseSet, updateAccelGet, updateAccelToggle, type GamepadSettings, type AutoCloseConfig, type UpdateAccelState } from '@/bridge/yeman';
 import { shell, fs, dialog } from '@/bridge/api';
 import { APP_VERSION } from '@/version';
 import InlineIcon from '@/components/InlineIcon.vue';
@@ -33,6 +33,13 @@ import {
 import { cleanGameTitle, detectGame } from '@/bridge/gamedetect';
 import { getUiSetting, loadUiSettings, setUiSettings } from '@/bridge/uiSettings';
 import { setMouseBackend, type MouseBackend } from '@/bridge/gameproc';
+import {
+  ensureUpdateManager,
+  checkForUpdate,
+  downloadAndInstall,
+  updateInfo,
+  updateSnapshot,
+} from '@/bridge/updateManager';
 
 const gp = ref<GamepadSettings>({
   enabled: true,
@@ -196,56 +203,44 @@ const updateAccel = ref<UpdateAccelState>({
   running: false,
 });
 const uaBusy = ref(false);
-const uaStatusText = computed(() => {
-  if (uaBusy.value) return '处理中…';
-  if (!updateAccel.value.exists) return '文件未找到';
-  if (updateAccel.value.running) return '运行中';
-  return '已关闭';
-});
-const uaTagClass = computed(() => {
-  if (uaBusy.value) return '';
-  if (updateAccel.value.running) return 'ok';
-  if (!updateAccel.value.exists) return 'err';
-  return '';
-});
 
 // 版本号：构建期由 version.json 注入（scripts/write-version.mjs → src/version.ts）
 const appVersion = APP_VERSION;
 
-// ── 自动更新（检查 / 下载 / 安装）──
-type UpdateState = 'idle' | 'checking' | 'has' | 'latest' | 'downloading' | 'error';
-const updateState = ref<UpdateState>('idle');
-const updateBusy = computed(() => updateState.value === 'downloading');
-const updateInfo = ref<{ version: string; notes?: string; sha256?: string } | null>(null);
-const updateErr = ref('');
-async function onCheckUpdate() {
-  updateErr.value = '';
-  updateState.value = 'checking';
-  try {
-    const info = await checkUpdate(UPDATE_MANIFEST_URL);
-    if (compareVersions(info.version, appVersion) > 0) {
-      updateInfo.value = { version: info.version, notes: info.notes, sha256: info.sha256 };
-      updateState.value = 'has';
-    } else {
-      updateState.value = 'latest';
-    }
-  } catch (e) {
-    updateErr.value = '检查失败：' + (e as Error).message;
-    updateState.value = 'error';
-  }
+const updateBusy = computed(() => ['checking', 'downloading', 'validating', 'installing'].includes(updateSnapshot.phase));
+const updateProgressPercent = computed(() => {
+  const n = Number(updateSnapshot.percent);
+  return Number.isFinite(n) ? Math.max(0, Math.min(100, n)) : 0;
+});
+const updateStatusText = computed(() => {
+  if (updateSnapshot.phase === 'checking') return '正在检查更新';
+  if (updateSnapshot.phase === 'available') return `发现新版本 ${updateSnapshot.version || updateInfo.value?.version || ''}`;
+  if (updateSnapshot.phase === 'downloading') return updateSnapshot.message || '正在下载更新包';
+  if (updateSnapshot.phase === 'validating') return '正在校验更新包';
+  if (updateSnapshot.phase === 'downloaded') return '更新包已准备完成';
+  if (updateSnapshot.phase === 'installing') return '正在安装并重启程序';
+  if (updateSnapshot.phase === 'latest') return '当前已是最新版本';
+  if (updateSnapshot.phase === 'interrupted') return '上次更新未完成，可重新检查';
+  if (updateSnapshot.phase === 'completed') return '更新已完成';
+  if (updateSnapshot.phase === 'failed') return updateSnapshot.error || '更新失败';
+  return '尚未检查更新';
+});
+function formatBytes(value: number | undefined): string {
+  const n = Number(value) || 0;
+  if (n < 1024) return `${Math.round(n)} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
+  return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`;
 }
-async function onUpdate() {
-  if (!updateInfo.value) return;
-  updateErr.value = '';
-  updateState.value = 'downloading';
-  try {
-    await downloadUpdate(updatePackageUrl(updateInfo.value.version), updateInfo.value.sha256);
-    // 下载完成后请求 native 安装（会解压、合并覆盖、重启，本进程随后退出）
-    await installUpdate();
-  } catch (e) {
-    updateErr.value = '更新失败：' + (e as Error).message;
-    updateState.value = 'error';
-  }
+function formatSpeed(value: number | undefined): string {
+  const n = Number(value) || 0;
+  return n > 0 ? `${formatBytes(n)}/s` : '--';
+}
+function formatEta(value: number | undefined): string {
+  const n = Math.max(0, Math.round(Number(value) || 0));
+  if (!n) return '--';
+  if (n < 60) return `${n} 秒`;
+  return `${Math.floor(n / 60)} 分 ${n % 60} 秒`;
 }
 
 // 快捷键预览：鼠标悬浮 或 真实手柄按键按下 → 对应手柄图标蓝色闪烁 + 提示
@@ -448,6 +443,7 @@ async function openGithub() {
 }
 
 onMounted(async () => {
+  await ensureUpdateManager();
   await loadUiSettings();
   videoBatteryPause.value = getUiSetting('videoBatteryPause');
   bgOpacity.value = Math.round(getBackgroundOpacity() * 100);
@@ -461,6 +457,7 @@ onMounted(async () => {
 // KeepAlive 缓存下切回本页时主动刷新，避免「手柄设置/背景状态在其它页面变更后不刷新」
 // （2026-08-05 补充 onActivated）。
 onActivated(() => {
+  void ensureUpdateManager();
   load();
   void loadBackgroundState();
   void syncDynamicKind();
@@ -644,30 +641,49 @@ onBeforeUnmount(() => {
       <button class="action-btn outline" @click="openGithub"><InlineIcon name="link" /> github免费开源地址 ↗</button>
     </section>
 
-    <section class="card">
-      <h3 class="card-title"><InlineIcon name="package" /> 版本和更新</h3>
-      <p class="muted body">当前版本：<b class="ac-name">{{ appVersion }}</b></p>
-      <div class="upd-row">
-        <button class="ac-add" :disabled="updateState === 'checking' || updateState === 'downloading'" @click="onCheckUpdate">
-          {{ updateState === 'checking' ? '检查中…' : '检查更新' }}
-        </button>
-        <span v-if="updateState === 'latest'" class="upd-tag ok">已是最新</span>
-        <span v-else-if="updateState === 'error'" class="upd-tag err">{{ updateErr }}</span>
-        <span v-else-if="updateState === 'checking'" class="upd-tag">连接更新服务器…</span>
-        <span class="upd-divider" />
-        <button class="ac-add ua-btn" :disabled="uaBusy || !updateAccel.exists" @click="onUpdateAccelToggle">
-          {{ updateAccel.running ? '停止更新加速' : '启动更新加速' }}
-        </button>
-        <span class="upd-tag" :class="uaTagClass">{{ uaStatusText }}</span>
+    <section class="card update-card">
+      <div class="card-header-row">
+        <h3 class="card-title"><InlineIcon name="package" /> 版本和更新</h3>
+        <div class="update-version-actions">
+          <button
+            class="action-btn outline update-accel-btn"
+            :class="{ active: updateAccel.running }"
+            :disabled="uaBusy || !updateAccel.exists"
+            :title="updateAccel.exists ? (updateAccel.running ? '关闭更新加速' : '开启更新加速') : '更新加速文件未找到'"
+            @click="onUpdateAccelToggle"
+          >
+            {{ updateAccel.running ? '加速已开启' : '加速未开启' }}
+          </button>
+          <span class="version-badge">v{{ appVersion }}</span>
+        </div>
       </div>
-      <div v-if="updateState === 'has' && updateInfo" class="upd-has">
-        <p class="upd-line">发现新版本 <b class="ac-name">{{ updateInfo.version }}</b></p>
-        <p v-if="updateInfo.notes" class="muted body upd-notes">{{ updateInfo.notes }}</p>
-        <button class="ac-add upd-install" :disabled="updateBusy" @click="onUpdate">
-          {{ updateBusy ? '下载并安装中…' : '下载并安装' }}
+      <p class="muted body">更新任务由程序后台持续执行，切换页面不会中断。</p>
+      <div class="update-main-row">
+        <button class="action-btn outline update-check-btn" :disabled="updateBusy" @click="checkForUpdate(appVersion)">
+          <InlineIcon name="refresh" /> {{ updateSnapshot.phase === 'checking' ? '检查中' : '检查更新' }}
         </button>
+        <span class="upd-tag" :class="{ ok: ['latest', 'completed'].includes(updateSnapshot.phase), err: updateSnapshot.phase === 'failed' }">{{ updateStatusText }}</span>
+      </div>
+      <div v-if="updateSnapshot.phase === 'available' && updateInfo" class="update-available">
+        <div class="update-available-head">
+          <span>可更新至 <b class="ac-name">v{{ updateInfo.version }}</b></span>
+          <button class="action-btn outline update-install-btn" :disabled="updateBusy" @click="downloadAndInstall">下载并安装</button>
+        </div>
+        <p v-if="updateInfo.notes" class="muted body upd-notes">{{ updateInfo.notes }}</p>
+      </div>
+      <div v-if="['downloading', 'validating', 'downloaded', 'installing'].includes(updateSnapshot.phase)" class="update-progress-panel">
+        <div class="update-progress-track"><span :style="{ width: `${updateProgressPercent}%` }" /></div>
+        <div class="update-progress-meta">
+          <span>{{ updateSnapshot.phase === 'downloading' ? `${updateProgressPercent.toFixed(0)}%` : updateStatusText }}</span>
+          <span v-if="updateSnapshot.phase === 'downloading'">{{ formatBytes(updateSnapshot.downloadedBytes) }} / {{ updateSnapshot.totalBytes ? formatBytes(updateSnapshot.totalBytes) : '未知大小' }}</span>
+        </div>
+        <div v-if="updateSnapshot.phase === 'downloading'" class="update-progress-detail">
+          <span>速度 {{ formatSpeed(updateSnapshot.speedBps) }}</span>
+          <span>剩余 {{ formatEta(updateSnapshot.etaSeconds) }}</span>
+        </div>
       </div>
     </section>
+
   </div>
 </template>
 
@@ -863,26 +879,30 @@ onBeforeUnmount(() => {
   z-index: 25;
   top: calc(100% + 7px);
   right: 0;
-  width: min(310px, 100%);
+  width: min(360px, calc(100vw - 24px));
   display: grid;
   grid-template-columns: auto 1fr auto;
   align-items: center;
-  gap: 7px;
-  padding: 8px 9px;
+  gap: 10px;
+  padding: 12px 14px;
   border: 1px solid color-mix(in srgb, #f5b93d 58%, transparent);
-  border-radius: 9px;
+  border-radius: 10px;
   background: color-mix(in srgb, var(--bg-card) 94%, #17120a);
   color: #ffd47a;
   box-shadow: 0 8px 22px rgba(0, 0, 0, 0.42);
-  font-size: 10px;
-  line-height: 1.35;
+  font-size: 13px;
+  line-height: 1.45;
+}
+.mouse-backend-popover > :deep(svg) {
+  width: 18px;
+  height: 18px;
 }
 .mouse-backend-popover > button {
-  width: 22px;
-  height: 22px;
+  width: 28px;
+  height: 28px;
   padding: 0;
   border: 0;
-  border-radius: 6px;
+  border-radius: 7px;
   background: rgba(255, 255, 255, 0.08);
   color: inherit;
   cursor: pointer;
@@ -1040,15 +1060,10 @@ onBeforeUnmount(() => {
 .ac-name {
   color: var(--accent-2);
 }
-.upd-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-top: 8px;
-}
 .upd-tag {
   font-size: 12px;
   color: var(--text-dim, #9aa4b2);
+  line-height: 1.45;
 }
 .upd-tag.ok {
   color: #4ec98b;
@@ -1056,25 +1071,72 @@ onBeforeUnmount(() => {
 .upd-tag.err {
   color: #ff9ea1;
 }
-.upd-divider {
-  width: 1px;
-  height: 18px;
-  background: rgba(255, 255, 255, 0.12);
-  margin: 0 4px;
+.update-card {
+  border-color: color-mix(in srgb, var(--accent) 26%, var(--border));
 }
-.ua-btn {
-  border-style: dashed;
+.update-version-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
-.ua-btn:disabled {
-  opacity: 0.5;
+.update-accel-btn,
+.version-badge {
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  border-radius: var(--radius-ctrl);
+  height: 32px;
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 10px;
+  font-size: 12px;
+  line-height: 1;
+}
+.version-badge {
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.update-main-row,
+.update-available-head,
+.update-progress-meta,
+.update-progress-detail {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.update-main-row {
+  margin-top: 10px;
+}
+.update-check-btn,
+.update-install-btn,
+.update-accel-btn {
+  width: auto;
+  margin: 0;
+}
+.update-accel-btn {
+  color: var(--text-dim, #9aa4b2);
+  border-color: color-mix(in srgb, var(--text-dim, #9aa4b2) 45%, transparent);
+  margin-bottom: 0;
+  font-weight: 700;
+}
+.update-accel-btn.active {
+  color: #4ec98b;
+  border-color: color-mix(in srgb, #4ec98b 55%, transparent);
+}
+.update-accel-btn:disabled {
+  opacity: 0.55;
   cursor: not-allowed;
 }
-.upd-has {
+.update-available,
+.update-progress-panel {
   margin-top: 10px;
   padding: 10px 12px;
-  border: 1px solid rgba(46, 166, 255, 0.35);
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--border));
   border-radius: var(--radius-card, 12px);
-  background: rgba(46, 166, 255, 0.06);
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
 }
 .upd-line {
   font-size: 13px;
@@ -1089,5 +1151,42 @@ onBeforeUnmount(() => {
 .upd-install {
   border-style: solid;
   background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+.update-progress-track {
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+}
+.update-progress-track span {
+  display: block;
+  height: 100%;
+  min-width: 2px;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width 0.25s ease;
+}
+.update-progress-meta {
+  margin-top: 8px;
+  color: var(--text);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.update-progress-detail {
+  margin-top: 5px;
+  color: var(--text-dim, #9aa4b2);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+@media (max-width: 520px) {
+  .update-main-row,
+  .update-available-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .update-check-btn,
+  .update-install-btn {
+    width: 100%;
+  }
 }
 </style>

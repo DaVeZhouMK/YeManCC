@@ -560,15 +560,15 @@ refresh();
   background: rgba(229, 72, 77, 0.12);
   border: 1px solid rgba(229, 72, 77, 0.4);
   border-radius: var(--radius-ctrl);
-  padding: 8px 10px;
-  margin-bottom: 8px;
-  font-size: 11px;
-  line-height: 1.4;
+  padding: 12px 14px;
+  margin-bottom: 10px;
+  font-size: 13px;
+  line-height: 1.5;
 }
 .confirm-text {
   color: #ff9ea1;
   display: block;
-  margin-bottom: 8px;
+  margin-bottom: 10px;
 }
 .confirm-actions {
   display: flex;
@@ -579,9 +579,10 @@ refresh();
   background: var(--bg-input);
   color: var(--text);
   border: 1px solid #2a3342;
-  border-radius: 6px;
-  padding: 5px 8px;
-  font-size: 11px;
+  border-radius: 7px;
+  padding: 8px 12px;
+  min-height: 36px;
+  font-size: 13px;
   cursor: pointer;
 }
 .mini-btn.danger {

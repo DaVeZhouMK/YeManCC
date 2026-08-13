@@ -115,6 +115,14 @@ function Move-ExistingReleaseItem([string]$Path, [string]$BackupRoot) {
 }
 
 $ProjectRoot = Get-FullPath (Split-Path -Parent $PSScriptRoot)
+$versionInfo = Get-Content -LiteralPath (Join-Path $ProjectRoot 'version.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+$packageInfo = Get-Content -LiteralPath (Join-Path $ProjectRoot 'package.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+$version = [string]$versionInfo.version
+$packageVersion = [string]$packageInfo.version
+if ($version -notmatch '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$') { throw "version.json has an invalid strict version: $version" }
+$versionParts = @([int64]$Matches[1], [int64]$Matches[2], [int64]$Matches[3])
+if (@($versionParts | Where-Object { $_ -gt [int]::MaxValue }).Count -gt 0) { throw "version.json version part is out of range: $version" }
+if ($packageVersion -ne $version) { throw "Version mismatch: version.json=$version, package.json=$packageVersion" }
 if ([string]::IsNullOrWhiteSpace($WorkspaceRoot)) {
   $WorkspaceRoot = Get-FullPath (Join-Path $ProjectRoot '..\..')
 } else {
@@ -262,9 +270,6 @@ if (-not (Test-Path -LiteralPath (Join-Path $UpdateRoot 'PowerControl\pawnio\YeM
   throw 'Update ZIP PowerControl directory is missing PawnIO runtime'
 }
 
-$versionInfo = Get-Content -LiteralPath (Join-Path $ProjectRoot 'version.json') -Raw -Encoding UTF8 | ConvertFrom-Json
-$version = [string]$versionInfo.version
-if ([string]::IsNullOrWhiteSpace($version)) { throw 'version.json has no version' }
 $compatPackage = Join-Path $ReleasePackages 'YeManCC.zip'
 Compress-Archive -Path (Join-Path $UpdateRoot '*') -DestinationPath $compatPackage -CompressionLevel Optimal -Force
 Add-Type -AssemblyName System.IO.Compression.FileSystem

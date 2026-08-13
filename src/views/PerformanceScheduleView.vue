@@ -678,7 +678,7 @@ function requestResetProfiles() {
   const r = trigger.getBoundingClientRect();
   const style: Record<string, string> = { position: 'fixed' };
   // 垂直：优先弹出在按钮下方，空间不足（接近视口底部）时向上翻转
-  const POP_H = 172;
+  const POP_H = 250;
   const spaceBelow = window.innerHeight - r.bottom;
   const above = spaceBelow < POP_H + 8 && r.top > spaceBelow;
   resetConfirmAbove.value = above;
@@ -690,7 +690,7 @@ function requestResetProfiles() {
     style.bottom = 'auto';
   }
   // 水平：右对齐按钮，防溢出视口左右边界
-  const POP_W = 284;
+  const POP_W = Math.min(420, window.innerWidth - 16);
   const left = Math.max(8, Math.min(r.right - POP_W, window.innerWidth - POP_W - 8));
   style.left = left + 'px';
   style.width = POP_W + 'px';
@@ -819,7 +819,7 @@ function requestDeleteCustom() {
   }
   const r = trigger.getBoundingClientRect();
   const style: Record<string, string> = { position: 'fixed' };
-  const POP_H = 172;
+  const POP_H = 250;
   const spaceBelow = window.innerHeight - r.bottom;
   const above = spaceBelow < POP_H + 8 && r.top > spaceBelow;
   customDeleteAbove.value = above;
@@ -830,7 +830,7 @@ function requestDeleteCustom() {
     style.top = r.bottom + 8 + 'px';
     style.bottom = 'auto';
   }
-  const POP_W = 284;
+  const POP_W = Math.min(420, window.innerWidth - 16);
   const left = Math.max(8, Math.min(r.right - POP_W, window.innerWidth - POP_W - 8));
   style.left = left + 'px';
   style.width = POP_W + 'px';
@@ -1819,31 +1819,31 @@ onUnmounted(() => {
   z-index: 35;
   top: calc(100% + 7px);
   right: 0;
-  width: 260px;
+  width: min(360px, calc(100vw - 24px));
   display: grid;
   grid-template-columns: auto 1fr auto;
   align-items: center;
-  gap: 7px;
-  padding: 8px 9px;
+  gap: 10px;
+  padding: 12px 14px;
   border: 1px solid color-mix(in srgb, #f5b93d 58%, transparent);
-  border-radius: 9px;
+  border-radius: 10px;
   background: color-mix(in srgb, var(--bg-card) 94%, #17120a);
   color: #ffd47a;
   box-shadow: 0 8px 22px rgba(0, 0, 0, 0.42);
-  font-size: 10px;
-  line-height: 1.35;
+  font-size: 13px;
+  line-height: 1.45;
 }
 .game-actions .mouse-action-popover > :deep(svg) {
-  width: 15px;
-  height: 15px;
+  width: 18px;
+  height: 18px;
 }
 .game-actions .mouse-action-popover > button {
-  width: 22px;
-  min-height: 22px;
-  height: 22px;
+  width: 28px;
+  min-height: 28px;
+  height: 28px;
   padding: 0;
   border: 0;
-  border-radius: 6px;
+  border-radius: 7px;
   background: rgba(255, 255, 255, 0.08);
   color: inherit;
 }
@@ -2289,27 +2289,28 @@ button:disabled { opacity: .42; cursor: default; }
   background: #161d29;
   border: 1px solid #2a3342;
   border-radius: 12px;
-  padding: 12px 12px 11px;
+  padding: 18px 20px 17px;
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55);
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 12px;
+  max-width: calc(100vw - 16px);
 }
 .reset-confirm::before {
   content: '';
   position: absolute;
-  width: 11px;
-  height: 11px;
+  width: 13px;
+  height: 13px;
   background: #161d29;
   border-left: 1px solid #2a3342;
   border-top: 1px solid #2a3342;
   transform: rotate(45deg);
-  top: -6px;
-  right: 26px;
+  top: -7px;
+  right: 32px;
 }
 .reset-confirm.above::before {
   top: auto;
-  bottom: -6px;
+  bottom: -7px;
   border-left: none;
   border-top: none;
   border-right: 1px solid #2a3342;
@@ -2318,35 +2319,35 @@ button:disabled { opacity: .42; cursor: default; }
 .rc-title {
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 12px;
+  gap: 9px;
+  font-size: 16px;
   font-weight: 700;
   color: var(--text);
 }
 .rc-title :deep(svg) {
-  width: 14px;
-  height: 14px;
+  width: 20px;
+  height: 20px;
   color: var(--danger);
 }
 .rc-desc {
   margin: 0;
   color: var(--text-dim);
-  font-size: 10px;
-  line-height: 1.55;
+  font-size: 14px;
+  line-height: 1.6;
 }
 .rc-actions {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 7px;
-  margin-top: 2px;
+  gap: 10px;
+  margin-top: 3px;
 }
 .rc-actions button {
-  min-height: 34px;
+  min-height: 44px;
   border: 1px solid rgba(255,255,255,.08);
-  border-radius: 8px;
+  border-radius: 9px;
   background: var(--bg-input);
   color: var(--text);
-  font-size: 11px;
+  font-size: 14px;
   font-weight: 600;
   cursor: pointer;
 }

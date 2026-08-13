@@ -10,9 +10,19 @@ import { dirname, resolve } from 'node:path';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, '..');
 
-const pkg = JSON.parse(readFileSync(resolve(root, 'version.json'), 'utf8'));
+const pkg = JSON.parse(readFileSync(resolve(root, 'version.json'), 'utf8').replace(/^\uFEFF/, ''));
+const packageInfo = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8').replace(/^\uFEFF/, ''));
 const v = String(pkg.version || '0.0.0');
-const parts = v.split('.').map((n) => parseInt(n, 10) || 0);
+if (!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(v)) {
+  throw new Error(`version.json has an invalid strict version: ${v}`);
+}
+const parts = v.split('.').map(Number);
+if (parts.some((part) => !Number.isSafeInteger(part) || part > 0x7fffffff)) {
+  throw new Error(`version.json version part is out of range: ${v}`);
+}
+if (String(packageInfo.version || '') !== v) {
+  throw new Error(`Version mismatch: version.json=${v}, package.json=${packageInfo.version || '(empty)'}`);
+}
 const major = parts[0] || 0;
 const minor = parts[1] || 0;
 const patch = parts[2] || 0;

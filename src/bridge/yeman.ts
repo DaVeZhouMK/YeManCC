@@ -566,35 +566,94 @@ export async function updateAccelToggle(): Promise<UpdateAccelState & { ok: bool
 export interface UpdateInfo {
   version: string;
   notes?: string;
-  sha256?: string;
+  sha256: string;
   publishedAt?: string;
+}
+export type StrictVersion = [number, number, number];
+const STRICT_VERSION_RE = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
+const STRICT_SHA256_RE = /^[0-9a-fA-F]{64}$/;
+const MAX_VERSION_PART = 0x7fffffff;
+
+export function parseStrictVersion(value: string): StrictVersion {
+  if (typeof value !== 'string') throw new Error('版本号必须是字符串');
+  const match = STRICT_VERSION_RE.exec(value);
+  if (!match) throw new Error(`版本号格式无效：${value || '(空)'}`);
+  const parts = match.slice(1).map(Number);
+  if (parts.some((part) => !Number.isSafeInteger(part) || part > MAX_VERSION_PART)) {
+    throw new Error(`版本号数值超出范围：${value}`);
+  }
+  return parts as StrictVersion;
+}
+
+export function isValidSha256(value: unknown): value is string {
+  return typeof value === 'string' && STRICT_SHA256_RE.test(value);
+}
+
+export function validateUpdateManifest(value: unknown): UpdateInfo {
+  if (!value || typeof value !== 'object') throw new Error('更新清单格式无效');
+  const manifest = value as Record<string, unknown>;
+  if (typeof manifest.version !== 'string') throw new Error('更新清单缺少版本号');
+  parseStrictVersion(manifest.version);
+  if (!isValidSha256(manifest.sha256)) throw new Error('更新清单缺少有效的 SHA-256');
+  return {
+    version: manifest.version,
+    sha256: manifest.sha256.toUpperCase(),
+    notes: typeof manifest.notes === 'string' ? manifest.notes : undefined,
+    publishedAt: typeof manifest.publishedAt === 'string' ? manifest.publishedAt : undefined,
+  };
 }
 // version.json 拉取地址（raw 分支，避免 GitHub API 限流）；版本号一致时由前端比较
 export const UPDATE_MANIFEST_URL =
   'https://raw.githubusercontent.com/DaVeZhouMK/YeManCC/main/version.json';
 // 下载地址由版本号拼出：releases/download/v<version>/YeManCC.zip
 export function updatePackageUrl(version: string): string {
+  parseStrictVersion(version);
   return `https://github.com/DaVeZhouMK/YeManCC/releases/download/v${version}/YeManCC.zip`;
 }
 export async function appVersion(): Promise<string> {
   return invoke<string>('app.version');
 }
 export async function checkUpdate(url: string): Promise<UpdateInfo> {
-  return invoke<UpdateInfo>('app.checkUpdate', { url }, { timeoutMs: 45000 });
+  const manifest = await invoke<unknown>('app.checkUpdate', { url }, { timeoutMs: 45000 });
+  return validateUpdateManifest(manifest);
 }
-export async function downloadUpdate(url: string, sha256?: string): Promise<string> {
-  return invoke<string>('app.downloadUpdate', { url, sha256: sha256 ?? '' }, { timeoutMs: 16 * 60 * 1000 });
+export async function downloadUpdate(url: string, sha256: string, operationId: string, version: string): Promise<string> {
+  parseStrictVersion(version);
+  if (!isValidSha256(sha256)) throw new Error('更新包 SHA-256 无效');
+  return invoke<string>(
+    'app.downloadUpdate',
+    { url, sha256, operationId, version },
+    { timeoutMs: 16 * 60 * 1000 },
+  );
 }
-export async function installUpdate(): Promise<boolean> {
-  return invoke<boolean>('app.installUpdate', {}, { timeoutMs: 150000 });
+export async function installUpdate(operationId: string, version: string, sha256: string): Promise<boolean> {
+  parseStrictVersion(version);
+  if (!isValidSha256(sha256)) throw new Error('更新包 SHA-256 无效');
+  return invoke<boolean>('app.installUpdate', { operationId, version, sha256 }, { timeoutMs: 150000 });
+}
+export interface UpdateProgressState {
+  operationId?: string;
+  phase?: string;
+  version?: string;
+  downloadedBytes?: number;
+  totalBytes?: number;
+  percent?: number;
+  speedBps?: number;
+  etaSeconds?: number;
+  message?: string;
+  error?: string;
+  updatedAt?: number;
+}
+export async function updateState(): Promise<UpdateProgressState> {
+  return invoke<UpdateProgressState>('app.updateState', {}, { timeoutMs: 5000 });
 }
 // 语义化版本比较：a<b 返回 -1，a==b 返回 0，a>b 返回 1
 export function compareVersions(a: string, b: string): number {
-  const pa = String(a).split('.').map((n) => parseInt(n, 10) || 0);
-  const pb = String(b).split('.').map((n) => parseInt(n, 10) || 0);
-  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
-    const x = pa[i] || 0;
-    const y = pb[i] || 0;
+  const pa = parseStrictVersion(a);
+  const pb = parseStrictVersion(b);
+  for (let i = 0; i < pa.length; i++) {
+    const x = pa[i];
+    const y = pb[i];
     if (x !== y) return x < y ? -1 : 1;
   }
   return 0;

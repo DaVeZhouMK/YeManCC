@@ -16,6 +16,7 @@ import { execFileSync } from 'node:child_process';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, '..');
 const verPath = resolve(root, 'version.json');
+const packagePath = resolve(root, 'package.json');
 
 const argv = process.argv.slice(2);
 let newVersion = null;
@@ -25,7 +26,9 @@ for (let i = 0; i < argv.length; i++) {
   else if (!newVersion) { newVersion = argv[i]; }
 }
 
-const pkg = JSON.parse(readFileSync(verPath, 'utf8'));
+const versionText = readFileSync(verPath, 'utf8').replace(/^\uFEFF/, '');
+const pkg = JSON.parse(versionText);
+const packageInfo = JSON.parse(readFileSync(packagePath, 'utf8').replace(/^\uFEFF/, ''));
 const cur = String(pkg.version || '0.0.0');
 if (!newVersion) {
   const parts = cur.split('.').map((n) => parseInt(n, 10) || 0);
@@ -33,9 +36,13 @@ if (!newVersion) {
   newVersion = parts.join('.');
 }
 
-// 简单校验 semver
-if (!/^\d+\.\d+\.\d+$/.test(newVersion)) {
+// 严格校验 x.y.z（禁止前导零、预发布和额外段）
+if (!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(newVersion)) {
   console.error('版本号格式应为 x.y.z，收到: ' + newVersion);
+  process.exit(1);
+}
+if (newVersion.split('.').map(Number).some((part) => !Number.isSafeInteger(part) || part > 0x7fffffff)) {
+  console.error('版本号数值超出支持范围，收到: ' + newVersion);
   process.exit(1);
 }
 
@@ -46,6 +53,9 @@ pkg.sha256 = '';
 pkg.publishedAt = '';
 writeFileSync(verPath, JSON.stringify(pkg, null, 2) + '\n', 'utf8');
 console.log(`[bump] version.json -> ${newVersion}`);
+packageInfo.version = newVersion;
+writeFileSync(packagePath, JSON.stringify(packageInfo, null, 2) + '\n', 'utf8');
+console.log(`[bump] package.json -> ${newVersion}`);
 
 // 重新生成 src/version.ts 与 native/version.h（保证打进 exe 的版本号一致）
 try {
@@ -58,7 +68,7 @@ try {
 // 打印发布步骤（CI 在 push tag 后自动构建发布）
 const today = new Date().toISOString().slice(0, 10);
 console.log('\n== 下一步（复制执行）==');
-console.log(`git add version.json            # 版本真相源（src/version.ts 与 native/version.h 由 CI 自动重新生成，已被 .gitignore 忽略）`);
+console.log(`git add version.json package.json # 两个发布版本源必须保持一致`);
 console.log(`git commit -m "chore: 发布 v${newVersion}"`);
 console.log(`git tag v${newVersion}`);
 console.log(`git push origin main --tags`);

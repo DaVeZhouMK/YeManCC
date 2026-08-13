@@ -101,8 +101,8 @@ function positionFsrDialog() {
   const trigger = fsrTriggerEl.value;
   const style: Record<string, string> = { position: 'fixed' };
   const r = trigger?.getBoundingClientRect();
-  const POP_W = 300;
-  const POP_H = 210;
+  const POP_W = Math.min(420, window.innerWidth - 16);
+  const POP_H = 280;
   if (!r) {
     style.left = Math.max(8, (window.innerWidth - POP_W) / 2) + 'px';
     style.top = Math.max(8, (window.innerHeight - POP_H) / 2) + 'px';
@@ -362,7 +362,7 @@ function applyGameStatus(g: DetectedGame | null) {
   const targetChanged = !!previous && (!g || previous.pid !== g.pid);
   if (targetChanged && activeSpeed.value !== null && previous) {
     // 游戏切换时尽力解除旧目标；变速链路只按旧 PID 操作。
-    void clearGameSpeed(previous.pid).catch(() => {});
+    void clearGameSpeed(previous.pid, 'target-change').catch(() => {});
   }
   if (!g || targetChanged) activeSpeed.value = null;
   game.value = g;
@@ -393,7 +393,7 @@ async function onSpeedApply(factor: number) {
       statusMsg.value = `${detectedGameName(target) || target.name} 暂不支持安全变速，已保持 1×`;
       return;
     }
-    const r = await applyGameSpeed(target.pid, factor, target);
+    const r = await applyGameSpeed(target.pid, factor, target, 'user-factor');
     if (r.skipped) {
       activeSpeed.value = null;
       statusMsg.value = r.reason === 'bridge_conflict'
@@ -432,7 +432,7 @@ async function onSpeedOff() {
   }
   speedBusy.value = true;
   try {
-    const r = await clearGameSpeed(game.value.pid);
+    const r = await clearGameSpeed(game.value.pid, 'user-reset');
     if (r.ok) {
       activeSpeed.value = null;
       statusMsg.value = '已关闭变速，恢复原始速度。';
@@ -875,8 +875,21 @@ onUnmounted(() => {
     <section class="card quick-functions-card">
       <h3 class="card-title"><InlineIcon name="settings" /> 快捷功能</h3>
       <div class="frame-actions">
-        <button class="quick-btn" :disabled="busy" @click="onLaunchLs"><InlineIcon name="rocket" /> 小黄鸭一键插帧<span class="quick-sub">写入 LS 插帧预设并启动</span></button>
-        <button ref="fsrTriggerEl" class="quick-btn opti-btn opti-any" :disabled="busy" @click="onOptiScalerCurrent"><InlineIcon name="bolt" /> 当前游戏安装<span class="quick-sub">自动识别当前游戏并安装/卸载 FSR4.1</span></button>
+        <button class="quick-btn" :disabled="busy" @click="onLaunchLs">
+          <InlineIcon name="rocket" />
+          <span class="quick-btn-copy">
+            <span class="quick-main">小黄鸭一键插帧</span>
+            <span class="quick-sub">写入 LS 插帧预设并启动</span>
+          </span>
+        </button>
+        <button ref="fsrTriggerEl" class="quick-btn opti-btn opti-any" :disabled="busy" @click="onOptiScalerCurrent">
+          <InlineIcon name="bolt" />
+          <span class="quick-btn-copy opti-copy">
+            <span class="quick-main">安装/卸载</span>
+            <span class="quick-product">FSR4.1</span>
+            <span class="quick-sub">自动识别当前游戏并安装</span>
+          </span>
+        </button>
       </div>
 
       <div class="sub-block">
@@ -1014,7 +1027,7 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 11px 12px;
+  padding: 12px 14px;
   border-radius: var(--radius-ctrl, 8px);
   border: 1px solid rgba(46, 166, 255, 0.4);
   background: rgba(46, 166, 255, 0.1);
@@ -1025,6 +1038,28 @@ onUnmounted(() => {
   text-align: left;
   transition: border-color 0.12s, background 0.12s;
 }
+.quick-btn > :deep(.inline-icon) {
+  flex: 0 0 auto;
+  width: 19px;
+  height: 19px;
+}
+.quick-btn-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  line-height: 1.2;
+}
+.quick-main,
+.quick-product {
+  display: block;
+  font-size: 14px;
+  font-weight: 700;
+}
+.quick-product {
+  font-size: 15px;
+  letter-spacing: 0.01em;
+}
 .quick-btn:hover:not(:disabled) {
   background: rgba(46, 166, 255, 0.18);
 }
@@ -1033,9 +1068,11 @@ onUnmounted(() => {
   cursor: not-allowed;
 }
 .quick-sub {
-  font-size: 11px;
+  display: block;
+  font-size: 12px;
   font-weight: 400;
   color: var(--text-dim);
+  line-height: 1.35;
 }
 /* ── OptiScaler FSR4.1 按钮 ── */
 .opti-btn {
@@ -1068,7 +1105,7 @@ onUnmounted(() => {
 }
 .frame-actions .quick-btn {
   min-width: 0;
-  min-height: 54px;
+  min-height: 76px;
 }
 .display-bubbles {
   display: grid;
@@ -1247,22 +1284,22 @@ onUnmounted(() => {
   background: #161d29;
   border: 1px solid #2a3342;
   border-radius: 10px;
-  padding: 5px;
+  padding: 7px;
   box-shadow: 0 8px 24px rgba(0,0,0,0.5);
   display: flex;
   flex-direction: column;
   gap: 2px;
-  min-width: 110px;
+  min-width: 140px;
   transform: translate(-50%, -50%);
 }
 .launch-menu-item {
   width: 100%;
-  padding: 9px 14px;
+  padding: 11px 16px;
   background: transparent;
   border: none;
   border-radius: 6px;
   color: var(--text);
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 600;
   font-family: inherit;
   text-align: left;
@@ -1282,27 +1319,28 @@ onUnmounted(() => {
   background: #161d29;
   border: 1px solid #2a3342;
   border-radius: 12px;
-  padding: 12px 12px 11px;
+  padding: 18px 20px 17px;
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55);
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 12px;
+  max-width: calc(100vw - 16px);
 }
 .fsr-confirm::before {
   content: '';
   position: absolute;
-  width: 11px;
-  height: 11px;
+  width: 13px;
+  height: 13px;
   background: #161d29;
   border-left: 1px solid #2a3342;
   border-top: 1px solid #2a3342;
   transform: rotate(45deg);
-  top: -6px;
-  right: 26px;
+  top: -7px;
+  right: 32px;
 }
 .fsr-confirm.above::before {
   top: auto;
-  bottom: -6px;
+  bottom: -7px;
   border-left: none;
   border-top: none;
   border-right: 1px solid #2a3342;
@@ -1311,14 +1349,14 @@ onUnmounted(() => {
 .fsr-confirm .rc-title {
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 12px;
+  gap: 9px;
+  font-size: 16px;
   font-weight: 700;
   color: var(--text);
 }
 .fsr-confirm .rc-title :deep(svg) {
-  width: 14px;
-  height: 14px;
+  width: 20px;
+  height: 20px;
   color: var(--accent);
 }
 .fsr-confirm.tone-error .rc-title :deep(svg) { color: var(--danger); }
@@ -1326,24 +1364,24 @@ onUnmounted(() => {
 .fsr-confirm .rc-desc {
   margin: 0;
   color: var(--text-dim);
-  font-size: 10px;
-  line-height: 1.55;
+  font-size: 14px;
+  line-height: 1.6;
   white-space: pre-line;
 }
 .fsr-confirm .rc-actions {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 7px;
-  margin-top: 2px;
+  gap: 10px;
+  margin-top: 3px;
 }
 .fsr-confirm .rc-actions:has(> button:only-child) { grid-template-columns: 1fr; }
 .fsr-confirm .rc-actions button {
-  min-height: 34px;
+  min-height: 44px;
   border: 1px solid rgba(255,255,255,.08);
-  border-radius: 8px;
+  border-radius: 9px;
   background: var(--bg-input);
   color: var(--text);
-  font-size: 11px;
+  font-size: 14px;
   font-weight: 600;
   cursor: pointer;
 }
