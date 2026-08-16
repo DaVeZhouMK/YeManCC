@@ -150,7 +150,12 @@ jobs:
           $generated = Get-Content -LiteralPath Release\version.json -Raw -Encoding UTF8 | ConvertFrom-Json
           $currentText = gh api "repos/${{ github.repository }}/contents/version.json?ref=main" --jq .content
           $currentText = ($currentText -replace '\s', '')
-          $currentJson = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($currentText)) | ConvertFrom-Json
+          $currentJsonText = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($currentText))
+          # GitHub contents may return a UTF-8 BOM from an older manifest.
+          # Strip it before ConvertFrom-Json so publish-order validation is
+          # independent of how the previous manifest was written.
+          $currentJsonText = $currentJsonText.TrimStart([char]0xFEFF)
+          $currentJson = $currentJsonText | ConvertFrom-Json
           $parse = {
             param([string]$value)
             if ($value -notmatch '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$') { throw "Invalid manifest version: $value" }
