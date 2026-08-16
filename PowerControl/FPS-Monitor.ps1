@@ -2,8 +2,8 @@
 # 帧率来源：HWiNFO 共享内存 "Framerate Presented (avg)" / "(1%)"（不再用 RTSS，RTSS 易崩）
 # GPU 来源：HWiNFO 共享内存 多 GPU 的 "D3D Usage" / "Core Load" / "Utilization" 最大值 %（比 Win32_Perf 准）
 # 有真实游戏时：每 1 秒记录 {ts,fps,fps1,game,pid} 到 fps-status.json
-# 未检测到游戏时：每 10 秒扫一次，且不在记录任何数据（只写心跳 fps-monitor.hb，不写状态文件）
-# 真实游戏识别 = 工作集 > 500MB + 黑名单(内置+exclude.txt)，且 HWiNFO 帧率 > 0
+# 未检测到游戏时：不记录状态数据（只写心跳 fps-monitor.hb，不写状态文件）
+# 游戏识别由 native 游戏识别阀门完成；本脚本只读取唯一 PID 快照，且 HWiNFO 帧率 > 0 才输出
 # 停止：创建 C:\SOFT\YeMan\PowerControl\fps-monitor.stop 文件即退出
 $ErrorActionPreference = "SilentlyContinue"
 
@@ -13,7 +13,7 @@ $STOPFLAG = Join-Path $DIR "fps-monitor.stop"
 $PIDFILE  = Join-Path $DIR "fps-monitor.pid"
 $HB       = Join-Path $DIR "fps-monitor.hb"
 $HWINFO_OK = Join-Path $DIR "hwinfo-ok"
-$EXCLUDE  = Join-Path $DIR "Sleep\exclude.txt"
+$GAME_TARGET = Join-Path $DIR "game-target.json"
 
 # ── 单实例：杀掉所有其它运行中的本脚本实例 ──
 # 旧逻辑只按 pidfile 杀「一个」旧 PID；反复重拉时旧实例未被引用→僵尸累积。
@@ -34,39 +34,33 @@ if (Test-Path $STOPFLAG) { Remove-Item $STOPFLAG -Force }
 # 初始心跳：证明守护已存活（前端据此区分"空闲"与"守护已死"）
 Set-Content -Path $HB -Value ('{"ts":' + [DateTimeOffset]::Now.ToUnixTimeMilliseconds() + '}') -Encoding ASCII
 
-# ── 黑名单（与 quickapp.ts SYSTEM_BLACKLIST 对齐）──
-$BLACKLIST = @(
-  'system','idle','csrss','winlogon','lsass','services','smss',
-  # 浏览器：看视频/网页也会让 HWiNFO "Framerate Presented" > 0，被误判为游戏 → 加入黑名单
-  'msedge','chrome','firefox','brave','opera','steam','steamwebhelper','qq','chatgpt','discord','slack','teams',
-  'dwm','explorer','shellhost','searchui','searchhost','runtimebroker',
-  'sihost','taskhostw','fontdrvhost','conhost','rundll32',
-  'msedgewebview2','applicationframehost','startmenuexperiencehost',
-  'peopleexperiencehost','systemsettings','lockapp','audiodg',
-  'svchost','nvcontainer','nvdisplaycontainer','nvdisplay',
-  'rtkauduservice64','yemancc','yemantdpctl','workbuddy',
-  'uuremote','uuremotefe','uur','neteaseuu','sunloginclient',
-  'teamviewer','anydesk','todesk','rtss','hwinfo64','gameviewer',
-  'vmware-vmx','virtualboxvm','qemu-system-x86_64','qemu-system-i386',
-  'vmmem','vmmemwsl','wslhost','vmcompute'
-)
-function Load-Exclude {
-    $set = @{}
-    foreach ($b in $BLACKLIST) { $set[$b] = $true }
-    if (Test-Path $EXCLUDE) {
-        foreach ($line in (Get-Content $EXCLUDE)) {
-            $t = $line.Trim()
-            if ($t -and -not $t.StartsWith('#')) { $set[($t -replace '\.exe$','').ToLower()] = $true }
-        }
-    }
-    return $set
+# 游戏识别阀门是唯一的候选选择器。本脚本只消费 native 发布的快照，
+# 并用 PID + 进程创建时间复核，快照不存在或过期时安全地视为无游戏。
+function Read-GameValveTarget {
+    try {
+        if (-not (Test-Path -LiteralPath $GAME_TARGET)) { return $null }
+        $target = Get-Content -LiteralPath $GAME_TARGET -Raw -ErrorAction Stop | ConvertFrom-Json
+        $targetPid = [int]$target.pid
+        $created = [Int64]$target.processCreated
+        $lastSeen = [Int64]$target.lastSeen
+        $generation = [Int64]$target.generation
+        $now = [DateTimeOffset]::Now.ToUnixTimeMilliseconds()
+        $age = $now - $lastSeen
+        if (-not $target.valid -or $targetPid -le 0 -or $created -le 0 -or
+            $generation -le 0 -or $lastSeen -le 0 -or $age -lt 0 -or $age -gt 10000) { return $null }
+        $process = Get-Process -Id $targetPid -ErrorAction SilentlyContinue
+        if (-not $process) { return $null }
+        $actualCreated = [Int64]$process.StartTime.ToFileTimeUtc()
+        if ($actualCreated -ne $created) { return $null }
+        return $target
+    } catch { return $null }
 }
 
 # ── HWiNFO 共享内存读取（帧率 avg/1%Low + GPU 3D 负载 + CPU Package Power）──
 # 内存映射 "Global\HWiNFO_SENS_SM2"，签名 0x53695748("HWiS")；布局遵循 REALiX 官方 SM2 规范（#pragma pack(1)）
 # Header: dwOffsetOfReadingSection@32 / dwSizeOfReadingElement@36 / dwNumReadingElements@40
 # Reading 元素(460B): szLabelOrig@+12(128 ANSI) / szUnit@+268(16 ANSI) / double Value@+284 / double ValueAvg@+308
-# 标签是 ANSI(单字节)，数值在 double 浮点字段（非文本）；avg/1%Low 均用 ValueAvg(运行均值)以稳定，瞬时 Value 噪声大
+# 标签是 ANSI(单字节)，数值在 double 浮点字段（非文本）。
 # GPU 3D 负载（多 GPU 取最大值）：标签含 "GPU" + 单位 "%" + (D3D Usage|Core Load|Utilization)，
 #   排除 Video/Compute/显存控制器/总线/风扇/显存占用 等无关传感器；比 Win32_PerfFormattedData 准很多
 function Read-HwinfoAll {
@@ -140,14 +134,7 @@ function Read-HwinfoAll {
 }
 
 # ── 主循环 ──
-$excl = Load-Exclude
 $LOG  = Join-Path $DIR "fps-monitor.log"
-# 游戏进程枚举缓存：Get-Process 全枚举（提权下遍历全系统进程+查工作集）很重，约 200ms+ 系统级瞬时负载。
-# 若每 2 秒跑一次，YeManCC 的 UI 线程消息泵会被判定持续繁忙 → 鼠标旁出现 IDC_APPSTARTING 转圈。
-# 且此分支只在 HWiNFO 提供帧率时才进入（$hw.ok -and $fps -gt 0）——正好解释「只有 浮动+HWiNFO64 开才转圈」。
-# 用户要求：游戏进程还在 → 不再搜索、直接继续；游戏没了 → 每 GAME_ENUM_MS 才搜一次。
-$gameCacheId = 0; $gameCacheName = $null; $gameCacheTs = 0
-$GAME_ENUM_MS = 30000
 # 工具：原子写（temp 写入 + File.Replace 替换），读者永远看到旧值或新值，不会读到
 # 截断半截内容。原 File.WriteAllText 先截断再写，前端每秒读 hb/status 时若撞上截断窗口会
 # 读到空/半截→JSON.parse 失败→readStatus 返回 null→前端误判守护死亡→反复重拉（抖动根因）。
@@ -192,41 +179,24 @@ while ($true) {
         }
 
         if ($hw.ok -and $fps -gt 0) {
-            # 有渲染 → 选游戏进程：工作集 > 500MB + 黑名单过滤，取最大工作集者
-            # ⚠ 全进程枚举很重（提权遍历全系统进程+查工作集）。用户要求：游戏进程还在 → 不再搜索直接继续；
-            #   游戏没了 → 每 GAME_ENUM_MS(30s) 才搜一次。缓存窗口内的存活校验用轻量 Get-Process -Id（毫秒级）。
-            $nowMs = [DateTimeOffset]::Now.ToUnixTimeMilliseconds()
-            if ($gameCacheId -le 0) {
-                # 无缓存游戏 → 冷却期外才全枚举搜索新游戏
-                if ($nowMs - $gameCacheTs -gt $GAME_ENUM_MS) {
-                    $gameCacheTs = $nowMs
-                    $best = $null; $bestWs = 0
-                    foreach ($pr in (Get-Process | Where-Object { $_.WorkingSet64 -gt 524288000 })) {
-                        $nm = $pr.ProcessName.ToLower()
-                        if (-not $excl.ContainsKey($nm)) {
-                            if ($pr.WorkingSet64 -gt $bestWs) { $bestWs = $pr.WorkingSet64; $best = $pr }
-                        }
-                    }
-                    if ($best) {
-                        $gameCacheName = $best.ProcessName; $gameCacheId = [int]$best.Id
-                    }
-                }
-            } elseif ($nowMs - $gameCacheTs -gt $GAME_ENUM_MS) {
-                # 有缓存游戏且到 30s：仅轻量单进程校验存活；仍在 → 直接继续（不枚举）；死了 → 清缓存走搜索
-                $gameCacheTs = $nowMs
-                $chk = Get-Process -Id $gameCacheId -ErrorAction SilentlyContinue
-                if (-not $chk) { $gameCacheId = 0; $gameCacheName = $null }
-            }
-            if ($gameCacheId -gt 0) {
-                # 有真实游戏：每 2 秒记录完整数据（用户明确要求 2 秒刷新）
-                $json = '{"ts":' + [DateTimeOffset]::Now.ToUnixTimeMilliseconds() +
-                        ',"fps":' + $fps + ',"fps1":' + $fps1 + ',"gpu":' + $gpu +
-                        ',"packagePower":' + $packagePower +
-                        ',"game":' + $('"' + $gameCacheName + '"') + ',"pid":' + $gameCacheId + '}'
+            # FPS is an output condition only. The native game recognition
+            # valve has already selected the sole PID; this compatibility
+            # script must not enumerate or choose another process.
+            $target = Read-GameValveTarget
+            if ($target) {
+                $targetName = [string]$target.name
+                $json = [ordered]@{
+                    ts = [DateTimeOffset]::Now.ToUnixTimeMilliseconds()
+                    fps = $fps
+                    fps1 = $fps1
+                    gpu = $gpu
+                    packagePower = $packagePower
+                    game = $targetName
+                    pid = [int]$target.pid
+                } | ConvertTo-Json -Compress
                 Write-Atomic $STATUS $json
-                # 调试日志：每 10 轮记录一次（避免日志爆炸）
                 if ($cycle % 10 -eq 0) {
-                    Write-Atomic $LOG ("[{0}] cycle=$cycle game={1} fps=$fps fps1=$fps1 gpu=$gpu packagePower=$packagePower`n" -f ([DateTimeOffset]::Now.ToString('HH:mm:ss')), $gameCacheName)
+                    Write-Atomic $LOG ("[{0}] cycle=$cycle game={1} pid={2} fps=$fps fps1=$fps1 gpu=$gpu packagePower=$packagePower`n" -f ([DateTimeOffset]::Now.ToString('HH:mm:ss')), $targetName, $target.pid)
                 }
                 Start-Sleep -Milliseconds 2000
                 continue

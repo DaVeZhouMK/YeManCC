@@ -6,8 +6,19 @@ const listeners: Array<(e: { data: any }) => void> = [];
 const shellScripts: string[] = [];
 const writtenLogs: string[] = [];
 let shellStdout = '';
+let valvePid = 111;
 
 function dispatch(cmd: string, args: any): any {
+  if (cmd === 'game.detect') {
+    return {
+      pid: valvePid,
+      name: valvePid === 111 ? 'Dungeons-Win64-Shipping.exe' : 'safe-game.exe',
+      title: valvePid === 111 ? 'Minecraft Dungeons' : 'Safe Game',
+      path: valvePid === 111 ? 'C:\\Games\\Minecraft Dungeons\\Dungeons-Win64-Shipping.exe' : 'C:\\Games\\safe-game.exe',
+      processCreated: String(valvePid * 1000 + 7),
+      source: 'memory',
+    };
+  }
   if (cmd === 'fs.exists') return false;
   if (cmd === 'fs.writeTextFile') {
     writtenLogs.push(String(args?.content || ''));
@@ -24,6 +35,9 @@ function dispatch(cmd: string, args: any): any {
   setTimeout(callback: () => void) {
     return setTimeout(callback, 0);
   },
+  addEventListener() {},
+  removeEventListener() {},
+  dispatchEvent() { return true; },
   chrome: {
     webview: {
       postMessage(msg: Msg) {
@@ -41,6 +55,11 @@ function dispatch(cmd: string, args: any): any {
       },
     },
   },
+};
+(globalThis as any).document = {
+  visibilityState: 'visible',
+  addEventListener() {},
+  removeEventListener() {},
 };
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -74,11 +93,13 @@ async function main() {
   assert(shellScripts.length === 0, 'blocked target must not invoke PowerShell or bridge');
   passed++;
 
+  valvePid = 222;
   shellStdout = 'ARCH:x64\nSAFE_SKIP:bridge_conflict\nSAFE_FALLBACK:1\n';
   const conflict = await speedhack.applyGameSpeed(222, 2, { pid: 222, name: 'safe-game.exe' });
   assert(conflict.ok && conflict.skipped && conflict.reason === 'bridge_conflict', 'foreign bridge must cause safe skip');
   passed++;
 
+  valvePid = 333;
   shellStdout = [
     'ARCH:x64',
     'RESP:OK',
@@ -91,7 +112,7 @@ async function main() {
   const success = await speedhack.applyGameSpeed(333, 2, { pid: 333, name: 'safe-game.exe' });
   assert(success.ok && !success.skipped, 'successful transaction should be accepted');
   const script = shellScripts.at(-1) || '';
-  const firstTransaction = script.slice(script.indexOf('# Target identity is PID-only'));
+  const firstTransaction = script.slice(script.indexOf('# Target selection comes from the game recognition valve'));
   assert(!firstTransaction.includes("Send-BridgeCommand 'SETSPEED 1'"), 'first injection must not reset the shared factor before injection');
   assert(firstTransaction.includes("Send-BridgeCommand 'INJECT 333'"), 'first application must inject the target');
   assert(firstTransaction.includes("Send-BridgeCommand 'ENABLE 333'"), 'first application must enable the target');
@@ -115,6 +136,7 @@ async function main() {
   assert(script.includes('BRIDGE_SELECTED_PID:'), 'diagnostics must record the actual bridge PID');
   passed++;
 
+  valvePid = 333;
   shellStdout = 'ARCH:x64\nRESP:OK ALREADY_INJECTED\nRESP:OK 4.000000\nRESULT:ok\n';
   const second = await speedhack.applyGameSpeed(333, 4, { pid: 333, name: 'safe-game.exe' });
   assert(second.ok && !second.skipped, 'same target factor change should succeed');
@@ -126,11 +148,13 @@ async function main() {
   assert(secondScript.includes('Test-OptionalSpeedReadback'), 'speed change must tolerate bridge readback variants');
   passed++;
 
+  valvePid = 333;
   shellStdout = 'ARCH:x64\nRESP:OK ALREADY_INJECTED\nRESP:OK\nRESULT:ok\n';
   const plainOkReadback = await speedhack.applyGameSpeed(333, 4, { pid: 333, name: 'safe-game.exe' });
   assert(plainOkReadback.ok && !plainOkReadback.skipped, 'plain OK GETSPEED readback should succeed');
   passed++;
 
+  valvePid = 333;
   shellStdout = 'ARCH:x64\nRESP:OK\nRESP:OK\nSAFE_FALLBACK:1\nRESULT:ok\n';
   const reset = await speedhack.clearGameSpeed(333, 'user-reset');
   assert(reset.ok && reset.safeFallback, 'X1 reset should succeed');
@@ -153,6 +177,7 @@ async function main() {
   assert(writtenLogs.some((entry) => entry.includes('POST_X1_SCHEDULE diagVersion=4')), 'X1 diagnostics must record its schedule without blocking the result');
   passed++;
 
+  valvePid = 444;
   shellStdout = 'ARCH:x64\nRESP:OK\nRESP:OK\nRESP:OK\nRESP:OK 8.000000\nRESULT:ok\n';
   const switched = await speedhack.applyGameSpeed(444, 8, { pid: 444, name: 'other-game.exe' });
   assert(switched.ok, 'switching target should succeed');
@@ -161,6 +186,7 @@ async function main() {
   assert(switchedScript.includes("Send-BridgeCommand 'INJECT 444'"), 'switching target must inject the new target');
   passed++;
 
+  valvePid = 555;
   shellStdout = 'ARCH:x64\nRESP:OK\nRESP:ERROR injection failed\nRESP:OK\nSAFE_FALLBACK:1\nRESULT:failed\n';
   const failed = await speedhack.applyGameSpeed(555, 8, { pid: 555, name: 'safe-game.exe' });
   assert(!failed.ok && failed.safeFallback && failed.reason === 'operation_failed', 'failed injection must report 1x fallback');

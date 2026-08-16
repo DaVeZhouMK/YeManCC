@@ -200,11 +200,12 @@ const offFloatUpdate = onFloatUpdate((info) => {
 onUnmounted(offFloatUpdate);
 
 // 帧数目标：滑块(实际值) + 上限下拉(右) —— 与「监控/锁帧」页同款组合。
-// 浮动目标必须保持有效帧率（0 会破坏 CPU/TDP 控制循环判定），故上限下拉不含「不锁帧(0)」；
-// 档位数值与锁帧页共用 FPS_CEILINGS（30/60/90/120/200/300），滑块步进 5 一致。
+// 0 = 不锁帧：不启动帧率驱动的 CPU/TDP 浮动，真实值仍保存为 0。
+// 档位数值与锁帧页共用 FPS_CEILINGS，滑块步进 5 一致。
 const fpsTargetVal = computed<number>({
   get: () => {
     const t = Number(floatInfo.value.target);
+    if (t === 0) return 0;
     return Number.isFinite(t) && t >= FPS_TARGET_MIN && t <= FPS_TARGET_MAX ? t : 60;
   },
   set: (v: number) => {
@@ -213,18 +214,21 @@ const fpsTargetVal = computed<number>({
 });
 const fpsCeiling = ref(300); // 帧数目标上限（滑块最大值），FPS_CEILINGS 单一数据源
 const fpsCeilingOpts: DropdownOption[] = FPS_CEILINGS
-  .filter((v) => v > 0)
-  .map((v) => ({ value: v, label: `${v} FPS` }));
+  .map((v) => ({ value: v, label: v === 0 ? '不锁帧' : `${v} FPS` }));
 function smallestFpsCeiling(val: number): number {
   const list = fpsCeilingOpts.map((o) => Number(o.value));
   for (const c of list) if (c >= val) return c;
   return list[list.length - 1];
 }
 // 帧数目标上限：只改滑块范围；当前目标超出新上限时钳制并保存（与监控/锁帧页一致）
-function onFpsCeiling(val: number) {
+async function onFpsCeiling(val: number) {
   fpsCeiling.value = val;
   const cur = fpsTargetVal.value;
-  if (cur > val) onFloatTarget(val);
+  if (val === 0) {
+    await onFloatTarget(0);
+  } else if (cur === 0 || cur > val) {
+    await onFloatTarget(Math.max(FPS_TARGET_MIN, val));
+  }
 }
 // 滑块松手才提交（拖动过程只改本地显示，避免拖动每步都触发 RTSS 重载）
 function onFloatTargetCommit(v: number) {
@@ -233,7 +237,9 @@ function onFloatTargetCommit(v: number) {
 // 目标值变化（手柄/外部）时确保上限 >= 目标，否则滑块被夹住选不上去
 watch(() => floatInfo.value.target, (t) => {
   const num = Number(t);
-  if (Number.isFinite(num) && num >= FPS_TARGET_MIN) {
+  if (num === 0) {
+    if (fpsCeiling.value !== 0) fpsCeiling.value = 0;
+  } else if (Number.isFinite(num) && num >= FPS_TARGET_MIN) {
     const c = smallestFpsCeiling(num);
     if (fpsCeiling.value !== c) fpsCeiling.value = c;
   }
@@ -279,20 +285,26 @@ async function onFloatTarget(v: number) {
   // 滑块只负责设置并保存帧数目标；是否启用浮动完全由电池栏目（autoEnable）决定，
   // 移动滑块不得自行启用浮动（否则会绕过 autoEnable 的逻辑）。
   floatInfo.value = { ...floatInfo.value, target: t };
-  setFloatTarget(t);
-  // 仅当浮动已由 autoEnable 逻辑启用时，实时把新目标应用到 RTSS 锁帧
-  if (floatOn.value) {
+  await setFloatTarget(t);
+  floatInfo.value = getFloatInfo();
+  // 仅当浮动已由 autoEnable 逻辑启用时，实时把新目标应用到 RTSS 锁帧。
+  // 0 已在桥层闭环为停止浮动 + 解除锁帧，不再把它送进控制循环。
+  if (t > 0 && floatOn.value) {
     void syncRtssFps(t).finally(refreshRtssAfterFloatChange);
+  } else {
+    refreshRtssAfterFloatChange();
   }
 }
 async function onFloatProfile(v: string) {
   if (await scheduleOwnsTdp()) return;
+  if (Number(floatInfo.value.target) <= 0) return;
   const p = v as FloatProfile;
   floatInfo.value = { ...floatInfo.value, profile: p };
   void setFloatProfile(p);
 }
 async function onTdpStrategy(v: string) {
   if (await scheduleOwnsTdp()) return;
+  if (Number(floatInfo.value.target) <= 0) return;
   const strategy = v as TdpFloatStrategy;
   floatInfo.value = { ...floatInfo.value, tdpStrategy: strategy };
   setTdpFloatStrategy(strategy);
@@ -540,9 +552,10 @@ onMounted(async () => {
               :max="fpsCeiling > 0 ? fpsCeiling : FPS_TARGET_MIN"
               :step="FPS_TARGET_STEP"
               label="帧数目标"
-              unit="FPS"
+              :unit="fpsTargetVal === 0 ? undefined : 'FPS'"
+              :value-text="fpsTargetVal === 0 ? '不锁帧' : undefined"
               color="accent"
-              :disabled="!isYemanScheme"
+              :disabled="!isYemanScheme || fpsTargetVal === 0"
               aria-label="帧数目标"
               @update:model-value="(v: number) => (fpsTargetVal = v)"
               @commit="(v: number) => onFloatTargetCommit(v)"
@@ -565,7 +578,7 @@ onMounted(async () => {
             :options="tdpStrategyOpts"
             color="accent"
             full
-            :disabled="!isYemanScheme"
+            :disabled="!isYemanScheme || fpsTargetVal === 0"
             @update:model-value="(v: string | number) => onTdpStrategy(String(v))"
           />
         </div>
@@ -576,7 +589,7 @@ onMounted(async () => {
             :options="FLOAT_PROFILE_OPTS"
             color="accent"
             full
-            :disabled="!isYemanScheme"
+            :disabled="!isYemanScheme || fpsTargetVal === 0"
             @update:model-value="(v: string | number) => onFloatProfile(String(v))"
           />
         </div>

@@ -102,10 +102,11 @@ export async function loadUiSettings(): Promise<void> {
 }
 
 export function setUiSettings(patch: Partial<UiSettings>): Promise<void> {
-  writeQueue = writeQueue.then(async () => {
+  writeQueue = writeQueue.catch(() => {}).then(async () => {
     await loadUiSettings();
-    settings = normalize({ ...settings, ...patch });
-    await saveSettingsSection('ui', settings);
+    const next = normalize({ ...settings, ...patch });
+    await saveSettingsSection('ui', next);
+    settings = next;
     window.dispatchEvent(new CustomEvent('ui-settings:changed', { detail: getUiSettings() }));
   });
   return writeQueue;

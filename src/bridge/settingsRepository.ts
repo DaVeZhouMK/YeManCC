@@ -70,7 +70,7 @@ const DEFAULTS: UnifiedSettings = {
     steamChartAutoRefresh: 'none',
   },
   background: { asset: {}, dynamic: {} },
-  music: { folder: 'C:\\SOFT\\YeMan\\Demo\\MP3', mode: 'random', volume: 0.11 },
+  music: { folder: '', mode: 'random', volume: 0.11 },
   gamepad: {
     enabled: true,
     bDoubleMinimize: true,
@@ -108,11 +108,10 @@ const DEFAULTS: UnifiedSettings = {
   },
   sleep: {
     mode: 'custom',
-    pauseResume: true,
-    killListEnabled: false,
-    resleepEnabled: true,
-    overheatSleepEnabled: true,
-    overheatTempC: 95,
+    pauseGameOnSleep: true,
+    retryOnEntryFailure: true,
+    retryOnNonUserWake: true,
+    factMonitorEnabled: false,
     sleepPowerPlanOptimizationEnabled: true,
   },
   quickApps: { apps: [] },
@@ -163,7 +162,10 @@ function normalize(raw: unknown): UnifiedSettings {
 async function readJson(path: string, maxBytes = 4 * 1024 * 1024): Promise<JsonObject | null> {
   try {
     const raw = await fs.readTextFile(path, maxBytes);
-    const parsed = JSON.parse(raw);
+    // Windows PowerShell/编辑器常写 UTF-8 BOM；JSON.parse 不接受前导
+    // U+FEFF，统一在共享设置读取边界去掉，避免整份设置回退为默认值。
+    const normalized = raw.charCodeAt(0) === 0xFEFF ? raw.slice(1) : raw;
+    const parsed = JSON.parse(normalized);
     return isObject(parsed) ? parsed : null;
   } catch {
     return null;

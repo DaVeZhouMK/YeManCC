@@ -526,7 +526,7 @@ onUnmounted(() => {
   border-color: var(--accent);
   box-shadow: 0 0 10px rgba(46,166,255,.2);
 }
-.states .sc-body {
+.states :deep(.sc-body) {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -534,14 +534,16 @@ onUnmounted(() => {
   min-height: 40px;
   width: 100%;
 }
-.states .sc-title {
+.states :deep(.sc-title) {
   line-height: 18px;
   min-height: 18px;
+  text-align: center;
 }
-.states .sc-text {
+.states :deep(.sc-text) {
   line-height: 20px;
   min-height: 20px;
   margin-top: 4px;
+  text-align: center;
 }
 .clickable {
   cursor: pointer;

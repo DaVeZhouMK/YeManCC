@@ -50,7 +50,7 @@ function initialize(): void {
       emitIfChanged();
     });
   }
-  for (const event of ['ipc:window.shown', 'ipc:window.restored', 'ipc:window.maximized']) {
+  for (const event of ['ipc:window.shown', 'ipc:window.restored', 'ipc:window.maximized', 'ipc:window.summoned']) {
     window.addEventListener(event, () => {
       nativeWindowVisible = true;
       emitIfChanged();
@@ -85,4 +85,3 @@ export function onUiVisibilityChange(handler: (state: UiVisibilityState) => void
   handler(getUiVisibilityState());
   return () => window.removeEventListener(UI_VISIBILITY_EVENT, listener);
 }
-

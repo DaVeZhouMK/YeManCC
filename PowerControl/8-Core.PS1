@@ -4,27 +4,32 @@ if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdenti
     exit
 }
 
-# 获取大于500MB的进程
-$Processes = Get-Process | Where-Object { 
-    $_.PM -gt 500MB -and 
-    $_.SessionId -eq (Get-Process -Id $PID).SessionId -and 
-    $_.ProcessName -notin @("steam", "explorer", "Taskmgr") 
-}
+# 游戏识别阀门是唯一的进程选择器；这里只执行既定的 CPU 掩码。
+$gate = 'C:\SOFT\YeMan\PowerControl\game-target.json'
+$target = $null
+try {
+    $raw = Get-Content -LiteralPath $gate -Raw -ErrorAction Stop | ConvertFrom-Json
+    $targetPid = [int]$raw.pid
+    $created = [Int64]$raw.processCreated
+    $generation = [Int64]$raw.generation
+    $age = [DateTimeOffset]::Now.ToUnixTimeMilliseconds() - [Int64]$raw.lastSeen
+    $process = Get-Process -Id $targetPid -ErrorAction Stop
+    if ($raw.valid -and $targetPid -gt 0 -and $created -gt 0 -and $generation -gt 0 -and
+        $age -ge 0 -and $age -le 10000 -and
+        [Int64]$process.StartTime.ToFileTimeUtc() -eq $created) {
+        $target = $process
+    }
+} catch { }
 
-# 找到内存使用量最大的进程
-$MaxMemoryProcess = $Processes | Sort-Object PM -Descending | Select-Object -First 1
+if ($target) {
+    Write-Host "Adjusting CPU affinity for valve PID: $($target.Id)"
 
-if ($MaxMemoryProcess) {
-    # 输出进程名称
-    $ProcessName = $MaxMemoryProcess.ProcessName
-    Write-Host "Adjusting CPU affinity for process: $ProcessName"
-    
-# 设置 CPU 亲和性为5物理核心（0/2/4/6/8）
-# 计算对应的二进制掩码
-$AffinityMask = 0x155 # 0x155 = 101010101 (二进制)
-(Get-Process $ProcessName).ProcessorAffinity = $AffinityMask
+    # 设置 CPU 亲和性为5物理核心（0/2/4/6/8）
+    # 计算对应的二进制掩码
+    $AffinityMask = 0x155 # 0x155 = 101010101 (二进制)
+    $target.ProcessorAffinity = $AffinityMask
 } else {
-    Write-Host "No process found that meets the criteria."
+    Write-Host "No current game admitted by the native game valve."
 }
 
 

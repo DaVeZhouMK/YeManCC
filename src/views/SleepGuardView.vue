@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { ref, reactive, computed, inject, watch, onBeforeUnmount, type Ref } from 'vue';
-import { fs, shell } from '@/bridge/api';
 import Toggle from '@/components/Toggle.vue';
 import Slider from '@/components/Slider.vue';
 import SegButton from '@/components/SegButton.vue';
@@ -21,7 +20,11 @@ import {
   readTotalMemoryGB,
   getSleepPowerPlanOptimizationEnabled,
   setSleepPowerPlanOptimizationEnabled,
+  sleepFactsGet,
+  sleepFactsSetEnabled,
+  sleepFactsOpenLog,
   type SleepGuardStatus,
+  type SleepFactStatus,
   type PowerBtnIdx,
 } from '@/bridge/yeman';
 
@@ -29,13 +32,11 @@ const cfg = reactive<SleepGuardStatus>({
   enabled: false,
   mode: 'off',
   suspended: 0,
-  pauseResume: true,
-  killListEnabled: false,
-  resleepEnabled: false,
-  overheatSleepEnabled: false,
-  overheatTempC: 95,
+  pauseGameOnSleep: true,
+  retryOnEntryFailure: true,
+  retryOnNonUserWake: true,
+  joyXoffAutoClose: true,
 });
-const SLEEP_KILL_LIST = 'C:\\SOFT\\YeMan\\PowerControl\\Sleep\\睡眠击杀名单.txt';
 
 // 电源按钮：0=S3睡眠, 1=S4休眠, 2=不操作
 const acBtnIdx = ref<PowerBtnIdx>(2);
@@ -53,6 +54,7 @@ const confirmOff = ref(false); // 关闭休眠二次确认（避免整行误触�
 const busy = ref(false);
 const msg = ref('');
 const activeSchemeGuid = ref('');
+const sleepFacts = ref<SleepFactStatus | null>(null);
 const isYemanScheme = computed(() => activeSchemeGuid.value === PW.YEMAN.toLowerCase());
 
 let msgTimer: number | null = null;
@@ -94,11 +96,10 @@ async function refresh() {
     cfg.enabled = s.enabled;
     cfg.mode = s.mode;
     cfg.suspended = s.suspended;
-    cfg.pauseResume = s.pauseResume;
-    cfg.killListEnabled = !!s.killListEnabled;
-    cfg.resleepEnabled = !!s.resleepEnabled;
-    cfg.overheatSleepEnabled = !!s.overheatSleepEnabled;
-    cfg.overheatTempC = Math.max(85, Math.min(100, Number(s.overheatTempC) || 95));
+    cfg.pauseGameOnSleep = s.pauseGameOnSleep;
+    cfg.retryOnEntryFailure = s.retryOnEntryFailure;
+    cfg.retryOnNonUserWake = s.retryOnNonUserWake;
+    cfg.joyXoffAutoClose = true;
   } catch {
     /* 检测不到保持现状，绝不假定关闭 */
   }
@@ -107,7 +108,6 @@ async function refresh() {
   } catch {
     /* 配置读取失败保持现状，绝不假定关闭 */
   }
-
   // 并行加载电源按钮、系统休眠状态
   const [schemeRes, acBtnRes, dcBtnRes, hibSizeRes, memRes] = await Promise.allSettled([
     getActiveScheme(),
@@ -122,14 +122,44 @@ async function refresh() {
   if (hibSizeRes.status === 'fulfilled') hibSize.value = hibSizeRes.value;
   if (memRes.status === 'fulfilled') memGB.value = memRes.value;
   await hibernateRefresh;
+  await refreshSleepFacts();
+}
+
+async function refreshSleepFacts() {
+  try {
+    sleepFacts.value = await sleepFactsGet();
+  } catch {
+    // The monitor is diagnostic-only; it must not make the sleep settings page unusable.
+  }
+}
+
+async function onSleepFactMonitor(enabled: boolean) {
+  busy.value = true;
+  try {
+    sleepFacts.value = await sleepFactsSetEnabled(enabled);
+    msg.value = enabled ? '睡眠日志记录已开启' : '睡眠日志记录已关闭';
+  } catch (e) {
+    msg.value = '睡眠日志记录设置失败: ' + (e as Error).message;
+    await refreshSleepFacts();
+  } finally {
+    busy.value = false;
+  }
+}
+
+async function openSleepFactLog() {
+  try {
+    await sleepFactsOpenLog();
+  } catch (e) {
+    msg.value = '打开睡眠日志失败: ' + (e as Error).message;
+  }
 }
 
 // 睡眠时暂停游戏（与唤醒自动恢复绑定）。
-async function onPauseResume(v: boolean) {
-  cfg.pauseResume = v;
+async function onPauseGame(v: boolean) {
+  cfg.pauseGameOnSleep = v;
   busy.value = true;
   try {
-    await sleepGuardSetConfig({ mode: 'custom', pauseResume: v, killListEnabled: cfg.killListEnabled, resleepEnabled: cfg.resleepEnabled, overheatSleepEnabled: cfg.overheatSleepEnabled, overheatTempC: cfg.overheatTempC });
+    await sleepGuardSetConfig({ mode: 'custom', pauseGameOnSleep: v, retryOnEntryFailure: cfg.retryOnEntryFailure, retryOnNonUserWake: cfg.retryOnNonUserWake });
     await syncGuardEnabled();
   } catch {
     msg.value = '设置保存失败';
@@ -139,11 +169,11 @@ async function onPauseResume(v: boolean) {
   }
 }
 
-async function onKillList(v: boolean) {
-  cfg.killListEnabled = v;
+async function onEntryFailure(v: boolean) {
+  cfg.retryOnEntryFailure = v;
   busy.value = true;
   try {
-    await sleepGuardSetConfig({ mode: 'custom', pauseResume: cfg.pauseResume, killListEnabled: v, resleepEnabled: cfg.resleepEnabled, overheatSleepEnabled: cfg.overheatSleepEnabled, overheatTempC: cfg.overheatTempC });
+    await sleepGuardSetConfig({ mode: 'custom', pauseGameOnSleep: cfg.pauseGameOnSleep, retryOnEntryFailure: v, retryOnNonUserWake: cfg.retryOnNonUserWake });
     await syncGuardEnabled();
   } catch {
     msg.value = '设置保存失败';
@@ -153,18 +183,11 @@ async function onKillList(v: boolean) {
   }
 }
 
-async function onResleep(v: boolean) {
-  cfg.resleepEnabled = v;
+async function onNonUserWake(v: boolean) {
+  cfg.retryOnNonUserWake = v;
   busy.value = true;
   try {
-    await sleepGuardSetConfig({
-      mode: 'custom',
-      pauseResume: cfg.pauseResume,
-      killListEnabled: cfg.killListEnabled,
-      resleepEnabled: v,
-      overheatSleepEnabled: cfg.overheatSleepEnabled,
-      overheatTempC: cfg.overheatTempC,
-    });
+    await sleepGuardSetConfig({ mode: 'custom', pauseGameOnSleep: cfg.pauseGameOnSleep, retryOnEntryFailure: cfg.retryOnEntryFailure, retryOnNonUserWake: v });
     await syncGuardEnabled();
   } catch {
     msg.value = '设置保存失败';
@@ -186,51 +209,9 @@ async function onSleepPowerPlanOptimization(v: boolean) {
   }
 }
 
-async function onOverheatSleep(v: boolean) {
-  cfg.overheatSleepEnabled = v;
-  busy.value = true;
-  try {
-    await sleepGuardSetConfig({
-      mode: 'custom',
-      pauseResume: cfg.pauseResume,
-      killListEnabled: cfg.killListEnabled,
-      resleepEnabled: cfg.resleepEnabled,
-      overheatSleepEnabled: v,
-      overheatTempC: cfg.overheatTempC,
-    });
-    await syncGuardEnabled();
-  } catch {
-    msg.value = '璁剧疆淇濆瓨澶辫触';
-    await refresh();
-  } finally {
-    busy.value = false;
-  }
-}
-
-async function onOverheatTemp(v: number) {
-  cfg.overheatTempC = Math.max(85, Math.min(100, Math.round(v)));
-  try {
-    await sleepGuardSetConfig({ overheatTempC: cfg.overheatTempC });
-  } catch {
-    msg.value = '璁剧疆淇濆瓨澶辫触';
-    await refresh();
-  }
-}
-
-async function openKillList() {
-  try {
-    if (!(await fs.exists(SLEEP_KILL_LIST))) {
-      await fs.writeTextFile(SLEEP_KILL_LIST, '# 每行一个 exe 名称，可带或不带 .exe\n# 例如：SomeTool.exe\n');
-    }
-    await shell.open(SLEEP_KILL_LIST);
-  } catch {
-    msg.value = '无法打开睡眠击杀名单';
-  }
-}
-
 // 总闸（Enable.txt）：任一子功能生效即开启，全部关闭即关闭
 async function syncGuardEnabled() {
-  const active = cfg.pauseResume || cfg.killListEnabled || cfg.resleepEnabled || cfg.overheatSleepEnabled;
+  const active = cfg.pauseGameOnSleep || cfg.retryOnEntryFailure || cfg.retryOnNonUserWake;
   if (active === cfg.enabled) return;
   const previous = cfg.enabled;
   try {
@@ -360,7 +341,6 @@ refresh();
       </div>
     </Transition>
 
-    <!-- 顶部：电源按钮与系统休眠 合并为一个气泡 -->
     <div class="card">
       <h3 class="card-title"><InlineIcon name="plug" /> 电源按钮与系统休眠</h3>
       <div class="pwr-row">
@@ -427,11 +407,11 @@ refresh();
     <div class="card">
       <h3 class="card-title"><InlineIcon name="sleep" /> 睡眠操作</h3>
       <Toggle
-        :model-value="cfg.pauseResume"
+        :model-value="cfg.pauseGameOnSleep"
         label="睡眠时暂停游戏"
-        description="入睡冻结当前最大内存进程，唤醒自动恢复"
+        description="只冻结本轮标记的游戏 PID，唤醒时只恢复同一批 PID"
         :disabled="busy"
-        @update:model-value="onPauseResume"
+        @update:model-value="onPauseGame"
       />
       <Toggle
         :model-value="sleepPowerPlanOptimizationEnabled"
@@ -441,43 +421,29 @@ refresh();
         @update:model-value="onSleepPowerPlanOptimization"
       />
       <Toggle
-        :model-value="cfg.resleepEnabled"
-        label="入睡失败重睡"
-        description="触发睡眠后 30 秒内，连续 10 秒无手柄/键盘输入时重新睡眠；重睡后 5 分钟内不重复触发"
+        :model-value="cfg.retryOnEntryFailure"
+        label="睡眠失效强制睡眠"
+        description="当睡眠发起后触发报错无法睡眠，将强制入睡"
         :disabled="busy"
-        @update:model-value="onResleep"
+        @update:model-value="onEntryFailure"
       />
       <Toggle
-        :model-value="cfg.overheatSleepEnabled"
-        label="过热自动睡眠"
-        description="电池设备温度超过阈值后，10秒无手柄、键盘、鼠标输入自动睡眠"
+        :model-value="cfg.retryOnNonUserWake"
+        label="USB4错误唤醒重睡"
+        description="睡眠时当 USB4 插入或拔出时，继续睡眠"
         :disabled="busy"
-        @update:model-value="onOverheatSleep"
+        @update:model-value="onNonUserWake"
       />
-      <Slider
-        v-model="cfg.overheatTempC"
-        :min="85"
-        :max="100"
-        :step="1"
-        label="过热温度"
-        unit="°C"
-        color="accent"
-        :disabled="busy || !cfg.overheatSleepEnabled"
-        @commit="onOverheatTemp"
+      <Toggle
+        :model-value="sleepFacts?.enabled === true"
+        label="睡眠日志记录"
+        description="记录 Kernel-Power、AC/DC 与设备变化；开启后，任何状态的 device-change code=7 都会写入日志"
+        :disabled="busy"
+        @update:model-value="onSleepFactMonitor"
       />
-      <div class="kill-list-row">
-        <div class="kill-list-text">
-          <div class="kill-list-label">睡眠时清除指定程序</div>
-          <div class="kill-list-hint">入睡前结束名单中的进程防止影响睡眠</div>
-        </div>
-        <div class="kill-list-actions">
-          <button class="kill-list-edit" :disabled="busy" @click="openKillList">编辑名单</button>
-          <Toggle
-            :model-value="cfg.killListEnabled"
-            :disabled="busy"
-            @update:model-value="onKillList"
-          />
-        </div>
+      <div class="fact-actions">
+        <button class="mini-btn" :disabled="busy" @click="openSleepFactLog">显示日志</button>
+        <span class="fact-path">{{ sleepFacts?.logPath || 'C:\\SOFT\\YeMan\\PowerControl\\Sleep\\sleep-facts.log' }}</span>
       </div>
     </div>
   </div>
@@ -502,6 +468,8 @@ refresh();
   align-items: center;
   gap: 6px;
 }
+.fact-actions { display: flex; align-items: center; gap: 10px; padding-top: 8px; }
+.fact-path { min-width: 0; color: var(--text-dim); font-size: 10px; overflow-wrap: anywhere; }
 
 .kill-list-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 0; }
 .kill-list-text { min-width: 0; flex: 1; text-align: left; }
@@ -520,7 +488,6 @@ refresh();
 }
 .kill-list-edit:disabled { opacity: 0.4; cursor: not-allowed; }
 .kill-list-edit:focus-visible { box-shadow: var(--focus-ring); }
-
 .msg {
   font-size: 12px;
   color: var(--danger);

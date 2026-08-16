@@ -2,6 +2,7 @@
 // transaction, while the target DLL stays injected for the lifetime of the
 // target process. Changing a factor must not be treated as a new injection.
 import { fs, shell } from './api';
+import { detectGame, type DetectedGame } from './gamedetect';
 
 export const OPENSPEEDY_DIR = 'C:\\SOFT\\YeMan\\PowerControl\\OpenSpeedy';
 export const SPEED_PRESETS = [0.5, 1, 2, 4, 8];
@@ -17,11 +18,19 @@ export interface SpeedResult {
   msgs: string[];
   skipped?: boolean;
   safeFallback?: boolean;
-  reason?: 'blocked_target' | 'bridge_conflict' | 'invalid_factor' | 'operation_failed';
+  reason?:
+    | 'blocked_target'
+    | 'bridge_conflict'
+    | 'invalid_factor'
+    | 'operation_failed'
+    | 'valve_no_target'
+    | 'valve_target_mismatch'
+    | 'stale_target';
 }
 
 export interface SpeedTargetIdentity {
   pid: number;
+  processCreated?: string;
   name?: string;
   title?: string;
   path?: string;
@@ -128,6 +137,37 @@ public static class YeManOpenSpeedyMapProbe {
 }
 '@
 Add-Type -TypeDefinition $mapProbe -ErrorAction SilentlyContinue
+$gameValveTargetPath = 'C:\SOFT\YeMan\PowerControl\game-target.json'
+function Read-GameValveIdentity {
+  try {
+    if (-not (Test-Path -LiteralPath $gameValveTargetPath)) { return $null }
+    $snapshot = Get-Content -LiteralPath $gameValveTargetPath -Raw -ErrorAction Stop | ConvertFrom-Json
+    $snapshotPid = [int]$snapshot.pid
+    $snapshotCreated = [UInt64]$snapshot.processCreated
+    $snapshotGeneration = [UInt64]$snapshot.generation
+    $age = [DateTimeOffset]::Now.ToUnixTimeMilliseconds() - [Int64]$snapshot.lastSeen
+    if (-not $snapshot.valid -or $snapshotPid -le 0 -or $snapshotCreated -le 0 -or
+        $snapshotGeneration -le 0 -or $age -lt 0 -or $age -gt 10000) { return $null }
+    return @{ pid = $snapshotPid; processCreated = $snapshotCreated }
+  } catch {
+    return $null
+  }
+}
+function Test-TrackedProcessIdentity([int]$targetPid, [UInt64]$expectedCreated) {
+  if ($expectedCreated -le 0) { return $false }
+  try {
+    $targetProcess = Get-Process -Id $targetPid -ErrorAction Stop
+    $actualCreated = [UInt64]$targetProcess.StartTime.ToFileTimeUtc()
+    return $actualCreated -eq $expectedCreated
+  } catch {
+    return $false
+  }
+}
+function Test-TargetIdentity([int]$targetPid, [UInt64]$expectedCreated) {
+  if (-not (Test-TrackedProcessIdentity $targetPid $expectedCreated)) { return $false }
+  $valve = Read-GameValveIdentity
+  return $valve -and $valve.pid -eq $targetPid -and $valve.processCreated -eq $expectedCreated
+}
 function Test-TargetEnabled([int]$targetPid) {
   $map = [YeManOpenSpeedyMapProbe]::OpenFileMapping(0x0004, $false, "OpenSpeedy.$targetPid")
   if ($map -eq [IntPtr]::Zero) { return $false }
@@ -209,6 +249,7 @@ type SpeedRequestContext = {
   id: number;
   source: SpeedOperationSource;
   requestedAt: number;
+  intentEpoch: number;
 };
 
 type SpeedSession = {
@@ -223,6 +264,7 @@ type SpeedSession = {
 
 let speedSession: SpeedSession | null = null;
 let speedOperationSequence = 0;
+let speedIntentEpoch = 0;
 
 function diagnosticNumber(lines: string[], prefix: string): number {
   const line = lines.find((entry) => entry.startsWith(prefix));
@@ -406,9 +448,38 @@ function sameSpeedTarget(
   right: SpeedTargetIdentity | null,
 ): boolean {
   if (!left || !right || left.pid !== right.pid) return false;
-  // PID is the sole target identity. Names, titles, and paths are display
-  // metadata and must never prevent operating on the selected process.
-  return true;
+  // PID is the control selector. Creation time is the mandatory guard against
+  // Windows reusing that selector for a different process instance.
+  return Boolean(left.processCreated && right.processCreated &&
+    left.processCreated === right.processCreated);
+}
+
+function valveTargetFromGame(game: DetectedGame): SpeedTargetIdentity | null {
+  if (!game.processCreated || !Number.isSafeInteger(game.pid) || game.pid <= 0) return null;
+  return {
+    pid: game.pid,
+    processCreated: game.processCreated,
+    name: game.name,
+    title: game.title,
+    path: game.path,
+  };
+}
+
+function normalizeProcessCreated(value: string | undefined): string {
+  return value && /^\d+$/.test(value) ? value : '0';
+}
+
+async function acquireSpeedValveTarget(expectedPid: number): Promise<
+  { target: SpeedTargetIdentity } | { target: null; reason: 'valve_no_target' | 'valve_target_mismatch' | 'stale_target' }
+> {
+  const game = await detectGame(true).catch(() => null);
+  if (!game) return { target: null, reason: 'valve_no_target' };
+  const target = valveTargetFromGame(game);
+  if (!target) return { target: null, reason: 'stale_target' };
+  if (expectedPid > 0 && target.pid !== expectedPid) {
+    return { target: null, reason: 'valve_target_mismatch' };
+  }
+  return { target };
 }
 
 async function speedOp(
@@ -429,6 +500,35 @@ async function speedOp(
   const previousOperationCount = speedSession?.operationCount ?? 0;
   const previousHistory = speedSession?.factorHistory.join('>') || 'none';
   const currentTarget = target || { pid };
+  const expectedCreated = normalizeProcessCreated(currentTarget.processCreated);
+  const oldTarget = speedSession?.target || null;
+  const oldExpectedCreated = normalizeProcessCreated(oldTarget?.processCreated);
+  if (expectedCreated === '0') {
+    return { ok: true, skipped: true, safeFallback: true, reason: 'stale_target', msgs: ['Game valve identity is missing; kept at 1x'] };
+  }
+  // The request may have waited behind another speed transaction. Re-read the
+  // native valve immediately before injection/enable/set-speed so a target
+  // switch during the queue can never apply the old operation.
+  const latest = await detectGame(true).catch(() => null);
+  const latestTarget = latest ? valveTargetFromGame(latest) : null;
+  const latestMatchesTarget = !!latestTarget && sameSpeedTarget(latestTarget, currentTarget);
+  if (!latestMatchesTarget && source !== 'target-change') {
+    if (operation.kind === 'apply') speedSession = null;
+    return {
+      ok: true,
+      skipped: true,
+      safeFallback: true,
+      reason: 'stale_target',
+      msgs: ['The game valve target changed while queued; kept at 1x'],
+    };
+  }
+  if (source === 'target-change' && speedSession &&
+      !sameSpeedTarget(speedSession.target, currentTarget)) {
+    return { ok: true, skipped: true, safeFallback: true, reason: 'stale_target', msgs: ['A newer speed target superseded the old cleanup'] };
+  }
+  if (!latestMatchesTarget && request?.intentEpoch !== speedIntentEpoch) {
+    return { ok: true, skipped: true, safeFallback: true, reason: 'stale_target', msgs: ['A newer speed target superseded the old cleanup'] };
+  }
   const sameTarget = operation.kind === 'apply' && sameSpeedTarget(speedSession?.target || null, currentTarget);
   const switchingTarget = operation.kind === 'apply' && !!speedSession && !sameTarget;
   const oldPid = switchingTarget ? speedSession?.target.pid : null;
@@ -443,14 +543,28 @@ async function speedOp(
 
   const transaction = operation.kind === 'apply'
     ? `
-${oldPid ? `# Stop the previous target before changing the shared factor.
+${oldPid ? `# Stop the previous target before changing the shared factor. The
+# previous PID is usable only when its saved process instance still exists.
+# It is intentionally no longer the current valve target; this is the
+# arbiter-owned cleanup needed to remove the old game's speed hook.
+if (Test-TrackedProcessIdentity ${oldPid} [UInt64]${oldExpectedCreated}) {
 $resp = Send-BridgeCommand 'DISABLE ${oldPid}'
 if (-not (Test-BridgeOk $resp)) { Invoke-SafeRollback; [Console]::Out.WriteLine('RESULT:failed'); exit 2 }
 $resp = Send-BridgeCommand 'SETSPEED 1'
 if (-not (Test-BridgeOk $resp)) { Invoke-SafeRollback; [Console]::Out.WriteLine('RESULT:failed'); exit 2 }
+} else {
+  [Console]::Out.WriteLine('OLD_TARGET_SKIP:identity_mismatch')
+}
 ` : ''}
-${`# Target identity is PID-only. Names, titles, paths, and module filenames
-# are deliberately not used for target matching or validation.
+${`# Target selection comes from the game recognition valve. The PID and
+# process creation time are checked again immediately before every control
+# operation; names and titles remain display metadata only.
+if (-not (Test-TargetIdentity ${pid} [UInt64]${expectedCreated})) {
+  [Console]::Out.WriteLine('SAFE_SKIP:target_identity_mismatch')
+  [Console]::Out.WriteLine('SAFE_FALLBACK:1')
+  [Console]::Out.WriteLine('RESULT:failed')
+  exit 3
+}
 $targetState = Get-TargetMappingState ${pid}
 [Console]::Out.WriteLine('TARGET_MAPPING_BEFORE:' + $targetState)
 if ($targetState -eq 'missing' -or $targetState -eq 'invalid') {
@@ -467,6 +581,12 @@ if ($targetState -eq 'missing' -or $targetState -eq 'invalid') {
   exit 2
 }
 if (${needsEnable ? '$true' : '$false'} -or $targetState -ne 'enabled') {
+  if (-not (Test-TargetIdentity ${pid} [UInt64]${expectedCreated})) {
+    [Console]::Out.WriteLine('SAFE_SKIP:target_identity_mismatch')
+    Invoke-SafeRollback
+    [Console]::Out.WriteLine('RESULT:failed')
+    exit 3
+  }
   $resp = Send-BridgeCommand 'ENABLE ${pid}'
   if (-not (Test-BridgeOk $resp)) { Invoke-SafeRollback; [Console]::Out.WriteLine('RESULT:failed'); exit 2 }
   Write-TargetSnapshot 'after_enable' ${pid}
@@ -480,6 +600,12 @@ if (-not $targetEnabled) {
   exit 2
 }
 [Console]::Out.WriteLine('TARGET_ENABLED:1')
+if (-not (Test-TargetIdentity ${pid} [UInt64]${expectedCreated})) {
+  [Console]::Out.WriteLine('SAFE_SKIP:target_identity_mismatch')
+  Invoke-SafeRollback
+  [Console]::Out.WriteLine('RESULT:failed')
+  exit 3
+}
 Write-TargetSnapshot 'before_setspeed' ${pid}
 $resp = Send-BridgeCommand 'SETSPEED ${operation.factor}'
 if (-not (Test-BridgeOk $resp)) { Invoke-SafeRollback; [Console]::Out.WriteLine('RESULT:failed'); exit 2 }
@@ -498,6 +624,12 @@ Write-TargetSnapshot 'after_getspeed' ${pid}
 `
     : `
 # X1 only resets the shared factor. Do not unload the DLL while the game runs.
+if (-not (Test-TargetIdentity ${pid} [UInt64]${expectedCreated})) {
+  [Console]::Out.WriteLine('SAFE_SKIP:target_identity_mismatch')
+  [Console]::Out.WriteLine('SAFE_FALLBACK:1')
+  [Console]::Out.WriteLine('RESULT:failed')
+  exit 3
+}
 Write-TargetSnapshot 'before_setspeed_1' ${pid}
 $resp = Send-BridgeCommand 'SETSPEED 1'
 if (-not (Test-BridgeOk $resp)) { [Console]::Out.WriteLine('SAFE_FALLBACK:1'); [Console]::Out.WriteLine('RESULT:failed'); exit 2 }
@@ -616,6 +748,7 @@ $pipe.Close()
   const transactionTargetStartUtcTicks = targetStartUtcTicks(lines);
   const transactionBridgePid = diagnosticNumber(lines, 'BRIDGE_SELECTED_PID:');
   const bridgeConflict = lines.includes('SAFE_SKIP:bridge_conflict');
+  const targetIdentityMismatch = lines.includes('SAFE_SKIP:target_identity_mismatch');
   const safeFallback = lines.includes('SAFE_FALLBACK:1');
   const ok = lines.includes('RESULT:ok');
   const arch = lines.find((line) => line.startsWith('ARCH:'))?.slice(5) || 'unknown';
@@ -625,7 +758,22 @@ $pipe.Close()
     `snapshotCount=${targetSnapshotCount} events=[${diagnosticEvents.join(' || ')}] resps=[${resps.join(' || ')}] ` +
     `note=protocol-success-does-not-prove-game-health`,
   );
+  if (ok && source !== 'target-change') {
+    const after = await detectGame(true).catch(() => null);
+    const afterTarget = after ? valveTargetFromGame(after) : null;
+    if (!afterTarget || !sameSpeedTarget(afterTarget, currentTarget)) {
+      if (operation.kind === 'apply') speedSession = null;
+      return {
+        ok: true,
+        skipped: true,
+        safeFallback: true,
+        reason: 'stale_target',
+        msgs: ['The game valve target changed during the operation; discarded the result'],
+      };
+    }
+  }
   if (bridgeConflict) return { ok: true, skipped: true, safeFallback: true, reason: 'bridge_conflict', msgs: ['OpenSpeedy bridge conflict; kept at 1x'] };
+  if (targetIdentityMismatch) return { ok: true, skipped: true, safeFallback: true, reason: 'stale_target', msgs: ['Target process instance changed; kept at 1x'] };
   if (ok && operation.kind === 'apply') {
     const completedAt = Date.now();
     const continuingSession = sameSpeedTarget(speedSession?.target || null, currentTarget);
@@ -666,24 +814,62 @@ export async function applyGameSpeed(
   source: SpeedOperationSource = 'user-factor',
 ): Promise<SpeedResult> {
   if (!Number.isFinite(factor) || factor <= 0 || factor > 16) return { ok: true, skipped: true, safeFallback: true, reason: 'invalid_factor', msgs: ['Invalid speed factor; kept at 1x'] };
-  const blocked = await blockedTargetReason(target);
+  if (!Number.isSafeInteger(pid) || pid <= 0) return { ok: true, skipped: true, safeFallback: true, reason: 'valve_target_mismatch', msgs: ['Invalid game PID; kept at 1x'] };
+  speedIntentEpoch += 1;
+  const admitted = await acquireSpeedValveTarget(pid);
+  if ('reason' in admitted) {
+    return { ok: true, skipped: true, safeFallback: true, reason: admitted.reason, msgs: ['The requested PID was not admitted by the game valve; kept at 1x'] };
+  }
+  if (target?.processCreated && target.processCreated !== admitted.target.processCreated) {
+    return { ok: true, skipped: true, safeFallback: true, reason: 'stale_target', msgs: ['The requested process instance is stale; kept at 1x'] };
+  }
+  // The caller-provided PID is only an expected value. The actual control
+  // target and all identity metadata come from the valve response above.
+  const valveTarget = admitted.target;
+  const blocked = await blockedTargetReason(valveTarget);
   if (blocked) return { ok: true, skipped: true, safeFallback: true, reason: 'blocked_target', msgs: [`Blocked by compatibility rule: ${blocked}; kept at 1x`] };
-  const request: SpeedRequestContext = { id: ++speedOperationSequence, source, requestedAt: Date.now() };
+  const request: SpeedRequestContext = {
+    id: ++speedOperationSequence,
+    source,
+    requestedAt: Date.now(),
+    intentEpoch: speedIntentEpoch,
+  };
   await log(
     `QUEUE diagVersion=4 appSession=${speedDiagnosticSession} op=${request.id} source=${source} ` +
-    `pid=${pid} action=apply:${factor}`,
+    `pid=${valveTarget.pid} processCreated=${valveTarget.processCreated} action=apply:${factor}`,
   );
-  return enqueueSpeedOperation(() => speedOp(pid, { kind: 'apply', factor }, target, request));
+  return enqueueSpeedOperation(() => speedOp(valveTarget.pid, { kind: 'apply', factor }, valveTarget, request));
 }
 
 export async function clearGameSpeed(
   pid: number,
   source: SpeedOperationSource = 'unknown',
 ): Promise<SpeedResult> {
-  const request: SpeedRequestContext = { id: ++speedOperationSequence, source, requestedAt: Date.now() };
+  if (!Number.isSafeInteger(pid) || pid <= 0) return { ok: true, skipped: true, safeFallback: true, reason: 'valve_target_mismatch', msgs: ['Invalid game PID; kept at 1x'] };
+  const sessionTarget = speedSession?.target || null;
+  if (!sessionTarget || sessionTarget.pid !== pid || !sessionTarget.processCreated) {
+    return { ok: true, skipped: true, safeFallback: true, reason: 'valve_target_mismatch', msgs: ['No matching valve-admitted speed session; kept at 1x'] };
+  }
+  const cleanupOldTarget = source === 'target-change';
+  const current = cleanupOldTarget ? null : await detectGame(true).catch(() => null);
+  const currentTarget = current ? valveTargetFromGame(current) : null;
+  const sameAsValve = !!currentTarget && sameSpeedTarget(sessionTarget, currentTarget);
+  if (!cleanupOldTarget && !sameAsValve) {
+    return { ok: true, skipped: true, safeFallback: true, reason: 'valve_target_mismatch', msgs: ['The current valve target is different; kept at 1x'] };
+  }
+  // Target-change cleanup may use the saved old instance only. It never
+  // re-elects a process by PID; the PowerShell transaction checks its saved
+  // creation time before sending any OpenSpeedy command.
+  const clearTarget = cleanupOldTarget ? sessionTarget : currentTarget!;
+  const request: SpeedRequestContext = {
+    id: ++speedOperationSequence,
+    source,
+    requestedAt: Date.now(),
+    intentEpoch: speedIntentEpoch,
+  };
   await log(
     `QUEUE diagVersion=4 appSession=${speedDiagnosticSession} op=${request.id} source=${source} ` +
-    `pid=${pid} action=clear`,
+    `pid=${clearTarget.pid} processCreated=${clearTarget.processCreated} action=clear`,
   );
-  return enqueueSpeedOperation(() => speedOp(pid, { kind: 'clear' }, undefined, request));
+  return enqueueSpeedOperation(() => speedOp(clearTarget.pid, { kind: 'clear' }, clearTarget, request));
 }

@@ -1,14 +1,14 @@
 // gamepad/engine.ts — 手柄全量导航引擎（对齐 PLAN §五）
 //
-// 轮询 navigator.getGamepads()（60Hz rAF），边沿检测按键跳变，
-// 通过 DOM 几何空间导航 + 统一的 action 分发，实现纯手柄操作系统。
+// Native Raw Input/XInput supplies page actions; this module maps those
+// actions to DOM geometry and unified dispatch for the page UI.
 // 无手柄时引擎静默，不影响纯鼠标用户。
 //
 // 按键映射（Xbox 360 / XInput STANDARD GAMEPAD）：
 //   LB(4)/RB(5)    → 切换上/下一页
 //   A(0)           → 确认/点击/切换
 //   B(1)           → 取消/blur
-//   Y(3)           → 应用滑块值（commit）
+//   Y(3)           → 全局编辑游戏识别名单
 //   X(2)           → 下拉菜单（与 A 一致：打开菜单选择）
 //   Start(9)       → 调试面板
 //   D-pad/左摇杆   → 页面内焦点移动（空间导航）
@@ -17,7 +17,9 @@ import { ROUTES } from '@/router';
 import type { Router } from 'vue-router';
 import { loadPerformanceSchedule } from '@/bridge/performanceSchedule';
 import { summonGet, type GamepadSettings } from '@/bridge/yeman';
-import { onUiVisibilityChange } from '@/bridge/uiLifecycle';
+import { isUiVisible, onUiVisibilityChange } from '@/bridge/uiLifecycle';
+import { focusGamepadElement, setGamepadFocused } from '@/gamepad/focus';
+import { enqueueGamepadTaskDetached } from '@/gamepad/serial';
 
 export interface GamepadEngineOptions {
   router: Router;
@@ -32,14 +34,11 @@ const FOCUSABLE =
 let rafId = 0;
 let prevButtons: boolean[] = [];
 let prevAxes: number[] = [];
-// ── 复用缓冲：替代每帧 pad.buttons.map(...) + Array.from(pad.axes) 的临时分配（GC 压力）。
-//    双缓冲（当前帧 cur* / 上一帧 prev*）swap 复用，语义与旧版“逐帧新建数组”完全等价。 ──
-let curButtons: boolean[] = [];
-let curAxes: number[] = [];
+// Per-frame snapshots intentionally follow the legacy engine semantics. This
+// keeps edge detection stable across summon, visibility and reconnect resets.
 let lastNav = 0;
-let lastPageSwitch = 0; // 切页冷却（防止连按卡顿）
+let lastPageSwitch = -Infinity; // 切页冷却（防止连按卡顿）
 const PAGE_SWITCH_COOLDOWN = 100; // ms，原 400ms 过严致连按 LB/RB 丢按；降到 100ms 使快速切页（含切到 TDP）每次都生效
-const POST_RELEASE_LOCKOUT = 350; // ms，呼出组合松开后再抑制 LB/RB 切页的时长，吸收松开抖动/误触（避免“呼出后放开手”误切页）
 // 滑块线性加速：按住越久步长越大、间隔越短
 // ⚠️ 速度参数需与 native 手柄 Start+方向 自动连发保持一致（见 main.cpp 注释），修改时两边同步。
 let sliderAccelStart = 0;  // 本次按住起始时间（用于线性加速）
@@ -67,8 +66,8 @@ let gpSettings: GamepadSettings = {
   mouseToggle: false,
   mouseBackend: 'joyxoff',
 };
-// 快捷应用「模拟鼠标」开启时：屏蔽内页按键选择/功能（上下导航、A/X/B/Y），
-// 保留 LB/RB 切页与 native 双击 B（最小化）；由 QuickAppView 通过 gp:mouse-mode 事件驱动。
+// 快捷应用「模拟鼠标」开启时：屏蔽内页按键选择/功能（上下导航、A/X），
+// 保留 LR 切页、B 返回和 Y 编辑游戏；由 QuickAppView 通过 gp:mouse-mode 事件驱动。
 let mouseModeSuppress = false;
 export function isMouseModeSuppressed(): boolean {
   return mouseModeSuppress;
@@ -82,27 +81,43 @@ let startUsedAsModifier = false; // Start 键是否在本轮按住中被用作�
 let lbNavPending = false; // LB 按下边沿待裁决
 let rbNavPending = false; // RB 按下边沿待裁决
 let summonSuppress = false; // 呼出后直到 LB/RB 全释放前抑制切页（呼出动作本身不产生页面移动）
-let releaseLockUntil = 0;     // 呼出组合松开后的锁定时刻（ms），期间仍抑制切页以吸收抖动
+let shoulderReleaseLockUntil = 0; // 组合键松开后的防抖窗口，丢弃释放抖动产生的单键边沿
+const SUMMON_POST_RELEASE_LOCKOUT_MS = 450;
+// Native focus and WebView2 compositor visibility settle independently. Keep
+// a short, cancellable focus session so a summon that races a restore/repaint
+// cannot leave the DOM without a gamepad focus target.
+let summonFocusGeneration = 0;
+let summonFocusTimers: number[] = [];
 
 let engineOpts: GamepadEngineOptions | null = null; // 供连接/可见/唤醒事件重启循环使用
 let noPadStreak = 0;       // 连续无手柄帧计数（Grace 防瞬时断连误杀）
 const NO_PAD_GRACE = 30;   // 约 0.5s@60fps：连续这么多帧无手柄才停止循环
 let summonActive = false;  // 呼出后置 true：强制视为可见，直到窗口再次隐藏（绕开 WebView2 可见态未及时刷新）
-let inputReady = true;
-let inputBaselineFrames = 0;
+let nativeUiInputActive = false;
+type NativeUiAction =
+  | 'page-prev' | 'page-next' | 'confirm' | 'back' | 'dropdown' | 'edit-game'
+  | 'debug' | 'nav-left' | 'nav-right' | 'nav-up' | 'nav-down'
+  | 'slider-decrease' | 'slider-increase';
 
 // 是否有任意已连接手柄
 function hasConnectedPad(): boolean {
   try {
-    const pads = navigator.getGamepads ? navigator.getGamepads() : [];
-    for (const p of pads) if (p && p.connected) return true;
+    return false;
   } catch { /* 某些 WebView2 版本 getGamepads() 可能抛异常 */ }
   return false;
 }
 
+// Native owns the controller state in every visibility state. The renderer
+// only consumes native actions and never polls a browser controller snapshot.
+function browserLoopAllowed(): boolean {
+  return summonActive || (
+    document.visibilityState === 'visible' && isUiVisible()
+  );
+}
+
 // 若循环未运行则启动（幂等）：用于连接/可见/唤醒事件拉起
 function ensureLoop(opts: GamepadEngineOptions) {
-  if (rafId) return;
+  if (rafId || !browserLoopAllowed()) return;
   noPadStreak = 0;
   rafId = requestAnimationFrame(() => tick(opts));
 }
@@ -110,12 +125,12 @@ function ensureLoop(opts: GamepadEngineOptions) {
 // 监听手柄连接/断开事件（某些 WebView2 版本需要此触发轮询）
 if (typeof window !== 'undefined') {
   // 插入/切换手柄 → 立即重启循环
-  window.addEventListener('gamepadconnected', () => {
+  window.addEventListener('native-pad-added', () => {
     gamepadConnected = true;
-    if (engineOpts) ensureLoop(engineOpts);
+    if (engineOpts && browserLoopAllowed()) ensureLoop(engineOpts);
   });
   // 断开 → 若已无任何手柄仍连着，停止循环（省 CPU）；仍有其他手柄则保留
-  window.addEventListener('gamepaddisconnected', () => {
+  window.addEventListener('native-pad-removed', () => {
     if (!hasConnectedPad()) {
       gamepadConnected = false;
       stopGamepadLoop();
@@ -128,20 +143,28 @@ if (typeof window !== 'undefined') {
   // 睡眠守护唤醒后，native 通知重启手柄引擎：重置边沿/时间戳状态，并尝试重启循环
   window.addEventListener('ipc:gamepad.restart', () => {
     restartGamepadState();
-    if (engineOpts && hasConnectedPad()) ensureLoop(engineOpts);
+    if (engineOpts && hasConnectedPad() && browserLoopAllowed()) ensureLoop(engineOpts);
+    window.setTimeout(() => {
+      if (!engineOpts || !browserLoopAllowed()) return;
+      const active = document.activeElement as HTMLElement | null;
+      if (!active || !focusables().includes(active)) focusFirst();
+    }, 120);
   });
+  window.addEventListener('ipc:gamepad.ui-input', ((e: CustomEvent<{ action?: string }>) => {
+    const action = e.detail?.action as NativeUiAction | undefined;
+    if (!engineOpts || !action || testMode) return;
+    nativeUiInputActive = true;
+    enqueueGamepadTaskDetached(() => dispatchNativeUiAction(engineOpts!, action));
+  }) as EventListener);
   onUiVisibilityChange(({ visible }) => {
-    if (visible) {
-      if (engineOpts && hasConnectedPad()) ensureLoop(engineOpts);
-    } else if (!summonActive) {
-      // Native Raw Input remains active for summon and shortcut handling. The
-      // browser navigation loop has no UI work to perform while hidden.
+    if (visible && engineOpts && hasConnectedPad()) {
+      ensureLoop(engineOpts);
+    } else if (!visible && !summonActive) {
+      // Raw Input remains registered in native for summon/global shortcuts;
+      // there is no renderer work to do while the window is hidden.
       stopGamepadLoop();
     }
   });
-  const suspendGamepadInput = () => restartGamepadState();
-  window.addEventListener('ipc:power.suspending', suspendGamepadInput);
-  window.addEventListener('ipc:power.resuming', suspendGamepadInput);
   // R1L1 呼出（native 后台线程 bringToFront 后发出）：强制接管手柄导航。
   // ① 置 summonActive 让循环即便 WebView2 可见态未刷新也照常处理输入；
   // ② 置 summonSuppress：呼出后到 LB/RB 全部松开前抑制切页，避免呼出动作误切页；
@@ -150,20 +173,42 @@ if (typeof window !== 'undefined') {
   window.addEventListener('ipc:gamepad.summon', () => {
     summonActive = true;
     summonSuppress = true;
-    releaseLockUntil = 0;   // 重新呼出：清除上一次的释放锁定，避免叠加
+    // The native event is delivered immediately after the window is focused.
+    // Do not impose the wake-up neutral-frame gate here: the summon combo is
+    // already known to be held, and waiting for two empty frames made the
+    // first L/R press after releasing the combo disappear. The shoulder
+    // suppression below still prevents the held summon combo from navigating.
     restartGamepadState();
     if (engineOpts) ensureLoop(engineOpts);
+    scheduleSummonFocus();
   });
+  // A native tray hide ends the summon session even when Chromium does not
+  // emit a matching document.visibilitychange event.
+  const clearSummonState = () => {
+    summonActive = false;
+    summonSuppress = false;
+    shoulderReleaseLockUntil = 0;
+    lbNavPending = false;
+    rbNavPending = false;
+    cancelSummonFocus();
+    if (!browserLoopAllowed()) stopGamepadLoop();
+  };
+  window.addEventListener('ipc:window.hidden', clearSummonState);
+  window.addEventListener('ipc:window.minimized', clearSummonState);
   // 回到可见（含系统唤醒窗口恢复可见）：兜底探测手柄并启动循环
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') {
-      if (engineOpts && hasConnectedPad()) ensureLoop(engineOpts);
-    } else {
-      // 窗口再次隐藏：清除呼出强制态，循环回到隐藏行为（仍保持运行以记录边沿）
+      if (engineOpts && hasConnectedPad() && browserLoopAllowed()) ensureLoop(engineOpts);
+    } else if (!summonActive) {
+      // 窗口再次隐藏：清除呼出强制态并停止 RAF；native Raw Input 仍负责
+      // 后台唤醒，不需要浏览器在托盘中持续采样。
       summonActive = false;
       summonSuppress = false; // 隐藏时不再需要呼出抑制，下次呼出会重新设置
+      shoulderReleaseLockUntil = 0;
       lbNavPending = false;   // 丢弃未裁决的切页挂起，恢复可见后不误切页
       rbNavPending = false;
+      cancelSummonFocus();
+      stopGamepadLoop();
     }
   });
   // 设置页实时同步手柄快捷开关
@@ -182,11 +227,10 @@ function restartGamepadState() {
   gamepadConnected = false;
   lastPadTs = 0;
   stuckSince = 0;
+  lastPageSwitch = -Infinity;
   lbNavPending = false; // 丢弃未裁决的切页挂起，避免基线重建后误切页
   rbNavPending = false;
-  releaseLockUntil = 0;
-  inputReady = false;
-  inputBaselineFrames = 0;
+  shoulderReleaseLockUntil = 0;
 }
 
 function log(opts: GamepadEngineOptions, msg: string) {
@@ -195,39 +239,21 @@ function log(opts: GamepadEngineOptions, msg: string) {
 
 function getPad(): Gamepad | null {
   try {
-    const pads = navigator.getGamepads ? navigator.getGamepads() : [];
-    for (const p of pads) if (p && p.connected) return p;
+    return null;
   } catch {
     /* 某些 WebView2 版本 getGamepads() 可能抛异常 */
   }
   return null;
 }
 
-// 把 Gamepad 快照写入复用缓冲（必要时 resize；避免每帧 map/Array.from 的临时分配）
-function snapPad(pad: Gamepad) {
-  const bl = pad.buttons.length;
-  if (curButtons.length !== bl) curButtons = new Array(bl).fill(false);
-  for (let i = 0; i < bl; i++) curButtons[i] = pad.buttons[i].pressed;
-  const al = pad.axes.length;
-  if (curAxes.length !== al) curAxes = new Array(al).fill(0);
-  for (let i = 0; i < al; i++) curAxes[i] = pad.axes[i];
-}
-// 交换当前帧/上一帧缓冲引用（等价于旧代码 prev = 每帧新建的 b/a）
-function swapPad() {
-  const tb = prevButtons; prevButtons = curButtons; curButtons = tb;
-  const ta = prevAxes; prevAxes = curAxes; curAxes = ta;
-}
-
 let visibleRoutePaths: string[] = ROUTES.map((r) => r.path);
 let visibleRouteTitles: string[] = ROUTES.map((r) => r.title);
-let routeVisibilityLoaded = false;
 
 function setVisibleRoutes(enabled: boolean) {
   const hidden = enabled ? new Set(['/tdp', '/cpu']) : new Set<string>();
   const visible = ROUTES.filter((r) => !hidden.has(r.path));
   visibleRoutePaths = visible.map((r) => r.path);
   visibleRouteTitles = visible.map((r) => r.title);
-  routeVisibilityLoaded = true;
 }
 
 async function refreshVisibleRoutes() {
@@ -237,35 +263,79 @@ async function refreshVisibleRoutes() {
 
 // ── 页面切换 ──
 function navigate(opts: GamepadEngineOptions, dir: -1 | 1) {
-  if (!routeVisibilityLoaded) {
-    void refreshVisibleRoutes();
-    return;
-  }
+  enqueueGamepadTaskDetached(() => navigateNow(opts, dir));
+}
+
+async function navigateNow(opts: GamepadEngineOptions, dir: -1 | 1) {
   const order = visibleRoutePaths;
   const cur = opts.router.currentRoute.value.path;
   let idx = order.indexOf(cur);
   if (idx < 0) idx = 0;
   idx = (idx + dir + order.length) % order.length;
-  opts.router.push(order[idx]);
-  setTimeout(() => focusFirst(), 80);
+  await opts.router.push(order[idx]);
+  await new Promise<void>((resolve) => window.setTimeout(resolve, 80));
+  focusFirst();
   log(opts, `切页 → ${visibleRouteTitles[idx]}`);
 }
 
 // 自动聚焦页面内首个可见可聚焦元素（手柄初值光标位置）
-function focusFirst() {
+function focusFirst(): boolean {
   const els = focusables();
-  if (els.length === 0) return;
+  if (els.length === 0) return false;
   const el = els[0];
-  el.focus({ preventScroll: false });
-  el.scrollIntoView?.({ block: 'nearest', behavior: 'auto' });
-  setFocused(el);
+  try {
+    if (!focusGamepadElement(el)) {
+      el.focus({ preventScroll: false });
+      setGamepadFocused(el);
+    }
+    return document.activeElement === el;
+  } catch {
+    // A transient WebView2 repaint can invalidate the element between the
+    // visibility scan and focus(); retrying on the next summon/frame is safe.
+    return false;
+  }
+}
+
+function cancelSummonFocus(): void {
+  summonFocusGeneration += 1;
+  for (const timer of summonFocusTimers) window.clearTimeout(timer);
+  summonFocusTimers = [];
+}
+
+function scheduleSummonFocus(): void {
+  cancelSummonFocus();
+  const generation = summonFocusGeneration;
+  const attempt = () => {
+    if (generation !== summonFocusGeneration || !summonActive) return;
+    // Do not steal a focus target that the user or a route transition has
+    // already established. Only retry when WebView2/Vue still left the page
+    // without a usable controller target.
+    const active = document.activeElement as HTMLElement | null;
+    if (active && focusables().includes(active)) return;
+    focusFirst();
+  };
+  requestAnimationFrame(attempt);
+  // Native show/restore, WebView2 paint, and Vue route rendering can complete
+  // in different turns. These bounded checkpoints cover all three without
+  // leaving a permanent timer or stealing focus after the session ends.
+  for (const delay of [16, 80, 180, 360, 640]) {
+    summonFocusTimers.push(window.setTimeout(attempt, delay));
+  }
 }
 
 // ── 页面内焦点列表 ──
 // 若有自绘模态浮层（data-gp-modal，如确认弹窗），导航范围收窄到浮层内部，
 // 防止方向键从弹窗按钮跳出到下层页面误触其它按钮；浮层关闭后恢复全页。
 function focusables(): HTMLElement[] {
-  const modal = document.querySelector<HTMLElement>('[data-gp-modal]');
+  // Transitions can leave the old panel in the DOM briefly. Use the last
+  // visible modal so a newly opened Teleport overlay owns navigation.
+  const modals = Array.from(document.querySelectorAll<HTMLElement>('[data-gp-modal]'))
+    .filter((el) => {
+      const style = getComputedStyle(el);
+      const r = el.getBoundingClientRect();
+      return style.display !== 'none' && style.visibility !== 'hidden' && r.width > 0 && r.height > 0;
+    });
+  const modal = modals[modals.length - 1] ?? null;
   const root: ParentNode = modal || document;
   return Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE)).filter(
     (el) => {
@@ -285,11 +355,6 @@ function focusables(): HTMLElement[] {
 // ── 可见焦点高亮（手柄/键盘）：显式切换 .focused，
 //    因为 Chromium 对程序化 .focus() 不触发 :focus-visible，
 //    而 tokens.css 的 .focused 提供 accent 发光环 ──
-function setFocused(el: HTMLElement | null) {
-  document.querySelectorAll('.focused').forEach((n) => n.classList.remove('focused'));
-  if (el) el.classList.add('focused');
-}
-
 // ── 空间方向导航（对齐 HTA 的方向键焦点切换） ──
 function moveFocus(dx: number, dy: number) {
   const els = focusables();
@@ -302,57 +367,74 @@ function moveFocus(dx: number, dy: number) {
   const bx = br.left + br.width / 2;
   const by = br.top + br.height / 2;
   let best: HTMLElement | null = null;
-
-  // 方向键按视觉网格工作：先要求候选项与当前控件处在同一列/行，
-  // 只有当前列/行完全没有目标时才退化到最近的下一行/列。这样不会从
-  // 编辑器里的 CPU 下拉横跳到页面顶部的“供电配置 AC”。
-  type Box = { el: HTMLElement; r: DOMRect; x: number; y: number };
-  const boxes: Box[] = els
+  type FocusBox = { el: HTMLElement; r: DOMRect; x: number; y: number };
+  const boxes: FocusBox[] = els
     .filter((el) => el !== base)
     .map((el) => {
       const r = el.getBoundingClientRect();
       return { el, r, x: r.left + r.width / 2, y: r.top + r.height / 2 };
     });
-  const baseBox = { r: br, x: bx, y: by };
-  const overlap = (aStart: number, aEnd: number, bStart: number, bEnd: number, tolerance = 8) =>
-    Math.min(aEnd, bEnd) - Math.max(aStart, bStart) >= -tolerance;
 
   if (dy !== 0) {
-    const forward = boxes.filter((c) => (dy > 0 ? c.y > by : c.y < by));
-    if (forward.length === 0) return;
-    const sameColumn = forward.filter((c) =>
-      overlap(baseBox.r.left, baseBox.r.right, c.r.left, c.r.right)
-    );
-    // 没有同一视觉列的目标时停留。跨列跳转会把“右”误解成回到页面顶部的控件。
-    if (sameColumn.length === 0) return;
-    const candidates = sameColumn;
-    const nearestY = Math.min(...candidates.map((c) => Math.abs(c.y - by)));
-    const row = candidates.filter((c) => Math.abs(Math.abs(c.y - by) - nearestY) <= 10);
-    best = row.reduce((current, c) =>
-      !current || Math.abs(c.x - bx) < Math.abs(current.x - bx) ? c : current,
-      null as Box | null,
-    )?.el ?? null;
+    // ── 上下导航：行优先 ──
+    // 用户希望方向键按“内容行”移动。例如从“帧数目标 30”按上，应跳到
+    // 同一卡片内上一行的“使用电池”下拉，而不是跳到更靠左的“野蛮系统电源”。
+    const ROW_BAND = 28; // 同一行内 center-y 容差（px）
+    type Cand = { el: HTMLElement; y: number; x: number; dyAbs: number };
+    const cands: Cand[] = [];
+    for (const el of els) {
+      if (el === base) continue;
+      const r = el.getBoundingClientRect();
+      const ey = r.top + r.height / 2;
+      const ddy = ey - by;
+      if (dy > 0 && ddy <= 0) continue;
+      if (dy < 0 && ddy >= 0) continue;
+      cands.push({ el, y: ey, x: r.left + r.width / 2, dyAbs: Math.abs(ddy) });
+    }
+    if (cands.length === 0) return;
+    // 先找垂直最近的元素，再用它的 y 定义“目标行”
+    cands.sort((a, b) => a.dyAbs - b.dyAbs);
+    const targetY = cands[0].y;
+    const rowCands = cands.filter((c) => Math.abs(c.y - targetY) <= ROW_BAND);
+    // 在目标行里选 x 最近的，保持水平落点一致
+    let bestXDist = Infinity;
+    for (const c of rowCands) {
+      const xDist = Math.abs(c.x - bx);
+      if (xDist < bestXDist) {
+        bestXDist = xDist;
+        best = c.el;
+      }
+    }
   } else {
-    const forward = boxes.filter((c) => (dx > 0 ? c.x > bx : c.x < bx));
-    if (forward.length === 0) return;
-    const sameRow = forward.filter((c) =>
-      overlap(baseBox.r.top, baseBox.r.bottom, c.r.top, c.r.bottom)
-    );
-    // 没有同一视觉行的目标时停留。方向键不负责跨卡片寻找“最近的”控件。
+    // 左右导航严格锁定当前视觉行。不要用空间导航的垂直偏离评分，
+    // 因为那会在同行没有目标时把下方/上方的按钮当成左右目标。
+    // 以实际控件矩形的纵向重叠定义同行，天然适配 CSS zoom 和不同控件高度。
+    const sameRow = boxes.filter((box) => {
+      const distance = box.x - bx;
+      const inDirection = dx > 0 ? distance > 0 : distance < 0;
+      const overlapsVertically = Math.min(br.bottom, box.r.bottom) > Math.max(br.top, box.r.top);
+      return inDirection && overlapsVertically;
+    });
     if (sameRow.length === 0) return;
-    const candidates = sameRow;
-    const nearestX = Math.min(...candidates.map((c) => Math.abs(c.x - bx)));
-    const column = candidates.filter((c) => Math.abs(Math.abs(c.x - bx) - nearestX) <= 10);
-    best = column.reduce((current, c) =>
-      !current || Math.abs(c.y - by) < Math.abs(current.y - by) ? c : current,
-      null as Box | null,
-    )?.el ?? null;
+
+    // 同一行内只按横向距离选择，垂直误差仅用于稳定相同距离时的结果。
+    sameRow.sort((a, b) => {
+      const xDistance = Math.abs(a.x - bx) - Math.abs(b.x - bx);
+      if (xDistance !== 0) return xDistance;
+      return Math.abs(a.y - by) - Math.abs(b.y - by);
+    });
+    best = sameRow[0].el;
   }
 
   if (best) {
-    best.focus({ preventScroll: false });
-    best.scrollIntoView?.({ block: 'nearest', behavior: 'auto' });
-    setFocused(best);
+    try {
+      if (!focusGamepadElement(best)) {
+        best.focus({ preventScroll: false });
+        setGamepadFocused(best);
+      }
+    } catch {
+      // Ignore transient DOM changes during route transitions.
+    }
   }
 }
 
@@ -407,7 +489,7 @@ function adjustSlider(delta: number) {
     v = Math.max(min, Math.min(max, v));
     inp.value = String(v);
     inp.dispatchEvent(new Event('input', { bubbles: true }));
-    // 不立即 dispatch change（等 Y 键确认才 commit）
+    // 不立即 dispatch change；按 A 应用并退出滑块编辑模式。
   }
 }
 
@@ -437,15 +519,111 @@ function microAdjustSlider(now: number, heldL: boolean, heldR: boolean, lt: bool
   }
 }
 
+// These two actions are global controller commands. They must remain usable
+// even while simulated-mouse mode intentionally suppresses page controls.
+function handleGamepadBack(opts: GamepadEngineOptions): void {
+  const backEvent = new CustomEvent('ipc:gamepad-back', { cancelable: true });
+  window.dispatchEvent(backEvent);
+  if (backEvent.defaultPrevented) {
+    log(opts, 'B · 当前页面处理');
+  } else if (sliderEditMode) {
+    sliderEditMode = false;
+    log(opts, 'B · 退出滑块编辑');
+  } else {
+    setGamepadFocused(null);
+    const active = document.activeElement as HTMLElement | null;
+    active?.blur?.();
+    log(opts, 'B · 返回');
+  }
+}
+
+function handleGamepadEditGame(opts: GamepadEngineOptions): void {
+  const editGameEvent = new CustomEvent('ipc:gamepad-edit-game', { cancelable: true });
+  window.dispatchEvent(editGameEvent);
+  if (editGameEvent.defaultPrevented) {
+    log(opts, 'Y · 编辑游戏识别名单');
+  } else {
+    log(opts, 'Y · 游戏识别菜单不可用');
+  }
+}
+
+function dispatchNativeUiAction(opts: GamepadEngineOptions, action: NativeUiAction): void {
+  if (action === 'page-prev') {
+    navigate(opts, -1);
+    setGamepadFocused(null);
+    return;
+  }
+  if (action === 'page-next') {
+    navigate(opts, 1);
+    setGamepadFocused(null);
+    return;
+  }
+  if (action === 'back') {
+    handleGamepadBack(opts);
+    return;
+  }
+  if (action === 'edit-game') {
+    handleGamepadEditGame(opts);
+    return;
+  }
+  if (mouseModeSuppress) return;
+  if (action === 'debug') {
+    window.dispatchEvent(new CustomEvent('ipc:gamepad-start'));
+    log(opts, 'Start -> debug');
+    return;
+  }
+  if (action === 'confirm') {
+    activate(opts);
+    log(opts, 'A -> confirm');
+    return;
+  }
+  if (action === 'dropdown') {
+    const el = document.activeElement as HTMLElement | null;
+    if (el?.dataset?.gpDropdown !== undefined) {
+      el.dispatchEvent(new CustomEvent('gp:dropdown-open', { bubbles: true }));
+    } else if (el?.tagName === 'SELECT') {
+      activate(opts);
+    }
+    log(opts, 'X -> dropdown');
+    return;
+  }
+
+  if (action === 'slider-decrease' || action === 'slider-increase') {
+    if (sliderEditMode && isRangeInput(document.activeElement as HTMLElement)) {
+      adjustSlider(action === 'slider-increase' ? 1 : -1);
+    }
+    return;
+  }
+
+  const dx = action === 'nav-right' ? 1 : action === 'nav-left' ? -1 : 0;
+  const dy = action === 'nav-down' ? 1 : action === 'nav-up' ? -1 : 0;
+  if (sliderEditMode && isRangeInput(document.activeElement as HTMLElement)) {
+    if (dx !== 0) adjustSlider(dx);
+    else if (dy !== 0) sliderEditMode = false;
+    return;
+  }
+  const ddTrigger = document.querySelector<HTMLElement>('[aria-expanded="true"][aria-haspopup="listbox"]');
+  if (ddTrigger) {
+    if (dy !== 0) {
+      ddTrigger.dispatchEvent(new CustomEvent('gp:dropdown-nav', { bubbles: true, detail: { dir: dy } }));
+    }
+    return;
+  }
+  if (dx !== 0) moveFocus(dx, 0);
+  else if (dy !== 0) moveFocus(0, dy);
+}
+
 // ── 主循环 ──
 function tick(opts: GamepadEngineOptions) {
   const now = performance.now();
   const pad = getPad();
   // 窗口隐藏（在托盘）时不处理手柄输入：避免后台空转，也避免“非活动窗口仍监听”
   // 呼出期间 (summonActive) 强制视为可见，绕开 WebView2 可见态未及时刷新的窗口
-  if (document.visibilityState !== 'visible' && !summonActive) {
-    if (pad) { snapPad(pad); swapPad(); }
-    rafId = requestAnimationFrame(() => tick(opts));
+  if (!summonActive && !browserLoopAllowed()) {
+    // A visibility event normally cancels the frame first. Keep this guard as
+    // a race-safe backstop so a callback already queued before hiding cannot
+    // recreate a permanent background RAF loop.
+    stopGamepadLoop();
     return;
   }
   if (pad) {
@@ -466,26 +644,9 @@ function tick(opts: GamepadEngineOptions) {
       prevAxes = [];
       stuckSince = now;
     }
-    snapPad(pad);
-    const b = curButtons;
-    const a = curAxes;
-
-    // 唤醒/重新连接后先等待两帧“无按键按下”的稳定基线，再允许任何 UI 动作。
-    // 仅隔离 YeManCC 自身动作，不阻塞 Windows 的手柄握手。
-    if (!inputReady) {
-      inputBaselineFrames = b.some(Boolean) ? 0 : inputBaselineFrames + 1;
-      swapPad();
-      if (inputBaselineFrames >= 2) inputReady = true;
-      rafId = requestAnimationFrame(() => tick(opts));
-      return;
-    }
-
-    // 状态重置后首帧（呼出/唤醒/连接后边沿基线被清空）：仅重建基线，不触发边沿，避免误触
-    if (prevButtons.length !== b.length) {
-      swapPad();
-      rafId = requestAnimationFrame(() => tick(opts));
-      return;
-    }
+    // Use a fresh snapshot per frame, matching the stable legacy engine.
+    const b = Array.from(pad.buttons, (button) => button.pressed);
+    const a = Array.from(pad.axes);
 
     // 测试模式：B 按住 3 秒退出；期间不向程序页面派发任何其它手柄操作。
     if (testMode) {
@@ -500,7 +661,8 @@ function tick(opts: GamepadEngineOptions) {
       } else {
         testBHoldStart = 0;
       }
-      swapPad();
+      prevButtons = b;
+      prevAxes = a;
       rafId = requestAnimationFrame(() => tick(opts));
       return;
     }
@@ -513,38 +675,56 @@ function tick(opts: GamepadEngineOptions) {
     const heldUp = b[12] || a[1] < -0.5;
     const heldDown = b[13] || a[1] > 0.5;
 
+    // Native Raw Input is the primary path after it has delivered one UI
+    // action. Keep the browser API as a fallback for non-XInput devices.
+    if (nativeUiInputActive) {
+      prevButtons = b;
+      prevAxes = a;
+      rafId = requestAnimationFrame(() => tick(opts));
+      return;
+    }
+
     // ── LB/RB (L1/R1) 切页（挂起一帧裁决，防 LB+RB 呼出组合误切页）──
     // 呼出后两键未全释放前，抑制 LB/RB 切页：呼出动作本身不产生页面移动。
     const lbDown = b[4];
     const rbDown = b[5];
-    // 呼出组合松开后，再锁一小段（POST_RELEASE_LOCKOUT）抑制 LB/RB 切页，
-    // 吸收松开瞬间的手柄抖动 / phantom press，避免“呼出后放开手”被误判成一次切页。
+    // After the summon combo is released, controllers can report a brief
+    // shoulder bounce as a fresh one-button edge. Suppress that burst before
+    // allowing ordinary L1/R1 page navigation again.
     if (summonSuppress && !lbDown && !rbDown) {
-      if (releaseLockUntil === 0) releaseLockUntil = now + POST_RELEASE_LOCKOUT;
-    }
-    if (releaseLockUntil !== 0 && now >= releaseLockUntil) {
       summonSuppress = false;
-      releaseLockUntil = 0;
+      shoulderReleaseLockUntil = now + SUMMON_POST_RELEASE_LOCKOUT_MS;
+      lbNavPending = false;
+      rbNavPending = false;
     }
-    const suppressPage = summonSuppress;
+    const suppressPage = summonSuppress || now < shoulderReleaseLockUntil;
+    if (suppressPage) {
+      lbNavPending = false;
+      rbNavPending = false;
+    }
     // 裁决上一帧挂起的切页：另一键也已按下（呼出组合）→ 取消；否则执行切页。
     if (lbNavPending) {
       if (rbDown || suppressPage) lbNavPending = false; // 组合/呼出中：丢弃
-      else if (now - lastPageSwitch > PAGE_SWITCH_COOLDOWN) { navigate(opts, -1); lastPageSwitch = now; setFocused(null); lbNavPending = false; } // LB → 上一页
+      else if (now - lastPageSwitch > PAGE_SWITCH_COOLDOWN) { navigate(opts, -1); lastPageSwitch = now; setGamepadFocused(null); lbNavPending = false; } // LB → 上一页
       else lbNavPending = false; // 冷却中：丢弃
     }
     if (rbNavPending) {
       if (lbDown || suppressPage) rbNavPending = false; // 组合/呼出中：丢弃
-      else if (now - lastPageSwitch > PAGE_SWITCH_COOLDOWN) { navigate(opts, 1); lastPageSwitch = now; setFocused(null); rbNavPending = false; } // RB → 下一页
+      else if (now - lastPageSwitch > PAGE_SWITCH_COOLDOWN) { navigate(opts, 1); lastPageSwitch = now; setGamepadFocused(null); rbNavPending = false; } // RB → 下一页
       else rbNavPending = false; // 冷却中：丢弃
     }
     // 新按下边沿：先挂起待裁决（若另一键已按下则视为组合，直接不切页）
     if (pressed(4) && !rbDown && !lbNavPending && !suppressPage) lbNavPending = true;
     if (pressed(5) && !lbDown && !rbNavPending && !suppressPage) rbNavPending = true;
 
-    // ── 模拟鼠标开启：屏蔽内页按键选择/功能（保留 LB/RB 切页、native 双击 B）──
+    // ── 模拟鼠标开启：屏蔽内页按键选择/功能 ──
+    // LR、B、Y are deliberately handled outside this suppression boundary:
+    // LR changes pages, B exits/backs out, and Y edits the current game rule.
     if (mouseModeSuppress) {
-      swapPad();
+      if (pressed(1)) enqueueGamepadTaskDetached(() => handleGamepadBack(opts));
+      if (pressed(3)) enqueueGamepadTaskDetached(() => handleGamepadEditGame(opts));
+      prevButtons = b;
+      prevAxes = a;
       rafId = requestAnimationFrame(() => tick(opts));
       return;
     }
@@ -559,45 +739,31 @@ function tick(opts: GamepadEngineOptions) {
     }
 
     // ── 面包按钮 ──
-    if (pressed(0)) { activate(opts); log(opts, 'A · 确认'); }
-    if (pressed(1)) {
-      // 先给当前页面/弹层一个拦截机会：例如快捷应用菜单打开时，B 只执行取消。
-      // 未被拦截时再走通用返回/失焦逻辑，避免弹层和全局返回双重响应。
-      const backEvent = new CustomEvent('ipc:gamepad-back', { cancelable: true });
-      window.dispatchEvent(backEvent);
-      if (backEvent.defaultPrevented) {
-        log(opts, 'B · 当前页面处理');
-      } else if (sliderEditMode) {
-        sliderEditMode = false;
-        log(opts, 'B · 退出滑块编辑');
-      } else {
-        const a = document.activeElement as HTMLElement | null;
-        a?.classList.remove('focused');
-        a?.blur?.();
-        log(opts, 'B · 返回');
-      }
+    if (pressed(0)) {
+      enqueueGamepadTaskDetached(() => {
+        activate(opts);
+        log(opts, 'A · 确认');
+      });
     }
-    if (pressed(3)) {
-      commitSlider();
-      if (sliderEditMode) {
-        sliderEditMode = false;
-        log(opts, 'Y · 应用并退出滑块编辑');
-      } else {
-        log(opts, 'Y · 应用滑块');
-      }
-    }
+    if (pressed(1)) enqueueGamepadTaskDetached(() => handleGamepadBack(opts));
+    if (pressed(3)) enqueueGamepadTaskDetached(() => handleGamepadEditGame(opts));
     if (pressed(2)) {
       const el = document.activeElement as HTMLElement | null;
       if (el?.dataset?.gpDropdown !== undefined) {
-        el.dispatchEvent(new CustomEvent('gp:dropdown-open', { bubbles: true }));
+        enqueueGamepadTaskDetached(() => {
+          const current = document.activeElement as HTMLElement | null;
+          if (current?.dataset?.gpDropdown !== undefined) {
+            current.dispatchEvent(new CustomEvent('gp:dropdown-open', { bubbles: true }));
+          }
+        });
       } else if (el?.tagName === 'SELECT') {
-        activate(opts);
+        enqueueGamepadTaskDetached(() => activate(opts));
       }
       log(opts, 'X · 下拉');
     }
 
     // ── Start 键作为修饰键：Start + 方向键快捷调节 ──
-    // ⚠️ 实际调节逻辑已移到 native gamepadSummonThread（XInput 后台线程），
+    // ⚠️ 实际调节逻辑已移到 native Raw Input 回调（仅在有输入时被唤醒），
     //    这样在游戏内全屏、窗口未聚焦时也能生效且零延迟。前端只负责：
     //    ① 按住期间屏蔽方向键的焦点移动/滑块微调；② 抑制调试面板（startUsedAsModifier）。
     const startHeld = b[9];
@@ -633,17 +799,18 @@ function tick(opts: GamepadEngineOptions) {
               );
             }
             // dirX：菜单打开时忽略左右（保持与鼠标点击菜单一致的选择体验）
-          } else if (dirX !== 0 && dirY === 0) moveFocus(dirX, 0);
-          else if (dirY !== 0 && dirX === 0) moveFocus(0, dirY);
+          } else if (dirX !== 0 && dirY === 0) enqueueGamepadTaskDetached(() => moveFocus(dirX, 0));
+          else if (dirY !== 0 && dirX === 0) enqueueGamepadTaskDetached(() => moveFocus(0, dirY));
           else if (dirX !== 0 && dirY !== 0) {
             // 对角线优先水平
-            moveFocus(dirX, 0);
+            enqueueGamepadTaskDetached(() => moveFocus(dirX, 0));
           }
           lastNav = now;
         }
       }
 
-    swapPad();
+    prevButtons = b;
+    prevAxes = a;
   } else {
     // 无手柄：连续若干帧后停止循环（Grace 防瞬时断连误杀），省 CPU
     noPadStreak++;
@@ -670,7 +837,7 @@ export function startGamepad(opts: GamepadEngineOptions): () => void {
   };
   summonGet().then((s) => { gpSettings = { ...gpSettings, ...s }; });
   // 仅检测到手柄时才启动 60fps 循环；无手柄保持停止，由连接/可见/唤醒事件拉起（省 CPU）
-  if (hasConnectedPad()) {
+  if (hasConnectedPad() && browserLoopAllowed()) {
     log(opts, '手柄引擎已启动（检测到手柄）');
     ensureLoop(opts);
   } else {
@@ -685,5 +852,6 @@ function stopGamepadLoop() {
 }
 export function stopGamepad() {
   if (mouseModeCleanup) { mouseModeCleanup(); mouseModeCleanup = null; }
+  cancelSummonFocus();
   stopGamepadLoop();
 }

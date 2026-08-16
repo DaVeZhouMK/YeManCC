@@ -60,6 +60,14 @@ for (const token of [
   assert.ok(native.includes(token), `native updater policy missing: ${token}`);
 }
 
+assert.ok(native.includes("$playerBlacklistPath = Join-Path $pcDir 'Sleep\\\\player-blacklist.txt'"));
+assert.ok(native.includes("$playerBlacklistRollback = Join-Path $rollbackFiles 'PowerControl\\\\Sleep\\\\player-blacklist.txt'"));
+assert.ok(native.includes('player blacklist preservation'));
+assert.ok(native.includes("$systemBlacklistSource = Join-Path $powerControlSource 'Sleep\\\\system-blacklist.txt'"));
+assert.ok(native.includes('system blacklist update'));
+assert.equal(native.includes('SG_GAME_LEGACY_BLACKLIST'), false, 'legacy exclude.txt constant must be removed');
+assert.equal(native.includes('sgMigrateLegacyGameBlacklist'), false, 'legacy exclude.txt migration must be removed');
+
 const updaterStart = native.indexOf('ipc_on("app.downloadUpdate"');
 const updaterEnd = native.indexOf('ipc_on("app.installUpdate"', updaterStart);
 assert.ok(updaterStart >= 0 && updaterEnd > updaterStart, 'native download updater block must exist');

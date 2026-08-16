@@ -26,6 +26,8 @@ REM MUST embed admin manifest (hard rule)
 mt.exe -manifest app.manifest -outputresource:"%OUTDIR%\YeManCC.exe";#1
 if errorlevel 1 goto :fail
 
+REM Build output is intentionally kept in the workspace.  Deployment to
+REM C:\SOFT\YeMan is a separate, explicitly authorized release step.
 echo BUILD_OK %OUTDIR%\YeManCC.exe
 goto :eof
 

@@ -73,16 +73,18 @@ function Restore-OrdinaryFiles {
 
 try {
   New-Item -ItemType Directory -Path $programSource, $powerControlSource, $exeDir, $pcDir, $rollbackFiles -Force | Out-Null
-  New-Item -ItemType Directory -Path (Join-Path $programSource 'assets'), (Join-Path $powerControlSource 'Sleep') -Force | Out-Null
+  New-Item -ItemType Directory -Path (Join-Path $programSource 'assets'), (Join-Path $powerControlSource 'Sleep'), (Join-Path $pcDir 'Sleep') -Force | Out-Null
   Set-Content -LiteralPath (Join-Path $programSource 'index.html') -Value 'new-index'
   Set-Content -LiteralPath (Join-Path $programSource 'assets\new.js') -Value 'new-asset'
   Set-Content -LiteralPath (Join-Path $programSource 'YeMan-Support.html') -Value 'new-support'
   Set-Content -LiteralPath (Join-Path $powerControlSource 'template.ini') -Value 'new-template'
-  Set-Content -LiteralPath (Join-Path $powerControlSource 'Sleep\exclude.txt') -Value 'new-exclude'
+  Set-Content -LiteralPath (Join-Path $powerControlSource 'Sleep\system-blacklist.txt') -Value 'new-system-blacklist'
+  Set-Content -LiteralPath (Join-Path $powerControlSource 'Sleep\player-blacklist.txt') -Value 'new-player-blacklist'
   Set-Content -LiteralPath (Join-Path $exeDir 'index.html') -Value 'old-index'
   Set-Content -LiteralPath $supportPath -Value 'old-support'
   Set-Content -LiteralPath (Join-Path $pcDir 'template.ini') -Value 'old-template'
   Set-Content -LiteralPath (Join-Path $pcDir 'player-owned.json') -Value 'keep-player-file'
+  Set-Content -LiteralPath (Join-Path $pcDir 'Sleep\player-blacklist.txt') -Value 'keep-player-rule'
 
   Register-TreeForRollback $programSource $exeDir 'YeManCC' @('YeManCC.exe', 'YeMan-Support.html')
   Register-TreeForRollback $powerControlSource $pcDir 'PowerControl' @('pawnio')
@@ -91,6 +93,11 @@ try {
 
   Copy-TreeChecked $programSource $exeDir
   Copy-TreeChecked $powerControlSource $pcDir
+  $playerBlacklistRollback = Join-Path $rollbackFiles 'PowerControl\Sleep\player-blacklist.txt'
+  $playerBlacklistTarget = Join-Path $pcDir 'Sleep\player-blacklist.txt'
+  if (!(Test-Path -LiteralPath $playerBlacklistRollback -PathType Leaf)) { throw 'player blacklist backup was not registered' }
+  Copy-Item -LiteralPath $playerBlacklistRollback -Destination $playerBlacklistTarget -Force
+  Assert-FileMatch $playerBlacklistRollback $playerBlacklistTarget 'player blacklist preservation'
   Copy-Item -LiteralPath (Join-Path $programSource 'YeMan-Support.html') -Destination $supportPath -Force
   Restore-OrdinaryFiles
 
@@ -98,7 +105,8 @@ try {
   if (Test-Path -LiteralPath (Join-Path $exeDir 'assets\new.js')) { throw 'new program file was not removed' }
   if ((Get-Content -LiteralPath $supportPath -Raw).Trim() -ne 'old-support') { throw 'support page was not restored' }
   if ((Get-Content -LiteralPath (Join-Path $pcDir 'template.ini') -Raw).Trim() -ne 'old-template') { throw 'PowerControl overwrite was not restored' }
-  if (Test-Path -LiteralPath (Join-Path $pcDir 'Sleep\exclude.txt')) { throw 'new PowerControl file was not removed' }
+  if (Test-Path -LiteralPath (Join-Path $pcDir 'Sleep\system-blacklist.txt')) { throw 'new PowerControl file was not removed' }
+  if ((Get-Content -LiteralPath (Join-Path $pcDir 'Sleep\player-blacklist.txt') -Raw).Trim() -ne 'keep-player-rule') { throw 'player-blacklist.txt was overwritten' }
   if ((Get-Content -LiteralPath (Join-Path $pcDir 'player-owned.json') -Raw).Trim() -ne 'keep-player-file') { throw 'player-owned file was changed' }
 
   Write-Output 'updater ordinary rollback self-test: PASS'

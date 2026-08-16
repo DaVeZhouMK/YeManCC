@@ -10,6 +10,9 @@ export interface DetectedGame {
   title: string;
   path: string;
   ts: number;
+  processCreated: string;
+  source?: 'memory' | 'whitelist' | string;
+  whitelistRule?: string;
 }
 
 export function stripLaunchModeSuffix(value: string): string {
@@ -55,35 +58,42 @@ export function detectedGameName(game: Pick<DetectedGame, 'title' | 'name'> | nu
   return cleanGameTitle(game.title || '') || cleanGameTitle(game.name || '');
 }
 
-let cached: { ts: number; game: DetectedGame | null } | null = null;
-const CACHE_MS = 5000;
-let detectInFlight: Promise<DetectedGame | null> | null = null;
+let preferredRefreshEpoch = 0;
+const detectInFlight = new Map<number, Promise<DetectedGame | null>>();
 
-async function runDetection(): Promise<DetectedGame | null> {
+async function runDetection(preferredPid = 0): Promise<DetectedGame | null> {
   // Keep transport/WebView failures distinct from a successful "no game"
   // result. Treating a transient IPC failure as null used to clear the active
   // speed target, so a later click could operate on stale injection state.
-  const raw = await invoke<Partial<DetectedGame> | null>('game.detect');
-  if (!raw || Number(raw.pid) <= 0) return null;
+  const raw = await invoke<Partial<DetectedGame> | null>('game.detect', preferredPid > 0 ? { pid: preferredPid } : {});
+  const pid = Number(raw?.pid);
+  const processCreated = raw?.processCreated !== undefined ? String(raw.processCreated) : '';
+  if (!raw || !Number.isSafeInteger(pid) || pid <= 0 ||
+      !/^\d+$/.test(processCreated) || processCreated === '0') return null;
   return {
-    pid: Number(raw.pid),
+    pid,
     name: String(raw.name || ''),
     title: String(raw.title || ''),
     path: String(raw.path || ''),
     ts: Number(raw.ts) || Date.now(),
+    processCreated,
+    source: raw.source ? String(raw.source) : undefined,
+    whitelistRule: raw.whitelistRule ? String(raw.whitelistRule) : undefined,
   };
 }
 
-export async function detectGame(force = false): Promise<DetectedGame | null> {
-  const now = Date.now();
-  if (!force && cached && now - cached.ts < CACHE_MS) return cached.game;
-  if (!detectInFlight) {
-    detectInFlight = runDetection().finally(() => {
-      detectInFlight = null;
+export async function detectGame(force = false, preferredPid = 0): Promise<DetectedGame | null> {
+  const pid = Number.isInteger(preferredPid) && preferredPid > 0 ? preferredPid : 0;
+  // Native owns the authoritative target and validates PID reuse on every
+  // request. Do not let a JS cache bypass the game recognition valve.
+  let inFlight = detectInFlight.get(pid);
+  if (!inFlight) {
+    inFlight = runDetection(pid).finally(() => {
+      if (detectInFlight.get(pid) === inFlight) detectInFlight.delete(pid);
     });
+    detectInFlight.set(pid, inFlight);
   }
-  const game = await detectInFlight;
-  cached = { ts: Date.now(), game };
+  const game = await inFlight;
   return game;
 }
 
@@ -92,7 +102,7 @@ export async function isGameRunning(): Promise<boolean> {
 }
 
 export function clearGameCache(): void {
-  cached = null;
+  // Kept as a compatibility API. Recognition state lives in native.
 }
 
 // The exclude list is now loaded by native Sleep Guard and game.detect on
@@ -106,14 +116,18 @@ export type GameStatusListener = (game: DetectedGame | null) => void;
 const listeners = new Set<GameStatusListener>();
 let currentGame: DetectedGame | null = null;
 let stopPollSchedule: (() => void) | null = null;
-let pollBusy = false;
-let refreshInFlight: Promise<DetectedGame | null> | null = null;
-const POLL_MS = 2500;
+const refreshInFlight = new Map<number, Promise<DetectedGame | null>>();
+let preferredRefreshInFlight: Promise<DetectedGame | null> | null = null;
+// The native valve remains authoritative; this only shortens the UI status
+// refresh interval so a newly started game appears sooner.
+const POLL_MS = 1250;
 
 function sameGame(a: DetectedGame | null, b: DetectedGame | null): boolean {
   if (a === b) return true;
   if (!a || !b) return false;
-  return a.pid === b.pid && a.name === b.name;
+  return a.pid === b.pid && a.processCreated === b.processCreated &&
+    a.name === b.name && a.path === b.path && a.source === b.source &&
+    a.whitelistRule === b.whitelistRule;
 }
 
 function emitGame(game: DetectedGame | null): void {
@@ -125,26 +139,36 @@ function emitGame(game: DetectedGame | null): void {
   for (const cb of [...listeners]) cb(game);
 }
 
-export async function refreshGameStatus(): Promise<DetectedGame | null> {
-  if (refreshInFlight) return refreshInFlight;
-  if (pollBusy) return currentGame;
-  pollBusy = true;
-  refreshInFlight = (async () => {
+export async function refreshGameStatus(preferredPid = 0): Promise<DetectedGame | null> {
+  const pid = Number.isInteger(preferredPid) && preferredPid > 0 ? preferredPid : 0;
+  if (!pid && preferredRefreshInFlight) return preferredRefreshInFlight;
+  const existing = refreshInFlight.get(pid);
+  if (existing) return existing;
+  const epochAtStart = preferredRefreshEpoch;
+  const preferredEpoch = pid ? ++preferredRefreshEpoch : epochAtStart;
+  if (pid) detectInFlight.delete(0);
+  const refresh = (async () => {
     try {
       clearGameCache();
-      const game = await detectGame(true);
-      emitGame(game);
+      const game = await detectGame(true, pid);
+      // A normal poll that started before or during a preferred-PID refresh
+      // must not overwrite the explicitly captured target.
+      if (pid ? preferredEpoch === preferredRefreshEpoch : epochAtStart === preferredRefreshEpoch) {
+        emitGame(game);
+      }
       return game;
     } catch {
       return currentGame;
     } finally {
-      pollBusy = false;
+      if (pid && preferredRefreshInFlight === refresh) preferredRefreshInFlight = null;
     }
   })();
+  refreshInFlight.set(pid, refresh);
+  if (pid) preferredRefreshInFlight = refresh;
   try {
-    return await refreshInFlight;
+    return await refresh;
   } finally {
-    refreshInFlight = null;
+    if (refreshInFlight.get(pid) === refresh) refreshInFlight.delete(pid);
   }
 }
 
@@ -166,4 +190,11 @@ export function subscribeGameStatus(cb: GameStatusListener): () => void {
       stopPollSchedule = null;
     }
   };
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('ipc:game.rules.changed', () => {
+    clearGameCache();
+    void refreshGameStatus();
+  });
 }

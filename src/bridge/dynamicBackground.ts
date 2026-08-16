@@ -4,6 +4,7 @@ import {
   dynamicBackgroundGet,
   dynamicBackgroundInstallOnline,
   dynamicBackgroundClear,
+  type DynamicBackgroundTarget,
   type DynamicBackgroundState,
 } from './background';
 import type { DetectedGame } from './gamedetect';
@@ -12,7 +13,7 @@ import { getUiSetting, setUiSettings } from './uiSettings';
 // V2 is keyed by the normalized performance-schedule title, so stale exe-name matches are ignored.
 const CACHE_KEY = 'yeman.ui.dynamic-background-title-cache-v3';
 const MAX_ONLINE_MEDIA_CANDIDATES = 16;
-let dynamicRefreshInFlight: Promise<DynamicBackgroundResult | null> | null = null;
+let dynamicRefreshInFlight: { key: string; promise: Promise<DynamicBackgroundResult | null> } | null = null;
 
 function reportDynamicProgress(message: string): void {
   window.dispatchEvent(new CustomEvent('dynamic-background:progress', { detail: message }));
@@ -175,8 +176,8 @@ export function getDynamicBackgroundConfig(): DynamicBackgroundConfig {
   return readConfig();
 }
 
-export function setDynamicBackgroundEnabled(enabled: boolean): void {
-  void setUiSettings({ dynamicBackgroundEnabled: enabled });
+export function setDynamicBackgroundEnabled(enabled: boolean): Promise<void> {
+  return setUiSettings({ dynamicBackgroundEnabled: enabled });
 }
 
 function cachedAppId(titleKey: string): number | null {
@@ -260,10 +261,11 @@ async function installSteamMediaOnline(
   gameName: string,
   sourceType: string,
   fallbackUrls: string[] = [source],
+  target: DynamicBackgroundTarget,
 ): Promise<DynamicBackgroundState> {
   // Online mode deliberately does not probe or download the media. WebView2
   // owns the request and can move through fallback URLs after playback errors.
-  return dynamicBackgroundInstallOnline(source, fallbackUrls, appId, gameName, sourceType, kind);
+  return dynamicBackgroundInstallOnline(source, fallbackUrls, appId, gameName, sourceType, kind, target);
 }
 
 function steamVideoPath(url: string): string {
@@ -491,12 +493,22 @@ function chooseMedia(data: StoreDetails, pageMedia: StorePageMedia = {}): { url:
 }
 
 export async function refreshDynamicBackground(game: DetectedGame | null): Promise<DynamicBackgroundResult | null> {
-  if (dynamicRefreshInFlight) return dynamicRefreshInFlight;
-  dynamicRefreshInFlight = refreshDynamicBackgroundImpl(game);
+  if (!game) return refreshDynamicBackgroundImpl(game);
+  const key = `${game.pid}:${game.processCreated || 'unknown'}:${game.path || game.name}:${detectedGameTitle(game)}`;
+  const existing = dynamicRefreshInFlight;
+  if (existing) {
+    if (existing.key === key) return existing.promise;
+    await existing.promise.catch(() => null);
+    // A game switch during a Steam request must queue the new game behind the
+    // old request. This avoids native media/config writes racing each other.
+    return refreshDynamicBackground(game);
+  }
+  const refresh = refreshDynamicBackgroundImpl(game);
+  dynamicRefreshInFlight = { key, promise: refresh };
   try {
-    return await dynamicRefreshInFlight;
+    return await refresh;
   } finally {
-    dynamicRefreshInFlight = null;
+    if (dynamicRefreshInFlight?.promise === refresh) dynamicRefreshInFlight = null;
   }
 }
 
@@ -505,6 +517,13 @@ async function refreshDynamicBackgroundImpl(game: DetectedGame | null): Promise<
   if (!cfg.enabled || !game) {
     return null;
   }
+  if (!game.processCreated) {
+    throw new Error('游戏识别阀门未提供进程身份，拒绝加载动态壁纸');
+  }
+  const valveTarget: DynamicBackgroundTarget = {
+    pid: game.pid,
+    processCreated: game.processCreated,
+  };
 
   reportDynamicProgress(`正在匹配 Steam：${detectedGameTitle(game)}`);
   const resolved = await resolveAppId(game);
@@ -550,7 +569,7 @@ async function refreshDynamicBackgroundImpl(game: DetectedGame | null): Promise<
     for (const [candidateIndex, candidate] of media.urls.entries()) {
       reportDynamicProgress(`Steam 媒体候选 ${candidateIndex + 1}/${media.urls.length}`);
       try {
-        state = await installSteamMediaOnline(candidate, media.kind, resolved.appId, app.data.name || resolved.detectedTitle, media.source, media.urls);
+        state = await installSteamMediaOnline(candidate, media.kind, resolved.appId, app.data.name || resolved.detectedTitle, media.source, media.urls, valveTarget);
         media.url = candidate;
         break;
       } catch (error) {
@@ -568,6 +587,8 @@ async function refreshDynamicBackgroundImpl(game: DetectedGame | null): Promise<
           resolved.appId,
           app.data.name || resolved.detectedTitle,
           app.data.background_raw || app.data.background ? 'background' : 'screenshot',
+          [fallbackUrl],
+          valveTarget,
         );
         media = {
           url: fallbackUrl,
@@ -581,6 +602,9 @@ async function refreshDynamicBackgroundImpl(game: DetectedGame | null): Promise<
   } catch (error) {
     throw new Error(`Steam 媒体下载失败：${(error as Error).message}`);
   }
+  if (Number(state.pid) !== game.pid || String(state.processCreated || '') !== String(game.processCreated)) {
+    throw new Error('游戏识别阀门目标在动态壁纸提交时已变化');
+  }
   reportDynamicProgress(media.source === 'video'
     ? '已找到 Steam 在线视频，正在缓冲'
     : 'Steam 视频不可用，已回退为在线背景图');
@@ -590,6 +614,8 @@ async function refreshDynamicBackgroundImpl(game: DetectedGame | null): Promise<
       appId: resolved.appId,
       detectedTitle: resolved.detectedTitle,
       game: app.data.name || resolved.detectedTitle,
+      pid: state.pid,
+      processCreated: state.processCreated,
       matchedBy: resolved.matchedBy,
       source: media.source,
       url: media.url,

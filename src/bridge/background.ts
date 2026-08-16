@@ -9,6 +9,9 @@ export interface BackgroundState {
   file?: string;
   url: string;
   fallbackUrls?: string[];
+  // Present only for dynamic media admitted by the game valve.
+  pid?: number;
+  processCreated?: string;
 }
 
 export interface DynamicBackgroundState {
@@ -19,6 +22,14 @@ export interface DynamicBackgroundState {
   appId?: number;
   gameName?: string;
   source?: string;
+  // Dynamic media is admitted for one exact game-process instance only.
+  pid?: number;
+  processCreated?: string;
+}
+
+export interface DynamicBackgroundTarget {
+  pid: number;
+  processCreated?: string;
 }
 
 export const BACKGROUND_OPACITY_MIN = 0.2;
@@ -53,7 +64,16 @@ export const dynamicBackgroundInstallUrl = (
   appId: number,
   gameName: string,
   sourceType: string,
-) => invoke<DynamicBackgroundState>('dynamicBackground.installUrl', { source, kind, appId, gameName, sourceType }, { timeoutMs: 120000 });
+  target?: DynamicBackgroundTarget,
+) => invoke<DynamicBackgroundState>('dynamicBackground.installUrl', {
+  source,
+  kind,
+  appId,
+  gameName,
+  sourceType,
+  pid: target?.pid || 0,
+  processCreated: target?.processCreated || '',
+}, { timeoutMs: 120000 });
 
 export const dynamicBackgroundInstallOnline = (
   source: string,
@@ -62,7 +82,17 @@ export const dynamicBackgroundInstallOnline = (
   gameName: string,
   sourceType: string,
   kind: BackgroundKind = 'video',
-) => invoke<DynamicBackgroundState>('dynamicBackground.installOnline', { source, fallbackUrls, appId, gameName, sourceType, kind });
+  target?: DynamicBackgroundTarget,
+) => invoke<DynamicBackgroundState>('dynamicBackground.installOnline', {
+  source,
+  fallbackUrls,
+  appId,
+  gameName,
+  sourceType,
+  kind,
+  pid: target?.pid || 0,
+  processCreated: target?.processCreated || '',
+});
 
 export const dynamicBackgroundClear = () => invoke<DynamicBackgroundState>('dynamicBackground.clear');
 

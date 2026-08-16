@@ -22,6 +22,7 @@ import {
   enableFloat,
   getFloatInfo,
   notifyTdpMaxChanged,
+  setFloatTarget,
   type FloatProfile,
   type TdpFloatStrategy,
 } from './autofloat';
@@ -63,6 +64,11 @@ export interface PerformanceScheduleWarning {
   watts: number;
   message: string;
   detail: string;
+}
+
+export interface PerformanceScheduleTarget {
+  pid: number;
+  processCreated: string;
 }
 
 const CONFIG_PATH = 'C:\\SOFT\\YeMan\\PowerControl\\performance-schedule.json';
@@ -149,6 +155,10 @@ export async function runOptionalPerformanceScheduleTdp(
     publishPerformanceScheduleWarning(warning);
     return warning;
   }
+}
+
+function hasFpsFloatTarget(profile: ScheduleProfile): boolean {
+  return Number(profile.fpsTarget) > 0;
 }
 
 export function getPerformanceScheduleWarning(): PerformanceScheduleWarning | null {
@@ -467,6 +477,7 @@ async function applyPerformanceScheduleUnsafe(
   }
 
   const profile = current.profiles[side][mode];
+  const fpsFloatEnabled = hasFpsFloatTarget(profile);
   // CPU 控制轴互斥：cpuTarget!=='none' 时由「CPU 浮动值」接管 autofloat 的 CPU 主频降低策略；
   // cpuTarget==='none' 时由「CPU 挡位」(cpuPreset) 直接设置硬件 CPU 档位。
   // 两路不得叠加：cpuTarget!=='none' 不调用 runResetProfile，避免 preset 基线被压制层覆盖。
@@ -488,9 +499,16 @@ async function applyPerformanceScheduleUnsafe(
     assertScheduleOpCurrent();
     await notifyTdpMaxChanged(profile.tdpMax);
     assertScheduleOpCurrent();
-    if (cpuTarget === 'none') await applyCpuPresetBaseline(profile.cpuPreset);
-    assertScheduleOpCurrent();
-    await applyFloatSettings(profile.fpsTarget, cpuTarget, profile.tdpStrategy);
+    if (!fpsFloatEnabled) {
+      // 不锁帧=0：RTSS 解锁，停止 CPU/TDP 浮动，并用固定 CPU 挡位接管。
+      await setFloatTarget(0);
+      assertScheduleOpCurrent();
+      await applyCpuPresetBaseline(profile.cpuPreset);
+    } else {
+      if (cpuTarget === 'none') await applyCpuPresetBaseline(profile.cpuPreset);
+      assertScheduleOpCurrent();
+      await applyFloatSettings(profile.fpsTarget, cpuTarget, profile.tdpStrategy);
+    }
     assertScheduleOpCurrent();
     await applyCoreModeIfHybrid(side, profile.coreMode);
     assertScheduleOpCurrent();
@@ -505,13 +523,19 @@ async function applyPerformanceScheduleUnsafe(
   await runOptionalPerformanceScheduleTdp(side, profile.tdpMax, () =>
     setTdp(side, profile.tdpMax, { apply: true, save: true }));
   assertScheduleOpCurrent();
-  if (cpuTarget === 'none') await applyCpuPresetBaseline(profile.cpuPreset);
-  assertScheduleOpCurrent();
-  await enableFloat(
-    profile.fpsTarget,
-    cpuTarget,
-    profile.tdpStrategy,
-  );
+  if (!fpsFloatEnabled) {
+    await setFloatTarget(0);
+    assertScheduleOpCurrent();
+    await applyCpuPresetBaseline(profile.cpuPreset);
+  } else {
+    if (cpuTarget === 'none') await applyCpuPresetBaseline(profile.cpuPreset);
+    assertScheduleOpCurrent();
+    await enableFloat(
+      profile.fpsTarget,
+      cpuTarget,
+      profile.tdpStrategy,
+    );
+  }
   assertScheduleOpCurrent();
   await applyCoreModeIfHybrid(side, profile.coreMode);
   assertScheduleOpCurrent();
@@ -554,14 +578,17 @@ export async function restorePerformanceScheduleIfConfigured(): Promise<Performa
     // 系统级恢复必须独立于性能调度页是否激活：启动、唤醒、AC/DC 切换时，
     // 当前游戏存在自定义档位则优先恢复自定义；否则才应用普通自动档位。
     const game = await detectGame(true).catch(() => null);
-    if (game) {
+  if (game) {
       const custom = await loadGameCustomConfig();
       const fromPath = game.path ? game.path.split(/[\\/]/).pop() : '';
       const key = (fromPath || game.name || '').toLowerCase().trim();
       const entry = key ? custom.entries[key.endsWith('.exe') ? key : `${key}.exe`] : undefined;
       if (entry) {
         const side = await detectPowerMode();
-        await applyGameCustomProfilesUnsafe(side, entry.ac, entry.dc);
+        await applyGameCustomProfilesUnsafe(side, entry.ac, entry.dc, {
+          pid: game.pid,
+          processCreated: game.processCreated,
+        });
         return 'auto';
       }
     }
@@ -598,6 +625,8 @@ export async function refreshPerformanceScheduleCoreMode(): Promise<boolean> {
       const entry = key ? custom.entries[key.endsWith('.exe') ? key : `${key}.exe`] : undefined;
       if (entry) {
         const side = await detectPowerMode();
+        const current = await detectGame(true).catch(() => null);
+        if (!current || current.pid !== game.pid || current.processCreated !== game.processCreated) return false;
         return applyCoreModeIfHybrid(side, entry[side].coreMode);
       }
     }
@@ -782,51 +811,72 @@ async function applyGameCustomProfilesUnsafe(
   side: PowerSide,
   acProfile: ScheduleProfile,
   dcProfile: ScheduleProfile,
+  expectedTarget?: PerformanceScheduleTarget,
 ): Promise<boolean> {
   const profile = side === 'ac' ? acProfile : dcProfile;
   const cpuTarget: FloatProfile = profile.cpuTarget;
+  const fpsFloatEnabled = hasFpsFloatTarget(profile);
 
-  assertScheduleOpCurrent();
+  const targetStillCurrent = async (): Promise<boolean> => {
+    if (!expectedTarget) return true;
+    const current = await detectGame(true).catch(() => null);
+    return !!current && current.pid === expectedTarget.pid &&
+      current.processCreated === expectedTarget.processCreated;
+  };
+  const checkpoint = async (): Promise<boolean> => {
+    assertScheduleOpCurrent();
+    return targetStillCurrent();
+  };
+
+  if (!(await checkpoint())) return false;
   if ((await detectPowerMode()) !== side) return false;
 
   // 所有耗时硬件阶段前后都复核电源侧，避免插拔窗口中把旧 AC/DC 档位继续写入。
   if ((await detectPowerMode()) !== side) return false;
   if (getFloatInfo().enabled) {
-    if ((await detectPowerMode()) !== side) return false;
-    assertScheduleOpCurrent();
+    if (!(await checkpoint()) || (await detectPowerMode()) !== side) return false;
     await runOptionalPerformanceScheduleTdp(side, profile.tdpMax, () =>
       setTdp(side, profile.tdpMax, { apply: false, save: true }));
-    assertScheduleOpCurrent();
-    if ((await detectPowerMode()) !== side) return false;
+    if (!(await checkpoint()) || (await detectPowerMode()) !== side) return false;
     await notifyTdpMaxChanged(profile.tdpMax);
-    assertScheduleOpCurrent();
-    if (cpuTarget === 'none') await applyCpuPresetBaseline(profile.cpuPreset);
-    assertScheduleOpCurrent();
-    await applyFloatSettings(profile.fpsTarget, cpuTarget, profile.tdpStrategy);
-    assertScheduleOpCurrent();
+    if (!(await checkpoint())) return false;
+    if (!fpsFloatEnabled) {
+      // 专属档位同样遵守 0=不锁帧：不继承上一个游戏/档位的 CPU/TDP 浮动。
+      await setFloatTarget(0);
+      if (!(await checkpoint())) return false;
+      await applyCpuPresetBaseline(profile.cpuPreset);
+    } else {
+      if (cpuTarget === 'none') await applyCpuPresetBaseline(profile.cpuPreset);
+      if (!(await checkpoint())) return false;
+      await applyFloatSettings(profile.fpsTarget, cpuTarget, profile.tdpStrategy);
+    }
+    if (!(await checkpoint())) return false;
     await applyCoreModeIfHybrid(side, profile.coreMode);
-    assertScheduleOpCurrent();
-    return true;
+    return checkpoint();
   }
-  if ((await detectPowerMode()) !== side) return false;
-  assertScheduleOpCurrent();
+  if (!(await checkpoint()) || (await detectPowerMode()) !== side) return false;
   await runOptionalPerformanceScheduleTdp(side, profile.tdpMax, () =>
     setTdp(side, profile.tdpMax, { apply: true, save: true }));
-  assertScheduleOpCurrent();
-  if (cpuTarget === 'none') await applyCpuPresetBaseline(profile.cpuPreset);
-  if ((await detectPowerMode()) !== side) return false;
-  assertScheduleOpCurrent();
-  await enableFloat(profile.fpsTarget, cpuTarget, profile.tdpStrategy);
-  assertScheduleOpCurrent();
+  if (!(await checkpoint())) return false;
+  if (!fpsFloatEnabled) {
+    await setFloatTarget(0);
+    if (!(await checkpoint())) return false;
+    await applyCpuPresetBaseline(profile.cpuPreset);
+  } else {
+    if (cpuTarget === 'none') await applyCpuPresetBaseline(profile.cpuPreset);
+    if (!(await checkpoint()) || (await detectPowerMode()) !== side) return false;
+    await enableFloat(profile.fpsTarget, cpuTarget, profile.tdpStrategy);
+  }
+  if (!(await checkpoint())) return false;
   await applyCoreModeIfHybrid(side, profile.coreMode);
-  assertScheduleOpCurrent();
-  return true;
+  return checkpoint();
 }
 
 // 应用自定义档位：绕开自动档位选择，直接把该游戏的 AC/DC 配置下发到当前电源侧。
 export async function applyGameCustomProfiles(
   acProfile: ScheduleProfile,
   dcProfile: ScheduleProfile,
+  expectedTarget?: PerformanceScheduleTarget,
 ): Promise<boolean> {
   const schedule = await loadPerformanceSchedule();
   if (!schedule.enabled) return false;
@@ -835,6 +885,6 @@ export async function applyGameCustomProfiles(
     await ensureRememberedYemanSchemeActive();
     assertScheduleOpCurrent();
     const side = await detectPowerMode();
-    return applyGameCustomProfilesUnsafe(side, acProfile, dcProfile);
+    return applyGameCustomProfilesUnsafe(side, acProfile, dcProfile, expectedTarget);
   });
 }

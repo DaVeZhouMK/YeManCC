@@ -767,6 +767,15 @@ export async function detectPowerMode(): Promise<'ac' | 'dc'> {
   return (await detectPowerModeProbe()).mode;
 }
 
+export async function detectPowerModeReliable(): Promise<'ac' | 'dc' | null> {
+  try {
+    const probe = await detectPowerModeProbe();
+    return probe.reliable ? probe.mode : null;
+  } catch {
+    return null;
+  }
+}
+
 // 唤醒后连续两轮可靠且一致才视为稳定；检测持续失败时仍按 AC 兜底，不引入 unknown。
 export async function detectPowerModeStable(): Promise<'ac' | 'dc'> {
   let lastReliable: 'ac' | 'dc' | null = null;
@@ -1884,31 +1893,33 @@ export async function monitorOn(): Promise<boolean> {
 /* =========================================================================
  *  睡眠守护（Sleep Guard）
  *  后端由 native 壳实现；这里仅做语义化封装。
- *  可调参数持久化于 C:\SOFT\YeMan\PowerControl\Sleep\sleepguard.json
+ *  可调参数持久化于 C:\SOFT\YeMan\PowerControl\yeman-settings.json 的 sleep section。
+ *  Sleep\sleepguard.json 仅作为首次迁移的旧版本输入。
  * ========================================================================= */
 export type SleepGuardMode = 'off' | 'custom';
 export interface SleepGuardStatus {
-  overheatSleepEnabled: boolean;
-  overheatTempC: number;
   enabled: boolean;             // 总开关
   mode: SleepGuardMode;         // 总开关模式：关闭 / 自选
   suspended: number;            // 当前被冻结任务数
-  pauseResume: boolean;         // 睡眠时暂停 + 唤醒自动恢复（绑定）
-  killListEnabled: boolean;     // 入睡前清除 Sleep\\睡眠击杀名单.txt 中的指定 exe
-  resleepEnabled: boolean;       // 入睡后异常唤醒：30s 内连续 10s 无手柄/键盘输入则重睡；重睡后 5 分钟抑制再次重睡
-
+  pauseGameOnSleep: boolean;    // 睡眠事务中暂停游戏，按唤醒分类后恢复
+  retryOnEntryFailure: boolean; // 明确 S0/S3 入睡失败时同模式重试一次
+  retryOnNonUserWake: boolean;  // 有来源证据的异常唤醒时同模式重试一次
+  joyXoffAutoClose: true;       // 固定开启，不提供用户开关
 }
+type LegacySleepGuardFields = Partial<SleepGuardStatus> & {
+  pauseResume?: boolean;
+  resleepEnabled?: boolean;
+};
 export async function sleepGuardGet(): Promise<SleepGuardStatus> {
-  const r = await invoke<Partial<SleepGuardStatus>>('sleepGuard.get');
+  const r = await invoke<LegacySleepGuardFields>('sleepGuard.get');
   return {
     enabled: !!r.enabled,
     mode: r.mode === 'custom' ? 'custom' : 'off',
     suspended: Number(r.suspended) || 0,
-    pauseResume: r.pauseResume !== false,
-    killListEnabled: !!r.killListEnabled,
-    resleepEnabled: !!r.resleepEnabled,
-    overheatSleepEnabled: !!r.overheatSleepEnabled,
-    overheatTempC: Math.max(85, Math.min(100, Number(r.overheatTempC) || 95)),
+    pauseGameOnSleep: r.pauseGameOnSleep ?? r.pauseResume !== false,
+    retryOnEntryFailure: r.retryOnEntryFailure !== false,
+    retryOnNonUserWake: r.retryOnNonUserWake ?? r.resleepEnabled ?? true,
+    joyXoffAutoClose: true,
   };
 }
 export async function sleepGuardSet(on: boolean): Promise<void> {
@@ -1917,11 +1928,39 @@ export async function sleepGuardSet(on: boolean): Promise<void> {
 export async function sleepGuardSetConfig(cfg: Partial<SleepGuardStatus>): Promise<void> {
   await invoke('sleepGuard.setConfig', cfg);
 }
+export interface SleepFactEvent {
+  time: string;
+  event: string;
+  details: Record<string, unknown>;
+}
+export interface SleepFactStatus {
+  enabled: boolean;
+  logPath: string;
+  subscriptionActive: boolean;
+  lifecycle: string;
+  generation: number;
+  guardEnabled: boolean;
+  sleepCycleActive: boolean;
+  gameSuspended: boolean;
+  taskMode: string;
+  taskPhase: string;
+  retryKind: string;
+  entryFailureAttempts: number;
+  last506: { reason: number; time: string };
+  last507: { reason: number; time: string };
+  lastAccepted506: string;
+  lastAccepted507: string;
+  facts: string[];
+}
+export const sleepFactsGet = () => invoke<SleepFactStatus>('sleepFacts.get');
+export const sleepFactsSetEnabled = (enabled: boolean) =>
+  invoke<SleepFactStatus>('sleepFacts.setEnabled', { enabled });
+export const sleepFactsOpenLog = () => invoke<boolean>('sleepFacts.openLog');
 export async function sleepGuardRecoverAll(): Promise<{ resumed: number }> {
   return await invoke<{ resumed: number }>('sleepGuard.recoverAll');
 }
-export async function sleepGuardSuspendCurrent(): Promise<{ paused: boolean; pid?: number; name?: string }> {
-  return await invoke<{ paused: boolean; pid?: number; name?: string }>('sleepGuard.suspendCurrent');
+export async function sleepGuardSuspendCurrent(): Promise<{ paused: boolean; pid?: number }> {
+  return await invoke<{ paused: boolean; pid?: number }>('sleepGuard.suspendCurrent');
 }
 
 export interface SleepPowerPlanOptimizationResult {

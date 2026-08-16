@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, nextTick, onMounted, onUnmounted, onActivated, onDeactivated } from 'vue';
+import { focusGamepadElement, getGamepadPopupPlacement } from '@/gamepad/focus';
 import {
   oneClickFrameGen,
   optiscalerStatus,
@@ -91,37 +92,18 @@ function focusFsrTrigger() {
   nextTick(() => {
     const trigger = fsrTriggerEl.value;
     if (!trigger || trigger.hasAttribute('disabled')) return;
-    document.querySelectorAll('.focused').forEach((n) => n.classList.remove('focused'));
-    trigger.focus({ preventScroll: true });
-    trigger.classList.add('focused');
+    focusGamepadElement(trigger);
   });
 }
 
 function positionFsrDialog() {
   const trigger = fsrTriggerEl.value;
-  const style: Record<string, string> = { position: 'fixed' };
   const r = trigger?.getBoundingClientRect();
   const POP_W = Math.min(420, window.innerWidth - 16);
   const POP_H = 280;
-  if (!r) {
-    style.left = Math.max(8, (window.innerWidth - POP_W) / 2) + 'px';
-    style.top = Math.max(8, (window.innerHeight - POP_H) / 2) + 'px';
-    fsrDialogAbove.value = false;
-  } else {
-    const spaceBelow = window.innerHeight - r.bottom;
-    const above = spaceBelow < POP_H + 8 && r.top > spaceBelow;
-    fsrDialogAbove.value = above;
-    if (above) {
-      style.bottom = window.innerHeight - r.top + 10 + 'px';
-      style.top = 'auto';
-    } else {
-      style.top = r.bottom + 8 + 'px';
-      style.bottom = 'auto';
-    }
-    style.left = Math.max(8, Math.min(r.right - POP_W, window.innerWidth - POP_W - 8)) + 'px';
-  }
-  style.width = POP_W + 'px';
-  fsrDialogStyle.value = style;
+  const placement = getGamepadPopupPlacement(r ?? null, POP_W, POP_H, 8);
+  fsrDialogAbove.value = placement.above;
+  fsrDialogStyle.value = placement.style;
 }
 
 function openFsrDialog(options: FsrDialogOptions): Promise<boolean> {
@@ -137,8 +119,7 @@ function openFsrDialog(options: FsrDialogOptions): Promise<boolean> {
   nextTick(() => {
     positionFsrDialog();
     const target = fsrDialogKind.value === 'confirm' ? fsrCancelEl.value : fsrMessageActionEl.value;
-    target?.focus({ preventScroll: true });
-    target?.classList.add('focused');
+    focusGamepadElement(target);
   });
   return new Promise<boolean>((resolve) => {
     fsrDialogResolve = resolve;
@@ -359,7 +340,7 @@ let unsubGame: (() => void) | null = null;
 // 全局状态变化 → 同步本页（游戏退出时自动归零，不再需要手动刷新）
 function applyGameStatus(g: DetectedGame | null) {
   const previous = game.value;
-  const targetChanged = !!previous && (!g || previous.pid !== g.pid);
+  const targetChanged = !!previous && (!g || previous.pid !== g.pid || previous.processCreated !== g.processCreated);
   if (targetChanged && activeSpeed.value !== null && previous) {
     // 游戏切换时尽力解除旧目标；变速链路只按旧 PID 操作。
     void clearGameSpeed(previous.pid, 'target-change').catch(() => {});
@@ -531,13 +512,13 @@ async function onOptiScalerCurrent() {
     }
 
     statusMsg.value = `正在结束 ${gameName}…`;
-    const closed = await closeGame(gamePid, gameName);
+    const closed = await closeGame(gamePid, gameName, current.processCreated);
     if (!closed.ok) {
       errMsg.value = '关闭游戏失败：' + (closed.msgs?.join('；') || '未知错误');
       await showFsrMessage('FSR4.1 操作失败', errMsg.value, 'error');
       return;
     }
-    if (!(await waitForProcessExit(gamePid))) {
+    if (!(await waitForProcessExit(gamePid, current.processCreated))) {
       errMsg.value = `已发送结束命令，但原游戏 PID ${gamePid} 仍在运行，已终止${action}。`;
       await showFsrMessage('FSR4.1 操作失败', errMsg.value, 'error');
       return;
@@ -598,8 +579,11 @@ interface LaunchApp {
 const launchApps = ref<LaunchApp[]>([]);
 const launchBusy = ref(false);
 const menuOpen = ref(false);
-const menuPos = ref({ x: 0, y: 0 });
+const menuStyle = ref<Record<string, string>>({ position: 'fixed' });
 const menuAppIndex = ref(-1);
+const menuTriggerEl = ref<HTMLElement | null>(null);
+const LAUNCH_MENU_WIDTH = 220;
+const LAUNCH_MENU_HEIGHT = 220;
 
 // 确定性颜色（基于路径 hash）— 明亮系
 function iconColor(path: string): string {
@@ -667,6 +651,7 @@ async function addLaunchApp() {
 function openMenu(index: number, event: MouseEvent) {
   menuAppIndex.value = index;
   const target = event.currentTarget instanceof HTMLElement ? event.currentTarget : null;
+  menuTriggerEl.value = target;
   const rect = target?.getBoundingClientRect();
   // 手柄 A 键/键盘触发 HTMLElement.click() 时，合成 MouseEvent 的 clientX/clientY 为 0。
   // 此时用启动卡片中心定位；真实鼠标/触摸点击仍优先使用事件坐标。
@@ -674,15 +659,33 @@ function openMenu(index: number, event: MouseEvent) {
     && (event.clientX !== 0 || event.clientY !== 0);
   const rawX = hasPointerPosition ? event.clientX : (rect ? rect.left + rect.width / 2 : window.innerWidth / 2);
   const rawY = hasPointerPosition ? event.clientY : (rect ? rect.top + rect.height / 2 : window.innerHeight / 2);
-  // 菜单自身使用 translate(-50%, -50%)，这里按菜单的大致尺寸做边界夹取，避免贴边溢出。
-  const x = Math.max(60, Math.min(window.innerWidth - 60, rawX));
-  const y = Math.max(72, Math.min(window.innerHeight - 72, rawY));
-  menuPos.value = { x, y };
+  // Treat the pointer as a tiny anchor. Shared placement keeps the full menu
+  // above the bottom safe area when the card is near the taskbar.
+  const anchor = new DOMRect(
+    rawX - LAUNCH_MENU_WIDTH / 2,
+    rawY - 1,
+    LAUNCH_MENU_WIDTH,
+    2,
+  );
+  menuStyle.value = getGamepadPopupPlacement(
+    anchor,
+    LAUNCH_MENU_WIDTH,
+    LAUNCH_MENU_HEIGHT,
+    8,
+  ).style;
   menuOpen.value = true;
+  if (!hasPointerPosition) {
+    nextTick(() => focusGamepadElement(document.querySelector<HTMLElement>('.launch-menu-item')));
+  }
 }
-function closeMenu() {
+function closeMenu(restoreFocus = false, event?: MouseEvent) {
   menuOpen.value = false;
   menuAppIndex.value = -1;
+  const fromPointer = Boolean(event && (event.clientX !== 0 || event.clientY !== 0));
+  if (restoreFocus && !fromPointer) {
+    const trigger = menuTriggerEl.value;
+    nextTick(() => focusGamepadElement(trigger));
+  }
 }
 
 function onGamepadBack(e: Event) {
@@ -692,7 +695,7 @@ function onGamepadBack(e: Event) {
     return;
   }
   if (!menuOpen.value) return;
-  closeMenu();
+  closeMenu(true);
   // 菜单打开时，B 只做取消，不继续执行全局失焦/返回。
   e.preventDefault();
 }
@@ -914,7 +917,7 @@ onUnmounted(() => {
     <!-- 页面最底部独立气泡：应用启动 -->
     <section class="card launch-apps-card">
       <div class="sub-head">
-        <span class="sub-title"><InlineIcon name="rocket" /> 启动应用</span>
+        <span class="sub-title"><InlineIcon name="rocket" /> 添加自定义应用</span>
         <button class="add-app-btn" :disabled="launchBusy" @click="addLaunchApp">+ 添加应用</button>
       </div>
       <div class="launch-grid">
@@ -935,13 +938,13 @@ onUnmounted(() => {
       </div>
       <!-- 点击/右键弹出菜单 -->
       <Teleport to="body">
-        <div v-if="menuOpen" class="launch-menu-mask" @click="closeMenu" @contextmenu.prevent="closeMenu"></div>
+        <div v-if="menuOpen" class="launch-menu-mask" @click="closeMenu()" @contextmenu.prevent="closeMenu()"></div>
         <Transition name="pop">
-          <div v-if="menuOpen" class="launch-menu" :style="{ left: menuPos.x + 'px', top: menuPos.y + 'px' }">
+          <div v-if="menuOpen" class="launch-menu" :style="menuStyle" data-gp-modal>
             <button class="launch-menu-item" @click="launchApp(menuAppIndex)"><InlineIcon name="play" /> 启动</button>
             <button class="launch-menu-item" @click="renameApp(menuAppIndex)"><InlineIcon name="edit" /> 重命名</button>
             <button class="launch-menu-item launch-menu-danger" @click="deleteApp(menuAppIndex)"><InlineIcon name="close" /> 删除</button>
-            <button class="launch-menu-item launch-menu-cancel" @click="closeMenu"><InlineIcon name="close" /> 取消</button>
+            <button class="launch-menu-item launch-menu-cancel" @click="closeMenu(true, $event)"><InlineIcon name="close" /> 取消</button>
           </div>
         </Transition>
       </Teleport>
@@ -1290,7 +1293,10 @@ onUnmounted(() => {
   flex-direction: column;
   gap: 2px;
   min-width: 140px;
-  transform: translate(-50%, -50%);
+  box-sizing: border-box;
+  max-width: calc(100vw - 16px);
+  min-height: 0;
+  overflow-y: auto;
 }
 .launch-menu-item {
   width: 100%;
@@ -1325,6 +1331,8 @@ onUnmounted(() => {
   flex-direction: column;
   gap: 12px;
   max-width: calc(100vw - 16px);
+  min-height: 0;
+  overflow-y: auto;
 }
 .fsr-confirm::before {
   content: '';

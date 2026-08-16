@@ -14,7 +14,6 @@ import {
   BACKGROUND_BLUR_MAX,
   BACKGROUND_BLUR_MIN,
   backgroundGet,
-  dynamicBackgroundGet,
   backgroundInstall,
   backgroundClear,
   getBackgroundOpacity,
@@ -68,10 +67,9 @@ const bgBlur = ref(getBackgroundBlur());
 const bgBlurMin = BACKGROUND_BLUR_MIN;
 const bgBlurMax = BACKGROUND_BLUR_MAX;
 const dynamicEnabled = ref(getDynamicBackgroundConfig().enabled);
-const dynamicKind = ref<'image' | 'video'>('image');
 const backgroundControlEnabled = computed(() => bgEnabled.value || dynamicEnabled.value);
-const backgroundControlKind = computed(() => dynamicEnabled.value ? dynamicKind.value : bgKind.value);
 const dynamicStatus = ref('等待识别当前游戏');
+let dynamicToggleGeneration = 0;
 const onDynamicProgress = (event: Event) => {
   dynamicStatus.value = (event as CustomEvent<string>).detail || '正在处理动态背景';
 };
@@ -112,11 +110,6 @@ async function loadBackgroundState() {
   bgKind.value = state?.kind === 'video' ? 'video' : 'image';
 }
 
-async function syncDynamicKind(): Promise<void> {
-  const dynamic = await dynamicBackgroundGet().catch(() => null);
-  dynamicKind.value = dynamic?.kind === 'video' ? 'video' : 'image';
-}
-
 async function chooseBackground() {
   if (bgBusy.value) return;
   bgBusy.value = true;
@@ -153,18 +146,29 @@ async function clearBackground() {
   }
 }
 
-function onDynamicToggle(value: boolean): void {
+async function onDynamicToggle(value: boolean): Promise<void> {
+  const generation = ++dynamicToggleGeneration;
   dynamicEnabled.value = value;
-  setDynamicBackgroundEnabled(value);
+  try {
+    await setDynamicBackgroundEnabled(value);
+  } catch (error) {
+    if (generation !== dynamicToggleGeneration) return;
+    dynamicEnabled.value = !value;
+    dynamicStatus.value = '设置保存失败';
+    errMsg.value = `动态壁纸开关保存失败：${(error as Error).message || '未知错误'}`;
+    return;
+  }
+  if (generation !== dynamicToggleGeneration) return;
   window.dispatchEvent(new CustomEvent('dynamic-background:settings-changed'));
   dynamicStatus.value = value ? '正在识别当前游戏' : '已关闭';
-  if (value) void syncDynamicRecognition();
+  if (value) void syncDynamicRecognition(generation);
 }
 
-async function syncDynamicRecognition(): Promise<void> {
-  if (!getDynamicBackgroundConfig().enabled) return;
+async function syncDynamicRecognition(generation = dynamicToggleGeneration): Promise<void> {
+  if (generation !== dynamicToggleGeneration || !getDynamicBackgroundConfig().enabled) return;
   dynamicStatus.value = '正在识别当前游戏';
   const game = await detectGame(true).catch(() => null);
+  if (generation !== dynamicToggleGeneration || !getDynamicBackgroundConfig().enabled) return;
   if (!game) {
     dynamicStatus.value = '未识别到当前游戏进程';
     return;
@@ -173,10 +177,11 @@ async function syncDynamicRecognition(): Promise<void> {
   dynamicStatus.value = `已识别当前游戏：${title}`;
   try {
     const result = await refreshDynamicBackground(game);
-    if (result) {
+    if (result && generation === dynamicToggleGeneration && getDynamicBackgroundConfig().enabled) {
       window.dispatchEvent(new CustomEvent('dynamic-background:loaded', { detail: result.state }));
     }
   } catch (error) {
+    if (generation !== dynamicToggleGeneration || !getDynamicBackgroundConfig().enabled) return;
     dynamicStatus.value = `失败：${(error as Error).message || 'Steam 连接失败'}`;
   }
 }
@@ -451,7 +456,6 @@ onMounted(async () => {
   dynamicEnabled.value = getDynamicBackgroundConfig().enabled;
   load();
   void loadBackgroundState();
-  void syncDynamicKind();
   window.addEventListener('dynamic-background:progress', onDynamicProgress);
 });
 // KeepAlive 缓存下切回本页时主动刷新，避免「手柄设置/背景状态在其它页面变更后不刷新」
@@ -460,7 +464,6 @@ onActivated(() => {
   void ensureUpdateManager();
   load();
   void loadBackgroundState();
-  void syncDynamicKind();
 });
 onBeforeUnmount(() => {
   window.removeEventListener('dynamic-background:progress', onDynamicProgress);
@@ -542,7 +545,7 @@ onBeforeUnmount(() => {
 
     <section class="card background-settings-card">
       <div class="card-header-row background-section-head">
-        <h3 class="card-title"><InlineIcon name="monitor" /> 背景设置</h3>
+        <h3 class="card-title"><InlineIcon name="monitor" /> 动态壁纸设置</h3>
       </div>
       <div class="bg-actions background-actions">
         <button class="bg-icon-btn" :disabled="bgBusy" title="选择背景文件" @click="chooseBackground">
@@ -585,10 +588,9 @@ onBeforeUnmount(() => {
         <output for="bg-blur">{{ bgBlur }}px</output>
       </div>
       <Toggle
-        v-if="backgroundControlKind === 'video'"
         :model-value="videoBatteryPause"
-        label="离电自动暂停视频"
-        description="拔掉电源后立即暂停，插电且窗口可见时恢复"
+        label="离电禁止播放视频"
+        description="始终可设置；离电时不启动视频，插电且窗口可见时恢复"
         color="accent"
         @update:model-value="onVideoBatteryPauseChange"
       />

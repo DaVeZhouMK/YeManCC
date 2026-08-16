@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, nextTick, onBeforeUnmount, onMounted } from 'vue';
+import { focusGamepadElement, getGamepadPopupPlacement } from '@/gamepad/focus';
 
 export interface DropdownOption {
   value: string | number;
@@ -47,7 +48,7 @@ function colorVar(): string {
   return 'var(--accent)';
 }
 
-function openMenu() {
+function openMenu(fromGamepad = false) {
   if (props.disabled || open.value) return;
   computePosition();
   // modelValue 不在选项中时（selectedIndex=-1）不高亮任何项，避免误导
@@ -55,9 +56,13 @@ function openMenu() {
   open.value = true;
   nextTick(() => {
     const el = menuEl.value?.querySelector<HTMLElement>('[data-hl="true"]');
-    el?.scrollIntoView({ block: 'nearest' });
     // 焦点落到高亮项：手柄 A 打开菜单后可直接 A 确认 / B 取消 / 上下移动（与鼠标菜单一致）
-    el?.focus({ preventScroll: true });
+    if (!el) return;
+    if (fromGamepad) focusGamepadElement(el);
+    else {
+      el.scrollIntoView({ block: 'nearest' });
+      el.focus({ preventScroll: true });
+    }
   });
 }
 
@@ -68,9 +73,7 @@ function closeMenu() {
 function restoreTriggerFocus() {
   const trigger = triggerEl.value;
   if (!trigger) return;
-  document.querySelectorAll('.focused').forEach((n) => n.classList.remove('focused'));
-  trigger.focus({ preventScroll: true });
-  trigger.classList.add('focused');
+  focusGamepadElement(trigger);
 }
 
 // 计算弹层 fixed 定位（对齐 trigger；空间不足则向上翻转）
@@ -78,21 +81,9 @@ function computePosition() {
   const r = triggerEl.value?.getBoundingClientRect();
   if (!r) return;
   const MENU_MAX = 360;
-  const style: Record<string, string> = {
-    position: 'fixed',
-    left: r.left + 'px',
-    width: r.width + 'px',
-  };
-  const spaceBelow = window.innerHeight - r.bottom;
-  if (spaceBelow < MENU_MAX + 8 && r.top > spaceBelow) {
+  const placement = getGamepadPopupPlacement(r, r.width, MENU_MAX, 6);
+  menuStyle.value = placement.style;
     // 向上：bottom = 视口底 - trigger顶 + 6
-    style.bottom = window.innerHeight - r.top + 6 + 'px';
-    style.top = 'auto';
-  } else {
-    style.top = r.bottom + 6 + 'px';
-    style.bottom = 'auto';
-  }
-  menuStyle.value = style;
 }
 
 function toggle() {
@@ -123,17 +114,16 @@ function move(dir: 1 | -1) {
   }
   highlight.value = i;
   const el = menuEl.value?.querySelectorAll<HTMLElement>('.dd-option')[i];
-  el?.scrollIntoView({ block: 'nearest' });
-  el?.focus({ preventScroll: false });
+  if (el) focusGamepadElement(el);
 }
 
 function onTriggerKey(e: KeyboardEvent) {
   if (props.disabled) return;
   if (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowDown' || e.key === 'ArrowUp') {
     e.preventDefault();
-    openMenu();
-    if (e.key === 'ArrowDown') move(1);
-    else if (e.key === 'ArrowUp') move(-1);
+    openMenu(true);
+    if (e.key === 'ArrowDown') nextTick(() => move(1));
+    else if (e.key === 'ArrowUp') nextTick(() => move(-1));
   }
 }
 
@@ -192,7 +182,7 @@ onBeforeUnmount(() => {
 // ── 手柄 A/X：打开菜单（与鼠标点击一致），不再顺序轮转档位 ──
 function onGpOpen(e: Event) {
   e.preventDefault();
-  openMenu();
+  openMenu(true);
 }
 // ── 手柄上下导航（来自引擎 gp:dropdown-nav）：在菜单项内移动高亮并聚焦 ──
 function onGpNav(e: Event) {
@@ -336,6 +326,7 @@ function onGpNav(e: Event) {
   padding: 5px;
   box-shadow: 0 14px 36px rgba(0, 0, 0, 0.5);
   max-height: 360px;
+  min-height: 0;
   overflow-y: auto;
   display: flex;
   flex-direction: column;

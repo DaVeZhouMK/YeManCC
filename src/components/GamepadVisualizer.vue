@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, computed, watch } from 'vue';
 import { on as onIpc } from '@/bridge/ipc';
-import { onUiVisibilityChange } from '@/bridge/uiLifecycle';
+
 import Toggle from '@/components/Toggle.vue';
 import type { GamepadSettings } from '@/bridge/yeman';
 
@@ -18,16 +18,17 @@ const axes = ref<number[]>([]);
 const connected = ref(false);
 const padName = ref('');
 const testMode = ref(false);
+let stopState: (() => void) | null = null;
+let testBTimer: number | null = null;
 let raf = 0;
-let probeTimer = 0; // 无手柄时的低频探测 timer（省 CPU）
-// 复用缓冲：仅当内容变化时才整体替换 ref，避免每帧 map + Vue 响应式开销
 let lastLive: boolean[] = [];
 let lastAxes: number[] = [];
+let probeTimer = 0; // 无手柄时的低频探测 timer（省 CPU）
+// 复用缓冲：仅当内容变化时才整体替换 ref，避免每帧 map + Vue 响应式开销
 const baseImageRevision = ref(0);
 let baseImageRetryTimer: number | null = null;
 let stopResumeReady: (() => void) | null = null;
 let stopResumed: (() => void) | null = null;
-let stopUiVisibility: (() => void) | null = null;
 
 const baseImageUrl = computed(() => `/gamepad-base.png?wake=${baseImageRevision.value}`);
 
@@ -66,7 +67,7 @@ function scheduleNext(connectedNow: boolean) {
 
 function poll() {
   try {
-    const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+    const pads: Gamepad[] = [];
     let p: Gamepad | null = null;
     for (const x of pads) if (x && x.connected) { p = x; break; }
     if (p) {
@@ -113,27 +114,36 @@ function onTestModeEvent(e: Event) {
 
 onMounted(() => {
   window.addEventListener('ipc:gamepad.testmode', onTestModeEvent);
+  stopState = onIpc('gamepad.state', (payload) => {
+    const state = payload as {
+      connected?: boolean;
+      name?: string;
+      buttons?: unknown;
+      axes?: unknown;
+    };
+    connected.value = Boolean(state?.connected);
+    padName.value = String(state?.name || '手柄');
+    live.value = Array.isArray(state?.buttons) ? state.buttons.map(Boolean) : [];
+    axes.value = Array.isArray(state?.axes)
+      ? state.axes.map((value) => Number.isFinite(Number(value)) ? Number(value) : 0)
+      : [];
+  });
   stopResumeReady = onIpc('power.resume-ready', refreshBaseImage);
   stopResumed = onIpc('power.resumed', refreshBaseImage);
-  stopUiVisibility = onUiVisibilityChange(({ visible }) => {
-    if (raf) cancelAnimationFrame(raf);
-    if (probeTimer) window.clearTimeout(probeTimer);
-    raf = 0;
-    probeTimer = 0;
-    if (visible) raf = requestAnimationFrame(poll);
-  });
 });
 onBeforeUnmount(() => {
   if (raf) cancelAnimationFrame(raf);
   if (probeTimer) clearTimeout(probeTimer);
   if (baseImageRetryTimer !== null) window.clearTimeout(baseImageRetryTimer);
   window.removeEventListener('ipc:gamepad.testmode', onTestModeEvent);
+  stopState?.();
+  stopState = null;
   stopResumeReady?.();
   stopResumeReady = null;
   stopResumed?.();
   stopResumed = null;
-  stopUiVisibility?.();
-  stopUiVisibility = null;
+  if (testBTimer !== null) window.clearTimeout(testBTimer);
+  testBTimer = null;
   setTestMode(false);
 });
 watch(connected, (c) => {
@@ -141,6 +151,17 @@ watch(connected, (c) => {
 });
 
 // 交互层以原始 420x270 标定坐标为基准；模板统一应用与 495px PNG 相同的 1.1 倍几何变换。
+watch(live, (buttons) => {
+  if (testBTimer !== null) window.clearTimeout(testBTimer);
+  testBTimer = null;
+  if (testMode.value && buttons[1]) {
+    testBTimer = window.setTimeout(() => {
+      testBTimer = null;
+      if (testMode.value && live.value[1]) setTestMode(false);
+    }, 3000);
+  }
+});
+
 const STICK_L = { x: 116, y: 138 };
 const STICK_R = { x: 255, y: 191 };
 const STICK_TRAVEL = 10;

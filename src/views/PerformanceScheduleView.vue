@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onActivated, onDeactivated, onMounted, onUnmounted, ref, watch } from 'vue';
+import { focusGamepadElement, getGamepadPopupPlacement, scrollElementIntoSafeArea } from '@/gamepad/focus';
 import AppIcon from '@/components/AppIcon.vue';
 import Dropdown from '@/components/Dropdown.vue';
 import Slider from '@/components/Slider.vue';
@@ -70,6 +71,7 @@ import {
   type ScheduleProfile,
 } from '@/bridge/performanceSchedule';
 import { detectCoreArchitecture, type CoreArchitectureInfo } from '@/bridge/yeman';
+import { gameRuleNameFromPath, getGameRules, setGameRuleList } from '@/bridge/gameRules';
 
 const config = ref<PerformanceScheduleConfig>(defaultPerformanceScheduleConfig());
 const selectedSide = ref<PowerSide>('ac');
@@ -93,6 +95,7 @@ const errMsg = ref('');
 const warningMsg = ref('');
 const trainerBusy = ref(false);
 const game = ref<DetectedGame | null>(null);
+const gameRulesBusy = ref(false);
 // 空名称也要保留为合法键「.exe」：不能用 truthiness 拒绝该配置。
 function normalizeCustomExeKey(raw: string): string {
   const base = raw.trim().toLowerCase();
@@ -110,6 +113,10 @@ const gameExeKey = computed(() => {
   return normalizeCustomExeKey(base);
 });
 const customActive = computed(() => !!gameExeKey.value && !!gameCustomConfig.value.entries[gameExeKey.value]);
+
+function gameTargetFor(g: DetectedGame | null | undefined) {
+  return g ? { pid: g.pid, processCreated: g.processCreated } : undefined;
+}
 const paused = ref(false);
 const mouseOn = ref(false);
 const showMonitor = ref(getUiSetting('scheduleMonitor'));
@@ -216,11 +223,6 @@ const editModeOptions = computed(() => MODE_ORDER.map((mode) => ({
   label: MODE_META[mode].label,
   sub: modeOptionSub(selectedSide.value, mode),
 })));
-const EDIT_SIDE_OPTIONS = POWER_SIDES.map((side) => ({
-  value: side,
-  label: side.toUpperCase(),
-  sub: side === 'ac' ? '交流电配置' : '电池配置',
-}));
 const STRATEGY_LABEL: Record<TdpFloatStrategy, string> = {
   none: '无下降',
   aggressive: '激进浮动',
@@ -242,11 +244,6 @@ async function refreshCoreArchitectureForAuto(): Promise<void> {
   coreArchitecture.value = await detectCoreArchitecture();
 }
 
-const gameName = computed(() => {
-  const detected = detectedGameName(game.value);
-  const monitored = floatInfo.value.status?.game?.trim();
-  return detected || monitored || '未识别游戏';
-});
 const powerText = computed(() => {
   const v = floatInfo.value.status?.packagePower || topMon.value?.tdpW || 0;
   return v > 0 ? v.toFixed(1) + 'W' : '--';
@@ -306,15 +303,6 @@ function sampleMonitor(): void {
   };
   monitorHistory.value = [...monitorHistory.value.slice(-(MONITOR_MAX_POINTS - 1)), point];
 }
-
-const remainText = computed(() => {
-  const min = Number(topMon.value?.remainMin);
-  if (powerSide.value === 'ac') return '交流供电';
-  if (!Number.isFinite(min) || min < 0) return '暂无数据';
-  const h = Math.floor(min / 60);
-  const m = Math.round(min % 60);
-  return h > 0 ? `${h}小时${m}分` : `${m}分钟`;
-});
 
 // 编辑面板：TDP / 帧数目标上限下拉（与监控锁帧 / TDP 功耗页共用 FPS_CEILINGS 单一数据源：0=不锁帧，上限 300）。
 const tdpCeilingOpts = TDP_CEILINGS.map((v) => ({ value: v, label: `${v} W` }));
@@ -385,9 +373,10 @@ function modeProfile(side: PowerSide, mode: ScheduleMode): ScheduleProfile {
 
 // 摘要反映当前真正生效的 CPU 控制项：cpuTarget≠无压制 → CPU 浮动值；否则 → CPU 挡位。
 function cpuControlLabel(p: ScheduleProfile): string {
-  if (p.cpuTarget && p.cpuTarget !== 'none') {
-  const t = CPU_FLOAT_OPTS.value.find((o) => o.value === p.cpuTarget);
-  return `CPU浮动值 ${t ? t.label : p.cpuTarget}`;
+  // 不锁帧时没有 FPS 目标，CPU 浮动不参与执行，实际控制项回到固定 CPU 挡位。
+  if (p.fpsTarget > 0 && p.cpuTarget && p.cpuTarget !== 'none') {
+    const t = CPU_FLOAT_OPTS.value.find((o) => o.value === p.cpuTarget);
+    return `CPU浮动值 ${t ? t.label : p.cpuTarget}`;
   }
   const cpuOpt = CPU_OPTS.find((o) => o.value === p.cpuPreset);
   return `CPU挡位 ${cpuOpt ? cpuOpt.label : p.cpuPreset}`;
@@ -396,7 +385,8 @@ function cpuControlLabel(p: ScheduleProfile): string {
 function modeDetail(side: PowerSide, mode: ScheduleMode): string {
   const p = modeProfile(side, mode);
   const fps = p.fpsTarget > 0 ? `${p.fpsTarget} FPS` : '不锁帧';
-  return `${fps} · ${p.tdpMax}W · ${cpuControlLabel(p)} · 浮动执行${getTdpTarget(p.tdpMax, p.tdpStrategy)}W`;
+  const floating = p.fpsTarget > 0 ? ` · 浮动执行${getTdpTarget(p.tdpMax, p.tdpStrategy)}W` : '';
+  return `${fps} · ${p.tdpMax}W · ${cpuControlLabel(p)}${floating}`;
 }
 
 // 自定义模式：取当前游戏某侧档位的详情文字
@@ -406,9 +396,10 @@ function customProfileFor(side: PowerSide): ScheduleProfile | null {
 }
 function customDetail(side: PowerSide): string {
   const p = customProfileFor(side);
-  if (!p) return '未设置自定义档位';
+  if (!p) return '未设置专属档位';
   const fps = p.fpsTarget > 0 ? `${p.fpsTarget} FPS` : '不锁帧';
-  return `${fps} · ${p.tdpMax}W · ${cpuControlLabel(p)} · 浮动执行${getTdpTarget(p.tdpMax, p.tdpStrategy)}W`;
+  const floating = p.fpsTarget > 0 ? ` · 浮动执行${getTdpTarget(p.tdpMax, p.tdpStrategy)}W` : '';
+  return `${fps} · ${p.tdpMax}W · ${cpuControlLabel(p)}${floating}`;
 }
 
 function cloneProfile(side: PowerSide, mode: ScheduleMode): ScheduleProfile {
@@ -466,9 +457,9 @@ async function resetCustomProfile() {
     editingDraft.value = { ...fallback };
     if (config.value.enabled) {
       const e = gameCustomConfig.value.entries[key];
-      await applyGameCustomProfiles(e.ac, e.dc);
+      await applyGameCustomProfiles(e.ac, e.dc, gameTargetFor(game.value));
     }
-    statusMsg.value = `自定义 ${side.toUpperCase()} 已恢复为自动优化默认`;
+    statusMsg.value = `专属配置 ${side.toUpperCase()} 已恢复为自动优化默认`;
   } catch (e) {
     errMsg.value = '恢复默认失败：' + (e as Error).message;
   } finally {
@@ -513,13 +504,6 @@ function toggleEditor() {
   openEditor();
 }
 
-function selectEditingSide(rawSide: string | number) {
-  const side = rawSide as PowerSide;
-  if (!POWER_SIDES.includes(side)) return;
-  selectedSide.value = side;
-  loadEditingDraft();
-}
-
 function selectEditingMode(rawMode: string | number) {
   const mode = rawMode as ScheduleMode;
   if (!MODE_ORDER.includes(mode)) return;
@@ -535,8 +519,7 @@ function focusPauseButton() {
   nextTick(() => {
     const el = pauseButtonEl.value;
     if (!el || el.disabled) return;
-    el.focus({ preventScroll: true });
-    el.classList.add('focused');
+    focusGamepadElement(el);
   });
 }
 
@@ -552,10 +535,32 @@ function onGamepadBack(e: Event) {
     cancelResetConfirm();
     return;
   }
+  if (customDeleteOpen.value) {
+    e.preventDefault();
+    cancelDeleteCustom();
+    return;
+  }
   if (e.defaultPrevented || (!editing.value && !customEditing.value)) return;
   if (document.querySelector('[aria-expanded="true"][aria-haspopup="listbox"]')) return;
   closeEditor();
   e.preventDefault();
+}
+
+async function removeCurrentGameJudgement(): Promise<void> {
+  const current = game.value;
+  if (!current || gameRulesBusy.value) return;
+  gameRulesBusy.value = true;
+  try {
+    const snapshot = await getGameRules();
+    const name = gameRuleNameFromPath(current.whitelistRule || current.path || current.name);
+    await setGameRuleList(
+      'whitelist',
+      snapshot.whitelist.filter((item) => item !== name),
+    );
+    statusMsg.value = `已删除 ${name} 的游戏判定`;
+  } catch (e) {
+    errMsg.value = '删除游戏判定失败：' + (e as Error).message;
+  } finally { gameRulesBusy.value = false; }
 }
 
 function syncMouseStateFromApp() {
@@ -653,16 +658,14 @@ const editorPanelEl = ref<HTMLElement | null>(null);
 // 内联编辑面板打开后滚动到可视区域（自定义模式入口在上方，面板在工具行下方）
 function scrollEditorIntoView() {
   nextTick(() => {
-    editorPanelEl.value?.scrollIntoView({ behavior: 'auto', block: 'nearest' });
+    if (editorPanelEl.value) scrollElementIntoSafeArea(editorPanelEl.value);
     // 编辑面板打开后，焦点必须落在面板内的第一个真实控件；否则旧的“编辑”按钮
     // 仍是 activeElement，手柄第一次下移会先经过顶部工具行。
     const first = editorPanelEl.value?.querySelector<HTMLElement>(
       '.editor-side-tab, .editor-targets [data-gp-dropdown] .dd-trigger, .editor-grid [data-gp-dropdown] .dd-trigger, input, button'
     );
     if (first && !first.hasAttribute('disabled')) {
-      document.querySelectorAll('.focused').forEach((n) => n.classList.remove('focused'));
-      first.focus({ preventScroll: true });
-      first.classList.add('focused');
+      focusGamepadElement(first);
     }
   });
 }
@@ -676,30 +679,16 @@ function requestResetProfiles() {
     return;
   }
   const r = trigger.getBoundingClientRect();
-  const style: Record<string, string> = { position: 'fixed' };
   // 垂直：优先弹出在按钮下方，空间不足（接近视口底部）时向上翻转
   const POP_H = 250;
-  const spaceBelow = window.innerHeight - r.bottom;
-  const above = spaceBelow < POP_H + 8 && r.top > spaceBelow;
-  resetConfirmAbove.value = above;
-  if (above) {
-    style.bottom = window.innerHeight - r.top + 10 + 'px';
-    style.top = 'auto';
-  } else {
-    style.top = r.bottom + 8 + 'px';
-    style.bottom = 'auto';
-  }
   // 水平：右对齐按钮，防溢出视口左右边界
   const POP_W = Math.min(420, window.innerWidth - 16);
-  const left = Math.max(8, Math.min(r.right - POP_W, window.innerWidth - POP_W - 8));
-  style.left = left + 'px';
-  style.width = POP_W + 'px';
-  resetConfirmStyle.value = style;
+  const placement = getGamepadPopupPlacement(r, POP_W, POP_H, 10);
+  resetConfirmAbove.value = placement.above;
+  resetConfirmStyle.value = placement.style;
   resetConfirmOpen.value = true;
   nextTick(() => {
-    const cancel = resetCancelEl.value;
-    cancel?.focus({ preventScroll: true });
-    cancel?.classList.add('focused');
+    focusGamepadElement(resetCancelEl.value);
   });
 }
 
@@ -707,8 +696,7 @@ function cancelResetConfirm() {
   if (!resetConfirmOpen.value) return;
   resetConfirmOpen.value = false;
   const trigger = resetTriggerEl.value;
-  trigger?.focus({ preventScroll: true });
-  trigger?.classList.add('focused');
+  focusGamepadElement(trigger);
 }
 
 function confirmResetProfiles() {
@@ -768,11 +756,11 @@ async function addCustomMode() {
     };
     await saveGameCustomConfig(gameCustomConfig.value);
     if (config.value.enabled) {
-      await applyGameCustomProfiles(entry.ac, entry.dc);
+      await applyGameCustomProfiles(entry.ac, entry.dc, gameTargetFor(game.value));
     }
-    statusMsg.value = `已为「${entry.displayName}」添加自定义模式`;
+    statusMsg.value = `已为「${entry.displayName}」添加专属配置`;
   } catch (e) {
-    errMsg.value = '添加自定义失败：' + (e as Error).message;
+    errMsg.value = '添加专属配置失败：' + (e as Error).message;
   } finally {
     busy.value = false;
   }
@@ -794,15 +782,15 @@ async function deleteCustomMode() {
       const side = powerSide.value;
       await applyPerformanceSchedule(side, config.value.active[side], config.value);
     }
-    statusMsg.value = '已删除自定义模式，恢复自动优化';
+    statusMsg.value = '已删除专属配置，恢复自动优化';
   } catch (e) {
-    errMsg.value = '删除自定义失败：' + (e as Error).message;
+    errMsg.value = '删除专属配置失败：' + (e as Error).message;
   } finally {
     busy.value = false;
   }
 }
 
-// 删除自定义确认弹窗（复用自绘弹窗模式，锚定「删除自定义」按钮）
+// 删除专属配置确认弹窗（复用自绘弹窗模式）
 const customDeleteOpen = ref(false);
 const customDeleteStyle = ref<Record<string, string>>({});
 const customDeleteAbove = ref(false);
@@ -818,28 +806,14 @@ function requestDeleteCustom() {
     return;
   }
   const r = trigger.getBoundingClientRect();
-  const style: Record<string, string> = { position: 'fixed' };
   const POP_H = 250;
-  const spaceBelow = window.innerHeight - r.bottom;
-  const above = spaceBelow < POP_H + 8 && r.top > spaceBelow;
-  customDeleteAbove.value = above;
-  if (above) {
-    style.bottom = window.innerHeight - r.top + 10 + 'px';
-    style.top = 'auto';
-  } else {
-    style.top = r.bottom + 8 + 'px';
-    style.bottom = 'auto';
-  }
   const POP_W = Math.min(420, window.innerWidth - 16);
-  const left = Math.max(8, Math.min(r.right - POP_W, window.innerWidth - POP_W - 8));
-  style.left = left + 'px';
-  style.width = POP_W + 'px';
-  customDeleteStyle.value = style;
+  const placement = getGamepadPopupPlacement(r, POP_W, POP_H, 10);
+  customDeleteAbove.value = placement.above;
+  customDeleteStyle.value = placement.style;
   customDeleteOpen.value = true;
   nextTick(() => {
-    const cancel = customDeleteCancelEl.value;
-    cancel?.focus({ preventScroll: true });
-    cancel?.classList.add('focused');
+    focusGamepadElement(customDeleteCancelEl.value);
   });
 }
 
@@ -847,8 +821,7 @@ function cancelDeleteCustom() {
   if (!customDeleteOpen.value) return;
   customDeleteOpen.value = false;
   const trigger = customDeleteTriggerEl.value;
-  trigger?.focus({ preventScroll: true });
-  trigger?.classList.add('focused');
+  focusGamepadElement(trigger);
 }
 
 function confirmDeleteCustom() {
@@ -939,7 +912,7 @@ async function saveEditor() {
         const e = gameCustomConfig.value.entries[key];
         await applyGameCustomProfiles(e.ac, e.dc);
       }
-      statusMsg.value = `自定义 ${side.toUpperCase()} 配置已保存`;
+      statusMsg.value = `专属配置 ${side.toUpperCase()} 配置已保存`;
     } else {
       const mode = editing.value;
       if (!mode) throw new Error('未选择档位');
@@ -981,24 +954,38 @@ async function refreshStatus() {
       // 电源切换：自定义模式重新应用当前侧，避免回退到自动档位
       if (config.value.enabled && customActive.value && gameExeKey.value) {
         const e = gameCustomConfig.value.entries[gameExeKey.value];
-        if (e) void applyGameCustomProfiles(e.ac, e.dc).catch(() => {});
+        if (e) void applyGameCustomProfiles(e.ac, e.dc, gameTargetFor(game.value)).catch(() => {});
       }
     }
   }
 }
 
 function syncGame(g: DetectedGame | null) {
+  const previous = game.value;
+  const targetChanged = !!previous &&
+    (!g || previous.pid !== g.pid || previous.processCreated !== g.processCreated ||
+      previous.source !== g.source);
   game.value = g;
   if (!g) paused.value = false;
   // 新游戏识别后：若该游戏已有自定义配置，则立即应用其 AC/DC 档位（覆盖自动模式）
-  if (g && gameExeKey.value && gameCustomConfig.value.entries[gameExeKey.value] && config.value.enabled) {
-    const e = gameCustomConfig.value.entries[gameExeKey.value];
-    void applyGameCustomProfiles(e.ac, e.dc).catch(() => {});
+  if (config.value.enabled && (targetChanged || (!previous && g))) {
+    const key = gameExeKey.value;
+    const entry = key ? gameCustomConfig.value.entries[key] : undefined;
+    if (g && entry) {
+      void applyGameCustomProfiles(entry.ac, entry.dc, gameTargetFor(g)).catch(() => {});
+    } else {
+      void applyPerformanceSchedule(powerSide.value, config.value.active[powerSide.value], config.value)
+        .catch(() => {});
+    }
   }
   if (g) {
     void hasSuspendedState(g.pid)
-      .then((r) => { paused.value = r.suspended; })
-      .catch(() => { paused.value = false; });
+      .then((r) => {
+        if (game.value?.pid === g.pid && game.value.processCreated === g.processCreated) paused.value = r.suspended;
+      })
+      .catch(() => {
+        if (game.value?.pid === g.pid && game.value.processCreated === g.processCreated) paused.value = false;
+      });
   }
 }
 
@@ -1057,7 +1044,11 @@ async function togglePause() {
         statusMsg.value = '暂停失败：没有可暂停的游戏进程';
         return;
       }
-      const r = await suspendGame(game.value.pid, game.value.name || game.value.title || '当前游戏');
+      const r = await suspendGame(
+        game.value.pid,
+        game.value.name || game.value.title || '当前游戏',
+        game.value.processCreated,
+      );
       paused.value = r.ok;
       statusMsg.value = r.ok
         ? `已暂停 ${game.value.name || game.value.title || '当前游戏'}`
@@ -1076,7 +1067,7 @@ async function closeCurrentGame() {
   closeBusy.value = true;
   try {
     const current = game.value;
-    const r = await closeGame(current.pid, current.name);
+    const r = await closeGame(current.pid, current.name, current.processCreated);
     if (!r.ok) throw new Error(r.msgs.join('；') || '关闭失败');
     statusMsg.value = `已关闭 ${current.name}`;
     await refreshGameStatus();
@@ -1235,15 +1226,13 @@ onUnmounted(() => {
 
 <template>
   <section class="schedule-view">
-    <header class="page-head">
-      <div class="page-title-block">
-        <h1><AppIcon name="gamepad" />{{ gameName }}</h1>
-        <p>预计续航 {{ remainText }}</p>
+    <header v-if="statusMsg || warningMsg || errMsg || customActive" class="page-head">
+      <div v-if="statusMsg || warningMsg || errMsg" class="page-title-block">
         <div v-if="statusMsg" class="head-notice ok">{{ statusMsg }}</div>
         <div v-if="warningMsg" class="head-notice warning">{{ warningMsg }}</div>
         <div v-if="errMsg" class="head-notice error">{{ errMsg }}</div>
       </div>
-      <span v-if="customActive" class="mode-label">自定义模式</span>
+      <span v-if="customActive" class="mode-label">专属配置</span>
     </header>
 
     <div class="hero card">
@@ -1339,8 +1328,8 @@ onUnmounted(() => {
     <!-- 自定义游戏模式：基于当前识别的游戏 exe，创建/编辑/删除一套专属 AC/DC 档位（覆盖自动模式）；自动/手动模式均显示 -->
     <div v-if="game && gameExeKey" class="custom-card card">
       <div class="section-head">
-        <div class="section-title">自定义模式</div>
-        <!-- 自定义模式编辑/保存/应用入口：自动/手动模式均可用；手动模式仅停止自动套用，不限制编辑 -->
+        <div class="section-title">专属配置</div>
+        <!-- 专属配置编辑/保存/应用入口：自动/手动模式均可用 -->
         <div class="custom-actions" data-gp-group="custom-actions">
           <button
             type="button"
@@ -1351,16 +1340,17 @@ onUnmounted(() => {
           >
             <AppIcon name="play" />{{ trainerBusy ? '处理中…' : '游戏修改器' }}
           </button>
-          <button
-            v-if="!customActive"
-            type="button"
-            class="tool-mode-btn"
-            :disabled="busy"
-            data-gp-group="custom-actions"
-            @click="addCustomMode"
-          >
-            <AppIcon name="plus" />添加自定义
-          </button>
+          <template v-if="!customActive">
+            <button
+              type="button"
+              class="tool-mode-btn"
+              :disabled="busy"
+              data-gp-group="custom-actions"
+              @click="addCustomMode"
+            >
+              <AppIcon name="plus" />添加专属配置
+            </button>
+          </template>
           <template v-else>
             <button
               type="button"
@@ -1370,7 +1360,7 @@ onUnmounted(() => {
               data-gp-group="custom-actions"
               @click="openCustomEditor()"
             >
-              <AppIcon name="edit" />编辑自定义
+              <AppIcon name="edit" />编辑专属配置
             </button>
             <button
               ref="customDeleteTriggerEl"
@@ -1380,18 +1370,23 @@ onUnmounted(() => {
               data-gp-group="custom-actions"
               @click="requestDeleteCustom"
             >
-              <AppIcon name="close" />删除自定义
+                <AppIcon name="close" />删除专属配置
+            </button>
+            <button
+              v-if="game?.source === 'whitelist'"
+              type="button"
+              class="tool-mode-btn danger"
+              :disabled="busy || gameRulesBusy"
+              data-gp-group="custom-actions"
+              @click="removeCurrentGameJudgement"
+            >
+              <AppIcon name="trash" />删除游戏判定
             </button>
           </template>
         </div>
       </div>
 
       <div class="custom-body">
-        <div class="custom-game">
-          <AppIcon name="gamepad" />
-          <span>当前游戏：<b>{{ gameCustomConfig.entries[gameExeKey]?.displayName || gameExeKey }}</b></span>
-        </div>
-
         <div v-if="customActive" class="power-mode-list">
           <button
             v-for="side in POWER_SIDES"
@@ -1437,12 +1432,12 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <!-- 编辑面板：内联展开在工具行下方（编辑性能组合 / 自定义模式共用同一面板） -->
+    <!-- 编辑面板：内联展开在工具行下方（编辑性能组合 / 专属配置共用同一面板） -->
     <div v-if="editing || customEditing" ref="editorPanelEl" class="editor-card card">
       <div class="section-head editor-head">
         <div>
           <div class="section-title">
-            {{ customEditing ? '编辑自定义档位' : '编辑性能组合' }}
+            {{ customEditing ? '编辑专属配置档位' : '编辑性能组合' }}
           </div>
           <div class="section-sub">
             {{ customEditing ? '仅对当前游戏生效，覆盖自动优化档位' : '可在这里切换 AC / DC 与任意档位' }}
@@ -1465,17 +1460,6 @@ onUnmounted(() => {
 
       <div class="editor-targets">
         <label v-if="!customEditing">
-          <span>供电配置</span>
-          <Dropdown
-            :model-value="selectedSide"
-            :options="EDIT_SIDE_OPTIONS"
-            :color="sideColor"
-            :disabled="busy"
-            aria-label="选择要编辑的供电配置"
-            @update:model-value="selectEditingSide"
-          />
-        </label>
-        <label v-if="!customEditing">
           <span>编辑档位</span>
           <Dropdown
             :model-value="editing"
@@ -1485,10 +1469,6 @@ onUnmounted(() => {
             aria-label="选择要编辑的性能档位"
             @update:model-value="selectEditingMode"
           />
-        </label>
-        <label v-else class="editor-target-game">
-          <span>当前游戏</span>
-          <div class="editor-game-name">{{ gameCustomConfig.entries[gameExeKey]?.displayName || gameExeKey }}</div>
         </label>
       </div>
 
@@ -1503,7 +1483,7 @@ onUnmounted(() => {
             @update:model-value="updateEditing('coreMode', $event as CoreMode)"
           />
         </label>
-        <label>
+        <label v-if="editingDraft.fpsTarget > 0">
           <span>CPU 浮动值</span>
           <Dropdown
             :model-value="editingDraft.cpuTarget"
@@ -1513,7 +1493,7 @@ onUnmounted(() => {
             @update:model-value="updateEditing('cpuTarget', $event as FloatProfile)"
           />
         </label>
-        <label v-if="editingDraft.cpuTarget === 'none'">
+        <label v-if="editingDraft.cpuTarget === 'none' || editingDraft.fpsTarget === 0">
           <span>CPU 挡位</span>
           <Dropdown
             :model-value="editingDraft.cpuPreset"
@@ -1523,7 +1503,7 @@ onUnmounted(() => {
             @update:model-value="updateEditing('cpuPreset', $event as CpuPreset)"
           />
         </label>
-        <label>
+        <label v-if="editingDraft.fpsTarget > 0">
           <span>TDP 浮动幅度</span>
           <Dropdown
             :model-value="editingDraft.tdpStrategy"
@@ -1549,6 +1529,7 @@ onUnmounted(() => {
             @update:model-value="updateEditing('tdpMax', $event)"
           />
           <Dropdown
+            class="editor-ceiling"
             :model-value="tdpCeiling"
             :options="tdpCeilingOpts"
             :color="sideColor"
@@ -1572,6 +1553,7 @@ onUnmounted(() => {
             @update:model-value="updateEditing('fpsTarget', $event)"
           />
           <Dropdown
+            class="editor-ceiling"
             :model-value="fpsCeiling"
             :options="fpsCeilingOpts"
             :color="sideColor"
@@ -1588,6 +1570,7 @@ onUnmounted(() => {
           v-if="!customEditing"
           ref="resetTriggerEl"
           type="button"
+          data-gp-group="schedule-editor-actions"
           class="editor-reset"
           :disabled="busy"
           @click="requestResetProfiles"
@@ -1597,18 +1580,17 @@ onUnmounted(() => {
         <button
           v-else
           type="button"
+          data-gp-group="schedule-editor-actions"
           class="editor-reset"
           :disabled="busy"
           @click="resetCustomProfile"
         >
           <AppIcon name="refresh" />恢复默认
         </button>
-        <div class="editor-actions-right" data-gp-group="schedule-editor-actions">
-          <button type="button" data-gp-group="schedule-editor-actions" class="primary" :disabled="busy" @click="saveEditor">保存组合</button>
-          <button type="button" data-gp-group="schedule-editor-actions" class="editor-cancel" @click="closeEditor">
-            取消 <small class="gp-hint">B</small>
-          </button>
-        </div>
+        <button type="button" data-gp-group="schedule-editor-actions" class="primary" :disabled="busy" @click="saveEditor">保存组合</button>
+        <button type="button" data-gp-group="schedule-editor-actions" class="editor-cancel" @click="closeEditor">
+          取消 <small class="gp-hint">B</small>
+        </button>
       </div>
     </div>
 
@@ -1638,7 +1620,7 @@ onUnmounted(() => {
       </Transition>
     </Teleport>
 
-    <!-- 删除自定义确认：自绘浮层（锚定「删除自定义」按钮） -->
+    <!-- 删除专属配置确认：自绘浮层 -->
     <Teleport to="body">
       <Transition name="rc-pop">
         <div
@@ -1649,13 +1631,13 @@ onUnmounted(() => {
           :style="customDeleteStyle"
           role="alertdialog"
           aria-modal="true"
-          aria-label="确认删除自定义模式"
+          aria-label="确认删除专属配置"
           data-gp-modal
           @pointerdown.stop
           @keydown.esc.prevent="cancelDeleteCustom"
         >
-          <div class="rc-title"><AppIcon name="warning" />确认删除自定义模式</div>
-          <p class="rc-desc">将删除「{{ gameCustomConfig.entries[gameExeKey]?.displayName || gameExeKey }}」的专属性能档位，恢复为自动优化。此操作不可撤销，是否继续？</p>
+          <div class="rc-title"><AppIcon name="warning" />确认删除专属配置</div>
+          <p class="rc-desc">将删除「{{ gameCustomConfig.entries[gameExeKey]?.displayName || detectedGameName(game) || '当前游戏' }}」的专属性能档位，恢复为自动优化。此操作不可撤销，是否继续？</p>
           <div class="rc-actions" data-gp-group="schedule-custom-delete">
             <button ref="customDeleteCancelEl" type="button" data-gp-group="schedule-custom-delete" @click="cancelDeleteCustom">取消</button>
             <button type="button" data-gp-group="schedule-custom-delete" class="danger" @click="confirmDeleteCustom">确认删除</button>
@@ -1681,19 +1663,27 @@ onUnmounted(() => {
   min-width: 0;
   flex: 1;
 }
-.page-head h1 {
-  margin: 0;
-  display: flex;
+.unrecognized-title-button {
+  display: inline-flex;
   align-items: center;
   gap: 7px;
-  max-width: 470px;
+  max-width: 100%;
+  min-height: 28px;
+  padding: 3px 7px;
+  border: 1px solid color-mix(in srgb, #f5b942 42%, transparent);
+  border-radius: 7px;
+  background: color-mix(in srgb, #f5b942 10%, var(--bg-card));
+  color: #f5b942;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 700;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 18px;
-  line-height: 1.2;
+  cursor: pointer;
 }
-.page-head h1 :deep(svg) { color: var(--accent); }
+.unrecognized-title-button :deep(svg) { flex: 0 0 auto; width: 16px; height: 16px; }
+.unrecognized-title-button:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 .page-head p {
   margin: 5px 0 0;
   color: var(--text-dim);
@@ -1739,7 +1729,7 @@ onUnmounted(() => {
   background: color-mix(in srgb, var(--ok) 16%, var(--bg-input));
   color: var(--ok);
 }
-/* 顶部标题栏：自定义模式标识 */
+/* 顶部标题栏：专属配置标识 */
 .mode-label {
   border-radius: 999px;
   padding: 5px 10px;
@@ -1748,6 +1738,53 @@ onUnmounted(() => {
   background: color-mix(in srgb, var(--ok) 18%, var(--bg-input));
   color: var(--ok);
 }
+.game-recognition {
+  padding: 10px 12px;
+  margin-bottom: 10px;
+}
+.game-recognition-trigger,
+.game-rule-actions button,
+.game-rule-add-row button {
+  min-height: 34px;
+  border: 1px solid rgba(255,255,255,.06);
+  border-radius: 8px;
+  background: var(--bg-input);
+  color: var(--text);
+  cursor: pointer;
+}
+.game-recognition-trigger {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  text-align: left;
+  font: inherit;
+  font-size: 12px;
+}
+.game-recognition-trigger :deep(svg) { color: #f5b942; width: 15px; height: 15px; }
+.game-recognition-trigger b { color: #f5b942; }
+.game-rule-panel { display: grid; gap: 8px; }
+.game-rule-panel-title { display: flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 700; }
+.game-rule-panel-title :deep(svg) { color: #f5b942; width: 15px; height: 15px; }
+.game-rule-panel-sub, .game-rule-list-title { color: var(--text-dim); font-size: 11px; }
+.game-rule-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; }
+.game-rule-actions button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; padding: 6px 8px; font-size: 11px; }
+.game-rule-actions button :deep(svg), .game-rule-add-row button :deep(svg) { width: 14px; height: 14px; }
+.game-rule-actions button.danger { color: var(--danger); }
+.game-rule-actions button.active { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+.game-rule-editor { gap: 10px; }
+.game-rule-tabs { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.game-rule-list-block { display: grid; gap: 7px; }
+.game-rule-list { display: grid; gap: 4px; max-height: 150px; overflow-y: auto; }
+.game-rule-item { display: flex; align-items: center; gap: 8px; min-height: 28px; padding: 4px 7px; border-radius: 6px; background: var(--bg-input); font-size: 11px; }
+.game-rule-item span { min-width: 0; flex: 1; overflow-wrap: anywhere; }
+.game-rule-item button { width: 26px; height: 26px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--danger); }
+.game-rule-add-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 6px; }
+.game-rule-add-row input { min-width: 0; height: 34px; padding: 6px 8px; border: 1px solid #2a3342; border-radius: 7px; background: var(--bg-input); color: var(--text); font-size: 11px; }
+.game-rule-add-row button { display: inline-flex; align-items: center; justify-content: center; gap: 4px; padding: 6px 9px; font-size: 11px; }
+.game-rule-add-row button:last-child { width: 34px; padding: 0; }
+.game-rule-add-row input:focus-visible, .game-rule-add-row button:focus-visible, .game-rule-actions button:focus-visible, .game-recognition-trigger:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 .hero { padding: 13px 14px; }
 .game-line, .section-head {
   display: flex;
@@ -1942,6 +1979,23 @@ button:disabled { opacity: .42; cursor: default; }
 }
 .custom-game :deep(svg) { width: 14px; height: 14px; color: var(--text-dim); }
 .custom-game b { color: var(--text); font-weight: 700; }
+.remove-game-judgement {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 28px;
+  margin-left: auto;
+  padding: 4px 7px;
+  border: 1px solid color-mix(in srgb, var(--danger) 38%, transparent);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--danger);
+  font: inherit;
+  font-size: 10px;
+  cursor: pointer;
+}
+.remove-game-judgement :deep(svg) { width: 13px; height: 13px; }
+.remove-game-judgement:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 /* 自定义 AC/DC 行：点击进入编辑。整行内容单排水平居中，减少留白。 */
 .custom-row {
   display: flex;
@@ -2154,6 +2208,10 @@ button:disabled { opacity: .42; cursor: default; }
   gap: 10px;
   margin: 10px 0;
 }
+.editor-combo :deep(.editor-ceiling) {
+  align-self: end;
+  margin-bottom: 1px;
+}
 .editor-combo:first-of-type { margin-top: 14px; }
 .editor-combo:last-of-type { margin-bottom: 11px; }
 .editor-card :deep(.dd-trigger) {
@@ -2177,25 +2235,20 @@ button:disabled { opacity: .42; cursor: default; }
   height: 16px;
 }
 .editor-actions {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   align-items: center;
-  justify-content: space-between;
   gap: 7px;
   margin-top: 9px;
 }
-.editor-actions-right {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-}
 .editor-actions button {
-  min-width: auto;
-  min-height: 32px;
+  width: 100%;
+  min-width: 0;
+  min-height: 36px;
   padding: 0 10px;
   font-size: 11px;
 }
 .editor-actions .editor-reset {
-  min-width: auto;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -2295,6 +2348,8 @@ button:disabled { opacity: .42; cursor: default; }
   flex-direction: column;
   gap: 12px;
   max-width: calc(100vw - 16px);
+  min-height: 0;
+  overflow-y: auto;
 }
 .reset-confirm::before {
   content: '';

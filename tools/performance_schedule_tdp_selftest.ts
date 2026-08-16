@@ -76,6 +76,20 @@ async function main(): Promise<void> {
     assert(writes.some((item) => item.name === 'ACSettingIndex'), 'TDP 失败后 AC CPU 参数仍应写入');
     assert(writes.some((item) => item.name === 'DCSettingIndex'), 'TDP 失败后 DC CPU 参数仍应写入');
 
+    // 0 = 不锁帧：自动档位不得继续启动或继承 CPU/TDP 浮动。
+    config.profiles.ac.balanced.fpsTarget = 0;
+    config.profiles.ac.balanced.cpuTarget = 'aggressive';
+    config.profiles.ac.balanced.tdpStrategy = 'aggressive';
+    const noLockApplied = await schedule.applyPerformanceSchedule('ac', 'balanced', config);
+    assert(noLockApplied, '不锁帧档位仍应完成自动模式应用');
+    assert(!autofloat.getFloatInfo().enabled, '不锁帧不得启动 CPU/TDP 浮动');
+    assert(autofloat.getFloatInfo().target === 0, '不锁帧必须保留真实目标值 0');
+
+    config.profiles.ac.balanced.fpsTarget = 45;
+    const relockApplied = await schedule.applyPerformanceSchedule('ac', 'balanced', config);
+    assert(relockApplied, '从不锁帧切回有效目标后应能重新应用自动浮动');
+    assert(autofloat.getFloatInfo().enabled, '有效 FPS 目标应重新启动浮动');
+
     await schedule.disablePerformanceSchedule(config);
     assert(!autofloat.getFloatInfo().enabled, '自动→手动必须停止 CPU 浮动控制');
     assert((await schedule.getPerformanceScheduleOwnership()) === 'manual', '自动→手动必须独立持久化');

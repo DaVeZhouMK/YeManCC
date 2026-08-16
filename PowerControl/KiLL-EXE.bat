@@ -8,9 +8,9 @@ if %errorlevel% neq 0 (
 )
 
 set "psScriptPath=C:\SOFT\YeMan\PowerControl\KiLL-EXE.ps1"
-for /f "delims=" %%i in ('powershell -ExecutionPolicy Bypass -File "%psScriptPath%"') do set "ProcessName=%%i"
+for /f "delims=" %%i in ('powershell -ExecutionPolicy Bypass -File "%psScriptPath%"') do set "ProcessPid=%%i"
 
-if defined ProcessName (
-    taskkill /F /IM "%ProcessName%.exe"
+if defined ProcessPid (
+    taskkill /F /T /PID "%ProcessPid%"
 )
 

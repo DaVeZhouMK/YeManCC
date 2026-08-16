@@ -14,7 +14,7 @@
 //   · GPU 3D 负载：限制 TDP 向下调节速度，GPU 越忙越慢降，避免瓶颈场景过快降功耗
 //   · CPU Package Power：仅用于显示和实际功耗监测；TDP 目标按电源方案的 TDP 最大值计算
 // 以上数据全部来自 HWiNFO 共享内存，不再用 RTSS / Win32_Perf（易崩/不准）。
-// 真实游戏识别（守护内完成）＝ 工作集 > 500MB ＋ 黑名单(内置+exclude.txt) ＋ HWiNFO 帧率>0。
+// 真实游戏识别由 native 游戏识别阀门完成；HWiNFO 帧率只决定浮动输出是否可用。
 //
 // 守护生命周期：
 //   start/stop = native IPC 切换 FPS 输出，保留 fps-status.json/fps-monitor.hb 契约
@@ -149,7 +149,7 @@ function floatCpuOverrides(profile: FloatProfile): FloatCpuOverrides | null {
   }
 }
 
-// ── 帧数目标：连续值，30–120、5 帧步进（0 仅在内部表示"关闭"）──
+// ── 帧数目标：连续值，30–300、5 帧步进（0 = 不锁帧/关闭浮动）──
 export const FPS_TARGET_MIN = 30;
 // 性能调度帧数目标/RTSS 锁帧/浮动目标统一上限 300FPS（2026-08-04 起由 200 放开；0 表示不锁帧）。
 export const FPS_TARGET_MAX = 300;
@@ -489,6 +489,7 @@ let restartBurst = 0; // 连续重拉计数：每次重拉后递增、读到有�
 const RESTART_BURST_MAX = 6; // 连续 6 次重拉仍无状态 → 冷却拉长到 30s，避免守护持续故障时 5s 一次的进程风暴
 let starting = false;    // 启用流程进行中标志（防并发双启动守护 + 双控制循环）
 let stopping = false;    // disableFloat 在 enableFloat 启动期间被调用 → 等启动完成后自动关闭
+let stoppingUnlockRtss = false;
 let tickRunning = false; // 控制循环重入锁：tick 内含多个 await（读状态/电源模式/下发硬件），
                          // 防止 setInterval 重叠触发多个 tick 交错争抢 UI 线程消息泵与进程池
                          // （鼠标旁转圈 IDC_APPSTARTING 的根因之一）。
@@ -556,6 +557,15 @@ export async function applyCpuAutoEnable(modeOverride?: string): Promise<void> {
   curTarget = c.target;
   curProfile = c.profile;
   curTdpStrategy = c.tdpStrategy;
+
+  // 0 是明确的“不锁帧”，不是一个可供浮动控制器比较的无限大目标。
+  // 因此无论自动启用下拉选择什么，都不能启动 CPU/TDP 浮动。
+  if (c.target <= 0) {
+    if (timer !== null || starting) await disableFloat({ unlockRtss: true });
+    else await syncRtssLimit(0).catch(() => {});
+    notify();
+    return;
+  }
 
   if (mode === 'never') {
     if (timer !== null) await disableFloat();
@@ -698,6 +708,15 @@ async function tick(): Promise<void> {
   // 不 per-tick 探测 AC/DC，避免每轮 IPC/powershell 阻塞；改为 15s 周期探测，插拔电源后跟随）。
   const st = await readStatus();
   lastStatus = st;
+  if (curTarget <= 0) {
+    // 不锁帧没有可比较的 FPS 目标：控制循环保持待机，绝不降 TDP/CPU。
+    downCount = 0;
+    lastTdpDownTs = 0;
+    lastAction = 'idle';
+    lastTdpAction = 'idle';
+    notify();
+    return;
+  }
   gpuCap = st ? gpuAggrCap(st.gpu ?? 0) : 100; // 每轮刷新 GPU 上限（守护失联→不限）
   // 周期性刷新电源模式：15s 一次。检测到切换后更新 tdpMode，后续 TDP 写入跟随新寄存器；
   // 单真相源下 tdpMax/tdpOriginal 与电源侧无关，无需重读（2026-08-05 修复插拔电源 TDP 失效）。
@@ -942,7 +961,16 @@ export async function enableFloat(target: FpsTarget, profile: FloatProfile, tdpS
   curProfile = profile;
   curTdpStrategy = tdpStrategy;
   // 配置保存只负责记忆 UI 选择，不能成为 CPU powercfg 写入的前置条件。
-  void writeConfig().catch(() => {});
+  await writeConfig().catch(() => {});
+  if (target <= 0) {
+    if (timer !== null || starting) {
+      await disableFloat({ unlockRtss: true });
+    } else {
+      await syncRtssLimit(0).catch(() => {});
+      notify();
+    }
+    return;
+  }
   // 重入保护：下方 2s+ 阻塞期间 timer 尚未置位，并发调用会双拉守护 + 双控制循环（CPU 参数互踩）。
   // 用 starting 在进函数即占位，确保同一时刻只有一个启用流程在跑；已在运行(starting/timer)则只更新目标/档位。
   if (timer !== null || starting) return;
@@ -1004,7 +1032,9 @@ export async function enableFloat(target: FpsTarget, profile: FloatProfile, tdpS
     // disableFloat 在启动期间被调用 → 启动完成后自动执行关闭，避免启停交叉
     if (stopping) {
       stopping = false;
-      void Promise.resolve().then(() => disableFloat());
+      const unlockRtss = stoppingUnlockRtss;
+      stoppingUnlockRtss = false;
+      void Promise.resolve().then(() => disableFloat({ unlockRtss }));
     }
   }
 }
@@ -1013,11 +1043,12 @@ export async function enableFloat(target: FpsTarget, profile: FloatProfile, tdpS
 // ⚠️ 严禁在此处把 curTarget/curProfile 归零或 writeConfig({target:0})——
 // 帧数目标 + 调度档位 是用户「偏好选择」，必须跨开关/跨电源态持久记忆在 autofloat.json。
 // 归零会导致拔插电源 / 切到「从不」时把记住的 45/aggressive 洗成 0，下次启用回退 60（用户实测"没记忆"）。
-export async function disableFloat(): Promise<void> {
+export async function disableFloat(options: { unlockRtss?: boolean } = {}): Promise<void> {
   // enableFloat 正在初始化（starting=true、timer 尚未创建）：标记 stopping，
   // 等 enableFloat 完成后自动执行关闭，避免在此刻强行停止导致守护/daemon/RTSS 状态交叉。
   if (starting) {
     stopping = true;
+    stoppingUnlockRtss = stoppingUnlockRtss || options.unlockRtss === true;
     return;
   }
   ++floatRunId;
@@ -1039,6 +1070,7 @@ export async function disableFloat(): Promise<void> {
   // 结束所有浮动控制：取消尚未执行的 RTSS 尾随更新并移除活动标志。
   // 不恢复 RTSS/TDP/CPU 快照，不重制任何当前参数；TDP daemon 保持常驻。
   if (rtssSyncTimer !== null) { window.clearTimeout(rtssSyncTimer); rtssSyncTimer = null; }
+  if (options.unlockRtss) await syncRtssLimit(0).catch(() => {});
   await fs.remove(FLOAT_ACTIVE).catch(() => {});
   // 注意：curTarget / curProfile 保持不变，不再写 config（选择未变，也不能洗掉记忆）
   downCount = 0;
@@ -1097,10 +1129,15 @@ export async function setFloatProfile(profile: FloatProfile): Promise<void> {
 }
 
 // 已运行时增量切换目标：UI/内存立即更新，RTSS 采用尾随防抖，避免连续切档反复重载。
-export function setFloatTarget(target: FpsTarget): void {
+export async function setFloatTarget(target: FpsTarget): Promise<void> {
   curTarget = clampFpsTarget(target);
-  void writeConfig();
-  if (timer !== null) scheduleRtssSync(curTarget);
+  await writeConfig();
+  if (curTarget <= 0) {
+    if (timer !== null || starting) await disableFloat({ unlockRtss: true });
+    else await syncRtssLimit(0).catch(() => {});
+  } else if (timer !== null) {
+    scheduleRtssSync(curTarget);
+  }
   notify();
 }
 

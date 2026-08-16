@@ -7,6 +7,7 @@
 //   3 温度   : CPU (Tctl/Tdie) x°（>=85 红 / >=75 琥珀告警色）
 //   4 电池   : 充电 xxW / 放电 xxW（仅电池设备显示）
 // 台式机判断为无电池时，不渲染电池格，剩余三格自然等宽。
+import GameRecognitionControl from '@/components/GameRecognitionControl.vue';
 import { computed, onMounted, onUnmounted } from 'vue';
 import { registerScheduledTask } from '@/scheduler';
 import { startTopMonitor, stopTopMonitor, readTopMonitor, setTopMonitorData, topMonitorData } from '@/bridge/topmon';
@@ -16,12 +17,13 @@ const POLL_MS = 1000; // 前台每 1 秒读取一次；后台由 pauseWhenHidden
 let stopTask: (() => void) | null = null;
 
 const data = topMonitorData;
+const showBattery = computed(() => Boolean(data.value && (data.value.hasBattery || data.value.ac === 0)));
 
 // ── 格式化 ──
 const tdpText = computed(() => (data.value ? data.value.tdpW.toFixed(1) + 'W' : '--'));
 const cpuText = computed(() => {
   const m = data.value?.freqMhz ?? 0;
-  return m > 0 ? (m / 1000).toFixed(1) + 'GHz' : '--';
+  return m > 0 ? (m / 1000).toFixed(1) + 'G' : '--';
 });
 const tempText = computed(() => (data.value && data.value.tempC > 0 ? Math.round(data.value.tempC) + '°' : '--'));
 const tempClass = computed(() => {
@@ -30,13 +32,12 @@ const tempClass = computed(() => {
   if (t >= 75) return 't-warm';
   return '';
 });
-// 电池设备只显示一格电池：正值=充电，负值=放电；台式机不显示此格
 const batteryText = computed(() => {
   const d = data.value;
   if (!d) return '--';
-  const w = Math.abs(d.chargeW);
-  if (w <= 0.05) return '0.0W';
-  return (d.chargeW > 0 ? '充电 ' : '放电 ') + w.toFixed(1) + 'W';
+  const watts = Math.round(Math.abs(d.chargeW));
+  if (watts === 0) return '0W';
+  return `${d.chargeW > 0 ? '+' : '-'}${watts}W`;
 });
 const batteryClass = computed(() => {
   const d = data.value;
@@ -79,6 +80,7 @@ function onDiscPointer(event: PointerEvent): void {
 
 <template>
   <div class="topmon-bar">
+    <GameRecognitionControl />
     <div class="tm-metrics">
       <!-- 1 TDP -->
       <div class="tm-cell">
@@ -96,7 +98,7 @@ function onDiscPointer(event: PointerEvent): void {
         <div class="tm-value" :class="tempClass">{{ tempText }}</div>
       </div>
       <!-- 4 电池：仅有电池设备显示；台式机为三格等宽 -->
-      <div v-if="data?.hasBattery" class="tm-cell">
+      <div v-if="showBattery" class="tm-cell">
         <div class="tm-label">电池</div>
         <div class="tm-value" :class="batteryClass">{{ batteryText }}</div>
       </div>
@@ -131,6 +133,8 @@ function onDiscPointer(event: PointerEvent): void {
   border-radius: 0; /* 顶部条左右贴边，不产生视觉缝隙 */
   border-bottom: none;
   flex: 0 0 auto;
+  position: relative;
+  z-index: 20;
 }
 /* 原监控格包进 .tm-metrics，继续等分；CD 固定宽度不参与等分 */
 .tm-metrics {

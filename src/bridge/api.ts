@@ -196,6 +196,12 @@ export const tray = {
 
 export const proc = {
   running: (names: string[]) => invoke<Record<string, boolean>>('proc.running', { names }),
+  identity: (pid: number) => invoke<{
+    valid: boolean;
+    pid: number;
+    processCreated?: string;
+    path?: string;
+  }>('process.identity', { pid }),
 };
 
 export interface HttpResponse {

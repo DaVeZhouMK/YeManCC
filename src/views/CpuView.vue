@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, onActivated, nextTick, inject, watch, type Ref } from 'vue';
+import { ref, computed, onMounted, onUnmounted, onActivated, onDeactivated, nextTick, inject, watch, type Ref } from 'vue';
 import Slider from '@/components/Slider.vue';
 import Toggle from '@/components/Toggle.vue';
 import SegButton from '@/components/SegButton.vue';
 import CcdCard from '@/components/CcdCard.vue';
 import UndervoltCard from '@/components/UndervoltCard.vue';
 import InlineIcon from '@/components/InlineIcon.vue';
+import { focusGamepadElement } from '@/gamepad/focus';
 import {
   PW,
   SCHEMES,
@@ -118,6 +119,8 @@ const smtInfo = ref(''); // 非错误提示（如"已处于关闭状态"）
 // 点击超线程 Toggle 后弹出的"需重启生效"确认框
 const smtDialogOpen = ref(false);
 const smtDialogTarget = ref(false); // 待应用的目标值（true=开 / false=关）
+const smtCancelEl = ref<HTMLButtonElement | null>(null);
+const smtTriggerEl = ref<HTMLElement | null>(null);
 
 // 活动核心数滑块右侧显示：当前物理核 + 对应线程数（SMT on 时 ×2，off 时 ×1）
 const activeCoreValueText = computed(() => {
@@ -417,10 +420,14 @@ function onSmt(v: boolean) {
   if (!isYemanScheme.value || !paramsOk.value) return;
   smtDialogTarget.value = v;
   smtDialogOpen.value = true;
+  nextTick(() => focusGamepadElement(smtCancelEl.value));
 }
-function cancelSmt() {
+function cancelSmt(event?: MouseEvent) {
   smtDialogOpen.value = false;
   smtDialogTarget.value = false;
+  const trigger = smtTriggerEl.value?.querySelector<HTMLElement>('button');
+  const fromPointer = Boolean(event && (event.clientX !== 0 || event.clientY !== 0));
+  if (!fromPointer) nextTick(() => focusGamepadElement(trigger));
   // smtOn 不变，Toggle 视觉自动回到原状态
 }
 async function confirmSmt() {
@@ -446,6 +453,12 @@ async function confirmSmt() {
   } finally {
     smtBusy.value = false;
   }
+}
+
+function onGamepadBack(e: Event): void {
+  if (!smtDialogOpen.value) return;
+  e.preventDefault();
+  cancelSmt();
 }
 
 const resetInfo = ref('');
@@ -518,6 +531,14 @@ onUnmounted(offFloatUpdate);
 
 // 活动电源方案变化由 native Windows 广播驱动；没有广播不做自愈检查。
 onActivated(onCpuViewActivated);
+onDeactivated(() => {
+  if (smtDialogOpen.value) {
+    smtDialogOpen.value = false;
+    smtDialogTarget.value = false;
+  }
+});
+onMounted(() => window.addEventListener('ipc:gamepad-back', onGamepadBack));
+onUnmounted(() => window.removeEventListener('ipc:gamepad-back', onGamepadBack));
 
 onMounted(() =>
   nextTick(async () => {
@@ -656,15 +677,17 @@ onMounted(() =>
       <div class="core-head">
         <span class="core-title"><InlineIcon name="wrench" /> 全局核心调度</span>
         <div class="core-head-right">
-          <Toggle
-            :model-value="smtOn"
-            :label="'超线程'"
-            :description="smtOn ? '已开启' : '已关闭'"
-            color="accent"
-            :disabled="!isYemanScheme || !paramsOk || smtBusy"
-            @update:model-value="onSmt"
-            compact
-          />
+          <div ref="smtTriggerEl">
+            <Toggle
+              :model-value="smtOn"
+              :label="'超线程'"
+              :description="smtOn ? '已开启' : '已关闭'"
+              color="accent"
+              :disabled="!isYemanScheme || !paramsOk || smtBusy"
+              @update:model-value="onSmt"
+              compact
+            />
+          </div>
         </div>
       </div>
 
@@ -692,7 +715,7 @@ onMounted(() =>
     <Teleport to="body">
       <Transition name="smt-fade">
         <div v-if="smtDialogOpen" class="smt-modal-mask" @click.self="cancelSmt">
-          <div class="smt-modal" role="dialog" aria-modal="true">
+           <div class="smt-modal" role="dialog" aria-modal="true" data-gp-modal>
             <div class="smt-modal-title">超线程 / SMT</div>
             <div class="smt-modal-body">
               <div class="smt-modal-msg">超线程修改后需重启生效</div>
@@ -707,7 +730,7 @@ onMounted(() =>
               </div>
             </div>
             <div class="smt-modal-actions">
-              <button class="smt-btn smt-btn-cancel" type="button" @click="cancelSmt">取消</button>
+            <button ref="smtCancelEl" class="smt-btn smt-btn-cancel" type="button" @click="cancelSmt">取消</button>
               <button class="smt-btn smt-btn-ok" type="button" @click="confirmSmt">确定</button>
             </div>
           </div>
@@ -1051,7 +1074,7 @@ onMounted(() =>
   align-items: center;
   justify-content: center;
   z-index: 1000;
-  padding: 16px;
+  padding: 16px 16px max(32px, var(--gamepad-viewport-bottom-gap, 6vh));
 }
 .smt-modal {
   width: 100%;
@@ -1061,6 +1084,8 @@ onMounted(() =>
   border-radius: 12px;
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
   padding: 24px;
+  max-height: calc(100vh - max(32px, var(--gamepad-viewport-bottom-gap, 6vh)) - 16px);
+  overflow-y: auto;
 }
 .smt-modal-title {
   font-size: 18px;

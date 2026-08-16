@@ -5,6 +5,7 @@ import NavRail from '@/components/NavRail.vue';
 import DebugView from '@/components/DebugView.vue';
 import { useDebugStore } from '@/stores/debug';
 import { startGamepad } from '@/gamepad/engine';
+import { enqueueGamepadTaskDetached } from '@/gamepad/serial';
 import { on } from '@/bridge/ipc';
 import { applyCpuAutostart } from '@/bridge/autostart';
 import { applyTrayResident } from '@/bridge/trayResident';
@@ -12,7 +13,7 @@ import { getFloatInfo, applyCpuAutoEnable, setAutofloatPowerControlDir } from '@
 import { readTdpAutoApply, applyAutoTdpIfNeeded } from '@/bridge/tdpAutoApply';
 import { app, fs, powerLifecycle, windowApi } from '@/bridge/api';
 import { initMusic } from '@/bridge/music';
-import { readTdp, setTdp, setRtssLimit, readFps, rtssRunning, toggleTask, taskExists, detectPowerMode, detectPowerModeStable, reconcileRememberedPowerScheme, resumeTdpDaemonAfterWake, getSleepPowerPlanOptimizationEnabled, optimizeSleepPowerPlans } from '@/bridge/yeman';
+import { readTdp, setTdp, setRtssLimit, readFps, rtssRunning, toggleTask, taskExists, detectPowerMode, detectPowerModeReliable, detectPowerModeStable, reconcileRememberedPowerScheme, resumeTdpDaemonAfterWake, getSleepPowerPlanOptimizationEnabled, optimizeSleepPowerPlans } from '@/bridge/yeman';
 import TopMonitorBar from '@/components/TopMonitorBar.vue';
 import { applyTheme } from '@/bridge/theme';
 import { cyclePerformanceScheduleMode, getPerformanceScheduleOwnership, refreshPerformanceScheduleCoreMode, restorePerformanceScheduleIfConfigured } from '@/bridge/performanceSchedule';
@@ -68,12 +69,16 @@ const backgroundBlur = ref(getBackgroundBlur());
 const backgroundVideoAutoPause = ref(getUiSetting('videoBatteryPause'));
 const onAcPower = ref(false);
 type VideoPowerState = 'unknown' | 'desktop' | 'charging' | 'discharging';
-// Unknown power data must never freeze a desktop video. A real battery
-// discharge will take effect after the monitor reports it twice.
-const videoPowerState = ref<VideoPowerState>('desktop');
+// Do not create a video decoder until the first power reading is known. This
+// prevents a brief play() on battery while startup probes are still pending.
+const videoPowerState = ref<VideoPowerState>('unknown');
 let lastVideoPowerTs = 0;
 let pendingVideoPowerState: Exclude<VideoPowerState, 'unknown'> | null = null;
 let pendingVideoPowerSamples = 0;
+const VIDEO_POWER_EVENT_SETTLE_MS = 5000;
+let videoPowerEventSettleUntil = 0;
+let videoPowerProbeGeneration = 0;
+let videoPowerProbeTimer: number | null = null;
 const documentVisible = ref(document.visibilityState === 'visible');
 const nativeWindowVisible = ref(document.visibilityState === 'visible');
 const backgroundVideoSuspended = ref(false);
@@ -81,16 +86,26 @@ const lowBatteryStatic = ref(false);
 const videoDesired = ref(false);
 const backgroundVideoGeneration = ref(0);
 const dynamicBackgroundActive = ref(false);
+const backgroundSource = ref<'fixed' | 'dynamic'>('fixed');
 const backgroundFallbackUrls = ref<string[]>([]);
 const backgroundFallbackIndex = ref(0);
 let appliedBackgroundIdentity: string | null = null;
 let lastDynamicGameIdentity: string | null = null;
+let dynamicBackgroundGeneration = 0;
+let lastFixedBackgroundState: BackgroundState | null = null;
 const BACKGROUND_RETRY_WINDOW_MS = 2 * 60 * 1000;
 const BACKGROUND_RETRY_INTERVAL_MS = 5000;
+const DYNAMIC_BACKGROUND_NO_GAME_GRACE_MS = 4000;
 let backgroundRetryTimer: number | null = null;
 let backgroundRetryUntil = 0;
+let dynamicBackgroundNoGameTimer: number | null = null;
 let resumeVideoTimer: number | null = null;
 let hlsInstance: { destroy: () => void; on: (event: string, callback: (...args: any[]) => void) => void; loadSource: (url: string) => void; attachMedia: (video: HTMLVideoElement) => void } | null = null;
+function isVideoPlaybackBlockedByPower(): boolean {
+  return backgroundVideoAutoPause.value &&
+    videoPowerState.value !== 'desktop' &&
+    videoPowerState.value !== 'charging';
+}
 // 每次隐藏、切源、销毁或重新挂载媒体都会推进 epoch。异步 nextTick/HLS 回调
 // 必须匹配当前 epoch，避免隐藏后旧回调重新挂载视频或触发重试。
 let backgroundMediaEpoch = 0;
@@ -120,7 +135,8 @@ function formatRetryRemaining(ms: number): string {
   return minutes > 0 ? `${minutes}分${seconds.toString().padStart(2, '0')}秒` : `${seconds}秒`;
 }
 function scheduleBackgroundRetry(message: string): void {
-  if (backgroundKind.value !== 'video' || !backgroundUrl.value) return;
+  if (backgroundKind.value !== 'video' || !backgroundUrl.value ||
+      (backgroundSource.value === 'dynamic' && !getDynamicBackgroundConfig().enabled)) return;
   const now = Date.now();
   if (backgroundRetryUntil <= now) backgroundRetryUntil = now + BACKGROUND_RETRY_WINDOW_MS;
   const remaining = backgroundRetryUntil - now;
@@ -136,7 +152,9 @@ function scheduleBackgroundRetry(message: string): void {
   }));
   backgroundRetryTimer = window.setTimeout(() => {
     backgroundRetryTimer = null;
-    if (Date.now() >= backgroundRetryUntil || backgroundKind.value !== 'video' || !backgroundUrl.value || backgroundVideoSuspended.value) {
+    if (Date.now() >= backgroundRetryUntil || backgroundKind.value !== 'video' || !backgroundUrl.value ||
+        backgroundVideoSuspended.value || isVideoPlaybackBlockedByPower() ||
+        (backgroundSource.value === 'dynamic' && !getDynamicBackgroundConfig().enabled)) {
       const finalMessage = Date.now() >= backgroundRetryUntil ? message : 'Steam 在线视频播放失败';
       clearBackgroundRetry();
       window.dispatchEvent(new CustomEvent('dynamic-background:progress', { detail: `失败：${finalMessage}` }));
@@ -208,7 +226,7 @@ const backgroundStyle = computed(() =>
       }
     : undefined,
 );
-function applyBackgroundState(state: BackgroundState | null | undefined): void {
+function applyBackgroundState(state: BackgroundState | null | undefined, source: 'fixed' | 'dynamic' = 'fixed'): void {
   const kind = state?.kind === 'video' ? 'video' : 'image';
   const urls = Array.isArray(state?.fallbackUrls)
     ? state.fallbackUrls.filter((url): url is string => typeof url === 'string' && url.length > 0)
@@ -216,6 +234,7 @@ function applyBackgroundState(state: BackgroundState | null | undefined): void {
   const requestedUrl = state?.enabled && state.url ? state.url : '';
   const effectiveUrl = requestedUrl || urls[0] || '';
   const identity = JSON.stringify([
+    source,
     Boolean(state?.enabled && effectiveUrl),
     kind,
     effectiveUrl,
@@ -224,12 +243,17 @@ function applyBackgroundState(state: BackgroundState | null | undefined): void {
   if (identity === appliedBackgroundIdentity) return;
   appliedBackgroundIdentity = identity;
   clearBackgroundRetry();
+  // Stop the old element before changing source/state. The pause handler is
+  // intent-aware, so this cannot enqueue an unwanted auto-resume.
+  videoDesired.value = false;
+  backgroundVideo.value?.pause();
   invalidateBackgroundMedia();
   backgroundVideoGeneration.value++;
-  videoDesired.value = false;
+  backgroundSource.value = source;
   backgroundKind.value = kind;
   backgroundVideoSuspended.value = backgroundKind.value === 'video' &&
-    (!documentVisible.value || !nativeWindowVisible.value || lowBatteryStatic.value);
+    (!documentVisible.value || !nativeWindowVisible.value || lowBatteryStatic.value ||
+      isVideoPlaybackBlockedByPower());
   backgroundFallbackUrls.value = urls;
   const index = requestedUrl && urls.length ? Math.max(0, urls.indexOf(requestedUrl)) : 0;
   backgroundFallbackIndex.value = index;
@@ -242,8 +266,10 @@ function applyBackgroundState(state: BackgroundState | null | undefined): void {
   });
 }
 function onBackgroundChanged(e: Event): void {
+  const state = (e as CustomEvent<BackgroundState>).detail;
+  lastFixedBackgroundState = state || null;
   if (dynamicBackgroundActive.value) return;
-  applyBackgroundState((e as CustomEvent<BackgroundState>).detail);
+  applyBackgroundState(state);
 }
 function onBackgroundOpacityChanged(e: Event): void {
   const opacity = Number((e as CustomEvent<{ opacity?: number }>).detail?.opacity);
@@ -257,19 +283,23 @@ function onBackgroundBlurChanged(e: Event): void {
 async function reconcileBackgroundVideo(): Promise<void> {
   await nextTick();
   const video = backgroundVideo.value;
+  const epoch = backgroundMediaEpoch;
   const shouldPlay = Boolean(
     video &&
     backgroundKind.value === 'video' &&
     backgroundUrl.value &&
+    (backgroundSource.value === 'fixed' || getDynamicBackgroundConfig().enabled) &&
+    !backgroundVideoSuspended.value &&
     documentVisible.value &&
     nativeWindowVisible.value &&
     !lowBatteryStatic.value &&
-    (!backgroundVideoAutoPause.value || videoPowerState.value !== 'discharging'),
+    !isVideoPlaybackBlockedByPower(),
   );
   if (!video) {
     videoDesired.value = shouldPlay;
     return;
   }
+  if (epoch !== backgroundMediaEpoch || video !== backgroundVideo.value) return;
   // Autoplay can leave the element playing while the remembered intent is
   // still false; do not skip the pause operation in that state.
   if (shouldSkipVideoReconcile(
@@ -282,10 +312,22 @@ async function reconcileBackgroundVideo(): Promise<void> {
     video.pause();
     return;
   }
+  // The element is intentionally not marked autoplay. Wait for metadata so
+  // the explicit play() below cannot turn a newly mounted or HLS-backed video
+  // into a false playback failure while its source is still being attached.
+  if (video.readyState < 1) {
+    videoDesired.value = false;
+    return;
+  }
   video.muted = true;
   try {
     await video.play();
+    if (epoch !== backgroundMediaEpoch || video !== backgroundVideo.value ||
+        !getDynamicBackgroundConfig().enabled && backgroundSource.value === 'dynamic') {
+      video.pause();
+    }
   } catch {
+    if (epoch !== backgroundMediaEpoch || video !== backgroundVideo.value) return;
     videoDesired.value = false;
     onBackgroundVideoError();
   }
@@ -302,13 +344,16 @@ function onBackgroundVideoCanPlay(): void {
 }
 
 function onBackgroundVideoPause(): void {
+  if (!videoDesired.value) return;
   const shouldResume = Boolean(
     backgroundKind.value === 'video' &&
     backgroundUrl.value &&
+    (backgroundSource.value === 'fixed' || getDynamicBackgroundConfig().enabled) &&
+    !backgroundVideoSuspended.value &&
     documentVisible.value &&
     nativeWindowVisible.value &&
     !lowBatteryStatic.value &&
-    (!backgroundVideoAutoPause.value || videoPowerState.value !== 'discharging'),
+    !isVideoPlaybackBlockedByPower(),
   );
   if (shouldResume) {
     videoDesired.value = false;
@@ -336,7 +381,8 @@ function updateLowBatteryStatic(data: TopMonData | null): void {
 
 function shouldSuspendBackgroundVideo(): boolean {
   return backgroundKind.value === 'video' &&
-    (!documentVisible.value || !nativeWindowVisible.value || lowBatteryStatic.value);
+    (!documentVisible.value || !nativeWindowVisible.value || lowBatteryStatic.value ||
+      isVideoPlaybackBlockedByPower());
 }
 
 function reconcileBackgroundLifecycle(): void {
@@ -393,6 +439,7 @@ function observeVideoPower(data: TopMonData | null): void {
   const next = classifyVideoPower(data);
   if (!next || data.ts === lastVideoPowerTs) return;
   lastVideoPowerTs = data.ts;
+  if (Date.now() < videoPowerEventSettleUntil && next !== videoPowerState.value) return;
   updateLowBatteryStatic(data);
   if (next === videoPowerState.value) {
     pendingVideoPowerState = null;
@@ -411,6 +458,43 @@ function observeVideoPower(data: TopMonData | null): void {
   reconcileBackgroundLifecycle();
 }
 
+function applyVideoPowerMode(mode: 'ac' | 'dc', authoritative = false): void {
+  onAcPower.value = mode === 'ac';
+  videoPowerState.value = mode === 'ac' ? 'charging' : 'discharging';
+  pendingVideoPowerState = null;
+  pendingVideoPowerSamples = 0;
+  if (mode === 'ac') lowBatteryStatic.value = false;
+  if (authoritative) videoPowerEventSettleUntil = Date.now() + VIDEO_POWER_EVENT_SETTLE_MS;
+  reconcileBackgroundLifecycle();
+}
+
+function requestVideoPowerCheck(delayMs = 0, expectedMode?: 'ac' | 'dc'): void {
+  const generation = ++videoPowerProbeGeneration;
+  if (videoPowerProbeTimer !== null) {
+    window.clearTimeout(videoPowerProbeTimer);
+    videoPowerProbeTimer = null;
+  }
+  const check = async () => {
+    const mode = await detectPowerModeReliable();
+    if (generation !== videoPowerProbeGeneration || !mode || expectedMode && mode !== expectedMode) return;
+    applyVideoPowerMode(mode, true);
+  };
+  if (delayMs > 0) {
+    videoPowerProbeTimer = window.setTimeout(() => {
+      videoPowerProbeTimer = null;
+      void check();
+    }, delayMs);
+  } else {
+    void check();
+  }
+}
+
+function onVideoPowerSourceChanged(ac: boolean): void {
+  const mode = ac ? 'ac' : 'dc';
+  applyVideoPowerMode(mode, true);
+  requestVideoPowerCheck(300, mode);
+}
+
 watch(topMonitorData, (data) => {
   observeVideoPower(data);
 }, { immediate: true });
@@ -422,6 +506,7 @@ watch([backgroundUrl, backgroundKind], () => {
 function onBackgroundVideoError(message = 'Steam 在线视频播放失败'): void {
   videoDesired.value = false;
   invalidateBackgroundMedia();
+  if (backgroundSource.value === 'dynamic' && !getDynamicBackgroundConfig().enabled) return;
   if (backgroundVideoSuspended.value) return;
   if (backgroundKind.value !== 'video') return;
   const urls = backgroundFallbackUrls.value;
@@ -500,6 +585,7 @@ function onBackgroundWindowShown(): void {
   nativeWindowVisible.value = true;
   setNativeWindowVisible(true);
   resumeBackgroundVideo();
+  requestVideoPowerCheck();
 }
 function powerEventGeneration(e: Event): number {
   return Number((e as CustomEvent<{ generation?: number }>).detail?.generation) || 0;
@@ -545,6 +631,7 @@ function onPowerResumed(e: Event): void {
     resumeVideoTimer = null;
     if (documentVisible.value && nativeWindowVisible.value) resumeBackgroundVideo();
   }, 250);
+  requestVideoPowerCheck();
 }
 function onBackgroundVideoPauseChanged(e: Event): void {
   backgroundVideoAutoPause.value = Boolean(
@@ -567,7 +654,9 @@ const BASE_W = 580;
 const BASE_H = 780;
 const SCALE_BOOST = 1.3; // "再放大 30%"
 const uiScale = ref(1);
+const viewportHeight = ref(window.innerHeight);
 function updateScale() {
+  viewportHeight.value = window.innerHeight;
   if (window.innerHeight <= 0 || window.innerWidth <= 0) {
     uiScale.value = 1;
     return;
@@ -584,6 +673,9 @@ const scalerStyle = computed(() => ({
   // zoom 同时参与布局和命中测试；transform 只放大绘制层，会让 WebView2
   // 看到的坐标与鼠标点击坐标分离，表现为内容区"看得到但点不到"。
   zoom: uiScale.value,
+  // Keep the physical safe area proportional to the viewport, then convert
+  // it back to the zoomed layout coordinate space used by app-content.
+  '--gamepad-safe-bottom': `${Math.max(32, Math.min(64, viewportHeight.value * 0.06)) / Math.max(0.5, uiScale.value)}px`,
 }));
 
 // M8: Start button toggles the debug panel via the same 'ipc:gamepad-start' event.
@@ -597,13 +689,9 @@ function onGamepadRefresh() {
 function onGamepadTdpDelta(e: Event) {
   const d = Number((e as CustomEvent<{ delta?: number }>).detail?.delta) || 0;
   if (d !== 0) {
-    const run = gamepadTdpQueue.then(() => applyGamepadTdp(d));
-    gamepadTdpQueue = run.catch((error) => {
-      console.error('[gamepad tdp-delta]', error);
-    });
+    enqueueGamepadTaskDetached(() => applyGamepadTdp(d));
   }
 }
-let gamepadTdpQueue: Promise<void> = Promise.resolve();
 async function applyGamepadTdp(delta: number) {
   try {
     if (await getPerformanceScheduleOwnership() === 'auto') {
@@ -821,57 +909,145 @@ function scheduleResumeTransaction(generation: number): void {
 }
 
 function onDynamicBackgroundSettingChanged(): void {
+  const generation = ++dynamicBackgroundGeneration;
+  if (dynamicBackgroundNoGameTimer !== null) {
+    window.clearTimeout(dynamicBackgroundNoGameTimer);
+    dynamicBackgroundNoGameTimer = null;
+  }
   if (!getDynamicBackgroundConfig().enabled) {
     stopDynamicBackgroundWatch();
     lastDynamicGameIdentity = null;
     dynamicBackgroundActive.value = false;
-    void backgroundGet().then((state) => applyBackgroundState(state)).catch(() => {});
+    // Remove the current Steam media immediately. If a fixed MP4 exists,
+    // background.get below will install it as a separate, allowed source.
+    applyBackgroundState(null, 'fixed');
+    void backgroundGet().then((state) => {
+      if (generation === dynamicBackgroundGeneration && !getDynamicBackgroundConfig().enabled) {
+        const fixedState = state || lastFixedBackgroundState;
+        lastFixedBackgroundState = fixedState;
+        applyBackgroundState(fixedState, 'fixed');
+      }
+    }).catch(() => {
+      if (generation === dynamicBackgroundGeneration && !getDynamicBackgroundConfig().enabled) {
+        applyBackgroundState(lastFixedBackgroundState, 'fixed');
+      }
+    });
     return;
   }
   if (!isUiVisible()) return;
   startDynamicBackgroundWatch();
-  void detectGame(true).then((game) => {
+  void detectGame(true).then(async (game) => {
+    if (generation !== dynamicBackgroundGeneration || !getDynamicBackgroundConfig().enabled) return;
     if (!game) {
       window.dispatchEvent(new CustomEvent('dynamic-background:progress', { detail: '未识别到当前游戏' }));
       return;
     }
     window.dispatchEvent(new CustomEvent('dynamic-background:progress', { detail: `正在访问 Steam：${cleanGameTitle(game.title || game.name)}` }));
-    return refreshDynamicBackground(game).then((result) => {
-      if (!result) return;
-      dynamicBackgroundActive.value = true;
-      applyBackgroundState(result.state as BackgroundState);
-      window.dispatchEvent(new CustomEvent('dynamic-background:progress', {
-        detail: result.source === 'video'
-          ? `正在缓冲在线视频：${result.gameName}`
-          : `已使用 Steam 背景图：${result.gameName}`,
-      }));
-    });
+    const result = await refreshDynamicBackground(game);
+    if (generation !== dynamicBackgroundGeneration || !getDynamicBackgroundConfig().enabled || !result) return;
+    lastDynamicGameIdentity = `${game.pid}:${game.processCreated || ''}:${game.path || game.name}`;
+    dynamicBackgroundActive.value = true;
+    applyBackgroundState(result.state as BackgroundState, 'dynamic');
+    window.dispatchEvent(new CustomEvent('dynamic-background:progress', {
+      detail: result.source === 'video'
+        ? `正在缓冲在线视频：${result.gameName}`
+        : `已使用 Steam 背景图：${result.gameName}`,
+    }));
   }).catch((error) => {
+    if (generation !== dynamicBackgroundGeneration || !getDynamicBackgroundConfig().enabled) return;
     window.dispatchEvent(new CustomEvent('dynamic-background:progress', { detail: `失败：${(error as Error).message || 'Steam 连接失败'}` }));
   });
 }
-function onDynamicGameStatus(game: DetectedGame | null): void {
-  void (async () => {
-  if (!getDynamicBackgroundConfig().enabled || !game) {
-      // Process enumeration can briefly return no game while a title is starting
-      // or switching renderers. Keep an already-installed dynamic background until
-      // a later status update confirms the next game state.
-      if (getDynamicBackgroundConfig().enabled && !game && dynamicBackgroundActive.value) return;
+function onGameRulesChanged(): void {
+  const generation = ++dynamicBackgroundGeneration;
+  if (dynamicBackgroundNoGameTimer !== null) {
+    window.clearTimeout(dynamicBackgroundNoGameTimer);
+    dynamicBackgroundNoGameTimer = null;
+  }
+  lastDynamicGameIdentity = null;
+  if (!getDynamicBackgroundConfig().enabled) return;
+
+  // A rules update is authoritative: a game that was just blacklisted must
+  // not keep its already-installed Steam media through the normal brief-null
+  // tolerance used while processes are starting or switching renderers.
+  dynamicBackgroundActive.value = false;
+  applyBackgroundState(lastFixedBackgroundState, 'fixed');
+  if (lastFixedBackgroundState) return;
+
+  // The initial fixed-background read can fail during WebView recovery. Fill
+  // that snapshot opportunistically without allowing it to overwrite a newer
+  // game/rules result.
+  void backgroundGet().then((state) => {
+    if (generation !== dynamicBackgroundGeneration || !getDynamicBackgroundConfig().enabled) return;
+    lastFixedBackgroundState = state;
+    applyBackgroundState(state, 'fixed');
+  }).catch(() => {});
+}
+
+function scheduleDynamicBackgroundNoGameClear(): void {
+  if (dynamicBackgroundNoGameTimer !== null) return;
+  dynamicBackgroundNoGameTimer = window.setTimeout(() => {
+    dynamicBackgroundNoGameTimer = null;
+    void detectGame(true).then((current) => {
+      if (current) {
+        onDynamicGameStatus(current);
+        return;
+      }
+      if (!getDynamicBackgroundConfig().enabled) return;
+      dynamicBackgroundGeneration++;
       lastDynamicGameIdentity = null;
       dynamicBackgroundActive.value = false;
-      applyBackgroundState(await backgroundGet().catch(() => null));
+      applyBackgroundState(lastFixedBackgroundState, 'fixed');
+    }).catch(() => {
+      // Keep the current media during a transient valve/IPC failure. The next
+      // scheduled game-status poll will make the authoritative decision.
+    });
+  }, DYNAMIC_BACKGROUND_NO_GAME_GRACE_MS);
+}
+
+function onDynamicGameStatus(game: DetectedGame | null): void {
+  const generation = ++dynamicBackgroundGeneration;
+  void (async () => {
+    if (!getDynamicBackgroundConfig().enabled || !game) {
+      if (dynamicBackgroundNoGameTimer !== null) {
+        window.clearTimeout(dynamicBackgroundNoGameTimer);
+        dynamicBackgroundNoGameTimer = null;
+      }
+      // A short no-game interval is normal while a title starts or switches
+      // renderers. It is not permission to retain the old title indefinitely.
+      if (getDynamicBackgroundConfig().enabled && dynamicBackgroundActive.value) {
+        scheduleDynamicBackgroundNoGameClear();
+        return;
+      }
+      lastDynamicGameIdentity = null;
+      dynamicBackgroundActive.value = false;
+      const state = await backgroundGet().catch(() => null);
+      if (generation === dynamicBackgroundGeneration) {
+        applyBackgroundState(state, 'fixed');
+      }
       return;
     }
-    const gameIdentity = `${game.pid}:${game.name}`;
+    if (dynamicBackgroundNoGameTimer !== null) {
+      window.clearTimeout(dynamicBackgroundNoGameTimer);
+      dynamicBackgroundNoGameTimer = null;
+    }
+    if (!game.processCreated) return;
+    const gameIdentity = `${game.pid}:${game.processCreated}:${game.path || game.name}`;
     if (gameIdentity === lastDynamicGameIdentity) return;
+    // The old media belongs to a different valve target. Do not display it
+    // while Steam data for the new target is still being resolved.
+    lastDynamicGameIdentity = null;
+    dynamicBackgroundActive.value = false;
+    applyBackgroundState(lastFixedBackgroundState, 'fixed');
     try {
       const result = await refreshDynamicBackground(game);
-      if (result) {
+      if (result && generation === dynamicBackgroundGeneration && getDynamicBackgroundConfig().enabled) {
         lastDynamicGameIdentity = gameIdentity;
         dynamicBackgroundActive.value = true;
-        applyBackgroundState(result.state as BackgroundState);
+        applyBackgroundState(result.state as BackgroundState, 'dynamic');
       }
     } catch (error) {
+      if (generation !== dynamicBackgroundGeneration || !getDynamicBackgroundConfig().enabled) return;
       const message = (error as Error).message || 'Steam 连接失败';
       window.dispatchEvent(new CustomEvent('dynamic-background:progress', { detail: `失败：${message}` }));
       console.warn('[dynamic background]', error);
@@ -888,9 +1064,16 @@ function stopDynamicBackgroundWatch(): void {
 }
 function onDynamicBackgroundLoaded(e: Event): void {
   const state = (e as CustomEvent<BackgroundState>).detail;
-  if (!state?.url) return;
-  dynamicBackgroundActive.value = true;
-  applyBackgroundState(state);
+  if (!state?.url || !getDynamicBackgroundConfig().enabled) return;
+  const generation = ++dynamicBackgroundGeneration;
+  void detectGame(true).then((game) => {
+    if (generation !== dynamicBackgroundGeneration || !game ||
+        !game.processCreated || Number(state.pid) !== game.pid ||
+        String(state.processCreated || '') !== String(game.processCreated)) return;
+    lastDynamicGameIdentity = `${game.pid}:${game.processCreated}:${game.path || game.name}`;
+    dynamicBackgroundActive.value = true;
+    applyBackgroundState(state, 'dynamic');
+  }).catch(() => {});
 }
 onMounted(async () => {
   resumeLifecycleActive = true;
@@ -932,13 +1115,16 @@ onMounted(async () => {
   window.addEventListener('ipc:window.restored', onBackgroundWindowShown as EventListener);
   window.addEventListener('ipc:window.shown', onBackgroundWindowShown as EventListener);
   window.addEventListener('ipc:window.maximized', onBackgroundWindowShown as EventListener);
+  window.addEventListener('ipc:window.summoned', onBackgroundWindowShown as EventListener);
   document.addEventListener('visibilitychange', onBackgroundVisibilityChange);
   const initialWindowState = await windowApi.getState().catch(() => null);
   if (initialWindowState) {
     nativeWindowVisible.value = Boolean(initialWindowState.visible && !initialWindowState.minimized);
     setNativeWindowVisible(nativeWindowVisible.value);
   }
-  applyBackgroundState(await backgroundGet().catch(() => null));
+  const initialBackgroundState = await backgroundGet().catch(() => null);
+  lastFixedBackgroundState = initialBackgroundState;
+  applyBackgroundState(initialBackgroundState, 'fixed');
   startDynamicBackgroundWatch();
 stopUiVisibility = onUiVisibilityChange(({ visible }) => {
     if (visible) {
@@ -951,7 +1137,10 @@ stopUiVisibility = onUiVisibilityChange(({ visible }) => {
   });
   window.addEventListener('dynamic-background:settings-changed', onDynamicBackgroundSettingChanged);
   window.addEventListener('dynamic-background:loaded', onDynamicBackgroundLoaded as EventListener);
-  onAcPower.value = (await detectPowerMode().catch(() => 'dc')) === 'ac';
+  window.addEventListener('ipc:game.rules.changed', onGameRulesChanged as EventListener);
+  const initialPowerMode = await detectPowerModeReliable();
+  if (initialPowerMode) applyVideoPowerMode(initialPowerMode, true);
+  else onAcPower.value = (await detectPowerMode().catch(() => 'dc')) === 'ac';
   await reconcileBackgroundVideo();
   window.addEventListener('ipc:gamepad-start', onGamepadStart as EventListener);
   window.addEventListener('ipc:gamepad.refresh', onGamepadRefresh as EventListener);
@@ -964,14 +1153,13 @@ stopUiVisibility = onUiVisibilityChange(({ visible }) => {
   window.addEventListener('background:video-battery-pause-changed', onBackgroundVideoPauseChanged as EventListener);
   window.addEventListener('ui-settings:loaded', onUiSettingsLoaded as EventListener);
   window.addEventListener('ui-settings:changed', onUiSettingsLoaded as EventListener);
-  stopPowerSourceWatch = on('power.sourceChanged', ({ ac }) => {
-    onAcPower.value = Boolean(ac);
-    void reconcileBackgroundVideo();
+  stopPowerSourceWatch = on<{ ac: boolean }>('power.sourceChanged', ({ ac }) => {
+    onVideoPowerSourceChanged(ac);
   });
   // AC/DC 插拔：刷新数据；自动模式由性能调度重新应用当前电源侧组合。
   stopAcWatch = on('power.acChanged', async ({ ac }) => {
     onAcPower.value = Boolean(ac);
-    void reconcileBackgroundVideo();
+    onVideoPowerSourceChanged(Boolean(ac));
     globalRefreshKey.value++;
     scheduleSleepPowerPlanOptimization();
     // Resume commit will perform one authoritative re-apply after AC/DC is
@@ -1047,6 +1235,15 @@ stopUiVisibility = onUiVisibilityChange(({ visible }) => {
 
 });
 onUnmounted(() => {
+  videoPowerProbeGeneration++;
+  if (videoPowerProbeTimer !== null) {
+    window.clearTimeout(videoPowerProbeTimer);
+    videoPowerProbeTimer = null;
+  }
+  if (dynamicBackgroundNoGameTimer !== null) {
+    window.clearTimeout(dynamicBackgroundNoGameTimer);
+    dynamicBackgroundNoGameTimer = null;
+  }
   resumeLifecycleActive = false;
   if (resumeRetryTimer) {
     clearTimeout(resumeRetryTimer);
@@ -1078,6 +1275,7 @@ onUnmounted(() => {
   window.removeEventListener('ipc:window.restored', onBackgroundWindowShown as EventListener);
   window.removeEventListener('ipc:window.shown', onBackgroundWindowShown as EventListener);
   window.removeEventListener('ipc:window.maximized', onBackgroundWindowShown as EventListener);
+  window.removeEventListener('ipc:window.summoned', onBackgroundWindowShown as EventListener);
   window.removeEventListener('background:video-battery-pause-changed', onBackgroundVideoPauseChanged as EventListener);
   window.removeEventListener('ipc:power.suspending', onPowerSuspending as EventListener);
   window.removeEventListener('ipc:power.resuming', onPowerResuming as EventListener);
@@ -1086,6 +1284,7 @@ onUnmounted(() => {
   window.removeEventListener('ui-settings:changed', onUiSettingsLoaded as EventListener);
   window.removeEventListener('dynamic-background:settings-changed', onDynamicBackgroundSettingChanged);
   window.removeEventListener('dynamic-background:loaded', onDynamicBackgroundLoaded as EventListener);
+  window.removeEventListener('ipc:game.rules.changed', onGameRulesChanged as EventListener);
   document.removeEventListener('visibilitychange', onBackgroundVisibilityChange);
   stopGamepad?.();
   stopAcWatch?.();
@@ -1119,7 +1318,6 @@ onUnmounted(() => {
         :src="isHlsUrl(backgroundUrl) ? undefined : backgroundUrl"
         :style="{ opacity: String(backgroundOpacity) }"
         muted
-        autoplay
         loop
         playsinline
         preload="metadata"
@@ -1212,6 +1410,8 @@ onUnmounted(() => {
   height: calc(100% - 52px); /* 8px 顶部留白 + 34px 监控条 + 10px 下间距 */
   min-height: 0;
   overflow-y: auto;
-  padding: 12px;
+  /* Leave room for the gamepad focus ring and the final control itself. */
+  padding: 12px 12px calc(var(--gamepad-safe-bottom, 24px) + var(--gamepad-clip-bottom, 0px));
+  scroll-padding: 8px 0 var(--gamepad-safe-bottom, 24px);
 }
 </style>

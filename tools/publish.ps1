@@ -9,7 +9,8 @@
 #>
 [CmdletBinding()]
 param(
-  [string]$WorkspaceRoot = $env:YEMAN_WORKSPACE_ROOT
+  [string]$WorkspaceRoot = $env:YEMAN_WORKSPACE_ROOT,
+  [switch]$DeployInstalled
 )
 
 $ErrorActionPreference = 'Stop'
@@ -24,8 +25,18 @@ try {
   if ($LASTEXITCODE -ne 0) {
     throw "Release build failed: exit=$LASTEXITCODE"
   }
+  if ($DeployInstalled) {
+    & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $ProjectRoot 'tools\deploy-installed.ps1') -WorkspaceRoot $env:YEMAN_WORKSPACE_ROOT
+    if ($LASTEXITCODE -ne 0) {
+      throw "Installed deployment failed: exit=$LASTEXITCODE"
+    }
+  }
 } finally {
   Pop-Location
 }
 
-Write-Output 'Release assembled. No files were deployed to C:\SOFT\YeMan.'
+if ($DeployInstalled) {
+  Write-Output 'Release assembled and deployed to C:\SOFT\YeMan\YeManCC.'
+} else {
+  Write-Output 'Release assembled. No files were deployed to C:\SOFT\YeMan.'
+}

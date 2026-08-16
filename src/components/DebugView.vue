@@ -1,14 +1,16 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue';
 import { useDebugStore } from '@/stores/debug';
 import { fs, shell } from '@/bridge/api';
 import { isNativeRuntime } from '@/bridge/ipc';
 import * as yeman from '@/bridge/yeman';
 import InlineIcon from '@/components/InlineIcon.vue';
 import AppIcon from '@/components/AppIcon.vue';
+import { focusGamepadElement } from '@/gamepad/focus';
 
 const emit = defineEmits<{ (e: 'close'): void }>();
 const store = useDebugStore();
+const panelEl = ref<HTMLElement | null>(null);
 
 type Tab = 'log' | 'txt' | 'task' | 'pad';
 const tab = ref<Tab>('log');
@@ -76,14 +78,25 @@ const logsText = computed(() =>
     .join('\n')
 );
 
+function onGamepadBack(e: Event): void {
+  e.preventDefault();
+  emit('close');
+}
+
 onMounted(() => {
   store.pushGamepad('调试面板已打开');
+  window.addEventListener('ipc:gamepad-back', onGamepadBack);
+  nextTick(() => {
+    const first = panelEl.value?.querySelector<HTMLElement>('button, input, textarea');
+    if (first) focusGamepadElement(first);
+  });
 });
+onBeforeUnmount(() => window.removeEventListener('ipc:gamepad-back', onGamepadBack));
 </script>
 
 <template>
   <div class="debug-overlay">
-    <div class="debug-panel">
+    <div ref="panelEl" class="debug-panel" role="dialog" aria-modal="true" data-gp-modal>
       <header class="db-head app-region-drag">
         <span><InlineIcon name="wrench" /> 调试面板</span>
         <span class="db-runtime" :class="isNativeRuntime ? 'ok' : 'warn'">
@@ -141,10 +154,12 @@ onMounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
+  padding: 16px 16px max(32px, var(--gamepad-viewport-bottom-gap, 6vh));
 }
 .debug-panel {
   width: 92%;
   height: 80%;
+  max-height: calc(100vh - max(32px, var(--gamepad-viewport-bottom-gap, 6vh)) - 16px);
   background: #0e131c;
   border: 1px solid #2a3342;
   border-radius: var(--radius);

@@ -1,0 +1,4 @@
+# YeManCC 游戏识别 - 玩家黑名单 (player-blacklist.txt)
+#
+# 此文件只保存玩家自行排除的 exe 名称或通配规则，一行一条。
+# 系统预置规则在 system-blacklist.txt，不要在这里重复填写。
