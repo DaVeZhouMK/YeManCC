@@ -1,7 +1,7 @@
 ﻿{
-    "version":  "0.0.12",
-    "notes":  "安装阶段握手失败可回滚并恢复旧版本；强化弱网断点续传与升级链路验收。",
-    "sha256":  "4E4F08FB2CD34FA29050B8F2685F6717B14E7AD77A0B250A6B5D0A06446AFE8D",
+    "version":  "0.0.13",
+    "notes":  "连续升级验收版本：验证 0.0.12 客户端继续完成下载、安装、握手与回滚链路。",
+    "sha256":  "5D338C4878E59A509F8D25D5A438DC8F9C7AC74E84AC3D5FF54B3DD588818A07",
     "publishedAt":  "2026-08-16",
     "package":  "Packages/YeManCC.zip"
 }
