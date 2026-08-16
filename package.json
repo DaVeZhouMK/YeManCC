@@ -1,7 +1,7 @@
 {
   "name": "yemancc",
   "private": true,
-  "version": "0.0.12",
+  "version": "0.0.13",
   "packageManager": "pnpm@11.16.0",
   "type": "module",
   "description": "YeManCC — 野蛮系统控制中心 (Vue3 + QiangQiang WebView2 shell)",
