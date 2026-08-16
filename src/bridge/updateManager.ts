@@ -3,6 +3,7 @@ import {
   checkUpdate,
   compareVersions,
   downloadUpdate,
+  isValidSha256,
   installUpdate,
   updateState as readNativeUpdateState,
   updatePackageUrl,
@@ -39,6 +40,7 @@ const initial: UpdateSnapshot = {
   percent: 0,
   speedBps: 0,
   etaSeconds: 0,
+  resumedBytes: 0,
   message: '',
   error: '',
 };
@@ -65,10 +67,24 @@ function merge(next: UpdateProgressState): void {
   for (const key of [
     'version', 'attempt', 'nextAttempt', 'retryInSeconds', 'remainingRetrySeconds',
     'downloadedBytes', 'totalBytes', 'percent', 'speedBps',
-    'etaSeconds', 'lastError', 'message', 'error', 'updatedAt',
+    'etaSeconds', 'resumedBytes', 'stage', 'sha256',
+    'lastError', 'message', 'error', 'updatedAt',
   ] as const) {
     if (next[key] !== undefined) updateSnapshot[key] = next[key] as never;
   }
+}
+
+function restoreSavedUpdateInfo(saved: UpdateProgressState): void {
+  if (!saved.version || !isValidSha256(saved.sha256)) return;
+  try {
+    if (compareVersions(saved.version, APP_VERSION) <= 0) return;
+  } catch {
+    return;
+  }
+  updateInfo.value = {
+    version: saved.version,
+    sha256: saved.sha256.toUpperCase(),
+  };
 }
 
 export async function ensureUpdateManager(): Promise<void> {
@@ -79,10 +95,16 @@ export async function ensureUpdateManager(): Promise<void> {
   initialized = true;
   try {
     const saved = await readNativeUpdateState();
+    restoreSavedUpdateInfo(saved);
     if (saved.phase === 'installing' && saved.version && compareVersions(APP_VERSION, saved.version) >= 0) {
       merge({ ...saved, phase: 'completed', percent: 100, message: '更新已完成' });
+    } else if (
+      (saved.phase === 'downloaded' || saved.phase === 'installing' || saved.phase === 'interrupted') &&
+      saved.stage === 'install'
+    ) {
+      merge({ ...saved, phase: 'interrupted', message: '上次安装未完成，可重试安装' });
     } else if (saved.phase === 'downloading' || saved.phase === 'validating' || saved.phase === 'installing') {
-      merge({ ...saved, phase: 'interrupted', message: '上次更新未完成，可重新检查更新' });
+      merge({ ...saved, phase: 'interrupted', message: '上次下载未完成，可继续下载' });
     } else {
       merge(saved);
     }
@@ -105,6 +127,7 @@ export async function checkForUpdate(appVersion: string): Promise<void> {
     if (compareVersions(info.version, appVersion) > 0) {
       updateInfo.value = info;
       updateSnapshot.phase = 'available';
+      updateSnapshot.sha256 = info.sha256;
       updateSnapshot.version = info.version;
       updateSnapshot.message = '发现新版本';
     } else {
@@ -120,22 +143,41 @@ export async function checkForUpdate(appVersion: string): Promise<void> {
 
 export async function downloadAndInstall(): Promise<void> {
   const info = updateInfo.value;
-  if (!info || updateSnapshot.phase !== 'available') return;
+  if (!info || !['available', 'failed', 'interrupted'].includes(updateSnapshot.phase)) return;
   const operationId = activeOperation || makeOperationId();
+  const isResume = updateSnapshot.phase === 'failed' || updateSnapshot.phase === 'interrupted';
+  const retryInstall = isResume && updateSnapshot.stage === 'install';
   activeOperation = operationId;
   updateSnapshot.operationId = operationId;
-  updateSnapshot.phase = 'downloading';
-  updateSnapshot.downloadedBytes = 0;
-  updateSnapshot.totalBytes = 0;
-  updateSnapshot.percent = 0;
   updateSnapshot.speedBps = 0;
   updateSnapshot.etaSeconds = 0;
   updateSnapshot.error = '';
   updateSnapshot.version = info.version;
-  updateSnapshot.message = `正在下载 ${info.version}`;
   try {
+    if (retryInstall) {
+      updateSnapshot.stage = 'install';
+      updateSnapshot.phase = 'installing';
+      updateSnapshot.message = `正在重试安装 ${info.version}`;
+      try {
+        await installUpdate(operationId, info.version, info.sha256);
+        return;
+      } catch {
+        // Preflight failures (for example a missing package) can be repaired
+        // by downloading a fresh, verified package before trying installation
+        // again. If the helper already launched, this process will exit and
+        // this fallback is never reached.
+        updateSnapshot.stage = 'download';
+        updateSnapshot.phase = 'downloading';
+        updateSnapshot.message = `安装前置检查失败，正在重新下载 ${info.version}`;
+      }
+    } else {
+      updateSnapshot.stage = 'download';
+      updateSnapshot.phase = 'downloading';
+      updateSnapshot.message = isResume ? `正在继续下载 ${info.version}` : `正在下载 ${info.version}`;
+    }
     await downloadUpdate(updatePackageUrl(info.version), info.sha256, operationId, info.version);
     updateSnapshot.phase = 'downloaded';
+    updateSnapshot.stage = 'install';
     updateSnapshot.percent = 100;
     updateSnapshot.message = '下载完成，准备安装';
     updateSnapshot.phase = 'installing';

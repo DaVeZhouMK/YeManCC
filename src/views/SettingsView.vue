@@ -225,7 +225,9 @@ const updateStatusText = computed(() => {
   if (updateSnapshot.phase === 'downloaded') return '更新包已准备完成';
   if (updateSnapshot.phase === 'installing') return '正在安装并重启程序';
   if (updateSnapshot.phase === 'latest') return '当前已是最新版本';
-  if (updateSnapshot.phase === 'interrupted') return '上次更新未完成，可重新检查';
+  if (updateSnapshot.phase === 'interrupted') {
+    return updateSnapshot.stage === 'install' ? '上次安装未完成，可重试安装' : '上次下载未完成，可继续下载';
+  }
   if (updateSnapshot.phase === 'completed') return '更新已完成';
   if (updateSnapshot.phase === 'failed') return updateSnapshot.error || '更新失败';
   return '尚未检查更新';
@@ -666,10 +668,12 @@ onBeforeUnmount(() => {
         </button>
         <span class="upd-tag" :class="{ ok: ['latest', 'completed'].includes(updateSnapshot.phase), err: updateSnapshot.phase === 'failed' }">{{ updateStatusText }}</span>
       </div>
-      <div v-if="updateSnapshot.phase === 'available' && updateInfo" class="update-available">
+      <div v-if="['available', 'failed', 'interrupted'].includes(updateSnapshot.phase) && updateInfo" class="update-available">
         <div class="update-available-head">
           <span>可更新至 <b class="ac-name">v{{ updateInfo.version }}</b></span>
-          <button class="action-btn outline update-install-btn" :disabled="updateBusy" @click="downloadAndInstall">下载并安装</button>
+          <button class="action-btn outline update-install-btn" :disabled="updateBusy" @click="downloadAndInstall">
+            {{ updateSnapshot.stage === 'install' ? '重试安装' : updateSnapshot.phase === 'available' ? '下载并安装' : '继续下载' }}
+          </button>
         </div>
         <p v-if="updateInfo.notes" class="muted body upd-notes">{{ updateInfo.notes }}</p>
       </div>

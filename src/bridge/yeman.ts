@@ -623,7 +623,11 @@ export async function downloadUpdate(url: string, sha256: string, operationId: s
   return invoke<string>(
     'app.downloadUpdate',
     { url, sha256, operationId, version },
-    { timeoutMs: 16 * 60 * 1000 },
+    // The native downloader has no total wall-clock deadline.  It uses a
+    // per-I/O idle timeout and preserves the partial file for Range resume;
+    // a bridge timeout here would still abort a legitimate 20-30 minute
+    // weak-network download.
+    { timeoutMs: 0 },
   );
 }
 export async function installUpdate(operationId: string, version: string, sha256: string): Promise<boolean> {
@@ -644,6 +648,9 @@ export interface UpdateProgressState {
   percent?: number;
   speedBps?: number;
   etaSeconds?: number;
+  resumedBytes?: number;
+  stage?: 'download' | 'install';
+  sha256?: string;
   lastError?: string;
   message?: string;
   error?: string;

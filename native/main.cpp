@@ -5961,22 +5961,72 @@ static std::vector<std::wstring> sgGamePlayerBlacklist() {
 }
 
 static std::vector<std::wstring> sgGameWhitelist() {
-    // Whitelist intentionally has priority over both built-in and user
-    // blacklist entries. Do not filter it through sgExcludes(), otherwise a
-    // rule such as "qq" could never opt the process back in.
+    // Whitelist still has priority over the immutable/system blacklist. The
+    // game.rules.set path keeps it disjoint from the user blacklist so a
+    // manual exclusion cannot be silently overridden by an old auto-entry.
     return sgReadGameRuleFile(SG_GAME_WHITELIST);
+}
+
+static std::string sgGameRuleFileContent(const std::vector<std::wstring>& rules) {
+    std::string content;
+    for (const auto& rule : rules) {
+        content += W2U(rule);
+        content += "\n";
+    }
+    return content;
 }
 
 static bool sgWriteGameRuleFile(const std::wstring& path,
                                 const std::vector<std::wstring>& rules) {
     std::error_code ec;
     fspath::create_directories(SG_DIR, ec);
-    std::string content;
+    return sgWriteFileAtomic(path, sgGameRuleFileContent(rules));
+}
+
+static std::vector<std::wstring> sgRemoveSameGameRules(
+    const std::vector<std::wstring>& rules,
+    const std::vector<std::wstring>& existingRules) {
+    std::vector<std::wstring> filtered;
+    filtered.reserve(rules.size());
     for (const auto& rule : rules) {
-        content += W2U(rule);
-        content += "\n";
+        if (std::find(existingRules.begin(), existingRules.end(), rule) == existingRules.end())
+            filtered.push_back(rule);
     }
-    return sgWriteFileAtomic(path, content);
+    return filtered;
+}
+
+// The UI edits one list at a time, but mutual exclusion changes both files.
+// Keep the operation under g_gameRulesMx and restore the first file if the
+// second atomic replacement fails, so a transient disk error does not leave a
+// newly-created conflict behind.
+static bool sgWriteGameRuleFiles(const std::vector<std::wstring>& blacklist,
+                                 const std::vector<std::wstring>& whitelist) {
+    std::error_code ec;
+    fspath::create_directories(SG_DIR, ec);
+    const bool blacklistExisted = fspath::exists(SG_GAME_PLAYER_BLACKLIST, ec) && !ec;
+    const std::string oldBlacklist = sgReadFile(SG_GAME_PLAYER_BLACKLIST);
+    ec.clear();
+    const bool whitelistExisted = fspath::exists(SG_GAME_WHITELIST, ec) && !ec;
+    const std::string oldWhitelist = sgReadFile(SG_GAME_WHITELIST);
+
+    if (!sgWriteFileAtomic(SG_GAME_PLAYER_BLACKLIST,
+                           sgGameRuleFileContent(blacklist)))
+        return false;
+    if (sgWriteFileAtomic(SG_GAME_WHITELIST,
+                          sgGameRuleFileContent(whitelist)))
+        return true;
+
+    if (blacklistExisted)
+        sgWriteFileAtomic(SG_GAME_PLAYER_BLACKLIST, oldBlacklist);
+    else
+        DeleteFileW(SG_GAME_PLAYER_BLACKLIST.c_str());
+    // The whitelist replacement failed, so its original content is still in
+    // place. Restore it as well if an unusual replace path changed it.
+    if (whitelistExisted)
+        sgWriteFileAtomic(SG_GAME_WHITELIST, oldWhitelist);
+    else
+        DeleteFileW(SG_GAME_WHITELIST.c_str());
+    return false;
 }
 
 static json sgGameRulesSnapshot() {
@@ -6055,12 +6105,19 @@ static json nativeAutoRegisterSummonGame(const FocusTargetSnapshot& target) {
     if (workingSet < static_cast<SIZE_T>(SG_CAPTURE_MIN_WS)) return result;
 
     if (!isWhitelisted) {
-        // Re-read under the lock before publishing. Another summon or a
-        // settings-page edit may have admitted the same rule while this
-        // process was being validated.
+        // Re-read both sides under the lock before publishing. Another summon
+        // or a settings-page edit may have admitted the same rule, or a user
+        // may have blacklisted it while this process was being validated.
         std::lock_guard<std::mutex> rulesLock(g_gameRulesMx);
+        const auto latestExcludes = sgExcludes();
         auto latestWhitelist = sgGameWhitelist();
-        if (!sgNameExcludedBy(name, latestWhitelist)) {
+        const bool latestWhitelisted = sgNameExcludedBy(name, latestWhitelist);
+        if (!latestWhitelisted &&
+            (nativeMonitorExcluded(name) || sgNameExcludedBy(name, latestExcludes))) {
+            result["blocked"] = true;
+            return result;
+        }
+        if (!latestWhitelisted) {
             latestWhitelist.push_back(name);
             if (!sgWriteGameRuleFile(SG_GAME_WHITELIST, latestWhitelist)) return result;
             result["autoAdded"] = true;
@@ -9624,10 +9681,11 @@ static void reg_fs() {
 
 static std::mutex g_backgroundMtx;
 
-// Update downloads are deliberately conservative for unreliable networks:
-// keep retrying the complete package at a fixed cadence, but never let one
-// update operation wait indefinitely.
-static constexpr ULONGLONG UPDATE_RETRY_WINDOW_MS = 5ULL * 60ULL * 1000ULL;
+// Update downloads are deliberately tolerant of unreliable networks.  There
+// is no total wall-clock deadline: a slow but progressing download may take
+// 20-30 minutes (or longer).  WinHTTP's per-operation timeout is only an idle
+// connection guard; a retry resumes from the preserved .part file.
+static constexpr DWORD UPDATE_HTTP_IO_TIMEOUT_MS = 120000;
 static constexpr DWORD UPDATE_RETRY_INTERVAL_MS = 5000;
 
 struct DownloadAttemptResult {
@@ -9638,12 +9696,17 @@ struct DownloadAttemptResult {
     DWORD httpStatus = 0;
     uint64_t receivedBytes = 0;
     uint64_t expectedBytes = 0;
+    bool restartRequired = false;
+    bool rangeAccepted = false;
+    std::string etag;
+    std::string lastModified;
 };
 
 static DownloadAttemptResult downloadFileAttempt(
     const std::string& url, const std::wstring& dest,
     const std::function<void(uint64_t, uint64_t)>& progress,
-    ULONGLONG deadline);
+    ULONGLONG deadline, uint64_t resumeOffset = 0,
+    const std::string& ifRange = {}, bool preservePartial = false);
 static bool downloadFile(const std::string& url, const std::wstring& dest,
                          const std::function<void(uint64_t, uint64_t)>& progress = {});
 static bool webmDurationSeconds(const std::wstring& path, double& seconds);
@@ -10261,10 +10324,17 @@ static void reg_shell_app() {
                 next.push_back(rule);
         }
 
+        std::vector<std::wstring> nextBlacklist = sgGamePlayerBlacklist();
+        std::vector<std::wstring> nextWhitelist = sgGameWhitelist();
         if (hasWhitelist) {
-            // The whitelist is an explicit override and may overlap either
-            // kind of blacklist rule.
-            if (!sgWriteGameRuleFile(SG_GAME_WHITELIST, next))
+            nextWhitelist = std::move(next);
+            // A manual whitelist entry revokes the corresponding user
+            // blacklist entry. System rules are immutable and remain outside
+            // this mutual-exclusion operation.
+            nextBlacklist = sgRemoveSameGameRules(nextBlacklist, nextWhitelist);
+            // The whitelist can still override immutable/system rules, but
+            // it is kept disjoint from the user-owned blacklist above.
+            if (!sgWriteGameRuleFiles(nextBlacklist, nextWhitelist))
                 return json{{"ok", false}, {"error", "白名单保存失败"}};
         } else {
             // Player rules never repeat a system rule.  Both lists still
@@ -10274,10 +10344,14 @@ static void reg_shell_app() {
             next.erase(std::remove_if(next.begin(), next.end(), [&](const std::wstring& rule) {
                 return sgNameExcludedBy(rule, systemRules);
             }), next.end());
-            if (!sgWriteGameRuleFile(SG_GAME_PLAYER_BLACKLIST, next))
+            nextBlacklist = std::move(next);
+            // A manual blacklist entry revokes any conflicting user
+            // whitelist entry with the same normalized rule.
+            nextWhitelist = sgRemoveSameGameRules(nextWhitelist, nextBlacklist);
+            if (!sgWriteGameRuleFiles(nextBlacklist, nextWhitelist))
                 return json{{"ok", false}, {"error", "黑名单保存失败"}};
-            // Keep overlapping whitelist entries: whitelist has explicit
-            // priority over the blacklist during game recognition.
+            // The whitelist remains an override only for immutable/system
+            // rules; user-owned lists are disjoint after every UI save.
         }
 
         g_gameRulesEpoch.fetch_add(1, std::memory_order_acq_rel);
@@ -11935,10 +12009,60 @@ static void sgAdvanceEntryFailureRetry(const char* reason) {
     sgAdvanceRetry(reason);
 }
 
+static std::string queryWinHttpHeader(HINTERNET request, DWORD query) {
+    DWORD bytes = 0;
+    WinHttpQueryHeaders(request, query, WINHTTP_HEADER_NAME_BY_INDEX,
+                        nullptr, &bytes, WINHTTP_NO_HEADER_INDEX);
+    if (GetLastError() != ERROR_INSUFFICIENT_BUFFER || bytes == 0) return {};
+    std::wstring value(bytes / sizeof(wchar_t), L'\0');
+    if (!WinHttpQueryHeaders(request, query, WINHTTP_HEADER_NAME_BY_INDEX,
+                             value.data(), &bytes, WINHTTP_NO_HEADER_INDEX)) return {};
+    value.resize(bytes / sizeof(wchar_t));
+    while (!value.empty() && value.back() == L'\0') value.pop_back();
+    return trim_ascii(W2U(value));
+}
+
+static bool parseContentRangeHeader(const std::string& raw, bool& unsatisfied,
+                                    uint64_t& start, uint64_t& end, uint64_t& total) {
+    const auto value = trim_ascii(raw);
+    if (value.rfind("bytes ", 0) != 0) return false;
+    const auto range = value.substr(6);
+    const auto slash = range.find('/');
+    if (slash == std::string::npos) return false;
+    const auto bounds = range.substr(0, slash);
+    const auto totalText = range.substr(slash + 1);
+    try {
+        if (bounds == "*") {
+            unsatisfied = true;
+            start = end = 0;
+        } else {
+            const auto dash = bounds.find('-');
+            if (dash == std::string::npos || dash == 0 || dash + 1 >= bounds.size()) return false;
+            size_t consumed = 0;
+            start = std::stoull(bounds.substr(0, dash), &consumed);
+            if (consumed != dash) return false;
+            consumed = 0;
+            end = std::stoull(bounds.substr(dash + 1), &consumed);
+            if (consumed != bounds.size() - dash - 1 || end < start) return false;
+            unsatisfied = false;
+        }
+        if (totalText == "*") total = 0;
+        else {
+            size_t consumed = 0;
+            total = std::stoull(totalText, &consumed);
+            if (consumed != totalText.size()) return false;
+        }
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
 static DownloadAttemptResult downloadFileAttempt(
     const std::string& url, const std::wstring& dest,
     const std::function<void(uint64_t, uint64_t)>& progress,
-    ULONGLONG deadline) {
+    ULONGLONG deadline, uint64_t resumeOffset,
+    const std::string& ifRange, bool preservePartial) {
     DownloadAttemptResult result;
     URL_COMPONENTS uc;
     wchar_t host[256]{}, path[2048]{}, extra[2048]{};
@@ -11954,6 +12078,7 @@ static DownloadAttemptResult downloadFileAttempt(
         if (hS) { WinHttpCloseHandle(hS); hS = nullptr; }
     };
     auto removePartial = [&]() {
+        if (preservePartial) return;
         std::error_code ec;
         fspath::remove(dest, ec);
     };
@@ -11969,16 +12094,21 @@ static DownloadAttemptResult downloadFileAttempt(
         return result;
     };
     auto remainingMs = [&]() -> DWORD {
+        if (deadline == 0) return 0xFFFFFFFFu;
         const ULONGLONG now = GetTickCount64();
         if (now >= deadline) return 0;
         return static_cast<DWORD>((std::min)(deadline - now, static_cast<ULONGLONG>(0xFFFFFFFFu)));
     };
     auto attemptTimeoutMs = [&]() -> DWORD {
-        return (std::min)(remainingMs(), DEFAULT_HTTP_TIMEOUT_MS);
+        // The update path passes deadline=0 and gets the weak-network idle
+        // timeout.  Keep the existing timeout policy for bounded background
+        // media downloads that still use a real total deadline.
+        const DWORD ioTimeout = deadline == 0 ? UPDATE_HTTP_IO_TIMEOUT_MS : DEFAULT_HTTP_TIMEOUT_MS;
+        return (std::min)(remainingMs(), ioTimeout);
     };
 
     std::error_code cleanupEc;
-    fspath::remove(dest, cleanupEc);
+    if (!preservePartial) fspath::remove(dest, cleanupEc);
     if (cleanupEc)
         return fail("Cannot remove the previous download package", ERROR_ACCESS_DENIED, false);
     if (g_poolCancel.load(std::memory_order_acquire))
@@ -11988,7 +12118,7 @@ static DownloadAttemptResult downloadFileAttempt(
     if (uc.nScheme != INTERNET_SCHEME_HTTPS)
         return fail("Only HTTPS download URLs are supported", ERROR_INVALID_PARAMETER, false);
     if (remainingMs() == 0)
-        return fail("Download retry window expired", ERROR_WINHTTP_TIMEOUT, true);
+        return fail("Download operation deadline expired", ERROR_WINHTTP_TIMEOUT, true);
 
     const bool steamHost = isSteamHostName(host);
     hS = WinHttpOpen(L"QQ/1.0",
@@ -12033,8 +12163,16 @@ static DownloadAttemptResult downloadFileAttempt(
         const DWORD error = GetLastError();
         return fail(downloadWinHttpError("WinHttpAddRequestHeaders", error), error);
     }
+    if (resumeOffset > 0) {
+        std::wstring resumeHeaders = L"Range: bytes=" + std::to_wstring(resumeOffset) + L"-\r\n";
+        if (!ifRange.empty()) resumeHeaders += L"If-Range: " + U2W(ifRange) + L"\r\n";
+        if (!WinHttpAddRequestHeaders(hR, resumeHeaders.c_str(), (DWORD)-1, WINHTTP_ADDREQ_FLAG_ADD)) {
+            const DWORD error = GetLastError();
+            return fail(downloadWinHttpError("WinHttpAddRequestHeaders(range)", error), error);
+        }
+    }
     if (remainingMs() == 0)
-        return fail("Download retry window expired", ERROR_WINHTTP_TIMEOUT, true);
+        return fail("Download operation deadline expired", ERROR_WINHTTP_TIMEOUT, true);
     setHttpTimeouts(hR, attemptTimeoutMs());
     if (!WinHttpSendRequest(hR, WINHTTP_NO_ADDITIONAL_HEADERS, 0,
         WINHTTP_NO_REQUEST_DATA, 0, 0, 0)) {
@@ -12053,27 +12191,76 @@ static DownloadAttemptResult downloadFileAttempt(
         return fail(downloadWinHttpError("WinHttpQueryHeaders(status)", error), error);
     }
     result.httpStatus = statusCode;
+    result.etag = queryWinHttpHeader(hR, WINHTTP_QUERY_ETAG);
+    result.lastModified = queryWinHttpHeader(hR, WINHTTP_QUERY_LAST_MODIFIED);
     if (statusCode < 200 || statusCode >= 300) {
-        const bool retryable = statusCode == 408 || statusCode == 425 || statusCode == 429 || statusCode >= 500;
+        if (resumeOffset > 0 && statusCode == 416) {
+            bool unsatisfied = false;
+            uint64_t rangeStart = 0, rangeEnd = 0, rangeTotal = 0;
+            const auto contentRange = queryWinHttpHeader(hR, WINHTTP_QUERY_CONTENT_RANGE);
+            if (parseContentRangeHeader(contentRange, unsatisfied, rangeStart, rangeEnd, rangeTotal) &&
+                unsatisfied && rangeTotal == resumeOffset) {
+                closeHandles();
+                result.receivedBytes = resumeOffset;
+                result.expectedBytes = rangeTotal;
+                result.ok = true;
+                result.retryable = false;
+                return result;
+            }
+            result.restartRequired = true;
+            result.receivedBytes = 0;
+            result.expectedBytes = 0;
+        }
+        const bool retryable = result.restartRequired ||
+            statusCode == 408 || statusCode == 425 || statusCode == 429 || statusCode >= 500;
         return fail("HTTP " + std::to_string(statusCode), ERROR_SUCCESS, retryable);
+    }
+    if (resumeOffset > 0 && statusCode == 200) {
+        result.restartRequired = true;
+        return fail("Server did not honor the resume range", ERROR_SUCCESS, true);
+    }
+    if (statusCode != 200 && statusCode != 206) {
+        return fail("Unexpected HTTP " + std::to_string(statusCode), ERROR_SUCCESS, false);
     }
     DWORD expectedLength = 0;
     DWORD expectedLengthSize = sizeof(expectedLength);
     const bool hasExpectedLength = WinHttpQueryHeaders(
         hR, WINHTTP_QUERY_CONTENT_LENGTH | WINHTTP_QUERY_FLAG_NUMBER,
         WINHTTP_HEADER_NAME_BY_INDEX, &expectedLength, &expectedLengthSize, WINHTTP_NO_HEADER_INDEX) != FALSE;
-    result.expectedBytes = hasExpectedLength ? expectedLength : 0;
-    out.open(dest, std::ios::binary | std::ios::trunc);
+    uint64_t expectedTotal = hasExpectedLength ? expectedLength : 0;
+    if (statusCode == 206) {
+        bool unsatisfied = false;
+        uint64_t rangeStart = 0, rangeEnd = 0, rangeTotal = 0;
+        const auto contentRange = queryWinHttpHeader(hR, WINHTTP_QUERY_CONTENT_RANGE);
+        if (!parseContentRangeHeader(contentRange, unsatisfied, rangeStart, rangeEnd, rangeTotal) ||
+            unsatisfied || rangeStart != resumeOffset) {
+            result.restartRequired = true;
+            return fail("Invalid Content-Range for resumed download", ERROR_INVALID_DATA, true);
+        }
+        result.rangeAccepted = resumeOffset > 0;
+        expectedTotal = rangeTotal > 0 ? rangeTotal : (resumeOffset + expectedLength);
+    }
+    if (expectedTotal > 0 && resumeOffset > expectedTotal) {
+        result.restartRequired = true;
+        return fail("Resume offset exceeds the remote package size", ERROR_INVALID_DATA, true);
+    }
+    result.expectedBytes = expectedTotal;
+    out.open(dest, std::ios::binary | (resumeOffset > 0 ? std::ios::app : std::ios::trunc));
     if (!out)
         return fail("Cannot open download destination for writing", ERROR_ACCESS_DENIED, false);
 
-    uint64_t receivedLength = 0;
+    uint64_t receivedLength = resumeOffset;
+    result.receivedBytes = resumeOffset;
     DWORD avail = 0, rd = 0;
     while (true) {
         if (g_poolCancel.load(std::memory_order_acquire))
             return fail("Download cancelled", ERROR_CANCELLED, false);
         if (remainingMs() == 0)
             return fail("Download attempt timed out", ERROR_WINHTTP_TIMEOUT, true);
+        // Content-Length/Content-Range is authoritative.  Once all declared
+        // bytes are present, stop reading immediately and validate the file;
+        // waiting for a graceful socket EOF caused 100%-then-timeout loops.
+        if (expectedTotal > 0 && receivedLength >= expectedTotal) break;
         setHttpTimeouts(hR, attemptTimeoutMs());
         if (!WinHttpQueryDataAvailable(hR, &avail)) {
             const DWORD error = GetLastError();
@@ -12081,7 +12268,9 @@ static DownloadAttemptResult downloadFileAttempt(
             return fail(downloadWinHttpError("WinHttpQueryDataAvailable", error), error);
         }
         if (avail == 0) break;
-        const DWORD readSize = (std::min)(avail, static_cast<DWORD>(1u << 20));
+        DWORD readSize = (std::min)(avail, static_cast<DWORD>(1u << 20));
+        if (expectedTotal > receivedLength)
+            readSize = (std::min)(readSize, static_cast<DWORD>((std::min)(expectedTotal - receivedLength, static_cast<uint64_t>(0xFFFFFFFFu))));
         std::string chunk(readSize, 0);
         setHttpTimeouts(hR, attemptTimeoutMs());
         if (!WinHttpReadData(hR, chunk.data(), readSize, &rd)) {
@@ -12096,16 +12285,18 @@ static DownloadAttemptResult downloadFileAttempt(
         out.write(chunk.data(), rd);
         receivedLength += rd;
         result.receivedBytes = receivedLength;
+        if (expectedTotal > 0 && receivedLength > expectedTotal)
+            return fail("Downloaded more bytes than declared by the server", ERROR_INVALID_DATA, true);
         if (!out)
             return fail("Failed to write the downloaded package", ERROR_WRITE_FAULT, false);
-        if (progress) progress(receivedLength, hasExpectedLength ? expectedLength : 0);
+        if (progress) progress(receivedLength, expectedTotal);
     }
     out.close();
     closeHandles();
     result.receivedBytes = receivedLength;
-    if (hasExpectedLength && receivedLength != expectedLength) {
+    if (expectedTotal > 0 && receivedLength != expectedTotal) {
         result.error = "Downloaded size mismatch (received " + std::to_string(receivedLength) +
-            ", expected " + std::to_string(expectedLength) + ")";
+            ", expected " + std::to_string(expectedTotal) + ")";
         result.retryable = true;
         removePartial();
         return result;
@@ -12496,7 +12687,8 @@ static void reg_updater() {
         if (operationId.empty()) operationId = "update-" + std::to_string(GetTickCount64());
         auto failBeforeDownload = [&](const std::string& error) -> void {
             updateProgressPost({
-                {"operationId", operationId}, {"phase", "failed"}, {"version", version},
+                {"operationId", operationId}, {"phase", "failed"}, {"stage", "download"}, {"version", version},
+                {"sha256", ascii_lower(sha)}, {"url", url},
                 {"error", error}, {"message", std::string("无法开始更新：") + error},
                 {"updatedAt", static_cast<int64_t>(time(nullptr) * 1000)}
             });
@@ -12508,16 +12700,48 @@ static void reg_updater() {
         std::error_code ec; fspath::create_directories(app_data_dir() + L"\\update", ec);
         if (ec) throw std::runtime_error("Failed to create update directory");
         auto dest = app_data_dir() + L"\\update\\package.zip";
+        auto part = app_data_dir() + L"\\update\\package.zip.part";
+        auto partMeta = app_data_dir() + L"\\update\\package.zip.part.json";
         fspath::remove(dest, ec);
+        if (ec) throw std::runtime_error("Failed to clear the previous completed package");
+        json resumeMeta = {
+            {"url", url}, {"sha256", ascii_lower(sha)}, {"version", version}
+        };
+        bool resumeStateValid = false;
+        if (fspath::exists(part) && fspath::exists(partMeta)) {
+            try {
+                auto stored = json::parse(sgReadFile(partMeta));
+                resumeStateValid = stored.is_object() &&
+                    stored.value("url", std::string{}) == url &&
+                    ascii_lower(stored.value("sha256", std::string{})) == ascii_lower(sha) &&
+                    stored.value("version", std::string{}) == version;
+                if (resumeStateValid) resumeMeta = std::move(stored);
+            } catch (...) {
+                resumeStateValid = false;
+            }
+        }
+        if (!resumeStateValid) {
+            fspath::remove(part, ec);
+            fspath::remove(partMeta, ec);
+        }
+        sgWriteFileAtomic(partMeta, resumeMeta.dump());
+        uint64_t existingBytes = 0;
+        if (fspath::exists(part)) {
+            existingBytes = fspath::file_size(part, ec);
+            if (ec) existingBytes = 0;
+        }
         updateProgressPost({
-            {"operationId", operationId}, {"phase", "downloading"},
+            {"operationId", operationId}, {"phase", "downloading"}, {"stage", "download"},
             {"version", version},
-            {"downloadedBytes", 0}, {"totalBytes", 0}, {"percent", 0},
+            {"sha256", ascii_lower(sha)}, {"url", url},
+            {"downloadedBytes", existingBytes},
+            {"totalBytes", resumeMeta.value("totalBytes", uint64_t{0})},
+            {"percent", resumeMeta.value("totalBytes", uint64_t{0}) > 0
+                ? existingBytes * 100.0 / resumeMeta.value("totalBytes", uint64_t{0}) : 0.0},
             {"speedBps", 0}, {"etaSeconds", 0}, {"message", "正在下载更新包"},
             {"updatedAt", static_cast<int64_t>(time(nullptr) * 1000)}
         });
         try {
-            const ULONGLONG retryDeadline = GetTickCount64() + UPDATE_RETRY_WINDOW_MS;
             uint64_t attempt = 0;
             DownloadAttemptResult lastFailure;
             bool downloaded = false;
@@ -12525,12 +12749,14 @@ static void reg_updater() {
                 if (g_poolCancel.load(std::memory_order_acquire))
                     throw std::runtime_error("Download cancelled during shutdown");
                 const ULONGLONG attemptStarted = GetTickCount64();
-                if (attemptStarted >= retryDeadline)
-                    break;
                 attempt++;
                 ULONGLONG lastTick = attemptStarted;
-                uint64_t lastBytes = 0;
-                auto result = downloadFileAttempt(url, dest, [&](uint64_t received, uint64_t total) {
+                uint64_t lastBytes = existingBytes;
+                const uint64_t resumeOffset = existingBytes;
+                const auto ifRange = resumeMeta.value("etag", std::string{}).empty()
+                    ? resumeMeta.value("lastModified", std::string{})
+                    : resumeMeta.value("etag", std::string{});
+                auto result = downloadFileAttempt(url, part, [&](uint64_t received, uint64_t total) {
                     const ULONGLONG now = GetTickCount64();
                     if (now - lastTick < 250 && received != total) return;
                     const double seconds = (std::max)(0.001, (now - lastTick) / 1000.0);
@@ -12540,8 +12766,9 @@ static void reg_updater() {
                     const int64_t eta = total > received && speed > 1.0
                         ? static_cast<int64_t>((total - received) / speed) : 0;
                     updateProgressPost({
-                        {"operationId", operationId}, {"phase", "downloading"},
+                        {"operationId", operationId}, {"phase", "downloading"}, {"stage", "download"},
                         {"version", version}, {"attempt", attempt},
+                        {"sha256", ascii_lower(sha)}, {"url", url},
                         {"downloadedBytes", received}, {"totalBytes", total},
                         {"percent", percent}, {"speedBps", speed}, {"etaSeconds", eta},
                         {"message", "正在下载更新包（第 " + std::to_string(attempt) + " 次尝试）"},
@@ -12549,52 +12776,72 @@ static void reg_updater() {
                     });
                     lastTick = now;
                     lastBytes = received;
-                }, retryDeadline);
+                }, 0, resumeOffset, ifRange, true);
+                if (!result.etag.empty()) resumeMeta["etag"] = result.etag;
+                if (!result.lastModified.empty()) resumeMeta["lastModified"] = result.lastModified;
+                if (result.expectedBytes > 0) resumeMeta["totalBytes"] = result.expectedBytes;
+                sgWriteFileAtomic(partMeta, resumeMeta.dump());
+                if (result.restartRequired) {
+                    fspath::remove(part, ec);
+                    fspath::remove(partMeta, ec);
+                    resumeMeta = {{"url", url}, {"sha256", ascii_lower(sha)}, {"version", version}};
+                    sgWriteFileAtomic(partMeta, resumeMeta.dump());
+                    existingBytes = 0;
+                }
                 if (result.ok) {
                     updateProgressPost({
-                        {"operationId", operationId}, {"phase", "validating"},
+                        {"operationId", operationId}, {"phase", "validating"}, {"stage", "download"},
                         {"version", version}, {"attempt", attempt},
+                        {"sha256", ascii_lower(sha)}, {"url", url},
                         {"downloadedBytes", result.receivedBytes},
                         {"totalBytes", result.expectedBytes},
                         {"percent", 100}, {"speedBps", 0}, {"etaSeconds", 0},
                         {"message", "正在校验更新包（第 " + std::to_string(attempt) + " 次尝试）"},
                         {"updatedAt", static_cast<int64_t>(time(nullptr) * 1000)}
                     });
-                    const auto got = sha256File(dest);
+                    const auto got = sha256File(part);
                     if (isStrictUpdateSha256(got) && _stricmp(got.c_str(), sha.c_str()) == 0) {
+                        if (!MoveFileExW(part.c_str(), dest.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+                            throw std::runtime_error("Failed to finalize the downloaded package");
+                        fspath::remove(partMeta, ec);
                         downloaded = true;
                         break;
                     }
                     result.ok = false;
                     result.retryable = true;
                     result.error = "Checksum mismatch (expected " + sha + ", got " + got + ")";
-                    std::error_code checksumEc;
-                    fspath::remove(dest, checksumEc);
+                    fspath::remove(part, ec);
+                    fspath::remove(partMeta, ec);
+                    resumeMeta = {{"url", url}, {"sha256", ascii_lower(sha)}, {"version", version}};
+                    sgWriteFileAtomic(partMeta, resumeMeta.dump());
+                    existingBytes = 0;
                 }
+                existingBytes = fspath::exists(part) ? fspath::file_size(part, ec) : 0;
+                if (ec) existingBytes = 0;
                 lastFailure = std::move(result);
                 if (!lastFailure.retryable) {
                     throw std::runtime_error("下载失败，已尝试 " + std::to_string(attempt) +
                         " 次：" + lastFailure.error);
                 }
 
-                const ULONGLONG now = GetTickCount64();
-                if (now >= retryDeadline || retryDeadline - now <= UPDATE_RETRY_INTERVAL_MS)
-                    break;
                 const uint64_t nextAttempt = attempt + 1;
-                const ULONGLONG remainingAfterWaitMs = retryDeadline - now - UPDATE_RETRY_INTERVAL_MS;
-                const uint64_t remainingMinutes = (std::max)(1ULL,
-                    (remainingAfterWaitMs + 59999ULL) / 60000ULL);
-                const std::string retryMessage = "下载失败，正在重新尝试第 " +
-                    std::to_string(nextAttempt) + " 次（剩余约 " +
-                    std::to_string(remainingMinutes) + " 分钟）";
+                const uint64_t retryTotal = lastFailure.expectedBytes;
+                const double retryPercent = retryTotal > 0
+                    ? (std::min)(100.0, lastFailure.receivedBytes * 100.0 / retryTotal) : 0.0;
+                const std::string retryMessage = lastFailure.receivedBytes > 0
+                    ? "下载中断，5秒后从 " + std::to_string(lastFailure.receivedBytes) +
+                        " 字节继续第 " + std::to_string(nextAttempt) + " 次尝试"
+                    : "下载失败，5秒后重新尝试第 " + std::to_string(nextAttempt) + " 次";
                 updateProgressPost({
-                    {"operationId", operationId}, {"phase", "downloading"},
+                    {"operationId", operationId}, {"phase", "downloading"}, {"stage", "download"},
                     {"version", version}, {"attempt", attempt}, {"nextAttempt", nextAttempt},
+                    {"sha256", ascii_lower(sha)}, {"url", url},
                     {"retryInSeconds", UPDATE_RETRY_INTERVAL_MS / 1000},
-                    {"remainingRetrySeconds", static_cast<uint64_t>((retryDeadline - now) / 1000ULL)},
+                    {"remainingRetrySeconds", 0},
                     {"downloadedBytes", lastFailure.receivedBytes},
                     {"totalBytes", lastFailure.expectedBytes},
-                    {"percent", 0}, {"speedBps", 0}, {"etaSeconds", 0},
+                    {"percent", retryPercent}, {"speedBps", 0}, {"etaSeconds", 0},
+                    {"resumedBytes", existingBytes},
                     {"lastError", lastFailure.error}, {"message", retryMessage},
                     {"updatedAt", static_cast<int64_t>(time(nullptr) * 1000)}
                 });
@@ -12607,24 +12854,18 @@ static void reg_updater() {
                     Sleep(static_cast<DWORD>((std::min)(waitRemaining, 100ULL)));
                 }
             }
-            if (!downloaded) {
-                const std::string detail = lastFailure.error.empty()
-                    ? std::string("Download retry window expired") : lastFailure.error;
-                throw std::runtime_error("下载失败，已尝试 " + std::to_string(attempt) +
-                    " 次，5 分钟内仍未成功：" + detail);
-            }
             updateProgressPost({
-                {"operationId", operationId}, {"phase", "downloaded"},
+                {"operationId", operationId}, {"phase", "downloaded"}, {"stage", "install"},
                 {"version", version},
+                {"sha256", ascii_lower(sha)}, {"url", url},
                 {"percent", 100}, {"message", "更新包校验通过"},
                 {"updatedAt", static_cast<int64_t>(time(nullptr) * 1000)}
             });
         } catch (const std::exception& e) {
-            std::error_code cleanupEc;
-            fspath::remove(dest, cleanupEc);
             updateProgressPost({
-                {"operationId", operationId}, {"phase", "failed"},
+                {"operationId", operationId}, {"phase", "failed"}, {"stage", "download"},
                 {"version", version},
+                {"sha256", ascii_lower(sha)}, {"url", url},
                 {"error", e.what()}, {"message", std::string("下载失败：") + e.what()},
                 {"updatedAt", static_cast<int64_t>(time(nullptr) * 1000)}
             });
@@ -12639,52 +12880,47 @@ static void reg_updater() {
         const auto operationId = a.value("operationId", std::string{});
         const auto version = a.value("version", std::string{});
         const auto sha = a.value("sha256", std::string{});
-        auto failBeforeInstall = [&](const std::string& error, const std::string& message) -> void {
+        auto failInstall = [&](const std::string& error, const std::string& message) -> void {
             updateProgressPost({
-                {"operationId", operationId}, {"phase", "failed"}, {"version", version},
+                {"operationId", operationId}, {"phase", "failed"}, {"stage", "install"}, {"version", version},
+                {"sha256", ascii_lower(sha)},
                 {"error", error}, {"message", message},
                 {"updatedAt", static_cast<int64_t>(time(nullptr) * 1000)}
             });
             throw std::runtime_error(error);
         };
-        if (!isStrictUpdateSha256(sha)) failBeforeInstall("A valid SHA-256 is required", "更新包 SHA-256 无效");
+        if (!isStrictUpdateSha256(sha)) failInstall("A valid SHA-256 is required", "更新包 SHA-256 无效");
         try { requireNewerUpdateVersion(version); }
-        catch (const std::exception& e) { failBeforeInstall(e.what(), "目标版本不是可安装的新版本"); }
+        catch (const std::exception& e) { failInstall(e.what(), "目标版本不是可安装的新版本"); }
         updateProgressPost({
-            {"operationId", operationId}, {"phase", "installing"},
+            {"operationId", operationId}, {"phase", "installing"}, {"stage", "install"},
             {"version", version},
+            {"sha256", ascii_lower(sha)},
             {"percent", 100}, {"message", "正在安装并重启程序"},
             {"updatedAt", static_cast<int64_t>(time(nullptr) * 1000)}
         });
         auto zip = app_data_dir() + L"\\update\\package.zip";
         if (!fspath::exists(zip)) {
-            updateProgressPost({{"operationId", operationId}, {"phase", "failed"},
-                {"error", "No update package downloaded"}, {"message", "更新包不存在"}});
-            throw std::runtime_error("No update package downloaded");
+            failInstall("No update package downloaded", "更新包不存在");
         }
         const auto installHash = sha256File(zip);
         if (!isStrictUpdateSha256(installHash) || _stricmp(installHash.c_str(), sha.c_str()) != 0) {
             std::error_code cleanupEc;
             fspath::remove(zip, cleanupEc);
-            updateProgressPost({{"operationId", operationId}, {"phase", "failed"},
-                {"error", "Update package checksum mismatch before installation"}, {"message", "安装前校验更新包失败"}});
-            throw std::runtime_error("Update package checksum mismatch before installation");
+            failInstall("Update package checksum mismatch before installation", "安装前校验更新包失败");
         }
         auto staging = app_data_dir() + L"\\update\\staging";
         std::error_code ec; fspath::remove_all(staging, ec);
+        if (ec) failInstall("Failed to clear stale update staging", "无法清理上次安装暂存目录");
         if (!unzipTar(zip, staging)) {
             fspath::remove_all(staging, ec);
             fspath::remove(zip, ec);
-            updateProgressPost({{"operationId", operationId}, {"phase", "failed"},
-                {"error", "Failed to extract update package"}, {"message", "更新包解压失败"}});
-            throw std::runtime_error("Failed to extract update package");
+            failInstall("Failed to extract update package", "更新包解压失败");
         }
         if (!updatePackageLayoutIsSafe(staging)) {
             fspath::remove_all(staging, ec);
             fspath::remove(zip, ec);
-            updateProgressPost({{"operationId", operationId}, {"phase", "failed"}, {"version", version},
-                {"error", "Update package contains an unsafe or unexpected layout"}, {"message", "更新包目录结构不安全"}});
-            throw std::runtime_error("Update package contains an unsafe or unexpected layout");
+            failInstall("Update package contains an unsafe or unexpected layout", "更新包目录结构不安全");
         }
         std::string packagedVersion;
         try {
@@ -12692,43 +12928,31 @@ static void reg_updater() {
         } catch (const std::exception& e) {
             fspath::remove_all(staging, ec);
             fspath::remove(zip, ec);
-            updateProgressPost({{"operationId", operationId}, {"phase", "failed"}, {"version", version},
-                {"error", e.what()}, {"message", "更新包内版本清单无效"}});
-            throw;
+            failInstall(e.what(), "更新包内版本清单无效");
         }
         if (packagedVersion != version) {
             fspath::remove_all(staging, ec);
             fspath::remove(zip, ec);
-            updateProgressPost({{"operationId", operationId}, {"phase", "failed"},
-                {"error", "Update package version does not match requested version"}, {"message", "更新包版本与请求版本不一致"}});
-            throw std::runtime_error("Update package version does not match requested version");
+            failInstall("Update package version does not match requested version", "更新包版本与请求版本不一致");
         }
         wchar_t exePath[MAX_PATH]; GetModuleFileNameW(nullptr, exePath, MAX_PATH);
         std::wstring exeStr(exePath);
         std::wstring exedir = exeStr.substr(0, exeStr.find_last_of(L"\\"));
         const auto packagedYeManCC = staging + L"\\YeManCC";
         if (!fspath::is_directory(packagedYeManCC)) {
-            updateProgressPost({{"operationId", operationId}, {"phase", "failed"},
-                {"error", "Update package missing YeManCC directory"}, {"message", "更新包缺少 YeManCC 目录"}});
-            throw std::runtime_error("Update package missing YeManCC directory");
+            failInstall("Update package missing YeManCC directory", "更新包缺少 YeManCC 目录");
         }
         const auto packagedExe = packagedYeManCC + L"\\YeManCC.exe";
         if (!fspath::exists(packagedExe)) {
-            updateProgressPost({{"operationId", operationId}, {"phase", "failed"},
-                {"error", "Update package missing YeManCC.exe"}, {"message", "更新包缺少 YeManCC.exe"}});
-            throw std::runtime_error("Update package missing YeManCC.exe");
+            failInstall("Update package missing YeManCC.exe", "更新包缺少 YeManCC.exe");
         }
         const auto packagedPowerControl = staging + L"\\PowerControl";
         if (!fspath::exists(packagedPowerControl)) {
-            updateProgressPost({{"operationId", operationId}, {"phase", "failed"},
-                {"error", "Update package missing PowerControl"}, {"message", "更新包缺少 PowerControl 目录"}});
-            throw std::runtime_error("Update package missing PowerControl");
+            failInstall("Update package missing PowerControl", "更新包缺少 PowerControl 目录");
         }
         const auto packagedSupport = packagedYeManCC + L"\\YeMan-Support.html";
         if (!fspath::exists(packagedSupport)) {
-            updateProgressPost({{"operationId", operationId}, {"phase", "failed"},
-                {"error", "Update package missing YeMan-Support.html"}, {"message", "更新包缺少支持页面"}});
-            throw std::runtime_error("Update package missing YeMan-Support.html");
+            failInstall("Update package missing YeMan-Support.html", "更新包缺少支持页面");
         }
         // 依赖包固定目标目录（与前端 yeman.ts 的 PC_DIR 默认一致）
         std::wstring pcDir = L"C:\\SOFT\\YeMan\\PowerControl";
@@ -12744,6 +12968,7 @@ static void reg_updater() {
             out += "'";
             return out;
         };
+        bool helperScriptWritten = false;
         {
             std::ofstream f(script, std::ios::binary);
             f.put((char)0xEF); f.put((char)0xBB); f.put((char)0xBF);
@@ -12768,12 +12993,26 @@ static void reg_updater() {
              f << "$playerBlacklistRollback = Join-Path $rollbackFiles 'PowerControl\\Sleep\\player-blacklist.txt'\n";
              f << "$playerBlacklistExisted = Test-Path -LiteralPath $playerBlacklistPath -PathType Leaf\n";
              f << "$scriptPath = " << psLiteral(script) << "\n";
-            f << "$progressPath = " << psLiteral(updateProgressPath()) << "\n";
-            f << "$operationId = " << psLiteral(U2W(operationId)) << "\n";
-            f << "$version = " << psLiteral(U2W(version)) << "\n";
-            f << "function Set-UpdateProgress([string]$phase, [string]$message, [string]$error = '') {\n";
-            f << "  $obj = [ordered]@{ operationId = $operationId; version = $version; phase = $phase; percent = 100; message = $message; error = $error; updatedAt = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() }\n";
-            f << "  $obj | ConvertTo-Json -Compress | Set-Content -LiteralPath $progressPath -Encoding utf8\n";
+             f << "$progressPath = " << psLiteral(updateProgressPath()) << "\n";
+             f << "$operationId = " << psLiteral(U2W(operationId)) << "\n";
+             f << "$version = " << psLiteral(U2W(version)) << "\n";
+             f << "$sha256 = " << psLiteral(U2W(ascii_lower(sha))) << "\n";
+             f << "function Write-Utf8Atomic([string]$path, [string]$text) {\n";
+             f << "  $parent = Split-Path -Parent $path\n";
+             f << "  if (!(Test-Path -LiteralPath $parent -PathType Container)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }\n";
+             f << "  $temp = $path + '.tmp-' + [guid]::NewGuid().ToString('N')\n";
+             f << "  $encoding = New-Object System.Text.UTF8Encoding -ArgumentList $false\n";
+             f << "  [System.IO.File]::WriteAllText($temp, $text, $encoding)\n";
+             f << "  $lastAtomicError = ''\n";
+             f << "  for ($attempt = 1; $attempt -le 60; $attempt++) {\n";
+             f << "    try { Move-Item -LiteralPath $temp -Destination $path -Force -ErrorAction Stop; return } catch { $lastAtomicError = $_.Exception.Message; if ($attempt -lt 60) { Start-Sleep -Milliseconds 100 } }\n";
+             f << "  }\n";
+             f << "  Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue\n";
+             f << "  throw ('atomic write failed: ' + $path + ': ' + $lastAtomicError)\n";
+             f << "}\n";
+             f << "function Set-UpdateProgress([string]$phase, [string]$message, [string]$error = '') {\n";
+             f << "  $obj = [ordered]@{ operationId = $operationId; version = $version; stage = 'install'; sha256 = $sha256; phase = $phase; percent = 100; message = $message; error = $error; updatedAt = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() }\n";
+             f << "  Write-Utf8Atomic $progressPath ($obj | ConvertTo-Json -Compress)\n";
             f << "}\n";
             // YeManTdpCtl.exe and its PyInstaller _internal directory are a
             // single runtime.  Give transient file locks enough time to
@@ -12792,12 +13031,13 @@ static void reg_updater() {
             f << "$tdpOriginalMoved = $false\n";
             f << "$tdpCommitted = $false\n";
             f << "$updateCommitted = $false\n";
-            f << "$rollbackSucceeded = $false\n";
+             f << "$rollbackSucceeded = $false\n";
+             f << "$recoveryError = $null\n";
             f << "$newProcess = $null\n";
             f << "$handshakeToken = [guid]::NewGuid().ToString('N')\n";
             f << "$handshakePath = Join-Path (Split-Path -Parent $staging) ('update-handshake-' + $handshakeToken + '.json')\n";
-            f << "$handshakeTimeoutSeconds = 90\n";
-            f << "$parentExitTimeoutSeconds = 60\n";
+             f << "$handshakeTimeoutSeconds = 180\n";
+             f << "$parentExitTimeoutSeconds = 180\n";
             f << "function Copy-TreeChecked([string]$source, [string]$destination, [string[]]$extraArgs) {\n";
             f << "  & robocopy $source $destination /E /COPY:DAT /DCOPY:DAT /R:$copyRetries /W:$copyWaitSeconds /XJ @extraArgs /NFL /NDL /NJH /NJS /NP\n";
             f << "  if ($LASTEXITCODE -ge 8) { throw ('copy failed: ' + $source + ' -> ' + $destination + ' (robocopy=' + $LASTEXITCODE + ')') }\n";
@@ -12908,7 +13148,7 @@ static void reg_updater() {
             f << "    $rollbackAddedFiles.Add($supportPath) | Out-Null\n";
             f << "  }\n";
             f << "  $ordinaryRollbackPrepared = $true\n";
-            f << "  Set-Content -LiteralPath $state -Value '{\"phase\":\"copying\"}' -Encoding utf8\n";
+             f << "  Write-Utf8Atomic $state '{\"phase\":\"copying\"}'\n";
              // Copy non-PawnIO PowerControl assets first. PawnIO is staged and
              // committed as one directory transaction below.
              f << "  if (!(Test-Path -LiteralPath $pcDir -PathType Container)) { New-Item -ItemType Directory -Path $pcDir -Force | Out-Null }\n";
@@ -12933,15 +13173,15 @@ static void reg_updater() {
             f << "  $tdpCommitted = $true\n";
             f << "  Assert-TreeMatch $tdpSource $tdpTarget 'YeManTdpCtl.runtime.committed'\n";
             f << "  Set-UpdateProgress 'installing' 'TDP 运行时校验通过'\n";
-            f << "  Set-Content -LiteralPath $state -Value '{\"phase\":\"tdp-verified\"}' -Encoding utf8\n";
+             f << "  Write-Utf8Atomic $state '{\"phase\":\"tdp-verified\"}'\n";
             f << "  if (Test-Path -LiteralPath $exePath -PathType Leaf) { Copy-Item -LiteralPath $exePath -Destination $backup -Force }\n";
             f << "  Copy-Item -LiteralPath $packageExe -Destination $newExe -Force\n";
             f << "  Move-Item -LiteralPath $newExe -Destination $exePath -Force\n";
             f << "  Copy-TreeChecked $programSource $exeDir @('/XF','YeManCC.exe','YeMan-Support.html')\n";
             f << "  Copy-Item -LiteralPath (Join-Path $programSource 'YeMan-Support.html') -Destination $supportPath -Force\n";
             f << "  Set-UpdateProgress 'installing' '正在启动新版本'\n";
-            f << "  Set-Content -LiteralPath $state -Value '{\"phase\":\"launching\"}' -Encoding utf8\n";
-            f << "  $newProcess = Start-Process -FilePath $exePath -ArgumentList @('--update-handshake', ('\"' + $handshakePath + '\"'), '--update-handshake-token', $handshakeToken) -PassThru\n";
+             f << "  Write-Utf8Atomic $state '{\"phase\":\"launching\"}'\n";
+             f << "  $newProcess = Start-Process -FilePath $exePath -WorkingDirectory $exeDir -ArgumentList @('--update-handshake', ('\"' + $handshakePath + '\"'), '--update-handshake-token', $handshakeToken) -PassThru\n";
             f << "  $handshakeDeadline = (Get-Date).AddSeconds($handshakeTimeoutSeconds)\n";
             f << "  $handshakeOk = $false\n";
             f << "  while ((Get-Date) -lt $handshakeDeadline) {\n";
@@ -12958,13 +13198,13 @@ static void reg_updater() {
             f << "  }\n";
             f << "  if (!$handshakeOk) { throw 'new YeManCC process did not complete startup handshake' }\n";
             f << "  $updateCommitted = $true\n";
-            f << "  Set-Content -LiteralPath $state -Value ('{\"phase\":\"started\",\"pid\":' + $newProcess.Id + '}') -Encoding utf8\n";
+             f << "  Write-Utf8Atomic $state ('{\"phase\":\"started\",\"pid\":' + $newProcess.Id + '}')\n";
             f << "  Set-UpdateProgress 'completed' '更新已完成'\n";
             f << "} catch {\n";
             f << "  $installError = $_.Exception.Message\n";
             f << "  $rollbackError = $null\n";
             f << "  $rollbackAttempted = $ordinaryRollbackPrepared -or $tdpCommitted -or $tdpOriginalMoved -or (Test-Path -LiteralPath $backup)\n";
-            f << "  if (!$updateCommitted -and $newProcess) { try { if (!$newProcess.HasExited) { Stop-Process -Id $newProcess.Id -Force -ErrorAction SilentlyContinue; $newProcess.WaitForExit(5000) } } catch { } }\n";
+             f << "  if (!$updateCommitted -and $newProcess) { try { if (!$newProcess.HasExited) { Stop-Process -Id $newProcess.Id -Force -ErrorAction SilentlyContinue; $newProcess.WaitForExit(30000) } } catch { } }\n";
             f << "  if (!$updateCommitted -and ($tdpCommitted -or $tdpOriginalMoved)) {\n";
             f << "    try {\n";
             f << "      if (Test-Path -LiteralPath $tdpTarget) { Remove-Item -LiteralPath $tdpTarget -Recurse -Force -ErrorAction Stop }\n";
@@ -12975,13 +13215,25 @@ static void reg_updater() {
             f << "  if (!$updateCommitted) {\n";
             f << "    try { Restore-OrdinaryFiles } catch { if (!$rollbackError) { $rollbackError = $_.Exception.Message } else { $rollbackError += '; ordinary rollback: ' + $_.Exception.Message } }\n";
             f << "    try { if (Test-Path -LiteralPath $backup) { Copy-Item -LiteralPath $backup -Destination $exePath -Force -ErrorAction Stop } } catch { if (!$rollbackError) { $rollbackError = $_.Exception.Message } else { $rollbackError += '; EXE rollback: ' + $_.Exception.Message } }\n";
-            f << "    if (!$rollbackError) { $rollbackSucceeded = $true }\n";
-            f << "  }\n";
-            f << "  $errorMessage = $installError\n";
-            f << "  if ($rollbackError) { $errorMessage += '; rollback: ' + $rollbackError }\n";
-            f << "  Set-UpdateProgress 'failed' ('更新失败：' + $errorMessage) $errorMessage\n";
-            f << "  $failurePhase = if ($rollbackAttempted) { 'rolled-back' } else { 'failed' }\n";
-            f << "  Set-Content -LiteralPath $state -Value ('{\"phase\":\"' + $failurePhase + '\",\"error\":' + (ConvertTo-Json $errorMessage -Compress) + '}') -Encoding utf8\n";
+             f << "    if (!$rollbackError) { $rollbackSucceeded = $true }\n";
+             f << "  }\n";
+             f << "  $errorMessage = $installError\n";
+             f << "  if ($rollbackError) { $errorMessage += '; rollback: ' + $rollbackError }\n";
+             f << "  try { Set-UpdateProgress 'failed' ('更新失败：' + $errorMessage) $errorMessage } catch { }\n";
+             f << "  $failurePhase = if ($rollbackAttempted) { 'rolled-back' } else { 'failed' }\n";
+             f << "  try { Write-Utf8Atomic $state ('{\"phase\":\"' + $failurePhase + '\",\"error\":' + (ConvertTo-Json $errorMessage -Compress) + '}') } catch { }\n";
+             f << "  if ($rollbackSucceeded -and !(Get-Process -Id $parentPid -ErrorAction SilentlyContinue)) {\n";
+             f << "    try {\n";
+             f << "      if (!(Test-Path -LiteralPath $exePath -PathType Leaf)) { throw 'rolled-back executable is missing' }\n";
+             f << "      $recoveryProcess = Start-Process -FilePath $exePath -WorkingDirectory $exeDir -PassThru\n";
+             f << "      if (!$recoveryProcess) { throw 'failed to relaunch rolled-back YeManCC' }\n";
+             f << "    } catch { $recoveryError = $_.Exception.Message }\n";
+             f << "  }\n";
+             f << "  if ($recoveryError) {\n";
+             f << "    $errorMessage += '; recovery launch: ' + $recoveryError\n";
+             f << "    try { Set-UpdateProgress 'failed' ('更新失败：' + $errorMessage) $errorMessage } catch { }\n";
+             f << "    try { Write-Utf8Atomic $state ('{\"phase\":\"' + $failurePhase + '\",\"error\":' + (ConvertTo-Json $errorMessage -Compress) + '}') } catch { }\n";
+             f << "  }\n";
             f << "} finally {\n";
             f << "  Remove-Item -LiteralPath $newExe -Force -ErrorAction SilentlyContinue\n";
             f << "  Remove-Item -LiteralPath $tdpStage -Recurse -Force -ErrorAction SilentlyContinue\n";
@@ -12994,14 +13246,18 @@ static void reg_updater() {
             f << "    Remove-Item -LiteralPath $tdpBackup -Recurse -Force -ErrorAction SilentlyContinue\n";
             f << "    Remove-Item -LiteralPath $rollbackRoot -Recurse -Force -ErrorAction SilentlyContinue\n";
             f << "  }\n";
-            f << "  Remove-Item -LiteralPath $handshakePath -Force -ErrorAction SilentlyContinue\n";
-            f << "  Remove-Item -LiteralPath $staging -Recurse -Force -ErrorAction SilentlyContinue\n";
-            f << "  Remove-Item -LiteralPath $scriptPath -Force -ErrorAction SilentlyContinue\n";
-            f << "}\n";
+             f << "  Remove-Item -LiteralPath $handshakePath -Force -ErrorAction SilentlyContinue\n";
+             f << "  Remove-Item -LiteralPath $staging -Recurse -Force -ErrorAction SilentlyContinue\n";
+             f << "  Remove-Item -LiteralPath $scriptPath -Force -ErrorAction SilentlyContinue\n";
+             f << "}\n";
+             f.flush();
+             helperScriptWritten = f.good();
         }
+        if (!helperScriptWritten || !fspath::is_regular_file(script))
+            failInstall("Failed to write update helper script", "无法生成安装辅助脚本");
         std::wstring psArgs = L"-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"" + script + L"\"";
-        if ((INT_PTR)ShellExecuteW(nullptr, L"open", L"powershell.exe", psArgs.c_str(), nullptr, SW_HIDE) <= 32)
-            throw std::runtime_error("Failed to launch update helper");
+        if ((INT_PTR)ShellExecuteW(nullptr, L"open", L"powershell.exe", psArgs.c_str(), exedir.c_str(), SW_HIDE) <= 32)
+            failInstall("Failed to launch update helper", "无法启动安装辅助程序");
         // 更新退出也必须走窗口统一清理链，不能直接 PostQuitMessage 绕过 WM_DESTROY。
         if (g_hwnd && IsWindow(g_hwnd)) PostMessageW(g_hwnd, WM_APP_EXIT, 0, 0);
         else PostQuitMessage(0);
