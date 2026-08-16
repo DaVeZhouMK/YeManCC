@@ -16,6 +16,10 @@ const props = defineProps<{
   color?: 'ac' | 'dc' | 'accent';
   ariaLabel?: string;
   placeholder?: string;
+  /** 在触发器内显示当前选项的说明文字。 */
+  showSelectedSub?: boolean;
+  /** 可选的触发器专用说明文字；下拉菜单仍使用选项自身的 sub。 */
+  selectedSubText?: string;
   /** 可选固定宽度（如 '120px'）；不传则填满父容器 */
   width?: string;
 }>();
@@ -41,6 +45,10 @@ const selectedIndex = computed(() => {
 const selectedLabel = computed(() => {
   const o = props.options.find((op) => op.value === props.modelValue);
   return o ? o.label : props.placeholder ?? '—';
+});
+const selectedSub = computed(() => {
+  const o = props.options.find((op) => op.value === props.modelValue);
+  return props.selectedSubText ?? o?.sub ?? '';
 });
 
 function colorVar(): string {
@@ -216,7 +224,8 @@ function onGpNav(e: Event) {
       @keydown="onTriggerKey"
     >
       <span class="dd-value" :class="{ 'dd-placeholder': options.findIndex((o) => o.value === modelValue) < 0 }">
-        {{ selectedLabel }}
+        <span class="dd-selected-label">{{ selectedLabel }}</span>
+        <span v-if="showSelectedSub && selectedSub" class="dd-selected-sub">{{ selectedSub }}</span>
       </span>
       <svg class="dd-caret" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
         <path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
@@ -301,9 +310,21 @@ function onGpNav(e: Event) {
   cursor: not-allowed;
 }
 .dd-value {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.dd-selected-label { flex: 0 0 auto; }
+.dd-selected-sub {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
+  color: var(--text-dim);
+  font-size: 11px;
 }
 .dd-placeholder {
   color: var(--text-dim);

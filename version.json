@@ -1,7 +1,7 @@
 {
-  "version": "0.0.13",
-  "notes": "连续升级验收版本：验证 0.0.12 客户端继续完成下载、安装、握手与回滚链路。",
-  "sha256": "5D338C4878E59A509F8D25D5A438DC8F9C7AC74E84AC3D5FF54B3DD588818A07",
-  "publishedAt": "2026-08-16",
+  "version": "0.0.14",
+  "notes": "性能计划 CPU 参数展示优化、下拉说明与专属游戏配置标识完善，并规范游戏名单冲突处理。",
+  "sha256": "",
+  "publishedAt": "",
   "package": "Packages/YeManCC.zip"
 }

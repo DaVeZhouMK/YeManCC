@@ -72,8 +72,14 @@ import {
 } from '@/bridge/performanceSchedule';
 import { detectCoreArchitecture, type CoreArchitectureInfo } from '@/bridge/yeman';
 import { gameRuleNameFromPath, getGameRules, setGameRuleList } from '@/bridge/gameRules';
+import {
+  defaultCpuProfilesConfig,
+  loadCpuProfiles,
+  type CpuProfilesConfig,
+} from '@/bridge/cpuProfiles';
 
 const config = ref<PerformanceScheduleConfig>(defaultPerformanceScheduleConfig());
+const cpuProfiles = ref<CpuProfilesConfig>(defaultCpuProfilesConfig());
 const selectedSide = ref<PowerSide>('ac');
 const powerSide = ref<PowerSide>('ac');
 const editing = ref<ScheduleMode | null>(null);
@@ -182,13 +188,29 @@ const modeOptionsFor = (side: PowerSide) => MODE_ORDER.map((mode) => ({
   label: MODE_META[mode].label,
   sub: modeOptionSub(side, mode),
 }));
-const CPU_OPTS = [
-  { value: 'balanced', label: '平衡', sub: 'Performance' },
-  { value: 'turbo', label: '高性能', sub: 'Turbo' },
-  { value: 'elite', label: '精睿', sub: 'Elite' },
-  { value: 'extreme', label: '极致', sub: 'Extreme' },
-];
-// CPU 浮动值：选项显示真实 CPU 范围数字（无 GHz 单位）。
+function cpuPresetDetail(preset: CpuPreset): string {
+  const values = cpuProfiles.value.profiles[preset];
+  const frequency = selectedSide.value === 'ac' ? values.acFreq : values.dcFreq;
+  const aggressiveness = selectedSide.value === 'ac' ? values.acAggr : values.dcAggr;
+  const maxFrequency = frequency > 0 ? `${(frequency / 1000).toFixed(1)}GHz` : '不限制';
+  return `CPU最大值 ${maxFrequency} · 调度积极性 ${aggressiveness}%`;
+}
+
+function cpuPresetShortDetail(preset: CpuPreset): string {
+  const values = cpuProfiles.value.profiles[preset];
+  const frequency = selectedSide.value === 'ac' ? values.acFreq : values.dcFreq;
+  const aggressiveness = selectedSide.value === 'ac' ? values.acAggr : values.dcAggr;
+  const maxFrequency = frequency > 0 ? `${(frequency / 1000).toFixed(1)}G` : '不限';
+  return `CPU${maxFrequency} 积极性${aggressiveness}%`;
+}
+
+const CPU_OPTS = computed(() => [
+  { value: 'balanced', label: '平衡', sub: cpuPresetDetail('balanced') },
+  { value: 'turbo', label: '高性能', sub: cpuPresetDetail('turbo') },
+  { value: 'elite', label: '精睿', sub: cpuPresetDetail('elite') },
+  { value: 'extreme', label: '极致', sub: cpuPresetDetail('extreme') },
+]);
+// CPU 浮动值：选项显示真实 CPU 范围与 GHz 单位。
 // 小标按 CPU 浮动档位显示对应的调度语义，不显示执行瓦数。
 // CPU 浮动值：按压制递增排序（无 → 小 → 中 → 大 → 激进），与 TDP 浮动幅度同向。
 // 小标为对应压制语义（不是执行瓦数），避免把 TDP 瓦数误当成 CPU 选项属性。
@@ -204,7 +226,7 @@ const CPU_FLOAT_OPTS = computed(() => CPU_FLOAT_ORDER.map((k) => ({
   value: k,
   label: k === 'none'
     ? '无压制'
-    : `${(FLOAT_PROFILES[k].min / 1000).toFixed(1)}-${(FLOAT_PROFILES[k].max / 1000).toFixed(1)}`,
+    : `${(FLOAT_PROFILES[k].min / 1000).toFixed(1)}Ghz-${(FLOAT_PROFILES[k].max / 1000).toFixed(1)}Ghz`,
   sub: CPU_FLOAT_LABEL[k],
 })));
 const CORE_MODE_OPTS = CORE_MODE_OPTIONS;
@@ -378,7 +400,7 @@ function cpuControlLabel(p: ScheduleProfile): string {
     const t = CPU_FLOAT_OPTS.value.find((o) => o.value === p.cpuTarget);
     return `CPU浮动值 ${t ? t.label : p.cpuTarget}`;
   }
-  const cpuOpt = CPU_OPTS.find((o) => o.value === p.cpuPreset);
+  const cpuOpt = CPU_OPTS.value.find((o) => o.value === p.cpuPreset);
   return `CPU挡位 ${cpuOpt ? cpuOpt.label : p.cpuPreset}`;
 }
 
@@ -1117,6 +1139,7 @@ onMounted(async () => {
   // 注意：KeepAlive 下 onMounted 之后紧跟 onActivated，监听注册统一放在 onActivated，
   // 避免重复注册（同一 handler 注册两次 → 事件触发两次）。
   config.value = await loadPerformanceSchedule();
+  cpuProfiles.value = await loadCpuProfiles();
   await refreshCoreArchitectureForAuto();
   gameCustomConfig.value = await loadGameCustomConfig();
   await refreshStatus();
@@ -1170,6 +1193,7 @@ onActivated(async () => {
   showMonitor.value = getUiSetting('scheduleMonitor');
   registerDocListeners(); // 失活时已移除，重新激活后必须恢复监听
   config.value = await loadPerformanceSchedule();
+  cpuProfiles.value = await loadCpuProfiles();
   await refreshCoreArchitectureForAuto();
   selectedSide.value = powerSide.value;
   await refreshStatus();
@@ -1328,7 +1352,10 @@ onUnmounted(() => {
     <!-- 自定义游戏模式：基于当前识别的游戏 exe，创建/编辑/删除一套专属 AC/DC 档位（覆盖自动模式）；自动/手动模式均显示 -->
     <div v-if="game && gameExeKey" class="custom-card card">
       <div class="section-head">
-        <div class="section-title">专属配置</div>
+        <div class="custom-title-block">
+          <div class="section-title">专属配置</div>
+          <span class="custom-game-tag">{{ gameCustomConfig.entries[gameExeKey]?.displayName || detectedGameName(game) || gameExeKey }}</span>
+        </div>
         <!-- 专属配置编辑/保存/应用入口：自动/手动模式均可用 -->
         <div class="custom-actions" data-gp-group="custom-actions">
           <button
@@ -1466,6 +1493,7 @@ onUnmounted(() => {
             :options="editModeOptions"
             :color="sideColor"
             :disabled="busy"
+            show-selected-sub
             aria-label="选择要编辑的性能档位"
             @update:model-value="selectEditingMode"
           />
@@ -1490,26 +1518,30 @@ onUnmounted(() => {
             :options="CPU_FLOAT_OPTS"
             :color="sideColor"
             :disabled="busy"
+            show-selected-sub
             @update:model-value="updateEditing('cpuTarget', $event as FloatProfile)"
           />
         </label>
         <label v-if="editingDraft.cpuTarget === 'none' || editingDraft.fpsTarget === 0">
-          <span>CPU 挡位</span>
+          <span>CPU挡位【可去手动模式编辑】</span>
           <Dropdown
             :model-value="editingDraft.cpuPreset"
             :options="CPU_OPTS"
             :color="sideColor"
             :disabled="busy"
+            show-selected-sub
+            :selected-sub-text="cpuPresetShortDetail(editingDraft.cpuPreset)"
             @update:model-value="updateEditing('cpuPreset', $event as CpuPreset)"
           />
         </label>
         <label v-if="editingDraft.fpsTarget > 0">
-          <span>TDP 浮动幅度</span>
+          <span>TDP 浮动幅度【执行瓦数】</span>
           <Dropdown
             :model-value="editingDraft.tdpStrategy"
             :options="TDP_STRATEGY_OPTS"
             :color="sideColor"
             :disabled="busy"
+            show-selected-sub
             @update:model-value="updateEditing('tdpStrategy', $event as TdpFloatStrategy)"
           />
         </label>
@@ -1969,6 +2001,23 @@ button:disabled { opacity: .42; cursor: default; }
   align-items: center;
   justify-content: space-between;
 }
+.custom-title-block { min-width: 0; }
+.custom-game-tag {
+  display: inline-block;
+  max-width: 100%;
+  margin-top: 4px;
+  padding: 3px 7px;
+  overflow: hidden;
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg-input));
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
+  border-radius: 5px;
+}
 .custom-body { margin-top: 8px; display: grid; gap: 7px; }
 .custom-game {
   display: flex;
@@ -2166,7 +2215,7 @@ button:disabled { opacity: .42; cursor: default; }
 }
 .editor-targets {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: 10px;
   margin: 14px 0 10px;
   padding: 11px;
