@@ -167,7 +167,7 @@ const TDP_DOWN_BASE = 1;
 const TDP_RECOVER_BASE = 5;
 // TDP 回调冷却：与「CPU 连续达标降档判定 DOWN_STABLE_N」解耦，避免调整降档稳定性时
 // 意外拖慢 TDP 回调速度（2026-08-05 拆分语义劫持）。
-const TDP_RECOVER_COOLDOWN_MS = 3000;
+const TDP_RECOVER_COOLDOWN_MS = 1000;
 // 动态加速量：以【当前 TDP 实际值 tdpLimit】为基准 * 0.03 取整（舍小数），结果 < 1 时抛弃
 // （加速量记为 0，只走基础步进），叠加在基础步进之上；提升与下降共用同一加速量。
 // ⚠️ 必须用当前实际值 tdpLimit 而非 tdpMax：200W 机器压到 30W 时若按 tdpMax 算，加速量仍 = 6，
@@ -187,11 +187,9 @@ export function getTdpTarget(tdpMax: number, strategy: TdpFloatStrategy): number
 }
 
 function gpuTdpDownIntervalMs(gpu: number): number {
-  if (gpu > 90) return 8000;
-  if (gpu > 70) return 5000;
-  if (gpu > 50) return 3000;
-  if (gpu > 30) return 3000;
-  return 3000;
+  if (gpu > 90) return 3000;
+  if (gpu > 70) return 2000;
+  return 1000;
 }
 
 async function applyTdpLimit(next: number): Promise<number> {
@@ -501,8 +499,10 @@ let hwinfoRecoveryAttempted = false;     // 已尝试运行 YeManHWiNFO.bat 修�
 let hwinfoRecoveryTs = 0;                // 上次观察到恢复等待状态的时间戳（30s 前端宽限）
 let hwinfoNoExe = false;                 // 补救时 HWiNFO 进程不在（未装/未启动）→ 两套逻辑之「无 HW」
 let hwinfoPollTs = 0;                    // 上次 HWiNFO 健康轮询时间戳（2s 间隔）
-let tdpModeCheckTs = 0;                  // 上次 AC/DC 电源模式探测时间戳（15s 间隔，插拔电源后跟随）
-const TDP_MODE_CHECK_MS = 15000;
+let tdpModeCheckTs = 0;                  // 上次 AC/DC 电源模式探测时间戳（1s 间隔，插拔电源后快速跟随）
+// Reconcile AC/DC promptly; the native monitor already samples once per
+// second while float control is active, so this does not add another clock.
+const TDP_MODE_CHECK_MS = 1000;
 const listeners = new Set<(info: FloatInfo) => void>();
 
 function notify() {
@@ -718,7 +718,7 @@ async function tick(): Promise<void> {
     return;
   }
   gpuCap = st ? gpuAggrCap(st.gpu ?? 0) : 100; // 每轮刷新 GPU 上限（守护失联→不限）
-  // 周期性刷新电源模式：15s 一次。检测到切换后更新 tdpMode，后续 TDP 写入跟随新寄存器；
+  // 周期性刷新电源模式：1s 一次。检测到切换后更新 tdpMode，后续 TDP 写入跟随新寄存器；
   // 单真相源下 tdpMax/tdpOriginal 与电源侧无关，无需重读（2026-08-05 修复插拔电源 TDP 失效）。
   if (Date.now() - tdpModeCheckTs > TDP_MODE_CHECK_MS) {
     tdpModeCheckTs = Date.now();

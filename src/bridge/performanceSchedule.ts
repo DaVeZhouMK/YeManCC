@@ -1,4 +1,4 @@
-import { fs } from './api';
+import { fs, powerLifecycle } from './api';
 import { readSettingsSection, replaceSettingsSection, saveSettingsSection } from './settingsRepository';
 import { detectGame } from './gamedetect';
 import {
@@ -397,6 +397,27 @@ let scheduleOpQueue: Promise<void> = Promise.resolve();
 let scheduleOpGen = 0;
 let runningScheduleOpGen = 0;
 
+const POWER_TRANSITION_WRITE_BLOCKED = /hardware writes (?:are|were) blocked (?:during|before) power transition/i;
+const POWER_GATE_RETRY_DELAY_MS = 250;
+const POWER_GATE_RETRY_PROBES = 4;
+const POWER_LIFECYCLE_QUERY_TIMEOUT_MS = 500;
+
+function isPowerTransitionWriteBlocked(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error ?? '');
+  return POWER_TRANSITION_WRITE_BLOCKED.test(message);
+}
+
+async function waitForPowerWritesReady(): Promise<boolean> {
+  for (let attempt = 0; attempt < POWER_GATE_RETRY_PROBES; attempt++) {
+    const state = await powerLifecycle.get(POWER_LIFECYCLE_QUERY_TIMEOUT_MS).catch(() => null);
+    if (state?.phase === 'ready' && state.hardwareWritesAllowed) return true;
+    if (attempt + 1 < POWER_GATE_RETRY_PROBES) {
+      await new Promise<void>((resolve) => setTimeout(resolve, POWER_GATE_RETRY_DELAY_MS));
+    }
+  }
+  return false;
+}
+
 async function withScheduleOp<T>(enabled: boolean, fn: () => Promise<T>): Promise<T> {
   // Every new scheduling request supersedes work that has not reached its
   // next commit point. `enabled` remains in the signature for call-site
@@ -414,7 +435,14 @@ async function withScheduleOp<T>(enabled: boolean, fn: () => Promise<T>): Promis
   try {
     if (gen !== scheduleOpGen) throw new SkipApplyError();
     runningScheduleOpGen = gen;
-    return await fn();
+    try {
+      return await fn();
+    } catch (error) {
+      // Retry only after native confirms that its sleep/resume write gate is open.
+      if (!isPowerTransitionWriteBlocked(error) || !(await waitForPowerWritesReady())) throw error;
+      if (gen !== scheduleOpGen) throw new SkipApplyError();
+      return await fn();
+    }
   } finally {
     if (runningScheduleOpGen === gen) runningScheduleOpGen = 0;
     resolveNext!();

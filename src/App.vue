@@ -655,17 +655,23 @@ const BASE_H = 780;
 const SCALE_BOOST = 1.3; // "再放大 30%"
 const uiScale = ref(1);
 const viewportHeight = ref(window.innerHeight);
+function setUiScale(scale: number) {
+  uiScale.value = scale;
+  // Dropdown 等 Teleport 到 body 的浮层不在 .app-stage 的 zoom 树中。
+  // 把同一缩放值发布到根节点，供这些浮层同步字号与控件尺寸。
+  document.documentElement.style.setProperty('--ui-scale', String(scale));
+}
 function updateScale() {
   viewportHeight.value = window.innerHeight;
   if (window.innerHeight <= 0 || window.innerWidth <= 0) {
-    uiScale.value = 1;
+    setUiScale(1);
     return;
   }
   // 用户视觉目标：在原本 innerHeight/BASE_H 的基础上再乘 1.3
   const boosted = (window.innerHeight / BASE_H) * SCALE_BOOST;
   // 宽度兜底：BASE_W * scale 不能超过 innerWidth（避免焦点跑到屏幕外）
   const widthCapped = window.innerWidth / BASE_W;
-  uiScale.value = Math.min(boosted, widthCapped);
+  setUiScale(Math.min(boosted, widthCapped));
 }
 const scalerStyle = computed(() => ({
   width: BASE_W + 'px',

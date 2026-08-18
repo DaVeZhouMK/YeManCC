@@ -1,7 +1,7 @@
-﻿{
-    "version":  "0.0.14",
-    "notes":  "性能计划 CPU 参数展示优化、下拉说明与专属游戏配置标识完善，并规范游戏名单冲突处理。",
-    "sha256":  "867DEFD9E8762C20579D04403E7EBFC00785A48C0D60C773588F0B972238ECC6",
-    "publishedAt":  "2026-08-16",
-    "package":  "Packages/YeManCC.zip"
+{
+  "version": "0.0.15",
+  "notes": "性能计划与快捷应用标注清晰化，完善下拉提示、游戏名单冲突处理及睡眠任务策略。",
+  "sha256": "",
+  "publishedAt": "",
+  "package": "Packages/YeManCC.zip"
 }

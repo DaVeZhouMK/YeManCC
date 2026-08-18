@@ -430,7 +430,7 @@ refresh();
       <Toggle
         :model-value="cfg.retryOnNonUserWake"
         label="USB4错误唤醒重睡"
-        description="睡眠时当 USB4 插入或拔出时，继续睡眠"
+        description="仅在 506 Reason=1/3 后超过120秒，且设备树变化与 AC/DC 或 507 Reason=5 互相佐证时，独立执行三次重睡"
         :disabled="busy"
         @update:model-value="onNonUserWake"
       />
@@ -471,23 +471,6 @@ refresh();
 .fact-actions { display: flex; align-items: center; gap: 10px; padding-top: 8px; }
 .fact-path { min-width: 0; color: var(--text-dim); font-size: 10px; overflow-wrap: anywhere; }
 
-.kill-list-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 0; }
-.kill-list-text { min-width: 0; flex: 1; text-align: left; }
-.kill-list-label { font-size: 13px; }
-.kill-list-hint { font-size: 11px; color: var(--text-dim); line-height: 1.3; }
-.kill-list-actions { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
-.kill-list-edit {
-  min-height: var(--btn-min-h);
-  padding: var(--btn-py) var(--btn-px);
-  border: 1px solid #2a3342;
-  border-radius: var(--radius-ctrl);
-  background: var(--bg-input);
-  color: var(--text);
-  font-size: var(--btn-font-size);
-  cursor: pointer;
-}
-.kill-list-edit:disabled { opacity: 0.4; cursor: not-allowed; }
-.kill-list-edit:focus-visible { box-shadow: var(--focus-ring); }
 .msg {
   font-size: 12px;
   color: var(--danger);

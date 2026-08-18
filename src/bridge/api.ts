@@ -79,7 +79,9 @@ export interface PowerResumeCompleteMeta {
 }
 
 export const powerLifecycle = {
-  get: () => invoke<PowerLifecycleState>('power.lifecycle'),
+  // Lifecycle reads must not leave callers waiting forever while native is
+  // recovering from a power transition.
+  get: (timeoutMs = 3000) => invoke<PowerLifecycleState>('power.lifecycle', {}, { timeoutMs }),
   completeResume: (generation: number, meta: PowerResumeCompleteMeta = { daemonRequired: false, daemonReady: false }) =>
     invoke<{ ok: boolean; reason?: string; generation: number; inputReady?: boolean; daemonRequired?: boolean; daemonReady?: boolean }>(
       'power.resumeComplete',

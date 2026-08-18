@@ -1,7 +1,7 @@
 // topmon.ts — 顶部监控条桥层
 //
 // 数据源：PowerControl\TopMonitor.ps1 常驻守护（独立于 FPS-Monitor.ps1，
-// 无论有无游戏都每 2 秒写 topmon.json），本桥负责拉起/停止守护 + 轮询解析。
+// 无论有无游戏都每 1 秒写 topmon.json），本桥负责拉起/停止守护 + 轮询解析。
 //
 // topmon.json 字段（守护侧照搬 FPS-Monitor.ps1 的 HWiNFO 共享内存读取范式）：
 //   ts        = 写入时间戳（<6s 视为新鲜，新鲜度即守护存活判据）

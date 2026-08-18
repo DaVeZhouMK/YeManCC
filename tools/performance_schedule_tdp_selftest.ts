@@ -18,9 +18,17 @@ function assert(condition: unknown, message: string): asserts condition {
 
 async function main(): Promise<void> {
   const dir = mkdtempSync(join(tmpdir(), 'yeman-schedule-tdp-'));
+  let powerLifecycleStates: Array<'ready' | 'resuming'> = [];
+  let blockedProfileAttempts = 0;
   (globalThis as any).__mockShellDryRun = true;
   (globalThis as any).__mockShellResponder = (program: string, args: string[]) => {
     const exe = program.toLowerCase();
+    if (exe === 'cscript.exe' && args.some((arg) => /TDP\\Performance\.vbs$/i.test(arg))) {
+      blockedProfileAttempts++;
+      if (blockedProfileAttempts === 1) {
+        throw new Error('hardware writes are blocked during power transition');
+      }
+    }
     if (exe.endsWith('yemantdpctl.exe')) {
       return { exitCode: 6, stdout: unsupportedLog, stderr: '' };
     }
@@ -32,10 +40,11 @@ async function main(): Promise<void> {
   (globalThis as any).__mockIpcResponder = (cmd: string, args: any) => {
     if (cmd === 'power.activeScheme') return YEMAN;
     if (cmd === 'power.lifecycle') {
-      return { phase: 'ready', generation: 1, hardwareWritesAllowed: true, inputReady: true, hibernateAvailable: true };
+      const phase = powerLifecycleStates.shift() ?? 'ready';
+      return { phase, generation: 1, hardwareWritesAllowed: phase === 'ready', inputReady: phase === 'ready', hibernateAvailable: true };
     }
     if (cmd === 'sys.info') {
-      return { cpuName: 'AMD Ryzen Threadripper 3970X', physicalCores: 32, logicalProcs: 64, totalMemoryBytes: 1, acLine: 1, powerMode: 'ac', hasBattery: false };
+      return { cpuName: 'AMD Ryzen Threadripper 3970X', physicalCores: 32, logicalProcs: 64, totalMemoryBytes: 1, acLine: 0, powerMode: 'dc', hasBattery: true };
     }
     if (cmd === 'cpu.architecture') {
       return { detected: true, heterogeneous: false, efficiencyClasses: [0], source: 'cpu-set', logical: 64, physical: 32 };
@@ -63,9 +72,10 @@ async function main(): Promise<void> {
     const config = schedule.defaultPerformanceScheduleConfig();
     config.configured = true;
     config.enabled = true;
-    config.active.ac = 'balanced';
+    // Simulate the affected class of machine: a battery device currently on DC.
+    config.active.dc = 'balanced';
 
-    const autoApplied = await schedule.applyPerformanceSchedule('ac', 'balanced', config);
+    const autoApplied = await schedule.applyPerformanceSchedule('dc', 'balanced', config);
     assert(autoApplied, 'TDP rc=6 不应让手动→自动切换返回失败');
     assert(autofloat.getFloatInfo().enabled, 'TDP rc=6 后 CPU 浮动仍应启动');
     assert((await schedule.getPerformanceScheduleOwnership()) === 'auto', '自动模式必须独立持久化');
@@ -77,16 +87,16 @@ async function main(): Promise<void> {
     assert(writes.some((item) => item.name === 'DCSettingIndex'), 'TDP 失败后 DC CPU 参数仍应写入');
 
     // 0 = 不锁帧：自动档位不得继续启动或继承 CPU/TDP 浮动。
-    config.profiles.ac.balanced.fpsTarget = 0;
-    config.profiles.ac.balanced.cpuTarget = 'aggressive';
-    config.profiles.ac.balanced.tdpStrategy = 'aggressive';
-    const noLockApplied = await schedule.applyPerformanceSchedule('ac', 'balanced', config);
+    config.profiles.dc.balanced.fpsTarget = 0;
+    config.profiles.dc.balanced.cpuTarget = 'aggressive';
+    config.profiles.dc.balanced.tdpStrategy = 'aggressive';
+    const noLockApplied = await schedule.applyPerformanceSchedule('dc', 'balanced', config);
     assert(noLockApplied, '不锁帧档位仍应完成自动模式应用');
     assert(!autofloat.getFloatInfo().enabled, '不锁帧不得启动 CPU/TDP 浮动');
     assert(autofloat.getFloatInfo().target === 0, '不锁帧必须保留真实目标值 0');
 
-    config.profiles.ac.balanced.fpsTarget = 45;
-    const relockApplied = await schedule.applyPerformanceSchedule('ac', 'balanced', config);
+    config.profiles.dc.balanced.fpsTarget = 45;
+    const relockApplied = await schedule.applyPerformanceSchedule('dc', 'balanced', config);
     assert(relockApplied, '从不锁帧切回有效目标后应能重新应用自动浮动');
     assert(autofloat.getFloatInfo().enabled, '有效 FPS 目标应重新启动浮动');
 
@@ -94,7 +104,17 @@ async function main(): Promise<void> {
     assert(!autofloat.getFloatInfo().enabled, '自动→手动必须停止 CPU 浮动控制');
     assert((await schedule.getPerformanceScheduleOwnership()) === 'manual', '自动→手动必须独立持久化');
 
-    const autoAppliedAgain = await schedule.applyPerformanceSchedule('ac', 'balanced', config);
+    // Retry only after native reports that the transition has returned to Ready.
+    config.profiles.dc.balanced.fpsTarget = 0;
+    config.profiles.dc.balanced.cpuPreset = 'balanced';
+    config.profiles.dc.balanced.cpuTarget = 'none';
+    config.profiles.dc.balanced.tdpStrategy = 'none';
+    powerLifecycleStates = ['ready', 'resuming', 'ready'];
+    const recoveredApply = await schedule.applyPerformanceSchedule('dc', 'balanced', config);
+    assert(recoveredApply, '短暂电源写入闸门应在 native Ready 后自动重试一次');
+    assert(blockedProfileAttempts === 2, `CPU 挡位应重试一次，实际=${blockedProfileAttempts}`);
+
+    const autoAppliedAgain = await schedule.applyPerformanceSchedule('dc', 'balanced', config);
     assert(autoAppliedAgain, '相同 TDP 不支持错误再次出现时仍不得阻断自动模式');
     assert(warnings.length === 1, '同一平台兼容性提示每次运行只应发布一次');
     await schedule.disablePerformanceSchedule(config);

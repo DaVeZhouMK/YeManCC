@@ -36,6 +36,7 @@ const menuEl = ref<HTMLElement | null>(null);
 const highlight = ref(0);
 // 弹层用 fixed 定位到视口（teleport 到 body），避免被 overflow 滚动容器裁切
 const menuStyle = ref<Record<string, string>>({});
+let measureCanvas: HTMLCanvasElement | null = null;
 
 const selectedIndex = computed(() => {
   // modelValue 不在选项中时返回 -1：菜单打开不高亮任何项，避免误导「第一个就是当前值」
@@ -54,6 +55,60 @@ const selectedSub = computed(() => {
 function colorVar(): string {
   if (props.color === 'dc') return 'var(--dc-accent)';
   return 'var(--accent)';
+}
+
+function getGlobalUiScale(): number {
+  const rootValue = Number.parseFloat(
+    getComputedStyle(document.documentElement).getPropertyValue('--ui-scale'),
+  );
+  if (Number.isFinite(rootValue) && rootValue > 0) {
+    return Math.max(0.5, Math.min(4, rootValue));
+  }
+
+  // 兼容尚未发布 --ui-scale 的首帧：直接从全局缩放容器读取视觉比例。
+  const stage = document.querySelector<HTMLElement>('.app-stage');
+  if (!stage || stage.clientWidth <= 0) return 1;
+  const visualWidth = stage.getBoundingClientRect().width;
+  return visualWidth > 0
+    ? Math.max(0.5, Math.min(4, visualWidth / stage.clientWidth))
+    : 1;
+}
+
+function measureOptionText(text: string, fontSize: number, fontWeight: number): number {
+  measureCanvas ??= document.createElement('canvas');
+  const context = measureCanvas.getContext('2d');
+  if (!context) return text.length * fontSize;
+  const family = getComputedStyle(document.body).fontFamily || 'sans-serif';
+  context.font = `${fontWeight} ${fontSize}px ${family}`;
+  return context.measureText(text).width;
+}
+
+function getMenuWidth(triggerWidth: number, scale: number): number {
+  const optionFont = 14 * scale;
+  const menuPadding = 5 * scale;
+  const optionPadding = 12 * scale;
+  const optionGap = 8 * scale;
+  const subGap = 6 * scale;
+  const checkSize = 14 * scale;
+  const widthSafety = 12 * scale;
+  let contentWidth = 0;
+
+  for (const option of props.options) {
+    const selected = option.value === props.modelValue;
+    let width = measureOptionText(option.label, optionFont, selected ? 600 : 400);
+    if (option.sub) {
+      width += subGap + measureOptionText(option.sub, optionFont, 400);
+    }
+    // 每个选项统一预留勾选槽位，避免某一项被选中后文字列突然缩窄。
+    width += optionGap + checkSize;
+    contentWidth = Math.max(contentWidth, width);
+  }
+
+  // 保持单行并允许弹层宽于触发框；定位函数仍会将最终宽度限制在视口安全区内。
+  return Math.ceil(Math.max(
+    triggerWidth,
+    contentWidth + menuPadding * 2 + optionPadding * 2 + widthSafety + 2,
+  ));
 }
 
 function openMenu(fromGamepad = false) {
@@ -88,9 +143,24 @@ function restoreTriggerFocus() {
 function computePosition() {
   const r = triggerEl.value?.getBoundingClientRect();
   if (!r) return;
-  const MENU_MAX = 360;
-  const placement = getGamepadPopupPlacement(r, r.width, MENU_MAX, 6);
-  menuStyle.value = placement.style;
+  const scale = getGlobalUiScale();
+  const menuWidth = getMenuWidth(r.width, scale);
+  const placement = getGamepadPopupPlacement(r, menuWidth, 360 * scale, 6 * scale);
+  menuStyle.value = {
+    ...placement.style,
+    '--dd-accent': colorVar(),
+    '--dd-popup-font-size': `${14 * scale}px`,
+    '--dd-popup-menu-padding': `${5 * scale}px`,
+    '--dd-popup-menu-gap': `${2 * scale}px`,
+    '--dd-popup-menu-radius': `${10 * scale}px`,
+    '--dd-popup-option-py': `${11 * scale}px`,
+    '--dd-popup-option-px': `${12 * scale}px`,
+    '--dd-popup-option-gap': `${8 * scale}px`,
+    '--dd-popup-option-radius': `${8 * scale}px`,
+    '--dd-popup-sub-gap': `${6 * scale}px`,
+    '--dd-popup-icon-size': `${14 * scale}px`,
+    '--dd-popup-enter-offset': `${4 * scale}px`,
+  };
     // 向上：bottom = 视口底 - trigger顶 + 6
 }
 
@@ -343,30 +413,34 @@ function onGpNav(e: Event) {
   z-index: 1000;
   background: #161d29;
   border: 1px solid #2a3342;
-  border-radius: 10px;
-  padding: 5px;
+  border-radius: var(--dd-popup-menu-radius, 10px);
+  padding: var(--dd-popup-menu-padding, 5px);
   box-shadow: 0 14px 36px rgba(0, 0, 0, 0.5);
   max-height: 360px;
   min-height: 0;
   overflow-y: auto;
+  overflow-x: hidden;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: var(--dd-popup-menu-gap, 2px);
 }
 .dd-option {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: var(--dd-popup-option-gap, 8px);
   width: 100%;
-  padding: 11px 12px;
+  padding: var(--dd-popup-option-py, 11px) var(--dd-popup-option-px, 12px);
   background: transparent;
   border: none;
-  border-radius: var(--radius-ctrl);
+  border-radius: var(--dd-popup-option-radius, var(--radius-ctrl));
   color: var(--text);
-  font-size: 14px;
+  font-size: var(--dd-popup-font-size, 14px);
+  line-height: var(--btn-line-height);
   font-family: inherit;
   text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
   cursor: pointer;
   transition: background 0.1s, color 0.1s;
 }
@@ -379,19 +453,26 @@ function onGpNav(e: Event) {
 }
 .dd-opt-sub {
   display: inline;
-  font-size: 14px;
+  font-size: inherit;
   font-weight: 400;
   color: var(--text-dim);
-  margin-left: 6px;
+  margin-left: var(--dd-popup-sub-gap, 6px);
   white-space: nowrap;
 }
-.dd-opt-label { white-space: nowrap; }
+.dd-opt-label {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .dd-opt-disabled {
   opacity: 0.4;
   cursor: not-allowed;
 }
 .dd-check {
   flex: 0 0 auto;
+  width: var(--dd-popup-icon-size, 14px);
+  height: var(--dd-popup-icon-size, 14px);
   color: var(--dd-accent);
 }
 
@@ -403,6 +484,6 @@ function onGpNav(e: Event) {
 .dd-pop-enter-from,
 .dd-pop-leave-to {
   opacity: 0;
-  transform: translateY(-4px);
+  transform: translateY(calc(-1 * var(--dd-popup-enter-offset, 4px)));
 }
 </style>

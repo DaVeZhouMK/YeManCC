@@ -65,6 +65,7 @@ interface FsrDialogOptions {
   tone?: FsrDialogTone;
   confirmLabel?: string;
   cancelLabel?: string;
+  confirmFirst?: boolean;
 }
 
 // FSR 操作使用页面内弹窗，保持与性能调度“配置重制”一致；原生 dialog 只保留给文件选择器。
@@ -75,11 +76,13 @@ const fsrDialogTitle = ref('');
 const fsrDialogDescription = ref('');
 const fsrDialogConfirmLabel = ref('知道了');
 const fsrDialogCancelLabel = ref('取消');
+const fsrDialogConfirmFirst = ref(false);
 const fsrDialogStyle = ref<Record<string, string>>({ position: 'fixed' });
 const fsrDialogAbove = ref(false);
 const fsrTriggerEl = ref<HTMLElement | null>(null);
 const fsrPanelEl = ref<HTMLElement | null>(null);
 const fsrMessageActionEl = ref<HTMLElement | null>(null);
+const fsrConfirmEl = ref<HTMLElement | null>(null);
 const fsrCancelEl = ref<HTMLElement | null>(null);
 let fsrDialogResolve: ((value: boolean) => void) | null = null;
 const fsrDialogIcon = computed(() => {
@@ -114,11 +117,14 @@ function openFsrDialog(options: FsrDialogOptions): Promise<boolean> {
   fsrDialogDescription.value = options.description;
   fsrDialogConfirmLabel.value = options.confirmLabel || (options.kind === 'message' ? '知道了' : '确认');
   fsrDialogCancelLabel.value = options.cancelLabel || '取消';
+  fsrDialogConfirmFirst.value = options.confirmFirst === true;
   positionFsrDialog();
   fsrDialogOpen.value = true;
   nextTick(() => {
     positionFsrDialog();
-    const target = fsrDialogKind.value === 'confirm' ? fsrCancelEl.value : fsrMessageActionEl.value;
+    const target = fsrDialogKind.value === 'confirm'
+      ? (fsrDialogConfirmFirst.value ? fsrConfirmEl.value : fsrCancelEl.value)
+      : fsrMessageActionEl.value;
     focusGamepadElement(target);
   });
   return new Promise<boolean>((resolve) => {
@@ -154,8 +160,22 @@ function showFsrMessage(title: string, description: string, tone: FsrDialogTone 
   return openFsrDialog({ kind: 'message', title, description, tone });
 }
 
-function showFsrConfirm(title: string, description: string, confirmLabel = '确认'): Promise<boolean> {
-  return openFsrDialog({ kind: 'confirm', title, description, tone: 'info', confirmLabel });
+function showFsrConfirm(
+  title: string,
+  description: string,
+  confirmLabel = '确认',
+  cancelLabel = '取消',
+  confirmFirst = false,
+): Promise<boolean> {
+  return openFsrDialog({
+    kind: 'confirm',
+    title,
+    description,
+    tone: 'info',
+    confirmLabel,
+    cancelLabel,
+    confirmFirst,
+  });
 }
 
 const displayModes = ref<DisplayMode[]>([]);
@@ -469,15 +489,47 @@ async function onOptiScalerCurrent() {
     errMsg.value = '识别当前游戏失败：' + (e as Error).message;
     return null;
   });
-  const gamePath = current?.path?.trim() || '';
-  const gamePid = Number(current?.pid) || 0;
+  let gamePath = current?.path?.trim() || '';
+  let gamePid = Number(current?.pid) || 0;
+  let gameName = current ? (detectedGameName(current) || basename(gamePath)) : '';
   if (!current || gamePid <= 0 || !gamePath || !/\.exe$/i.test(gamePath)) {
-    errMsg.value = '未识别到当前游戏，已取消 FSR4.1 操作。';
-    busy.value = false;
-    return;
+    errMsg.value = '';
+    const chooseManual = await showFsrConfirm(
+      '未识别到当前游戏',
+      '请选择手动安装或卸载 OptiScaler (FSR4.1) 的程序。',
+      '手动选择',
+      '按 B 取消',
+      true,
+    );
+    if (!chooseManual) {
+      statusMsg.value = '已取消 FSR4.1 操作。';
+      busy.value = false;
+      focusFsrTrigger();
+      return;
+    }
+    const picked = await dialog.openFile([
+      { name: '可执行程序', extensions: ['exe'] },
+    ]).catch((e) => {
+      errMsg.value = '打开程序选择器失败：' + (e as Error).message;
+      return null;
+    });
+    if (!picked) {
+      if (!errMsg.value) statusMsg.value = '已取消 FSR4.1 操作。';
+      busy.value = false;
+      focusFsrTrigger();
+      return;
+    }
+    gamePath = picked.trim();
+    gamePid = 0;
+    if (!gamePath || !/\.exe$/i.test(gamePath)) {
+      errMsg.value = '请选择 exe 可执行程序。';
+      busy.value = false;
+      focusFsrTrigger();
+      return;
+    }
+    errMsg.value = '';
+    gameName = basename(gamePath);
   }
-
-  const gameName = detectedGameName(current) || basename(gamePath);
   try {
     const state = await optiscalerStatus(gamePath);
     if (!state.ok) {
@@ -501,30 +553,32 @@ async function onOptiScalerCurrent() {
       return;
     }
 
-    const terminate = await showFsrConfirm(
-      '需要结束当前游戏',
-      `「${gameName}」正在运行，${action}前必须结束游戏并释放文件。\n是否立即结束当前游戏？`,
-      '结束游戏并继续',
-    );
-    if (!terminate) {
-      statusMsg.value = `已取消${action}，游戏未结束。`;
-      return;
-    }
+    if (current && gamePid > 0) {
+      const terminate = await showFsrConfirm(
+        '需要结束当前游戏',
+        `「${gameName}」正在运行，${action}前必须结束游戏并释放文件。\n是否立即结束当前游戏？`,
+        '结束游戏并继续',
+      );
+      if (!terminate) {
+        statusMsg.value = `已取消${action}，游戏未结束。`;
+        return;
+      }
 
-    statusMsg.value = `正在结束 ${gameName}…`;
-    const closed = await closeGame(gamePid, gameName, current.processCreated);
-    if (!closed.ok) {
-      errMsg.value = '关闭游戏失败：' + (closed.msgs?.join('；') || '未知错误');
-      await showFsrMessage('FSR4.1 操作失败', errMsg.value, 'error');
-      return;
-    }
-    if (!(await waitForProcessExit(gamePid, current.processCreated))) {
-      errMsg.value = `已发送结束命令，但原游戏 PID ${gamePid} 仍在运行，已终止${action}。`;
-      await showFsrMessage('FSR4.1 操作失败', errMsg.value, 'error');
-      return;
+      statusMsg.value = `正在结束 ${gameName}…`;
+      const closed = await closeGame(gamePid, gameName, current.processCreated);
+      if (!closed.ok) {
+        errMsg.value = '关闭游戏失败：' + (closed.msgs?.join('；') || '未知错误');
+        await showFsrMessage('FSR4.1 操作失败', errMsg.value, 'error');
+        return;
+      }
+      if (!(await waitForProcessExit(gamePid, current.processCreated))) {
+        errMsg.value = `已发送结束命令，但原游戏 PID ${gamePid} 仍在运行，已终止${action}。`;
+        await showFsrMessage('FSR4.1 操作失败', errMsg.value, 'error');
+        return;
+      }
     }
     // 这里只清除显示状态，不触发第二次识别；安装目标仍是上面保存的路径。
-    if (game.value?.pid === gamePid) game.value = null;
+    if (gamePid > 0 && game.value?.pid === gamePid) game.value = null;
 
     statusMsg.value = `${action}中，请稍候…`;
     const result = await oneClickOptiScaler(gamePath, uninstall);
@@ -890,7 +944,7 @@ onUnmounted(() => {
           <span class="quick-btn-copy opti-copy">
             <span class="quick-main">安装/卸载</span>
             <span class="quick-product">FSR4.1</span>
-            <span class="quick-sub">自动识别当前游戏并安装</span>
+            <span class="quick-sub">自动识别安装OPT缩放</span>
           </span>
         </button>
       </div>
@@ -969,8 +1023,14 @@ onUnmounted(() => {
           <p class="rc-desc">{{ fsrDialogDescription }}</p>
           <div class="rc-actions" data-gp-group="fsr-dialog">
             <template v-if="fsrDialogKind === 'confirm'">
-              <button ref="fsrCancelEl" type="button" data-gp-group="fsr-dialog" @click="cancelFsrDialog">{{ fsrDialogCancelLabel }}</button>
-              <button type="button" data-gp-group="fsr-dialog" :class="{ danger: fsrDialogTone === 'error' }" @click="confirmFsrDialog">{{ fsrDialogConfirmLabel }}</button>
+              <template v-if="fsrDialogConfirmFirst">
+                <button ref="fsrConfirmEl" type="button" data-gp-group="fsr-dialog" :class="{ danger: fsrDialogTone === 'error' }" @click="confirmFsrDialog">{{ fsrDialogConfirmLabel }}</button>
+                <button ref="fsrCancelEl" type="button" data-gp-group="fsr-dialog" @click="cancelFsrDialog">{{ fsrDialogCancelLabel }}</button>
+              </template>
+              <template v-else>
+                <button ref="fsrCancelEl" type="button" data-gp-group="fsr-dialog" @click="cancelFsrDialog">{{ fsrDialogCancelLabel }}</button>
+                <button ref="fsrConfirmEl" type="button" data-gp-group="fsr-dialog" :class="{ danger: fsrDialogTone === 'error' }" @click="confirmFsrDialog">{{ fsrDialogConfirmLabel }}</button>
+              </template>
             </template>
             <button v-else ref="fsrMessageActionEl" type="button" data-gp-group="fsr-dialog" @click="confirmFsrDialog">{{ fsrDialogConfirmLabel }}</button>
           </div>

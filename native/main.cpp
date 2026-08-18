@@ -697,6 +697,7 @@ static std::vector<DWORD> g_acSwitchTicks;          // 5 秒滑动窗口内的�
 #define SG_S0_WAKE_CLASSIFY_TIMER_ID 0xA20B // S0 唤醒原因等待超时（Kernel-Power 507）
 #define SG_RETRY_TIMER_ID 0xA20C // 同模式重睡退避计时器
 #define SG_S0_STATE_TIMER_ID 0xA20D // S0 状态采样，仅用于发现系统重新可运行
+#define SG_EXTERNAL_DEVICE_RETRY_TIMER_ID 0xA20E // 外接设备变化唤醒独立重睡计时器
 #define SG_S0_WAKE_CLASSIFY_TIMEOUT_MS 10000U
 #define SG_S0_STATE_POLL_MS 250U
 #define SG_ACDC_MANUAL_DETECT_WINDOW_MS 5000ULL
@@ -705,10 +706,15 @@ static constexpr ULONGLONG SG_POWER_BUTTON_SLEEP_RECENCY_100NS = 1200ULL * 1000U
 #define SG_WAKE_SOURCE_EVIDENCE_MS 15000ULL // 仅接受唤醒后短窗口内的系统来源证据
 static constexpr ULONGLONG SG_ENTRY_FAILURE_BASE_WINDOW_MS = 3000ULL;
 static constexpr ULONGLONG SG_ENTRY_FAILURE_STEP_MS = 3000ULL;
+// Kernel-Power 507 Reason=7 is the platform's immediate S0 flow exit. It is
+// an entry failure only when it follows the current 506 Reason=1/3 intent
+// within this short monotonic window; USB4's 120-second marker is unrelated.
+static constexpr ULONGLONG SG_S0_REASON7_FAILURE_WINDOW_MS = 2000ULL;
 static constexpr ULONGLONG SG_ENTRY_RETRY_DELAYS_MS[] = {500ULL, 1000ULL, 2000ULL};
 static constexpr unsigned int SG_MAX_ENTRY_RETRIES =
     static_cast<unsigned int>(std::size(SG_ENTRY_RETRY_DELAYS_MS));
 static constexpr ULONGLONG SG_USER_STANDBY_DEVICE_DELAY_MS = 120000ULL;
+static constexpr ULONGLONG SG_EXTERNAL_WAKE_EVIDENCE_WINDOW_MS = 15000ULL;
 static constexpr UINT_PTR WEBVIEW_RECOVERY_TIMER_ID = 0xA205;
 static constexpr UINT_PTR WEBVIEW_RECOVERY_ACTION_TIMER_ID = 0xA206;
 static constexpr UINT_PTR POWER_RESUME_NUDGE_TIMER_ID = 0xA207;
@@ -727,7 +733,6 @@ static constexpr UINT POWER_RESUME_PROBE_RETRY_MS = 450;
 // 不升级 S4，不创建外部保底任务。
 static const std::wstring SG_DIR = POWER_CONTROL_DIR + L"\\Sleep";
 static const std::wstring SG_MANUAL_DIR = SG_DIR + L"\\manual-suspended";
-static const std::wstring SG_KILL_LIST = SG_DIR + L"\\睡眠击杀名单.txt";
 static const std::wstring SG_GAME_WHITELIST = SG_DIR + L"\\game-whitelist.txt";
 // Game-recognition exclusions have two ownership domains.  The system list
 // ships with the application; the player list is the only list written by UI.
@@ -789,7 +794,6 @@ static std::mutex g_sgFactMx;
 static std::deque<std::string> g_sgFacts;
 static constexpr size_t SG_FACT_HISTORY_LIMIT = 64;
 static bool g_sgPauseResume   = true;  // 睡眠时暂停游戏 + 唤醒时自动恢复（两者绑定，只一个开关）
-static bool g_sgKillListEnabled = false; // 入睡前终止 Sleep\\睡眠击杀名单.txt 中的指定 exe
 static bool g_sgResleepEnabled = true; // 异常唤醒后满足静默条件时重新进入睡眠
 static bool g_sgRetryEntryFailure = true; // 明确 S0/S3 入睡失败时同模式重试一次
 static bool g_monitorOn       = true;  // 当前显示器状态
@@ -864,13 +868,29 @@ static bool g_sgUserStandbyDeviceTriggered = false;
 // is the event-log timestamp for Kernel-Power 507 Reason=1, not a UI timer.
 static std::atomic<ULONGLONG> g_sgLastPowerButtonWakeEventFileTime{0};
 // Reset only at process launch.  This records the last Kernel-Power 506
-// Reason=1 event, which is the operating system's durable power-button sleep
-// intent timestamp rather than a wake/resume timestamp.
+// Reason=1/3 event, which is the operating system's durable user-initiated
+// sleep intent timestamp rather than a wake/resume timestamp.
 static std::atomic<ULONGLONG> g_sgLastPowerButtonSleepIntentFileTime{0};
 static std::atomic<int> g_sgLastKernel506Reason{-1};
 static std::atomic<int> g_sgLastKernel507Reason{-1};
 static std::atomic<ULONGLONG> g_sgLastKernel506EventFileTime{0};
 static std::atomic<ULONGLONG> g_sgLastKernel507EventFileTime{0};
+// 外接设备变化唤醒独立于 SleepTask：只使用“主动按键睡眠”的
+// 506/Reason=1 或 Reason=3 时间与外接设备变化证据，绝不依赖 repairEligible/taskMode。
+struct SgExternalDeviceWakeState {
+    bool deviceNodeChangeSeen = false;
+    bool acdcChangeSeen = false;
+    bool kernel507Reason5Seen = false;
+    bool retryActive = false;
+    bool consumed = false;
+    ULONGLONG deviceNodeChangeTick = 0;
+    ULONGLONG acdcChangeTick = 0;
+    ULONGLONG kernel507Reason5Tick = 0;
+    ULONGLONG retryScheduledTick = 0;
+    ULONGLONG retryLastDispatchTick = 0;
+    unsigned int retryAttempt = 0;
+};
+static SgExternalDeviceWakeState g_sgExternalDeviceWake;
 // PBT_APMQUERYSUSPEND is the earliest reliable S3 intent callback.  Keep a
 // separate marker so a cancelled query can reopen the write gate without
 // touching a real S0/S3 generation that may already be in progress.
@@ -996,6 +1016,19 @@ static json sgFactSnapshot() {
         }},
         {"lastAccepted506", sgFormatFactFileTime(g_sgLastPowerButtonSleepIntentFileTime.load(std::memory_order_acquire))},
         {"lastAccepted507", sgFormatFactFileTime(g_sgLastPowerButtonWakeEventFileTime.load(std::memory_order_acquire))},
+        {"userInitiatedSleep", {
+            {"active", g_sgLastPowerButtonSleepIntentFileTime.load(std::memory_order_acquire) != 0},
+            {"time", sgFormatFactFileTime(g_sgLastPowerButtonSleepIntentFileTime.load(std::memory_order_acquire))},
+            {"evidence", "Kernel-Power EventID=506 Reason=1 or Reason=3"}
+        }},
+        {"externalDeviceWake", {
+            {"deviceNodeChangeSeen", g_sgExternalDeviceWake.deviceNodeChangeSeen},
+            {"acdcChangeSeen", g_sgExternalDeviceWake.acdcChangeSeen},
+            {"kernel507Reason5Seen", g_sgExternalDeviceWake.kernel507Reason5Seen},
+            {"retryActive", g_sgExternalDeviceWake.retryActive},
+            {"consumed", g_sgExternalDeviceWake.consumed},
+            {"retryAttempt", g_sgExternalDeviceWake.retryAttempt}
+        }},
         {"facts", facts}
     };
 }
@@ -1122,6 +1155,79 @@ static double sgNowEpoch() { // Unix 秒(含亚秒)，用于 300s 窗口精确�
     const ULONGLONG fileTime = sgNowFileTime();
     return (double)(fileTime - 116444736000000000ULL) / 1e7;
 }
+
+struct SgSystemSleepRequestResult {
+    bool shutdownPrivilegeEnabled = false;
+    DWORD shutdownPrivilegeError = ERROR_SUCCESS;
+    bool accepted = false;
+    DWORD requestError = ERROR_SUCCESS;
+};
+
+// SetSuspendState is the documented sleep request API for current Windows.
+// The shutdown privilege is present but disabled in many interactive tokens,
+// so enable it before every retry and keep both error codes for diagnostics.
+static SgSystemSleepRequestResult sgRequestSystemSleep() {
+    SgSystemSleepRequestResult result;
+    HANDLE token = nullptr;
+    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY | TOKEN_ADJUST_PRIVILEGES, &token)) {
+        result.shutdownPrivilegeError = GetLastError();
+    } else {
+        LUID shutdownLuid{};
+        if (!LookupPrivilegeValueW(nullptr, SE_SHUTDOWN_NAME, &shutdownLuid)) {
+            result.shutdownPrivilegeError = GetLastError();
+        } else {
+            TOKEN_PRIVILEGES privileges{};
+            privileges.PrivilegeCount = 1;
+            privileges.Privileges[0].Luid = shutdownLuid;
+            privileges.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
+            SetLastError(ERROR_SUCCESS);
+            if (!AdjustTokenPrivileges(token, FALSE, &privileges, 0, nullptr, nullptr)) {
+                result.shutdownPrivilegeError = GetLastError();
+            } else {
+                result.shutdownPrivilegeError = GetLastError();
+                result.shutdownPrivilegeEnabled =
+                    result.shutdownPrivilegeError != ERROR_NOT_ALL_ASSIGNED;
+            }
+        }
+        CloseHandle(token);
+    }
+
+    SetLastError(ERROR_SUCCESS);
+    result.accepted = SetSuspendState(FALSE, FALSE, FALSE) != FALSE;
+    result.requestError = result.accepted ? ERROR_SUCCESS : GetLastError();
+    return result;
+}
+
+static json sgSleepEnvironmentSnapshot() {
+    SYSTEM_POWER_CAPABILITIES caps{};
+    const bool capsKnown = GetPwrCapabilities(&caps) != FALSE;
+    SYSTEM_POWER_STATUS status{};
+    const bool statusKnown = GetSystemPowerStatus(&status) != FALSE;
+    return {
+        {"capabilitiesKnown", capsKnown},
+        {"systemS1", capsKnown && caps.SystemS1},
+        {"systemS2", capsKnown && caps.SystemS2},
+        {"systemS3", capsKnown && caps.SystemS3},
+        {"systemS4", capsKnown && caps.SystemS4},
+        {"systemS5", capsKnown && caps.SystemS5},
+        {"hibernationFilePresent", capsKnown && caps.HiberFilePresent},
+        {"fullWake", capsKnown && caps.FullWake},
+        {"fastSystemS4", capsKnown && caps.FastSystemS4},
+        {"systemBatteriesPresent", capsKnown && caps.SystemBatteriesPresent},
+        {"thermalControl", capsKnown && caps.ThermalControl},
+        {"acLineStatusKnown", statusKnown},
+        {"acLineStatus", statusKnown ? static_cast<unsigned int>(status.ACLineStatus) : 255U},
+        {"batteryFlag", statusKnown ? static_cast<unsigned int>(status.BatteryFlag) : 255U},
+        {"batteryPercent", statusKnown ? static_cast<unsigned int>(status.BatteryLifePercent) : 255U},
+        {"lifecycle", powerLifecycleName(g_powerLifecycle.load(std::memory_order_acquire))},
+        {"generation", currentPowerGeneration()},
+        {"taskMode", sgSleepModeName(g_sgTask.mode)},
+        {"taskPhase", sgSleepTaskPhaseName(g_sgTask.phase)},
+        {"retryKind", sgRetryKindName(g_sgTask.retryKind)},
+        {"externalRetryActive", g_sgExternalDeviceWake.retryActive}
+    };
+}
+
 static std::string sgFactTimestamp() {
     SYSTEMTIME local{};
     GetLocalTime(&local);
@@ -1166,6 +1272,7 @@ static void sgMarkUserStandby(const char* source, int reason = -1,
     g_sgUserStandbyReason.store(reason, std::memory_order_release);
     g_sgUserStandbyDeviceTriggered = false;
     sgRecordFact("user-standby", {
+        {"label", "主动按键睡眠"},
         {"source", source ? source : "unknown"},
         {"reason", reason},
         {"fileTime", sgFormatFactFileTime(fileTime)}
@@ -1196,6 +1303,161 @@ static bool sgUserStandbyDeviceEligible(ULONGLONG nowTick, ULONGLONG& ageMs) {
         return false;
     }
     return ageMs >= SG_USER_STANDBY_DEVICE_DELAY_MS;
+}
+
+static bool sgExternalDeviceWakeIntentAge(ULONGLONG& ageMs) {
+    ageMs = 0;
+    const ULONGLONG intentFileTime =
+        g_sgLastPowerButtonSleepIntentFileTime.load(std::memory_order_acquire);
+    const ULONGLONG nowFileTime = sgNowFileTime();
+    if (intentFileTime == 0 || nowFileTime < intentFileTime) return false;
+    ageMs = (nowFileTime - intentFileTime) / 10000ULL;
+    return ageMs >= SG_USER_STANDBY_DEVICE_DELAY_MS;
+}
+
+static bool sgExternalDeviceWakeTicksNear(ULONGLONG first, ULONGLONG second) {
+    if (first == 0 || second == 0) return false;
+    const ULONGLONG delta = first >= second ? first - second : second - first;
+    return delta <= SG_EXTERNAL_WAKE_EVIDENCE_WINDOW_MS;
+}
+
+static void sgClearExternalDeviceWake(const char* source, bool clearUserPowerButtonSleep) {
+    if (g_hwnd) KillTimer(g_hwnd, SG_EXTERNAL_DEVICE_RETRY_TIMER_ID);
+    const bool hadState = g_sgExternalDeviceWake.deviceNodeChangeSeen ||
+        g_sgExternalDeviceWake.acdcChangeSeen ||
+        g_sgExternalDeviceWake.kernel507Reason5Seen ||
+        g_sgExternalDeviceWake.retryActive || g_sgExternalDeviceWake.consumed;
+    g_sgExternalDeviceWake = {};
+    if (clearUserPowerButtonSleep)
+        g_sgLastPowerButtonSleepIntentFileTime.store(0, std::memory_order_release);
+    if (hadState) {
+        sgRecordFact("external-device-wake-cleared", {
+            {"source", source ? source : "unknown"},
+            {"clearedUserPowerButtonSleep", clearUserPowerButtonSleep}
+        });
+    }
+}
+
+static void sgScheduleExternalDeviceWakeRetry() {
+    if (!g_hwnd || !g_guardEnabled || !g_sgResleepEnabled ||
+        g_sgExternalDeviceWake.retryActive || !g_sgExternalDeviceWake.consumed)
+        return;
+    g_sgExternalDeviceWake.retryActive = true;
+    g_sgExternalDeviceWake.retryAttempt = 0;
+    g_sgExternalDeviceWake.retryScheduledTick =
+        GetTickCount64() + SG_ENTRY_RETRY_DELAYS_MS[0];
+    g_sgExternalDeviceWake.retryLastDispatchTick = 0;
+    SetTimer(g_hwnd, SG_EXTERNAL_DEVICE_RETRY_TIMER_ID,
+             static_cast<UINT>(SG_ENTRY_RETRY_DELAYS_MS[0]), nullptr);
+    sgRecordFact("external-device-wake-retry-scheduled", {
+        {"label", "外接设备变化唤醒"},
+        {"delaysMs", {500, 1000, 2000}},
+        {"firstDueInMs", SG_ENTRY_RETRY_DELAYS_MS[0]},
+        {"environment", sgSleepEnvironmentSnapshot()},
+        {"independentOf", {"repairEligible", "taskMode"}}
+    });
+}
+
+static void sgEvaluateExternalDeviceWake() {
+    if (!g_sgExternalDeviceWake.deviceNodeChangeSeen ||
+        g_sgExternalDeviceWake.consumed || g_sgExternalDeviceWake.retryActive)
+        return;
+    const bool corroboratedByAcDc = sgExternalDeviceWakeTicksNear(
+        g_sgExternalDeviceWake.deviceNodeChangeTick,
+        g_sgExternalDeviceWake.acdcChangeTick);
+    const bool corroboratedByKernel507 = sgExternalDeviceWakeTicksNear(
+        g_sgExternalDeviceWake.deviceNodeChangeTick,
+        g_sgExternalDeviceWake.kernel507Reason5Tick);
+    if (!corroboratedByAcDc && !corroboratedByKernel507) return;
+
+    ULONGLONG intentAgeMs = 0;
+    const bool intentAgeEligible = sgExternalDeviceWakeIntentAge(intentAgeMs);
+    sgRecordFact("external-device-wake-evaluated", {
+        {"label", "外接设备变化唤醒"},
+        {"intentAgeMs", intentAgeMs},
+        {"intentAgeEligible", intentAgeEligible},
+        {"deviceNodeChange", true},
+        {"acdcEvidence", corroboratedByAcDc},
+        {"kernel507Reason5Evidence", corroboratedByKernel507},
+        {"guardEnabled", g_guardEnabled},
+        {"resleepEnabled", g_sgResleepEnabled}
+    });
+    if (!intentAgeEligible || !g_guardEnabled || !g_sgResleepEnabled) return;
+
+    g_sgExternalDeviceWake.consumed = true;
+    sgRecordFact("external-device-wake-confirmed", {
+        {"label", "外接设备变化唤醒"},
+        {"intentAgeMs", intentAgeMs},
+        {"retryDelaysMs", {500, 1000, 2000}}
+    });
+    sgScheduleExternalDeviceWakeRetry();
+}
+
+static void sgNoteExternalDeviceNodeChange() {
+    const ULONGLONG now = GetTickCount64();
+    const bool recentResume = g_lastResumeNotifyTick != 0 &&
+        now >= g_lastResumeNotifyTick &&
+        now - g_lastResumeNotifyTick <= SG_EXTERNAL_WAKE_EVIDENCE_WINDOW_MS;
+    const auto lifecycle = g_powerLifecycle.load(std::memory_order_acquire);
+    const bool sleepWakeContext = recentResume || g_sgModernStandbyActive ||
+        g_sgModernWakePending || lifecycle == PowerLifecycle::Suspended ||
+        lifecycle == PowerLifecycle::Resuming;
+    if (!sleepWakeContext) return;
+    g_sgExternalDeviceWake.deviceNodeChangeSeen = true;
+    g_sgExternalDeviceWake.deviceNodeChangeTick = now;
+    sgEvaluateExternalDeviceWake();
+}
+
+static void sgNoteExternalDeviceAcDcChange() {
+    g_sgExternalDeviceWake.acdcChangeSeen = true;
+    g_sgExternalDeviceWake.acdcChangeTick = GetTickCount64();
+    sgEvaluateExternalDeviceWake();
+}
+
+static void sgNoteExternalDeviceKernel507Reason5() {
+    g_sgExternalDeviceWake.kernel507Reason5Seen = true;
+    g_sgExternalDeviceWake.kernel507Reason5Tick = GetTickCount64();
+    sgEvaluateExternalDeviceWake();
+}
+
+static void sgDispatchExternalDeviceWakeRetry() {
+    if (g_hwnd) KillTimer(g_hwnd, SG_EXTERNAL_DEVICE_RETRY_TIMER_ID);
+    if (!g_sgExternalDeviceWake.retryActive) return;
+    if (g_sgExternalDeviceWake.retryAttempt >= std::size(SG_ENTRY_RETRY_DELAYS_MS)) {
+        g_sgExternalDeviceWake.retryActive = false;
+        sgRecordFact("external-device-wake-retry-finished", {{"result", "exhausted"}});
+        return;
+    }
+    const unsigned int attempt = ++g_sgExternalDeviceWake.retryAttempt;
+    const ULONGLONG dispatchTick = GetTickCount64();
+    const ULONGLONG scheduledToDispatchMs =
+        g_sgExternalDeviceWake.retryScheduledTick != 0 &&
+        dispatchTick >= g_sgExternalDeviceWake.retryScheduledTick
+        ? dispatchTick - g_sgExternalDeviceWake.retryScheduledTick
+        : 0;
+    g_sgExternalDeviceWake.retryLastDispatchTick = dispatchTick;
+    const SgSystemSleepRequestResult request = sgRequestSystemSleep();
+    json requestDetails = {
+        {"attempt", attempt}, {"accepted", request.accepted},
+        {"api", "SetSuspendState"}, {"shutdownPrivilegeEnabled", request.shutdownPrivilegeEnabled},
+        {"shutdownPrivilegeError", request.shutdownPrivilegeError},
+        {"requestError", request.requestError}, {"label", "外接设备变化唤醒"},
+        {"scheduledToDispatchMs", scheduledToDispatchMs},
+        {"environment", sgSleepEnvironmentSnapshot()}
+    };
+    sgRecordFact("external-device-wake-retry-request", requestDetails);
+    traceLog("external device wake retry request api=SetSuspendState attempt=%u accepted=%d privilege=%d privilegeError=%lu requestError=%lu",
+             attempt, request.accepted ? 1 : 0, request.shutdownPrivilegeEnabled ? 1 : 0,
+             request.shutdownPrivilegeError, request.requestError);
+    if (attempt < std::size(SG_ENTRY_RETRY_DELAYS_MS) && g_hwnd) {
+        g_sgExternalDeviceWake.retryScheduledTick =
+            dispatchTick + SG_ENTRY_RETRY_DELAYS_MS[attempt];
+        SetTimer(g_hwnd, SG_EXTERNAL_DEVICE_RETRY_TIMER_ID,
+                 static_cast<UINT>(SG_ENTRY_RETRY_DELAYS_MS[attempt]), nullptr);
+    } else {
+        g_sgExternalDeviceWake.retryActive = false;
+        sgRecordFact("external-device-wake-retry-finished", {{"result", "attempts-dispatched"}});
+    }
 }
 
 static std::wstring sgBaseName(const std::wstring& path) { // 取文件名并去 .exe/小写
@@ -1780,10 +2042,15 @@ static double nativeCpuUsagePct() {
 }
 
 static bool nativeBatteryStatus(bool& ac, bool& hasBattery, double& remainMin, int& batteryPercent) {
+    // ACLineStatus can briefly be 255 while Windows is switching power
+    // sources. Keep the last known value instead of treating unknown as DC.
+    static bool lastAc = true;
     SYSTEM_POWER_STATUS sps{};
     if (!GetSystemPowerStatus(&sps)) return false;
-    ac = sps.ACLineStatus == 1;
     hasBattery = sps.BatteryFlag != 128 && sps.BatteryLifePercent != 255;
+    if (sps.ACLineStatus == 1) lastAc = true;
+    else if (sps.ACLineStatus == 0) lastAc = false;
+    ac = lastAc;
     batteryPercent = hasBattery && sps.BatteryLifePercent != 255
         ? static_cast<int>(sps.BatteryLifePercent) : -1;
     remainMin = (sps.BatteryLifeTime != 0xFFFFFFFFu && sps.BatteryLifeTime > 0)
@@ -2563,11 +2830,12 @@ static void nativeMonitorLoop() {
             game = {};
         }
 
-        // 顶部监控保持 2 秒；仅 FPS 浮动且没有游戏时降低到 5 秒，
-        // 游戏出现后恢复 1 秒，减少空闲状态下的 HWiNFO/进程检测压力。
         const auto cadence = top
-            ? std::chrono::milliseconds(2000)
+            ? std::chrono::milliseconds(1000)
             : std::chrono::milliseconds(game.pid ? 1000 : 5000);
+
+        // 顶部监控与 FPS 浮动共享同一条 HWiNFO 采样链：有实时消费者时统一每 1 秒，
+        // 仅 FPS 浮动且没有游戏时降低到 5 秒，减少空闲状态下的 HWiNFO/进程检测压力。
         std::unique_lock<std::mutex> lock(g_nativeMonitorMx);
         g_nativeMonitorCv.wait_for(lock, cadence, [top, fps] {
             return g_nativeMonitorStop || g_nativeMonitorTop != top || g_nativeMonitorFps != fps;
@@ -3272,6 +3540,7 @@ static std::string sgDetectVendor() { // 对齐 yeman.detectVendor
 
 // ── 睡眠守护配置（统一 sleep section；Sleep\sleepguard.json 仅迁移）──
 static void sgClearSleepTarget();
+static void sgAbortSleepIntent(const char* reason, bool preserveRetryContext);
 static void sgMarkSleepTrigger() {
     const bool continuingRetry = g_sgRetryInProgress &&
         g_sgTask.retryKind != SgRetryKind::None;
@@ -3410,11 +3679,19 @@ static void sgStopResleepObservation() {
 static void sgTryResleep() {
     if (g_sgRetryInProgress && g_sgTask.retryKind != SgRetryKind::None)
         return;
-    // Automatic re-sleep is now authorized by the user-standby marker plus a
-    // device-node change. The legacy quiet-window observer remains harmless
-    // for diagnostics but cannot start a competing retry transaction.
-    if (!g_sgUserStandbyDeviceTriggered)
+    // USB4/external-device retry is no longer part of the SleepTask observer.
+    // Keep the paused lease only while its short evidence window is open; the
+    // independent external-device state schedules all actual retry requests.
+    if (!g_sgUserStandbyDeviceTriggered) {
+        if (g_sgExternalDeviceWake.retryActive)
+            return;
+        const ULONGLONG now = GetTickCount64();
+        if (g_sgWakeTick != 0 && now >= g_sgWakeTick &&
+            now - g_sgWakeTick < SG_EXTERNAL_WAKE_EVIDENCE_WINDOW_MS)
+            return;
+        sgReleaseAfterWakeObservation();
         return;
+    }
     if (!g_sgResleepPending) return;
     if (!g_sgResleepEnabled || !g_sgRepairEligible) {
         sgReleaseAfterWakeObservation();
@@ -3499,8 +3776,6 @@ static void sgLoadConfig() {
                     : true;
             g_sgRetryEntryFailure = j.value("retryOnEntryFailure", true);
             g_sgFactMonitorEnabled.store(j.value("factMonitorEnabled", false), std::memory_order_release);
-            // Legacy kill-list fields are intentionally ignored for compatibility.
-            g_sgKillListEnabled = false;
             g_sgMode      = j.value("mode", std::string("custom"));
         } catch (...) {}
     }
@@ -6128,52 +6403,6 @@ static json nativeAutoRegisterSummonGame(const FocusTargetSnapshot& target) {
     return result;
 }
 
-static void sgKillListedProcesses() {
-    const std::string txt = sgReadFile(SG_KILL_LIST);
-    if (txt.empty()) return;
-    std::vector<std::string> names;
-    std::istringstream iss(txt);
-    std::string line;
-    while (std::getline(iss, line)) {
-        auto h = line.find('#');
-        if (h != std::string::npos) line = line.substr(0, h);
-        size_t a = line.find_first_not_of(" \t\r\n");
-        if (a == std::string::npos) continue;
-        size_t b = line.find_last_not_of(" \t\r\n");
-        line = line.substr(a, b - a + 1);
-        if (!line.empty()) names.push_back(line);
-    }
-    if (names.empty()) return;
-    const DWORD selfPid = GetCurrentProcessId();
-    const std::wstring selfBase = sgSelfBase();
-    if (!g_sgSessionValid) return;
-    auto excludes = sgExcludes();
-    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-    if (snap == INVALID_HANDLE_VALUE) return;
-    PROCESSENTRY32W pe{ sizeof(pe) };
-    if (Process32FirstW(snap, &pe)) {
-        do {
-            std::wstring base = sgBaseName(pe.szExeFile);
-            if (pe.th32ProcessID == 0 || pe.th32ProcessID == 4 ||
-                pe.th32ProcessID == selfPid || base == selfBase) {
-                continue;
-            }
-            bool excluded = false;
-            excluded = sgNameExcludedBy(base, excludes);
-            if (excluded) continue;
-            DWORD psid = 0;
-            if (!ProcessIdToSessionId(pe.th32ProcessID, &psid) || psid != g_sgSessionId) {
-                continue;
-            }
-            if (acNameMatch(base, names)) {
-                HANDLE h = OpenProcess(PROCESS_TERMINATE, FALSE, pe.th32ProcessID);
-                if (h) { TerminateProcess(h, 0); CloseHandle(h); }
-            }
-        } while (Process32NextW(snap, &pe));
-    }
-    CloseHandle(snap);
-}
-
 static bool sgEnsureMarkerDir(const std::wstring& dir) {
     std::error_code ec;
     fspath::create_directories(fspath::path(dir), ec);
@@ -6285,13 +6514,6 @@ static SgSuspendResult sgSuspendTarget(unsigned long long generation) {
             (phaseAtStart != PowerLifecycle::Suspending &&
              phaseAtStart != PowerLifecycle::Suspended &&
              phaseAtStart != PowerLifecycle::Resuming))
-            return r;
-        if (g_sgKillListEnabled) sgKillListedProcesses();
-        const auto phaseAfterKill = g_powerLifecycle.load(std::memory_order_acquire);
-        if (currentPowerGeneration() != generation ||
-            (phaseAfterKill != PowerLifecycle::Suspending &&
-             phaseAfterKill != PowerLifecycle::Suspended &&
-             phaseAfterKill != PowerLifecycle::Resuming))
             return r;
         // 睡眠和手动暂停共用同一根 PID 规则：只选唯一最大候选进程，
         // 实际操作由 sgSuspendGameByPidUnlocked 再次校验后只冻结该 PID。
@@ -7234,6 +7456,13 @@ static void sgWorkLoop() {
                     traceLog("sleep game pause generation=%llu pid=%lu frozen=%d ws=%llu",
                              item.generation, static_cast<unsigned long>(result.pid),
                              result.frozen ? 1 : 0, static_cast<unsigned long long>(result.ws));
+                    sgRecordFact("sleep-game-pause", {
+                        {"generation", item.generation},
+                        {"pid", static_cast<unsigned long long>(result.pid)},
+                        {"paused", result.frozen},
+                        {"workingSetBytes", static_cast<unsigned long long>(result.ws)},
+                        {"pauseEnabled", g_sgPauseResume}
+                    });
                     if (!result.frozen) {
                         g_sgInSuspend.store(false);
                         g_sgGameActuallySuspended.store(false, std::memory_order_release);
@@ -7251,6 +7480,12 @@ static void sgWorkLoop() {
                         g_sgEnteredTick = 0;
                 } else {
                     g_sgEnteredTick = 0;
+                    sgRecordFact("sleep-game-pause-skipped", {
+                        {"generation", item.generation},
+                        {"guardEnabled", g_guardEnabled},
+                        {"repairEligible", g_sgRepairEligible},
+                        {"alreadyPaused", g_sgInSuspend.load(std::memory_order_acquire)}
+                    });
                 }
                 // The cycle remains active even if PID freeze failed; this is
                 // required for S0 wake classification and non-user-wake retry.
@@ -11871,26 +12106,30 @@ static void sgDispatchSameModeRetry() {
         return;
     }
     g_sgRetryDueTick = 0;
-    // Use the alternate documented Windows sleep entry point for retries.
-    // Its first argument is explicitly "suspend" (TRUE), which avoids the
-    // inverted hibernate flag of SetSuspendState. Windows still selects S3
-    // on legacy hardware and Modern Standby on S0-only hardware.
     SYSTEM_POWER_CAPABILITIES caps{};
     const bool capsKnown = GetPwrCapabilities(&caps) != FALSE;
     // SYSTEM_POWER_CAPABILITIES has no SystemS0 bit: S0 is the working
     // platform model, not a legacy sleep capability. If S3 is absent, the
     // request is necessarily handled by the platform's S0 path.
-    traceLog("sleep retry request api=SetSystemPowerState suspend=1 force=0 capsKnown=%d s3=%d s4=%d s0OnlyCandidate=%d attempt=%u generation=%llu",
+    const SgSystemSleepRequestResult request = sgRequestSystemSleep();
+    traceLog("sleep retry request api=SetSuspendState hibernate=0 forceCritical=0 capsKnown=%d s3=%d s4=%d s0OnlyCandidate=%d accepted=%d privilege=%d privilegeError=%lu requestError=%lu attempt=%u generation=%llu",
              capsKnown ? 1 : 0,
              capsKnown && caps.SystemS3 ? 1 : 0,
              capsKnown && caps.SystemS4 ? 1 : 0,
              capsKnown && !caps.SystemS3 ? 1 : 0,
+             request.accepted ? 1 : 0,
+             request.shutdownPrivilegeEnabled ? 1 : 0,
+             request.shutdownPrivilegeError,
+             request.requestError,
              g_sgTask.entryFailureAttempts, currentPowerGeneration());
-    const bool requested = SetSystemPowerState(TRUE, FALSE) != FALSE;
-    traceLog("sleep retry request result accepted=%d attempt=%u generation=%llu",
-             requested ? 1 : 0, g_sgTask.entryFailureAttempts,
-             currentPowerGeneration());
-    if (requested) return;
+    sgRecordFact("sleep-retry-request", {
+        {"api", "SetSuspendState"}, {"accepted", request.accepted},
+        {"shutdownPrivilegeEnabled", request.shutdownPrivilegeEnabled},
+        {"shutdownPrivilegeError", request.shutdownPrivilegeError},
+        {"requestError", request.requestError},
+        {"environment", sgSleepEnvironmentSnapshot()}
+    });
+    if (request.accepted) return;
 
     const auto retryKind = g_sgTask.retryKind;
     if (retryKind != SgRetryKind::None) {
@@ -15341,12 +15580,42 @@ static void handlePowerResumeNotification(SgWork work, const char* reason) {
 }
 
 static void sgBeginModernStandbyIntent() {
-    if (!g_guardEnabled) return;
+    if (!g_guardEnabled) {
+        sgRecordFact("s0-intent-ignored", {{"reason", "guard-disabled"}});
+        return;
+    }
     const ULONGLONG now = GetTickCount64();
     if (g_sgModernStandbyActive ||
-        (g_sgLastModernStandbyIntentTick != 0 && now - g_sgLastModernStandbyIntentTick < 2000ULL))
+        sgRetryIsExclusive() ||
+        (g_sgLastModernStandbyIntentTick != 0 && now - g_sgLastModernStandbyIntentTick < 2000ULL)) {
+        sgRecordFact("s0-intent-ignored", {
+            {"reason", g_sgModernStandbyActive ? "active-transaction" :
+                (sgRetryIsExclusive() ? "entry-retry-active" : "duplicate-506")},
+            {"lifecycle", powerLifecycleName(g_powerLifecycle.load(std::memory_order_acquire))},
+            {"generation", currentPowerGeneration()}
+        });
         return;
-    if (g_powerLifecycle.load(std::memory_order_acquire) != PowerLifecycle::Ready) return;
+    }
+    const auto previousPhase = g_powerLifecycle.load(std::memory_order_acquire);
+    if (previousPhase != PowerLifecycle::Ready) {
+        // A new 506 Reason=1/3 can only arrive while Windows is running. If no
+        // S0 transaction or retry owns the old state, it is stale bookkeeping
+        // from an earlier resume. Release its exact PID lease before creating
+        // a fresh one; otherwise the next power-button sleep is silently lost.
+        sgRecordFact("s0-intent-stale-lifecycle", {
+            {"previousLifecycle", powerLifecycleName(previousPhase)},
+            {"generation", currentPowerGeneration()},
+            {"gameSuspended", g_sgGameActuallySuspended.load(std::memory_order_acquire)}
+        });
+        sgAbortSleepIntent("kernel-power-506-stale-lifecycle", false);
+        if (g_powerLifecycle.load(std::memory_order_acquire) != PowerLifecycle::Ready) {
+            sgRecordFact("s0-intent-ignored", {
+                {"reason", "stale-lifecycle-not-reset"},
+                {"lifecycle", powerLifecycleName(g_powerLifecycle.load(std::memory_order_acquire))}
+            });
+            return;
+        }
+    }
     g_sgLastModernStandbyIntentTick = now;
     // Power-button policy is diagnostic only. Kernel-Power 506 already proves
     // that this was an interactive S0 request; a stale registry value must not
@@ -15384,6 +15653,34 @@ static void sgBeginModernStandbyIntent() {
     traceLog("s0 sleep intent armed generation=%llu source=kernel-power-506", generation);
 }
 
+// Reason=7 and the observed Reason=8 are not user wake acknowledgements when
+// they immediately follow our own 506 sleep intent. The event payload does
+// not identify the physical source for Reason=8, so it is deliberately only
+// an entry-failure signal inside this short, correlated window.
+static bool sgS0EntryFailureEligible(int wakeReason, ULONGLONG nowTick) {
+    if (wakeReason != 7 && wakeReason != 8) return false;
+    const int sleepReason = g_sgLastKernel506Reason.load(std::memory_order_acquire);
+    if (sleepReason != 1 && sleepReason != 3) return false;
+    // sgMarkSleepTrigger deliberately consumes g_sgSleepIntentArmed after it
+    // has transferred the intent into g_sgRepairEligible. Do not require the
+    // one-shot arm flag here: doing so makes every valid immediate 507 fail
+    // classification after the 506 transaction was accepted.
+    if (!g_sgRepairEligible ||
+        g_sgTask.mode != SgSleepMode::S3 ||
+        g_sgTask.generation != currentPowerGeneration() ||
+        g_sgSleepTriggerTick == 0 ||
+        nowTick < g_sgSleepTriggerTick ||
+        nowTick - g_sgSleepTriggerTick > SG_S0_REASON7_FAILURE_WINDOW_MS)
+        return false;
+    const auto phase = g_powerLifecycle.load(std::memory_order_acquire);
+    return phase == PowerLifecycle::Suspending ||
+        phase == PowerLifecycle::Suspended || phase == PowerLifecycle::Resuming;
+}
+
+static bool sgS0Reason7FailureEligible(ULONGLONG nowTick) {
+    return sgS0EntryFailureEligible(7, nowTick);
+}
+
 static void sgHandleModernStandbyWake(bool userWake) {
     const ULONGLONG now = GetTickCount64();
     g_sgSleepQueryGateClosed = false;
@@ -15408,13 +15705,11 @@ static void sgHandleModernStandbyWake(bool userWake) {
     g_sgModernWakeClassifiedTick = now;
     if (g_hwnd) KillTimer(g_hwnd, SG_S0_WAKE_CLASSIFY_TIMER_ID);
     if (g_hwnd) KillTimer(g_hwnd, SG_S0_STATE_TIMER_ID);
-    // Entry failure is a lifecycle failure, not a game-freeze failure.  A
-    // machine with no game (or a protected game PID) can still enter sleep;
-    // only a wake before the suspend worker recorded completion is retried.
-    const bool fastEntryFailure = !userWake && g_sgTask.mode == SgSleepMode::S3 &&
-        g_sgRepairEligible && g_sgEnteredTick == 0 &&
-        g_sgSleepTriggerTick != 0 && now >= g_sgSleepTriggerTick &&
-        now - g_sgSleepTriggerTick <= sgEntryFailureWindowMs();
+    // A Reason=7/8 exit within the confirmed two-second intent window is an
+    // entry failure even if the pause worker already completed. Keep the pause
+    // lease while the exclusive retry transaction attempts to enter sleep again.
+    const bool fastEntryFailure = !userWake &&
+        sgS0EntryFailureEligible(g_sgLastS0WakeReason, now);
     sgRecordFact("s0-wake-classified", {
         {"userWake", userWake}, {"fastEntryFailure", fastEntryFailure},
         {"generation", generation}, {"phase", powerLifecycleName(phase)}
@@ -15721,7 +16016,8 @@ static DWORD WINAPI sgKernelPowerEventCallback(EVT_SUBSCRIBE_NOTIFY_ACTION actio
         sgKernelPowerEventDataInt(xml, "TargetState") == 5;
     if ((!entering && !leaving && !hibernateWake) || !g_hwnd) return ERROR_SUCCESS;
     const int reason = sgKernelPowerReason(xml);
-    const bool powerButton = reason == 1 || sgKernelPowerReasonIsPowerButton(xml);
+    const bool reason1 = reason == 1;
+    const bool userInitiatedSleep = reason == 1 || reason == 3;
     const ULONGLONG eventFileTime = sgKernelPowerEventFileTime(xml);
     const ULONGLONG recordedFileTime = eventFileTime != 0 ? eventFileTime : sgNowFileTime();
     if (entering) {
@@ -15732,29 +16028,51 @@ static DWORD WINAPI sgKernelPowerEventCallback(EVT_SUBSCRIBE_NOTIFY_ACTION actio
         g_sgLastKernel507Reason.store(reason, std::memory_order_release);
         g_sgLastKernel507EventFileTime.store(recordedFileTime, std::memory_order_release);
     }
-    if (entering) {
-        // Kernel-Power 506 is the durable S0 entry record. Reason=3 is also
-        // observed for Start-menu sleep on current Windows builds, so the
-        // user-standby marker intentionally accepts every 506 entry here.
-        sgMarkUserStandby("kernel-power-506", reason, recordedFileTime);
+    if (hibernateWake) {
+        sgRecordFact("kernel-power-107", {
+            {"eventId", eventId}, {"reason", reason},
+            {"targetState", sgKernelPowerEventDataInt(xml, "TargetState")},
+            {"fileTime", sgFormatFactFileTime(recordedFileTime)},
+            {"environment", sgSleepEnvironmentSnapshot()}
+        });
     }
-    if (entering && powerButton) {
+    if (entering) {
+        // 完整记录所有 Kernel-Power 506 形式；它是本机唯一稳定的
+        // 睡眠进入事件来源。Reason=1/3 才能写入主动按键睡眠标记。
+        sgRecordFact("kernel-power-506", {
+            {"reason", reason}, {"reasonName", sgKernelPowerReasonName(reason)},
+            {"reason1Accepted", reason1},
+            {"userInitiatedSleep", userInitiatedSleep},
+            {"fileTime", sgFormatFactFileTime(recordedFileTime)},
+            {"targetState", sgKernelPowerEventDataInt(xml, "TargetState")}
+        });
+    }
+    if (entering && userInitiatedSleep) {
         g_sgLastPowerButtonSleepIntentFileTime.store(
             recordedFileTime, std::memory_order_release);
+        sgClearExternalDeviceWake("kernel-power-506-user-initiated", false);
+        sgMarkUserStandby("kernel-power-506-user-initiated", reason, recordedFileTime);
+        sgRecordFact("user-initiated-sleep", {
+            {"label", "主动按键睡眠"},
+            {"evidence", "Kernel-Power EventID=506 Reason=1 or Reason=3"},
+            {"reason", reason},
+            {"fileTime", sgFormatFactFileTime(recordedFileTime)}
+        });
     }
-    if (leaving && powerButton) {
+    if (leaving && reason1) {
         g_sgLastPowerButtonWakeEventFileTime.store(
             recordedFileTime, std::memory_order_release);
     }
     sgRecordFact("kernel-power", {
-        {"eventId", eventId}, {"reason", reason}, {"reason1Accepted", powerButton},
-        {"targetState", sgKernelPowerEventDataInt(xml, "TargetState")}
+        {"eventId", eventId}, {"reason", reason}, {"reason1Accepted", reason1},
+        {"targetState", sgKernelPowerEventDataInt(xml, "TargetState")},
+        {"fileTime", sgFormatFactFileTime(recordedFileTime)}
     });
     traceLog("kernel power event id=%d reason=%s targetState=%d", eventId,
              eventId == 506 || eventId == 507 ? sgKernelPowerReasonName(reason) :
-                 (powerButton ? "power-button" : "other"),
+                (reason1 ? "power-button" : "other"),
              sgKernelPowerEventDataInt(xml, "TargetState"));
-    if (entering && powerButton)
+    if (entering && reason1)
         PostMessageW(g_hwnd, WM_SG_S0_INTENT, 0, 0);
     else if (entering && reason == 3)
         // Start-menu sleep is reported as Kernel-Power 506 Reason=3 on the
@@ -15763,7 +16081,7 @@ static DWORD WINAPI sgKernelPowerEventCallback(EVT_SUBSCRIBE_NOTIFY_ACTION actio
     else if (entering && reason == 28)
         PostMessageW(g_hwnd, WM_SG_S0_REENTER, static_cast<WPARAM>(reason), 0);
     else if (leaving)
-        PostMessageW(g_hwnd, WM_SG_S0_WAKE, powerButton ? 1 : 2,
+        PostMessageW(g_hwnd, WM_SG_S0_WAKE, reason1 ? 1 : 2,
                      static_cast<LPARAM>(reason));
     else if (hibernateWake)
         PostMessageW(g_hwnd, WM_SG_S4_WAKE, 0, 0);
@@ -16113,6 +16431,10 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
             KillTimer(g_hwnd, SG_RETRY_TIMER_ID);
             sgDispatchSameModeRetry();
         }
+        if (w == SG_EXTERNAL_DEVICE_RETRY_TIMER_ID) {
+            sgDispatchExternalDeviceWakeRetry();
+            return 0;
+        }
         if (w == GP_HOLD_TIMER_ID) {
             gamepadEval();
         }
@@ -16166,6 +16488,7 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         KillTimer(h, MEM_TRAY_TIMER_ID);
         KillTimer(h, SG_RESLEEP_TIMER_ID);
         KillTimer(h, SG_RETRY_TIMER_ID);
+        KillTimer(h, SG_EXTERNAL_DEVICE_RETRY_TIMER_ID);
         KillTimer(h, SG_S0_WAKE_CLASSIFY_TIMER_ID);
         KillTimer(h, SG_S0_STATE_TIMER_ID);
         KillTimer(h, GP_HOLD_TIMER_ID);
@@ -16246,6 +16569,7 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         KillTimer(h, FOCUS_DISPLAY_TIMER_ID);
         KillTimer(h, MEM_TRAY_TIMER_ID);
         KillTimer(h, SG_RESLEEP_TIMER_ID);
+        KillTimer(h, SG_EXTERNAL_DEVICE_RETRY_TIMER_ID);
         KillTimer(h, SG_S0_WAKE_CLASSIFY_TIMER_ID);
         KillTimer(h, SG_S0_STATE_TIMER_ID);
         KillTimer(h, GP_HOLD_TIMER_ID);
@@ -16378,10 +16702,7 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
                 sgUserStandbyDeviceEligible(nowTick, standbyAgeMs);
             const bool deviceNodeChange =
                 static_cast<unsigned long>(w) == DBT_DEVNODES_CHANGED;
-            const bool retryCandidate = deviceNodeChange &&
-                g_guardEnabled && g_sgResleepEnabled && g_sgRepairEligible &&
-                g_sgTask.mode == SgSleepMode::S3 && standbyAgeEligible &&
-                !g_sgUserStandbyDeviceTriggered;
+            const bool retryCandidate = deviceNodeChange;
             sgRecordFact("device-change", {
                 {"code", static_cast<unsigned long long>(w)},
                 {"userStandby", g_sgUserStandbyTick.load(std::memory_order_acquire) != 0},
@@ -16389,21 +16710,10 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
                 {"standbyAgeEligible", standbyAgeEligible},
                 {"guardEnabled", g_guardEnabled},
                 {"resleepEnabled", g_sgResleepEnabled},
-                {"repairEligible", g_sgRepairEligible},
-                {"taskMode", sgSleepModeName(g_sgTask.mode)},
                 {"retryCandidate", retryCandidate}
             });
             if (retryCandidate) {
-                sgRecordFact("user-standby-device-trigger", {
-                    {"code", static_cast<unsigned long long>(w)},
-                    {"standbyAgeMs", standbyAgeMs},
-                    {"delaysMs", {500, 1000, 2000}}
-                });
-                sgRequestSleepRetry(SgRetryKind::NonUserWake,
-                                     "user-standby-device-change");
-                if (g_sgRetryInProgress &&
-                    g_sgTask.retryKind == SgRetryKind::NonUserWake)
-                    g_sgUserStandbyDeviceTriggered = true;
+                sgNoteExternalDeviceNodeChange();
             }
         }
         if (g_sgRepairEligible) {
@@ -16481,34 +16791,72 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         if (static_cast<int>(w) == 28)
             sgMarkModernStandbyReentry("kernel-power-506");
         return 0;
-    case WM_SG_S0_WAKE:
+    case WM_SG_S0_WAKE: {
         g_sgLastS0WakeReason = static_cast<int>(l);
         g_sgLastS0WakeTick = GetTickCount64();
+        const bool entryFailure = sgS0EntryFailureEligible(
+            g_sgLastS0WakeReason, g_sgLastS0WakeTick);
+        const bool reason7EntryFailure = g_sgLastS0WakeReason == 7 && entryFailure;
+        const bool reason8EntryFailure = g_sgLastS0WakeReason == 8 && entryFailure;
         sgRecordFact("s0-wake-message", {
-            {"reason", g_sgLastS0WakeReason}, {"acceptedUserWake", w == 1}
+            {"reason", g_sgLastS0WakeReason}, {"acceptedUserWake", w == 1},
+            {"reason7EntryFailure", reason7EntryFailure},
+            {"reason8EntryFailure", reason8EntryFailure},
+            {"entryFailure", entryFailure}
         });
-        // Only the Kernel-Power 507 Reason=1 event authorizes a user wake.
-        // Raw input and every other event reason remain non-user evidence.
         if (w == 1) {
+            // 507 Reason=1 is a confirmed user wake. Consume the prior
+            // 506 Reason=1/3 marker so later USB4 activity cannot re-sleep it.
+            sgClearExternalDeviceWake("kernel-power-507-reason-1", true);
             g_sgLastPowerButtonWakeTick = g_sgLastS0WakeTick;
             traceLog("s0 wake gate opened source=kernel-power-507-reason-1 reason=%d",
                      g_sgLastS0WakeReason);
-        } else {
-            // USB4, AC/DC, device changes and generic Kernel-Power 507 are
-            // observation-only.  They never resume the game or start retry.
-            traceLog("s0 wake ignored source=non-power-button reason=%d class=%s",
-                     g_sgLastS0WakeReason,
-                     sgKernelPowerReasonName(g_sgLastS0WakeReason));
+            if (sgEntryRetryIsExclusive()) {
+                // This is the only signal that accepts a user abort during
+                // Reason=7 entry retries. Resume only the marker owned by the
+                // current transaction; no automatic/non-user signal may do it.
+                sgRecordFact("s0-entry-retry-canceled-user-wake", {
+                    {"generation", currentPowerGeneration()}
+                });
+                sgAbortSleepIntent("s0-user-power-button-wake", false);
+                return 0;
+            }
+            g_sgS0ReentryActive = false;
+            sgHandleModernStandbyWake(true);
             return 0;
         }
-        g_sgS0ReentryActive = false;
-        sgHandleModernStandbyWake(true);
+        if (entryFailure) {
+            // A rapid Reason=7/8 is a rejected sleep entry, not a user wake.
+            // sgHandleModernStandbyWake(false) schedules EntryFailure retry
+            // before any wake worker can resume the owned game PID.
+            g_sgS0ReentryActive = false;
+            traceLog("s0 reason=%d confirmed entry failure generation=%llu",
+                     g_sgLastS0WakeReason, currentPowerGeneration());
+            sgHandleModernStandbyWake(false);
+            return 0;
+        }
+        if (g_sgLastS0WakeReason == 5)
+            sgNoteExternalDeviceKernel507Reason5();
+        // Reason=5 remains USB4 evidence only. Other non-user reasons remain
+        // observational; neither can consume the Reason=7 entry-retry lease.
+        traceLog("s0 wake ignored source=non-power-button reason=%d class=%s",
+                 g_sgLastS0WakeReason,
+                 sgKernelPowerReasonName(g_sgLastS0WakeReason));
         return 0;
+    }
     case WM_SG_S4_WAKE:
-        sgRecordFact("s4-wake-message");
+        sgRecordFact("s4-wake-message", {
+            {"entryRetryActive", sgEntryRetryIsExclusive()}
+        });
         // Kernel-Power 107 with TargetState=5 is the reliable post-hiberfile
-        // signal. It is intentionally treated as a final user-visible wake:
-        // no automatic re-sleep classification may retain the sleep lease.
+        // signal. It is a final user-visible wake: it overrides a pending
+        // Reason=7 entry retry so the owned game PID cannot remain paused.
+        if (sgEntryRetryIsExclusive()) {
+            sgRecordFact("s4-wake-canceled-entry-retry", {
+                {"generation", currentPowerGeneration()}
+            });
+            sgAbortSleepIntent("kernel-s4-wake", false);
+        }
         handlePowerResumeNotification(SgWork::WakeHibernate, "kernel-s4-wake");
         return 0;
     case WM_SG_RESUME_GAME_FOCUS:
@@ -16530,7 +16878,14 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
             w == PBT_APMQUERYSUSPENDFAILED || w == PBT_APMQUERYSTANDBYFAILED ||
             w == PBT_APMRESUMEAUTOMATIC || w == PBT_APMRESUMESUSPEND ||
             w == PBT_APMRESUMECRITICAL) {
-            sgRecordFact("power-broadcast", {{"code", static_cast<unsigned long long>(w)}});
+            sgRecordFact("power-broadcast", {
+                {"code", static_cast<unsigned long long>(w)},
+                {"lifecycle", powerLifecycleName(g_powerLifecycle.load(std::memory_order_acquire))},
+                {"generation", currentPowerGeneration()},
+                {"externalRetryActive", g_sgExternalDeviceWake.retryActive},
+                {"taskMode", sgSleepModeName(g_sgTask.mode)},
+                {"taskPhase", sgSleepTaskPhaseName(g_sgTask.phase)}
+            });
         }
         if (w == PBT_POWERSETTINGCHANGE && l) {
             auto* pbs = reinterpret_cast<POWERBROADCAST_SETTING*>(l);
@@ -16545,6 +16900,7 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
                     g_lastAcState = ac;
                     sgRecordFact("acdc-change", {{"ac", ac == 1}});
                     g_sgLastAcDcBroadcastTick = GetTickCount64();
+                    sgNoteExternalDeviceAcDcChange();
                     sgObserveAcDcForManualSleep();
                     if (g_sgRepairEligible) {
                         g_sgWakeSourceEvidence = true;
@@ -16587,6 +16943,13 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         }
         // ── 睡眠守护：PBT_APM* 同样走 WM_POWERBROADCAST（窗口程序自动送达，无需额外注册）──
         else if (w == PBT_APMQUERYSUSPEND) {
+            if (g_sgExternalDeviceWake.retryActive) {
+                closeHardwareWriteGate("external-device-retry-query");
+                sgRecordFact("external-device-wake-retry-query", {
+                    {"attempt", g_sgExternalDeviceWake.retryAttempt}
+                });
+                return TRUE;
+            }
             // Windows 8+ sends this pre-suspend query for the interactive
             // power-button path as well as explicit app sleep requests. Arm
             // only for this immediately preceding query; a bare suspend with
@@ -16645,10 +17008,17 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         }
         else if (w == PBT_APMSUSPEND) {
             {
+                if (g_sgExternalDeviceWake.retryActive) {
+                    KillTimer(g_hwnd, SG_EXTERNAL_DEVICE_RETRY_TIMER_ID);
+                    g_sgExternalDeviceWake.retryActive = false;
+                    g_powerLifecycle.store(PowerLifecycle::Suspended, std::memory_order_release);
+                    sgRecordFact("external-device-wake-retry-succeeded", {
+                        {"attempt", g_sgExternalDeviceWake.retryAttempt}
+                    });
+                    return TRUE;
+                }
                 const bool internalRetry = g_sgRetryInProgress &&
                     g_sgTask.retryKind != SgRetryKind::None;
-                if (!internalRetry)
-                    sgMarkUserStandby("pbt-apmsuspend", -1);
                 if (sgMarkModernStandbyReentry("pbt-apmsuspend-506"))
                     return TRUE;
                 if (g_sgRetryInProgress && g_sgTask.retryKind == SgRetryKind::NonUserWake) {
