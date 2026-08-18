@@ -8,17 +8,30 @@ function requireNative(token: string): void {
   assert.ok(native.includes(token), `missing SleepTask policy: ${token}`);
 }
 
-requireNative('enum class SgRetryKind : uint8_t { None, EntryFailure, NonUserWake };');
-requireNative('unsigned int entryFailureAttempts = 0;');
-requireNative('bool nonUserWakeResleepUsed = false;');
-requireNative('g_sgTask.nonUserWakeResleepUsed');
-requireNative('g_sgTask.entryFailureAttempts >= SG_MAX_ENTRY_RETRIES');
-requireNative('case SgRetryKind::NonUserWake: return "non-user-wake";');
+function rejectNative(token: string): void {
+  assert.ok(!native.includes(token), `obsolete SleepTask policy remains: ${token}`);
+}
 
-// A confirmed S3 transition belongs to the non-user-wake path if it returns;
-// it must not be reclassified as an entry failure because it was short.
+requireNative('enum class SgRetryKind : uint8_t { None, EntryFailure };');
+requireNative('unsigned int entryFailureAttempts = 0;');
+requireNative('g_sgTask.entryFailureAttempts >= SG_MAX_ENTRY_RETRIES');
+rejectNative('SgRetryKind::NonUserWake');
+rejectNative('nonUserWakeAttempts');
+rejectNative('nonUserWakeResleepUsed');
+rejectNative('sgRequestSleepRetry(SgRetryKind::NonUserWake');
+rejectNative('sgObserveAcDcForManualSleep');
+rejectNative('sgSampleModernStandbySystemState');
+rejectNative('sgFinalizeModernWakeTimeout');
+rejectNative('sgReleaseAfterWakeObservation');
+rejectNative('SG_RESLEEP_TIMER_ID');
+rejectNative('SG_S0_WAKE_CLASSIFY_TIMER_ID');
+
+// A confirmed S3 transition must not be reclassified as an entry failure
+// merely because it returns quickly.
 requireNative('phase == PowerLifecycle::Suspending && !g_sgTask.suspendConfirmed');
 requireNative('g_sgTask.suspendConfirmed = true;');
+requireNative('sleep automatic wake held for explicit user resume');
+requireNative('handlePowerResumeNotification(SgWork::WakeSuspend, "resume_suspend")');
 
 // Hibernate is deliberately outside the live pause/retry transaction.
 requireNative('sleep task ignored mode=S4 source=query');
@@ -32,7 +45,6 @@ requireNative('SE_SHUTDOWN_NAME');
 requireNative('AdjustTokenPrivileges(token, FALSE, &privileges, 0, nullptr, nullptr)');
 requireNative('SG_ENTRY_RETRY_DELAYS_MS[] = {500ULL, 1000ULL, 2000ULL}');
 requireNative('sgAdvanceRetry("retry-request-rejected")');
-requireNative('g_sgTask.nonUserWakeAttempts >= SG_MAX_ENTRY_RETRIES');
 requireNative('external-device-wake-confirmed');
 requireNative('independentOf", {"repairEligible", "taskMode"}');
 
