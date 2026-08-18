@@ -99,6 +99,41 @@ requireNative('g_sgExternalDeviceWake.consumed = !rearmed;');
 requireNative('sgConfirmExternalDeviceWakeSleepBoundary();');
 requireNative('const bool internalUnexpectedWakeRetry = g_sgExternalDeviceWake.retryActive;');
 requireNative('"internal-sleep-506"');
+requireNative('SG_INTERNAL_SLEEP_506_WINDOW_MS = 60000ULL');
+requireNative('enum class SgInternalSleepRequestKind');
+requireNative('sgInternalSleepRequestMatches506(reason, eventFileTime)');
+requireNative('sgClearInternalSleepRequest("kernel-power-507-reason-1")');
+requireNative('sgClearInternalSleepRequest("pbt-resume-suspend-user")');
+const entryDispatch = native.slice(
+  native.indexOf('static void sgDispatchSameModeRetry()'),
+  native.indexOf('static void sgRequestSleepRetry(', native.indexOf('static void sgDispatchSameModeRetry()')),
+);
+assert.ok(
+  entryDispatch.indexOf('sgMarkInternalSleepRequest(SgInternalSleepRequestKind::EntryFailure)') >= 0 &&
+  entryDispatch.indexOf('sgMarkInternalSleepRequest(SgInternalSleepRequestKind::EntryFailure)') <
+    entryDispatch.indexOf('sgRequestSystemSleep()'),
+  'EntryFailure must identify its internal request before SetSuspendState',
+);
+const unexpectedDispatch = native.slice(
+  native.indexOf('static void sgDispatchExternalDeviceWakeRetry()'),
+  native.indexOf('static void sgConfirmExternalDeviceWakeSleepBoundary()'),
+);
+assert.ok(
+  unexpectedDispatch.indexOf('sgMarkInternalSleepRequest(SgInternalSleepRequestKind::UnexpectedWake)') >= 0 &&
+  unexpectedDispatch.indexOf('sgMarkInternalSleepRequest(SgInternalSleepRequestKind::UnexpectedWake)') <
+    unexpectedDispatch.indexOf('sgRequestSystemSleep()'),
+  'unexpected-wake retry must identify its internal request before SetSuspendState',
+);
+const intentMessage = native.slice(
+  native.indexOf('case WM_SG_S0_INTENT:'),
+  native.indexOf('case WM_SG_S0_REENTER:'),
+);
+assert.ok(
+  intentMessage.indexOf('sgInternalSleepRequestMatches506(reason, eventFileTime)') >= 0 &&
+  intentMessage.indexOf('sgInternalSleepRequestMatches506(reason, eventFileTime)') <
+    intentMessage.indexOf('g_sgLastPowerButtonSleepIntentFileTime.store'),
+  'a delayed internal 506 must be filtered before it can overwrite the 120-second user marker',
+);
 const kernelCallback = native.slice(
   native.indexOf('static DWORD WINAPI sgKernelPowerEventCallback'),
   native.indexOf('static void sgStartKernelPowerSubscription()'),
@@ -117,6 +152,7 @@ requireNative('SG_S0_REASON7_FAILURE_WINDOW_MS = 2000ULL');
 requireNative('static bool sgS0EntryFailureEligible(int wakeReason, ULONGLONG nowTick)');
 requireNative('if (wakeReason != 7 && wakeReason != 8) return false;');
 requireNative('if (!userIntent506 && !sgEntryRetryIsExclusive()) return false;');
+requireNative('sgInternalSleepRequestIs(SgInternalSleepRequestKind::UnexpectedWake)');
 requireNative('sgMarkSleepTrigger deliberately consumes g_sgSleepIntentArmed');
 requireNative('static bool sgS0Reason7FailureEligible');
 requireNative('const bool reason7EntryFailure = g_sgLastS0WakeReason == 7');
@@ -128,6 +164,70 @@ requireNative('sgHandleModernStandbyWake(false);');
 requireNative('Reason=5 is direct unexpected-wake evidence');
 requireNative('s0-entry-retry-canceled-user-wake');
 requireNative('sgAbortSleepIntent("s0-user-power-button-wake", false);');
+
+// The two physical-machine acceptance paths are the priority contract. Their
+// dispatch branches must remain ahead of all secondary wake classification.
+const s0WakeMessage = native.slice(
+  native.indexOf('case WM_SG_S0_WAKE:'),
+  native.indexOf('case WM_SG_S4_WAKE:'),
+);
+assert.ok(
+  s0WakeMessage.indexOf('if (entryFailure) {') >= 0 &&
+  s0WakeMessage.indexOf('if (entryFailure) {') <
+    s0WakeMessage.indexOf('g_sgLastS0WakeReason == 5'),
+  'Reason=7/8 EntryFailure must win before the Reason=5 unexpected-wake path',
+);
+const deviceChangeStart = native.indexOf('case WM_DEVICECHANGE:');
+const deviceChangeMessage = native.slice(
+  deviceChangeStart,
+  native.indexOf('case WM_KEYDOWN:', deviceChangeStart),
+);
+assert.ok(deviceChangeMessage.includes('DBT_DEVNODES_CHANGED'),
+  'USB4 device-node code=7 must remain a direct evidence source');
+assert.ok(deviceChangeMessage.includes('sgNoteExternalDeviceNodeChange();'),
+  'USB4 device-node code=7 must reach the unexpected-wake evaluator');
+const externalEvaluate = native.slice(
+  native.indexOf('static void sgEvaluateExternalDeviceWake()'),
+  native.indexOf('static void sgNoteExternalDeviceNodeChange()'),
+);
+assert.ok(!externalEvaluate.includes('g_sgRepairEligible'),
+  'USB4 120-second path must not depend on repairEligible');
+assert.ok(!externalEvaluate.includes('g_sgTask.mode'),
+  'USB4 120-second path must not depend on SleepTask mode');
+const pbtSuspend = native.slice(
+  native.indexOf('else if (w == PBT_APMSUSPEND)'),
+  native.indexOf('else if (w == PBT_APMQUERYSUSPENDFAILED'),
+);
+assert.ok(
+  pbtSuspend.indexOf('if (g_sgExternalDeviceWake.retryActive)') >= 0 &&
+  pbtSuspend.indexOf('if (g_sgExternalDeviceWake.retryActive)') <
+    pbtSuspend.indexOf('if (sgEntryRetryIsExclusive())'),
+  'an active USB4 retry must own its suspend confirmation before generic EntryFailure handling',
+);
+
+// Deterministic replay of the exact evidence supplied by the physical tests.
+const entryFailureDecision = (reason506: number, deltaMs: number, reason507: number): boolean =>
+  (reason506 === 1 || reason506 === 3) &&
+  (reason507 === 7 || reason507 === 8) &&
+  deltaMs >= 0 && deltaMs <= 2000;
+assert.equal(entryFailureDecision(1, 3, 7), true,
+  'SD Gundam: 506/1 -> 3ms -> 507/7 must enter EntryFailure');
+assert.equal(entryFailureDecision(1, 1007, 8), true,
+  'SD Gundam: 506/1 -> 1007ms -> 507/8 must enter EntryFailure');
+assert.equal(entryFailureDecision(1, 2001, 7), false,
+  'the EntryFailure path must remain bounded to two seconds');
+
+const unexpectedWakeDecision = (
+  ageMs: number,
+  deviceNodeCode7: boolean,
+  reason507: number,
+): boolean => ageMs >= 120000 && (deviceNodeCode7 || reason507 === 5);
+assert.equal(unexpectedWakeDecision(192042, true, -1), true,
+  'USB4: code=7 after 120 seconds must enter unexpected-wake resleep');
+assert.equal(unexpectedWakeDecision(192042, false, 5), true,
+  'USB4: 507/5 after 120 seconds must enter unexpected-wake resleep');
+assert.equal(unexpectedWakeDecision(119999, true, -1), false,
+  'USB4 activity before 120 seconds must not resleep the user');
 
 // A new user 506 must repair a stale in-process lifecycle before it queues the
 // game pause. This is separate from active S0 transactions and USB4 retry.
