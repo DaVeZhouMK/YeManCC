@@ -45,6 +45,15 @@ requireNative('SE_SHUTDOWN_NAME');
 requireNative('AdjustTokenPrivileges(token, FALSE, &privileges, 0, nullptr, nullptr)');
 requireNative('SG_ENTRY_RETRY_DELAYS_MS[] = {500ULL, 1000ULL, 2000ULL}');
 requireNative('sgAdvanceRetry("retry-request-rejected")');
+const sameModeDispatchStart = native.indexOf('static void sgDispatchSameModeRetry() {');
+const sameModeDispatch = native.slice(
+  sameModeDispatchStart,
+  native.indexOf('static void sgRequestSleepRetry(', sameModeDispatchStart),
+);
+assert.ok(sameModeDispatch.includes('g_sgSleepTriggerTick = now;'),
+  'every EntryFailure attempt must open a fresh 506/507 correlation window');
+assert.ok(sameModeDispatch.includes('g_sgModernWakeClassified = false;'),
+  'every EntryFailure attempt must clear the prior wake classification');
 requireNative('external-device-wake-confirmed');
 requireNative('independentOf", {"repairEligible", "taskMode"}');
 
@@ -59,6 +68,10 @@ requireNative('sgNoteExternalDeviceAcDcChange();');
 requireNative('sgNoteExternalDeviceKernel507Reason5();');
 requireNative('g_sgExternalDeviceWake.retryActive');
 requireNative('g_sgExternalDeviceWake.consumed');
+requireNative('SG_MAX_EXTERNAL_WAKE_CYCLES = 2');
+requireNative('SG_EXTERNAL_SUSPEND_CONFIRM_TIMEOUT_MS = 60000U');
+requireNative('bool awaitingSuspendConfirmation = false;');
+requireNative('unsigned int completedSleepCycles = 0;');
 requireNative('const bool unexpectedWakeEvidence =');
 requireNative('g_sgExternalDeviceWake.deviceNodeChangeSeen ||');
 requireNative('g_sgExternalDeviceWake.kernel507Reason5Seen;');
@@ -68,7 +81,34 @@ const acdcEvidenceFunction = native.slice(
 );
 assert.ok(!acdcEvidenceFunction.includes('sgEvaluateExternalDeviceWake();'),
   'AC/DC changes must remain diagnostic-only');
+const externalSchedule = native.slice(
+  native.indexOf('static void sgScheduleExternalDeviceWakeRetry()'),
+  native.indexOf('static void sgEvaluateExternalDeviceWake()'),
+);
+assert.ok(externalSchedule.includes('stopPowerResumeWatchdog();'),
+  'unexpected-wake retry must stop the generic resume watchdog');
+assert.ok(externalSchedule.includes('closeHardwareWriteGate("external-device-wake-retry");'),
+  'unexpected-wake retry must close the hardware write gate before dispatch');
+requireNative('if (request.accepted) {');
+requireNative('g_sgExternalDeviceWake.awaitingSuspendConfirmation = true;');
+requireNative('external-device-wake-retry-awaiting-suspend');
+requireNative('external-device-wake-suspend-confirm-timeout');
+requireNative('static void sgConfirmExternalDeviceWakeSleepBoundary()');
+requireNative('g_sgExternalDeviceWake.completedSleepCycles = completed;');
+requireNative('g_sgExternalDeviceWake.consumed = !rearmed;');
+requireNative('sgConfirmExternalDeviceWakeSleepBoundary();');
+requireNative('const bool internalUnexpectedWakeRetry = g_sgExternalDeviceWake.retryActive;');
+requireNative('"internal-sleep-506"');
+const kernelCallback = native.slice(
+  native.indexOf('static DWORD WINAPI sgKernelPowerEventCallback'),
+  native.indexOf('static void sgStartKernelPowerSubscription()'),
+);
+assert.ok(!kernelCallback.includes('sgClearExternalDeviceWake('),
+  'Kernel-Power callback thread must not clear the UI-owned unexpected-wake state');
 requireNative('Kernel-Power 107 with TargetState=5');
+requireNative('sgClearExternalDeviceWake("kernel-s4-wake", true);');
+requireNative('sgClearExternalDeviceWake("pbt-resume-suspend-user", true);');
+requireNative('sgClearExternalDeviceWake("pbt-resume-critical", true);');
 
 // A rapid Modern Standby flow exit is a confirmed entry failure. It must not
 // be routed through the 120-second unexpected-wake evidence path, and its
@@ -76,6 +116,7 @@ requireNative('Kernel-Power 107 with TargetState=5');
 requireNative('SG_S0_REASON7_FAILURE_WINDOW_MS = 2000ULL');
 requireNative('static bool sgS0EntryFailureEligible(int wakeReason, ULONGLONG nowTick)');
 requireNative('if (wakeReason != 7 && wakeReason != 8) return false;');
+requireNative('if (!userIntent506 && !sgEntryRetryIsExclusive()) return false;');
 requireNative('sgMarkSleepTrigger deliberately consumes g_sgSleepIntentArmed');
 requireNative('static bool sgS0Reason7FailureEligible');
 requireNative('const bool reason7EntryFailure = g_sgLastS0WakeReason == 7');
@@ -114,6 +155,18 @@ assert.ok(retryBeforeWake >= 0 && ordinaryWakeQueue > retryBeforeWake,
   'entry retry must be scheduled before ordinary wake work');
 requireNative('sleep entry retry succeeded attempts=%u generation=%llu');
 requireNative('g_powerLifecycle.store(PowerLifecycle::Suspended, std::memory_order_release);');
+requireNative('closeHardwareWriteGate("entry-retry-exhausted");');
+requireNative('{"entryRetryExhausted", true}');
+
+// Automatic S3 wake is not a user resume. It must keep both the game lease and
+// hardware gate held until RESUMESUSPEND supplies explicit user intent.
+const automaticWake = native.slice(
+  native.indexOf('static void sgRealWake(const char* src)'),
+  native.indexOf('static SgSleepMode sgPowerButtonSleepMode()'),
+);
+assert.ok(automaticWake.includes('stopPowerResumeWatchdog();'),
+  'automatic S3 wake must stop the resume watchdog');
+requireNative('sleep automatic wake commit held generation=%llu');
 
 // Sleep delegates its process lease to the Performance Schedule directory.
 requireNative('target.pid, SG_MANUAL_DIR, target.processCreated, &target');
