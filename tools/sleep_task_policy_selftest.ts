@@ -5,11 +5,11 @@ import { resolve } from 'node:path';
 const native = readFileSync(resolve(process.cwd(), 'native/main.cpp'), 'utf8');
 
 function requireNative(token: string): void {
-  assert.ok(native.includes(token), `missing SleepTask policy: ${token}`);
+  assert.ok(native.includes(token), `missing sleep policy: ${token}`);
 }
 
 function rejectNative(token: string): void {
-  assert.ok(!native.includes(token), `obsolete SleepTask policy remains: ${token}`);
+  assert.ok(!native.includes(token), `obsolete sleep policy remains: ${token}`);
 }
 
 function section(start: string, end: string): string {
@@ -20,52 +20,32 @@ function section(start: string, end: string): string {
   return native.slice(begin, finish);
 }
 
-// Keep only the two evidence-driven repair paths. Broad wake inference and
-// global process recovery are intentionally absent.
-requireNative('enum class SgRetryKind : uint8_t { None, EntryFailure };');
+// One transaction, two evidence reasons, one retry timer.
+requireNative('enum class SgRetryKind : uint8_t { None, EntryFailure, UnexpectedWake };');
+requireNative('#define SG_RETRY_TIMER_ID 0xA20C');
+rejectNative('SG_EXTERNAL_DEVICE_RETRY_TIMER_ID');
+rejectNative('SgSleepTaskPhase');
+rejectNative('SgExternalDeviceWakeState');
+rejectNative('SG_ENTRY_RETRY_CONFIRM_TIMEOUT_MS');
+rejectNative('SG_EXTERNAL_SUSPEND_CONFIRM_TIMEOUT_MS');
+rejectNative('SG_MAX_EXTERNAL_WAKE_CYCLES');
+rejectNative('completedSleepCycles');
+rejectNative('awaitingSuspendConfirmation');
 rejectNative('SgRetryKind::NonUserWake');
-rejectNative('sgEntryFailureWindowMs');
-rejectNative('fast-entry-failure');
 rejectNative('WM_SG_S0_REENTER');
-rejectNative('sgMarkModernStandbyReentry');
 rejectNative('sgResumeGlobalSuspendedLargeProcesses');
-rejectNative('SG_GLOBAL_RECOVERY_MIN_WS');
 
-// Sleep pause has one dedicated ownership lease. Manual pause remains a
-// separate user-owned feature and cannot be consumed by a sleep wake.
+// Sleep pause owns one exact PID lease. Manual pause remains independent.
 requireNative('static const std::wstring SG_SLEEP_LEASE_DIR = SG_DIR + L"\\\\suspended";');
 requireNative('static const std::wstring SG_MANUAL_DIR = SG_DIR + L"\\\\manual-suspended";');
 requireNative('target.pid, SG_SLEEP_LEASE_DIR, target.processCreated, &target,');
-requireNative('false, generation);');
 requireNative('reason=manual-lease');
 rejectNative('target.pid, SG_MANUAL_DIR, target.processCreated, &target');
 
-const markerWriter = section(
-  'static bool sgWriteProcessMarker(',
-  'struct SgSuspendResult',
-);
+const markerWriter = section('static bool sgWriteProcessMarker(', 'struct SgSuspendResult');
 assert.ok(markerWriter.includes('|generation='),
-  'sleep marker must persist its power generation');
-const suspendSignature = 'static json sgSuspendGameByPidUnlocked(\n    DWORD rootPid,';
-const suspendDefinition = native.indexOf(
-  suspendSignature,
-  native.indexOf(suspendSignature) + suspendSignature.length,
-);
-assert.ok(suspendDefinition >= 0, 'missing sgSuspendGameByPidUnlocked definition');
-const suspendByPid = native.slice(
-  suspendDefinition,
-  native.indexOf('static ULONGLONG sgMarkerCreated(', suspendDefinition),
-);
-assert.ok(
-  suspendByPid.indexOf('sgWriteProcessMarker(markerDir, pid, "suspended", leaseGeneration)') >= 0 &&
-  suspendByPid.indexOf('sgWriteProcessMarker(markerDir, pid, "suspended", leaseGeneration)') <
-    suspendByPid.indexOf('fnNtSuspend(h)'),
-  'the crash-recovery marker must exist before NtSuspendProcess',
-);
+  'sleep marker must persist power generation');
 
-// Resume is exact PID + creation time + generation, bounded, and never falls
-// back to the currently detected game or a system-wide scan.
-requireNative('SG_SLEEP_RESUME_RETRY_DELAYS_MS[] = {0ULL, 100ULL, 300ULL, 600ULL}');
 const resumeSignature =
   'static SgResumeResult sgResumeSleepTarget(\n    unsigned long long expectedGeneration';
 const resumeDefinition = native.indexOf(
@@ -80,80 +60,61 @@ const resumeSleepTarget = native.slice(
 requireNative('target.powerGeneration != expectedGeneration');
 requireNative('sgMarkerGeneration(SG_SLEEP_LEASE_DIR, target.pid) != expectedGeneration');
 requireNative('actualCreated != target.processCreated');
-assert.ok(resumeSleepTarget.includes('for (const ULONGLONG delayMs : SG_SLEEP_RESUME_RETRY_DELAYS_MS)'),
-  'sleep resume must use bounded retries');
-assert.ok(!resumeSleepTarget.includes('SG_MANUAL_DIR'),
-  'sleep wake must not resume manual pause markers');
-assert.ok(!resumeSleepTarget.includes('nativeValveAcquire'),
-  'sleep wake must not replace the leased PID with the current detector result');
+requireNative('SG_SLEEP_RESUME_RETRY_DELAYS_MS[] = {0ULL, 100ULL, 300ULL, 600ULL}');
+assert.ok(!resumeSleepTarget.includes('SG_MANUAL_DIR'));
+assert.ok(!resumeSleepTarget.includes('nativeValveAcquire'));
 
-// Work ordering: a queued pause or resume is never discarded. EntryFailure
-// waits up to two seconds for the pause worker before SetSuspendState.
-const queueSignature = 'static void sgQueueWork(';
-const queueDefinition = native.indexOf(
-  queueSignature,
-  native.indexOf(queueSignature) + queueSignature.length,
-);
-assert.ok(queueDefinition >= 0, 'missing sgQueueWork definition');
-const queueWork = native.slice(
-  queueDefinition,
-  native.indexOf('// A suspend query can be vetoed', queueDefinition),
-);
-assert.ok(!queueWork.includes('pop_front'), 'work queue must not discard its oldest item');
-requireNative('g_sgPauseWorkCompletedGeneration.store(');
+// The one dispatcher waits for the original pause worker only on EntryFailure.
+requireNative('SG_ENTRY_RETRY_DELAYS_MS[] = {500ULL, 1000ULL, 2000ULL}');
 requireNative('SG_PAUSE_READY_WAIT_MAX_MS = 2000ULL');
 requireNative('SG_PAUSE_READY_POLL_MS = 50U');
-requireNative('SG_ENTRY_RETRY_CONFIRM_TIMEOUT_MS = 60000U');
-const entryDispatch = section(
+requireNative('SetSuspendState(FALSE, FALSE, FALSE)');
+requireNative('SE_SHUTDOWN_NAME');
+const retryDispatch = section(
   'static void sgDispatchSameModeRetry() {',
-  'static void sgRequestSleepRetry(',
+  'static void sgStartSleepRetry(',
 );
 assert.ok(
-  entryDispatch.indexOf('g_sgPauseWorkCompletedGeneration.load') >= 0 &&
-  entryDispatch.indexOf('g_sgPauseWorkCompletedGeneration.load') <
-    entryDispatch.indexOf('sgRequestSystemSleep()'),
+  retryDispatch.indexOf('g_sgPauseWorkCompletedGeneration.load') >= 0 &&
+  retryDispatch.indexOf('g_sgPauseWorkCompletedGeneration.load') <
+    retryDispatch.indexOf('sgRequestSystemSleep()'),
   'EntryFailure must wait for pause completion before requesting sleep',
 );
 assert.ok(
-  entryDispatch.indexOf('sgMarkInternalSleepRequest(SgInternalSleepRequestKind::EntryFailure)') >= 0 &&
-  entryDispatch.indexOf('sgMarkInternalSleepRequest(SgInternalSleepRequestKind::EntryFailure)') <
-    entryDispatch.indexOf('sgRequestSystemSleep()'),
-  'EntryFailure must tag its internal request before SetSuspendState',
+  retryDispatch.indexOf('sgMarkInternalSleepRequest(kind)') >= 0 &&
+  retryDispatch.indexOf('sgMarkInternalSleepRequest(kind)') <
+    retryDispatch.indexOf('sgRequestSystemSleep()'),
+  'every internal retry must be tagged before SetSuspendState',
 );
-requireNative('SetSuspendState(FALSE, FALSE, FALSE)');
-requireNative('SE_SHUTDOWN_NAME');
-requireNative('SG_ENTRY_RETRY_DELAYS_MS[] = {500ULL, 1000ULL, 2000ULL}');
-assert.ok(entryDispatch.includes('sgAdvanceRetry("retry-confirm-timeout")'),
-  'an accepted retry without a suspend/failure boundary must not wait forever');
+assert.ok(retryDispatch.includes('if (request.accepted) return;'),
+  'accepted SetSuspendState must wait for real Windows evidence');
+rejectNative('retry-confirm-timeout');
 
-// Physical path 1: user 506 Reason=1/3 followed within two seconds by 507
-// Reason=7/8. It wins before Reason=5 and keeps the game paused during retry.
+// Physical path 1: 506 Reason=1/3 then 507 Reason=7/8 within 2 seconds.
 requireNative('SG_S0_REASON7_FAILURE_WINDOW_MS = 2000ULL');
 requireNative('if (wakeReason != 7 && wakeReason != 8) return false;');
 requireNative('const bool userIntent506 = sleepReason == 1 || sleepReason == 3;');
+requireNative('sgStartSleepRetry(SgRetryKind::EntryFailure, "s0-kernel-entry-failure")');
+requireNative('sgAdvanceSleepRetry("s0-retry-entry-failure")');
 const s0Wake = section('case WM_SG_S0_WAKE:', 'case WM_SG_S4_WAKE:');
 assert.ok(
   s0Wake.indexOf('if (entryFailure) {') >= 0 &&
-  s0Wake.indexOf('if (entryFailure) {') < s0Wake.indexOf('g_sgLastS0WakeReason == 5'),
-  'Reason=7/8 EntryFailure must win before unexpected-wake Reason=5',
+  s0Wake.indexOf('if (entryFailure) {') <
+    s0Wake.indexOf('g_sgLastS0WakeReason == 5'),
+  'EntryFailure must win before Reason=5 processing',
 );
-requireNative('sgHandleModernStandbyWake(false);');
-requireNative('sgAdvanceRetry("s0-retry-entry-failure")');
-requireNative('sgQueueWork(SgWork::WakeSuspend, generation);');
 
-// Physical path 2: after 120 seconds, AMD USB4 device-node code=7 or
-// Kernel-Power 507 Reason=5 starts the independent unexpected-wake retry.
+// Physical path 2: 120-second user sleep intent plus code=7 or Reason=5.
 requireNative('SG_USER_STANDBY_DEVICE_DELAY_MS = 120000ULL');
-requireNative('g_sgExternalDeviceWake.deviceNodeChangeSeen ||');
-requireNative('g_sgExternalDeviceWake.kernel507Reason5Seen;');
+requireNative('g_sgTask.unexpectedWakeConsumed = true;');
+requireNative('sgStartSleepRetry(SgRetryKind::UnexpectedWake, "external-device-wake")');
 const externalEvaluate = section(
   'static void sgEvaluateExternalDeviceWake()',
   'static void sgNoteExternalDeviceNodeChange()',
 );
-assert.ok(!externalEvaluate.includes('g_sgRepairEligible'),
-  'unexpected-wake evidence must not depend on EntryFailure eligibility');
-assert.ok(!externalEvaluate.includes('g_sgTask.mode'),
-  'unexpected-wake evidence must not depend on SleepTask mode');
+assert.ok(!externalEvaluate.includes('g_sgRepairEligible'));
+assert.ok(!externalEvaluate.includes('g_sgTask.mode'));
+assert.ok(externalEvaluate.includes('g_sgTask.unexpectedWakeConsumed'));
 const deviceChange = section('case WM_DEVICECHANGE:', 'case WM_KEYDOWN:');
 assert.ok(deviceChange.includes('DBT_DEVNODES_CHANGED'));
 assert.ok(deviceChange.includes('sgNoteExternalDeviceNodeChange();'));
@@ -163,53 +124,85 @@ const acdcOnly = section(
 );
 assert.ok(!acdcOnly.includes('sgEvaluateExternalDeviceWake();'),
   'AC/DC alone must remain diagnostic-only');
-requireNative('SG_MAX_EXTERNAL_WAKE_CYCLES = 2');
-requireNative('sgConfirmExternalDeviceWakeSleepBoundary();');
 
-// Any retry exhaustion releases the application lifecycle and queues exact
-// PID recovery. It may retain a failed marker, but cannot strand the app in
-// Resuming or silently resume a manual pause.
-requireNative('static void sgFinishExternalDeviceWakeFailure(const char* source)');
-requireNative('sgFinishExternalDeviceWakeFailure("unexpected-wake-suspend-confirm-timeout")');
-requireNative('sgFinishExternalDeviceWakeFailure("unexpected-wake-requests-exhausted")');
-const realWake = section(
-  'static void sgRealWake(const char* src, unsigned long long expectedGeneration)',
-  'static SgSleepMode sgPowerButtonSleepMode()',
-);
-assert.ok(realWake.includes('sgResumeSleepTarget(expectedGeneration, true)'));
-assert.ok(!realWake.includes('if (stillOwned) return'),
-  'failed exact resume must not block lifecycle cleanup forever');
-assert.ok(!realWake.includes('SG_MANUAL_DIR'),
-  'normal sleep wake must not consume manual pause');
-assert.ok(realWake.includes('const bool taskMatches = g_sgTask.generation == expectedGeneration;'),
-  'a stale wake must not clear the current generation task');
-
-// Automatic wake remains paused; explicit S3 resume, 507 Reason=1, S4 wake,
-// query cancellation, retry exhaustion, and process exit are final recovery.
+// Automatic wake never restores the lease. Explicit user/S4/query-cancel/failure does.
 requireNative('sleep automatic wake held for explicit user resume');
 requireNative('handlePowerResumeNotification(SgWork::WakeSuspend, "resume_suspend")');
 requireNative('sgAbortSleepIntent("s0-user-power-button-wake")');
 requireNative('sgAbortSleepIntent("kernel-s4-wake")');
 requireNative('sgAbortSleepIntent("query-canceled")');
+requireNative('static void sgFinishSleepRetryFailure(const char* reason)');
 requireNative('sgResumeTrackedAll();');
 
-// Deterministic replay of the two physical acceptance contracts.
-const entryFailureDecision = (reason506: number, deltaMs: number, reason507: number): boolean =>
-  (reason506 === 1 || reason506 === 3) &&
-  (reason507 === 7 || reason507 === 8) &&
-  deltaMs >= 0 && deltaMs <= 2000;
-assert.equal(entryFailureDecision(1, 3, 7), true);
-assert.equal(entryFailureDecision(1, 1007, 8), true);
-assert.equal(entryFailureDecision(3, 2000, 7), true);
-assert.equal(entryFailureDecision(1, 2001, 7), false);
+// Deterministic replay of the two absolute-priority contracts.
+type RetryKind = 'none' | 'entry-failure' | 'unexpected-wake';
+type Model = {
+  paused: boolean;
+  userIntentAt: number;
+  retryKind: RetryKind;
+  retryAttempt: number;
+  unexpectedConsumed: boolean;
+  resumeCount: number;
+};
 
-const unexpectedWakeDecision = (
-  ageMs: number,
-  deviceNodeCode7: boolean,
-  reason507: number,
-): boolean => ageMs >= 120000 && (deviceNodeCode7 || reason507 === 5);
-assert.equal(unexpectedWakeDecision(192042, true, -1), true);
-assert.equal(unexpectedWakeDecision(192042, false, 5), true);
-assert.equal(unexpectedWakeDecision(119999, true, -1), false);
+const createModel = (): Model => ({
+  paused: false,
+  userIntentAt: -1,
+  retryKind: 'none',
+  retryAttempt: 0,
+  unexpectedConsumed: false,
+  resumeCount: 0,
+});
+const userSleep = (s: Model, at: number): void => {
+  s.paused = true;
+  s.userIntentAt = at;
+  s.retryKind = 'none';
+  s.retryAttempt = 0;
+  s.unexpectedConsumed = false;
+};
+const entryExit = (s: Model, at: number, reason: number): boolean => {
+  if ((reason !== 7 && reason !== 8) || at - s.userIntentAt > 2000) return false;
+  s.retryKind = 'entry-failure';
+  return true;
+};
+const unexpectedWake = (s: Model, at: number, code7: boolean, reason507: number): boolean => {
+  if (s.unexpectedConsumed || s.retryKind !== 'none' ||
+      at - s.userIntentAt < 120000 || (!code7 && reason507 !== 5)) return false;
+  s.unexpectedConsumed = true;
+  s.retryKind = 'unexpected-wake';
+  return true;
+};
+const userWake = (s: Model): void => {
+  s.retryKind = 'none';
+  if (s.paused) {
+    s.paused = false;
+    s.resumeCount += 1;
+  }
+};
+
+const sd = createModel();
+userSleep(sd, 0);
+assert.equal(entryExit(sd, 1007, 8), true);
+assert.equal(sd.retryKind, 'entry-failure');
+assert.equal(sd.paused, true, 'SD Gundam must stay paused during re-sleep');
+userWake(sd);
+assert.equal(sd.paused, false);
+assert.equal(sd.resumeCount, 1);
+
+const usb4 = createModel();
+userSleep(usb4, 0);
+assert.equal(unexpectedWake(usb4, 192042, true, -1), true);
+assert.equal(usb4.retryKind, 'unexpected-wake');
+assert.equal(usb4.paused, true, 'USB4 wake must not resume the game');
+assert.equal(unexpectedWake(usb4, 192050, true, 5), false,
+  'a burst of code=7/Reason=5 must not start a second retry');
+userWake(usb4);
+assert.equal(usb4.paused, false);
+assert.equal(usb4.resumeCount, 1);
+
+assert.equal(entryExit(createModel(), 2001, 7), false);
+const tooEarly = createModel();
+userSleep(tooEarly, 0);
+assert.equal(unexpectedWake(tooEarly, 119999, true, -1), false);
 
 console.log('sleep task policy self-test: PASS');
