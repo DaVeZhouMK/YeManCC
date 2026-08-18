@@ -429,8 +429,8 @@ refresh();
       />
       <Toggle
         :model-value="cfg.retryOnNonUserWake"
-        label="USB4错误唤醒重睡"
-        description="仅在 506 Reason=1/3 后超过120秒，且设备树变化与 AC/DC 或 507 Reason=5 互相佐证时，独立执行三次重睡"
+        label="意外唤醒重睡"
+        description="插入供电和非用户唤醒"
         :disabled="busy"
         @update:model-value="onNonUserWake"
       />

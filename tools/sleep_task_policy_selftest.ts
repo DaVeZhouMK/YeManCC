@@ -36,7 +36,7 @@ requireNative('g_sgTask.nonUserWakeAttempts >= SG_MAX_ENTRY_RETRIES');
 requireNative('external-device-wake-confirmed');
 requireNative('independentOf", {"repairEligible", "taskMode"}');
 
-// USB4/external-device resleep is a frozen, separate state machine. These
+// Unexpected-wake resleep is a separate state machine. These
 // assertions prevent later SleepTask changes from silently taking ownership
 // of its evidence, timer, or retry budget.
 requireNative('struct SgExternalDeviceWakeState');
@@ -47,10 +47,19 @@ requireNative('sgNoteExternalDeviceAcDcChange();');
 requireNative('sgNoteExternalDeviceKernel507Reason5();');
 requireNative('g_sgExternalDeviceWake.retryActive');
 requireNative('g_sgExternalDeviceWake.consumed');
+requireNative('const bool unexpectedWakeEvidence =');
+requireNative('g_sgExternalDeviceWake.deviceNodeChangeSeen ||');
+requireNative('g_sgExternalDeviceWake.kernel507Reason5Seen;');
+const acdcEvidenceFunction = native.slice(
+  native.indexOf('static void sgNoteExternalDeviceAcDcChange()'),
+  native.indexOf('static void sgNoteExternalDeviceKernel507Reason5()'),
+);
+assert.ok(!acdcEvidenceFunction.includes('sgEvaluateExternalDeviceWake();'),
+  'AC/DC changes must remain diagnostic-only');
 requireNative('Kernel-Power 107 with TargetState=5');
 
 // A rapid Modern Standby flow exit is a confirmed entry failure. It must not
-// be routed through USB4's 120-second external-device evidence path, and its
+// be routed through the 120-second unexpected-wake evidence path, and its
 // owned game pause lease must survive until retry success or a user wake.
 requireNative('SG_S0_REASON7_FAILURE_WINDOW_MS = 2000ULL');
 requireNative('static bool sgS0EntryFailureEligible(int wakeReason, ULONGLONG nowTick)');
@@ -63,7 +72,7 @@ requireNative('{"reason7EntryFailure", reason7EntryFailure}');
 requireNative('{"reason8EntryFailure", reason8EntryFailure}');
 requireNative('s0 reason=%d confirmed entry failure');
 requireNative('sgHandleModernStandbyWake(false);');
-requireNative('Reason=5 remains USB4 evidence only');
+requireNative('Reason=5 is direct unexpected-wake evidence');
 requireNative('s0-entry-retry-canceled-user-wake');
 requireNative('sgAbortSleepIntent("s0-user-power-button-wake", false);');
 

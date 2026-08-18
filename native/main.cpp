@@ -697,7 +697,7 @@ static std::vector<DWORD> g_acSwitchTicks;          // 5 秒滑动窗口内的�
 #define SG_S0_WAKE_CLASSIFY_TIMER_ID 0xA20B // S0 唤醒原因等待超时（Kernel-Power 507）
 #define SG_RETRY_TIMER_ID 0xA20C // 同模式重睡退避计时器
 #define SG_S0_STATE_TIMER_ID 0xA20D // S0 状态采样，仅用于发现系统重新可运行
-#define SG_EXTERNAL_DEVICE_RETRY_TIMER_ID 0xA20E // 外接设备变化唤醒独立重睡计时器
+#define SG_EXTERNAL_DEVICE_RETRY_TIMER_ID 0xA20E // 意外唤醒独立重睡计时器
 #define SG_S0_WAKE_CLASSIFY_TIMEOUT_MS 10000U
 #define SG_S0_STATE_POLL_MS 250U
 #define SG_ACDC_MANUAL_DETECT_WINDOW_MS 5000ULL
@@ -875,17 +875,15 @@ static std::atomic<int> g_sgLastKernel506Reason{-1};
 static std::atomic<int> g_sgLastKernel507Reason{-1};
 static std::atomic<ULONGLONG> g_sgLastKernel506EventFileTime{0};
 static std::atomic<ULONGLONG> g_sgLastKernel507EventFileTime{0};
-// 外接设备变化唤醒独立于 SleepTask：只使用“主动按键睡眠”的
-// 506/Reason=1 或 Reason=3 时间与外接设备变化证据，绝不依赖 repairEligible/taskMode。
+// 意外唤醒重睡独立于 SleepTask：只使用“主动按键睡眠”的
+// 506/Reason=1 或 Reason=3 时间，以及 code=7 / 507 Reason=5 证据，
+// 绝不依赖 repairEligible/taskMode。
 struct SgExternalDeviceWakeState {
     bool deviceNodeChangeSeen = false;
     bool acdcChangeSeen = false;
     bool kernel507Reason5Seen = false;
     bool retryActive = false;
     bool consumed = false;
-    ULONGLONG deviceNodeChangeTick = 0;
-    ULONGLONG acdcChangeTick = 0;
-    ULONGLONG kernel507Reason5Tick = 0;
     ULONGLONG retryScheduledTick = 0;
     ULONGLONG retryLastDispatchTick = 0;
     unsigned int retryAttempt = 0;
@@ -1315,12 +1313,6 @@ static bool sgExternalDeviceWakeIntentAge(ULONGLONG& ageMs) {
     return ageMs >= SG_USER_STANDBY_DEVICE_DELAY_MS;
 }
 
-static bool sgExternalDeviceWakeTicksNear(ULONGLONG first, ULONGLONG second) {
-    if (first == 0 || second == 0) return false;
-    const ULONGLONG delta = first >= second ? first - second : second - first;
-    return delta <= SG_EXTERNAL_WAKE_EVIDENCE_WINDOW_MS;
-}
-
 static void sgClearExternalDeviceWake(const char* source, bool clearUserPowerButtonSleep) {
     if (g_hwnd) KillTimer(g_hwnd, SG_EXTERNAL_DEVICE_RETRY_TIMER_ID);
     const bool hadState = g_sgExternalDeviceWake.deviceNodeChangeSeen ||
@@ -1350,7 +1342,7 @@ static void sgScheduleExternalDeviceWakeRetry() {
     SetTimer(g_hwnd, SG_EXTERNAL_DEVICE_RETRY_TIMER_ID,
              static_cast<UINT>(SG_ENTRY_RETRY_DELAYS_MS[0]), nullptr);
     sgRecordFact("external-device-wake-retry-scheduled", {
-        {"label", "外接设备变化唤醒"},
+        {"label", "意外唤醒"},
         {"delaysMs", {500, 1000, 2000}},
         {"firstDueInMs", SG_ENTRY_RETRY_DELAYS_MS[0]},
         {"environment", sgSleepEnvironmentSnapshot()},
@@ -1359,26 +1351,22 @@ static void sgScheduleExternalDeviceWakeRetry() {
 }
 
 static void sgEvaluateExternalDeviceWake() {
-    if (!g_sgExternalDeviceWake.deviceNodeChangeSeen ||
+    const bool unexpectedWakeEvidence =
+        g_sgExternalDeviceWake.deviceNodeChangeSeen ||
+        g_sgExternalDeviceWake.kernel507Reason5Seen;
+    if (!unexpectedWakeEvidence ||
         g_sgExternalDeviceWake.consumed || g_sgExternalDeviceWake.retryActive)
         return;
-    const bool corroboratedByAcDc = sgExternalDeviceWakeTicksNear(
-        g_sgExternalDeviceWake.deviceNodeChangeTick,
-        g_sgExternalDeviceWake.acdcChangeTick);
-    const bool corroboratedByKernel507 = sgExternalDeviceWakeTicksNear(
-        g_sgExternalDeviceWake.deviceNodeChangeTick,
-        g_sgExternalDeviceWake.kernel507Reason5Tick);
-    if (!corroboratedByAcDc && !corroboratedByKernel507) return;
 
     ULONGLONG intentAgeMs = 0;
     const bool intentAgeEligible = sgExternalDeviceWakeIntentAge(intentAgeMs);
     sgRecordFact("external-device-wake-evaluated", {
-        {"label", "外接设备变化唤醒"},
+        {"label", "意外唤醒"},
         {"intentAgeMs", intentAgeMs},
         {"intentAgeEligible", intentAgeEligible},
-        {"deviceNodeChange", true},
-        {"acdcEvidence", corroboratedByAcDc},
-        {"kernel507Reason5Evidence", corroboratedByKernel507},
+        {"deviceNodeChangeCode7Evidence", g_sgExternalDeviceWake.deviceNodeChangeSeen},
+        {"kernel507Reason5Evidence", g_sgExternalDeviceWake.kernel507Reason5Seen},
+        {"acdcObserved", g_sgExternalDeviceWake.acdcChangeSeen},
         {"guardEnabled", g_guardEnabled},
         {"resleepEnabled", g_sgResleepEnabled}
     });
@@ -1386,8 +1374,10 @@ static void sgEvaluateExternalDeviceWake() {
 
     g_sgExternalDeviceWake.consumed = true;
     sgRecordFact("external-device-wake-confirmed", {
-        {"label", "外接设备变化唤醒"},
+        {"label", "意外唤醒"},
         {"intentAgeMs", intentAgeMs},
+        {"deviceNodeChangeCode7Evidence", g_sgExternalDeviceWake.deviceNodeChangeSeen},
+        {"kernel507Reason5Evidence", g_sgExternalDeviceWake.kernel507Reason5Seen},
         {"retryDelaysMs", {500, 1000, 2000}}
     });
     sgScheduleExternalDeviceWakeRetry();
@@ -1404,19 +1394,17 @@ static void sgNoteExternalDeviceNodeChange() {
         lifecycle == PowerLifecycle::Resuming;
     if (!sleepWakeContext) return;
     g_sgExternalDeviceWake.deviceNodeChangeSeen = true;
-    g_sgExternalDeviceWake.deviceNodeChangeTick = now;
     sgEvaluateExternalDeviceWake();
 }
 
 static void sgNoteExternalDeviceAcDcChange() {
     g_sgExternalDeviceWake.acdcChangeSeen = true;
-    g_sgExternalDeviceWake.acdcChangeTick = GetTickCount64();
-    sgEvaluateExternalDeviceWake();
+    // AC/DC remains diagnostic-only. Only code=7 or Kernel-Power 507
+    // Reason=5 may submit an unexpected-wake retry transaction.
 }
 
 static void sgNoteExternalDeviceKernel507Reason5() {
     g_sgExternalDeviceWake.kernel507Reason5Seen = true;
-    g_sgExternalDeviceWake.kernel507Reason5Tick = GetTickCount64();
     sgEvaluateExternalDeviceWake();
 }
 
@@ -1441,7 +1429,7 @@ static void sgDispatchExternalDeviceWakeRetry() {
         {"attempt", attempt}, {"accepted", request.accepted},
         {"api", "SetSuspendState"}, {"shutdownPrivilegeEnabled", request.shutdownPrivilegeEnabled},
         {"shutdownPrivilegeError", request.shutdownPrivilegeError},
-        {"requestError", request.requestError}, {"label", "外接设备变化唤醒"},
+        {"requestError", request.requestError}, {"label", "意外唤醒"},
         {"scheduledToDispatchMs", scheduledToDispatchMs},
         {"environment", sgSleepEnvironmentSnapshot()}
     };
@@ -16837,7 +16825,7 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         }
         if (g_sgLastS0WakeReason == 5)
             sgNoteExternalDeviceKernel507Reason5();
-        // Reason=5 remains USB4 evidence only. Other non-user reasons remain
+        // Reason=5 is direct unexpected-wake evidence. Other non-user reasons remain
         // observational; neither can consume the Reason=7 entry-retry lease.
         traceLog("s0 wake ignored source=non-power-button reason=%d class=%s",
                  g_sgLastS0WakeReason,
