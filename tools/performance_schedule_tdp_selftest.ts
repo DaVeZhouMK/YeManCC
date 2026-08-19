@@ -4,6 +4,12 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 
 const YEMAN = '1cb8b882-a900-4b9f-9bac-99d151e64441';
+const CPU_MAX_STATE = 'bc5038f7-23e0-4960-96da-33abaf5935ec';
+const CPU_FREQ0 = '75b0ae3f-bce0-45a7-8c89-c9611c25e100';
+const CPU_BOOST = 'be337238-0d82-4146-a960-4f3749d470c7';
+const CPU_SCHED0 = '36687f9e-e3a5-4dbf-b1dc-15eb381c6863';
+const CPU_MIN0 = '893dee8e-2bef-41e0-89c6-b55d0929964c';
+const CPU_THROTTLE = '3b04d4fd-1cc7-4f23-ab1c-d1337819c4bb';
 const unsupportedLog = [
   '2026-08-11 12:51:07 ensure_pawnio enter',
   '2026-08-11 12:51:07 pawnio_present=True,no action needed',
@@ -20,15 +26,14 @@ async function main(): Promise<void> {
   const dir = mkdtempSync(join(tmpdir(), 'yeman-schedule-tdp-'));
   let powerLifecycleStates: Array<'ready' | 'resuming'> = [];
   let blockedProfileAttempts = 0;
+  let blockNextProfileWrite = false;
+  let failNextRequiredProfileWrite = false;
+  let templateScriptCalls = 0;
+  const powerValues = new Map<string, number>();
   (globalThis as any).__mockShellDryRun = true;
   (globalThis as any).__mockShellResponder = (program: string, args: string[]) => {
     const exe = program.toLowerCase();
-    if (exe === 'cscript.exe' && args.some((arg) => /TDP\\Performance\.vbs$/i.test(arg))) {
-      blockedProfileAttempts++;
-      if (blockedProfileAttempts === 1) {
-        throw new Error('hardware writes are blocked during power transition');
-      }
-    }
+    if (exe === 'cscript.exe') templateScriptCalls++;
     if (exe.endsWith('yemantdpctl.exe')) {
       return { exitCode: 6, stdout: unsupportedLog, stderr: '' };
     }
@@ -38,6 +43,39 @@ async function main(): Promise<void> {
     return undefined;
   };
   (globalThis as any).__mockIpcResponder = (cmd: string, args: any) => {
+    if (cmd === 'registry.writePowerBatch') {
+      const entries = Array.isArray(args?.entries) ? args.entries : [];
+      const isFixedProfile = entries.some((entry: any) => entry.setting === CPU_MAX_STATE);
+      if (isFixedProfile) {
+        blockedProfileAttempts++;
+        if (blockNextProfileWrite) {
+          blockNextProfileWrite = false;
+          throw new Error('hardware writes are blocked during power transition');
+        }
+      }
+      const writes = (globalThis as any).__mockRegistryWrites as Array<{
+        root: string; path: string; name: string; value: any;
+      }>;
+      for (const entry of entries) {
+        const value = Number(entry.value);
+        writes.push({
+          root: 'HKLM',
+          path: `SYSTEM\\CurrentControlSet\\Control\\Power\\User\\PowerSchemes\\${args.scheme}\\${args.subGroup}\\${entry.setting}`,
+          name: args.valueName,
+          value,
+        });
+        powerValues.set(`${args.valueName}|${entry.setting}`, value);
+      }
+      if (isFixedProfile && failNextRequiredProfileWrite) {
+        failNextRequiredProfileWrite = false;
+        return { ok: false, written: entries.length - 1, failed: [{ setting: CPU_FREQ0, code: 5 }] };
+      }
+      return { ok: true, written: entries.length, failed: [] };
+    }
+    if (cmd === 'registry.read' && String(args?.path || '').includes('\\User\\PowerSchemes\\')) {
+      const setting = String(args?.path || '').split('\\').pop() || '';
+      return powerValues.get(`${args?.name}|${setting}`) ?? 0;
+    }
     if (cmd === 'power.activeScheme') return YEMAN;
     if (cmd === 'power.lifecycle') {
       const phase = powerLifecycleStates.shift() ?? 'ready';
@@ -62,10 +100,22 @@ async function main(): Promise<void> {
     const settings = await import('../src/bridge/settingsRepository');
     const yeman = await import('../src/bridge/yeman');
     const autofloat = await import('../src/bridge/autofloat');
+    const cpuProfiles = await import('../src/bridge/cpuProfiles');
     const schedule = await import('../src/bridge/performanceSchedule');
     settings.setSettingsDirectory(dir);
     yeman.setPowerControlDir(dir);
     autofloat.setAutofloatPowerControlDir(dir);
+
+    const savedCpuProfiles = cpuProfiles.defaultCpuProfilesConfig();
+    savedCpuProfiles.profiles.balanced = {
+      acFreq: 6200,
+      dcFreq: 3600,
+      acTurbo: true,
+      dcTurbo: true,
+      acAggr: 91,
+      dcAggr: 77,
+    };
+    await cpuProfiles.saveCpuProfiles(savedCpuProfiles);
 
     const warnings: string[] = [];
     const offWarning = schedule.onPerformanceScheduleWarning((warning) => warnings.push(warning.message));
@@ -74,6 +124,7 @@ async function main(): Promise<void> {
     config.enabled = true;
     // Simulate the affected class of machine: a battery device currently on DC.
     config.active.dc = 'balanced';
+    config.profiles.dc.balanced.cpuPreset = 'balanced';
 
     const autoApplied = await schedule.applyPerformanceSchedule('dc', 'balanced', config);
     assert(autoApplied, 'TDP rc=6 不应让手动→自动切换返回失败');
@@ -82,18 +133,32 @@ async function main(): Promise<void> {
     const warning = schedule.getPerformanceScheduleWarning();
     assert(warning?.code === 'tdp-unsupported', 'Desktop-17h 应给出明确的不支持提示');
     assert(warning.message.includes('不会阻断 CPU 调度'), '提示必须明确 CPU 调度仍继续');
-    const writes = (globalThis as any).__mockRegistryWrites as Array<{ name: string }>;
+    const writes = (globalThis as any).__mockRegistryWrites as Array<{
+      root: string; path: string; name: string; value: any;
+    }>;
     assert(writes.some((item) => item.name === 'ACSettingIndex'), 'TDP 失败后 AC CPU 参数仍应写入');
     assert(writes.some((item) => item.name === 'DCSettingIndex'), 'TDP 失败后 DC CPU 参数仍应写入');
+    assert(!writes.some((item) => item.path.endsWith(`\\${CPU_MAX_STATE}`)), 'CPU 浮动接管时不得重复应用固定 CPU 挡位');
 
     // 0 = 不锁帧：自动档位不得继续启动或继承 CPU/TDP 浮动。
     config.profiles.dc.balanced.fpsTarget = 0;
     config.profiles.dc.balanced.cpuTarget = 'aggressive';
     config.profiles.dc.balanced.tdpStrategy = 'aggressive';
+    writes.length = 0;
     const noLockApplied = await schedule.applyPerformanceSchedule('dc', 'balanced', config);
     assert(noLockApplied, '不锁帧档位仍应完成自动模式应用');
     assert(!autofloat.getFloatInfo().enabled, '不锁帧不得启动 CPU/TDP 浮动');
     assert(autofloat.getFloatInfo().target === 0, '不锁帧必须保留真实目标值 0');
+    assert(writes.length === 12, `固定 CPU 挡位应只写当前 DC 侧 12 项，实际=${writes.length}`);
+    assert(writes.every((item) => item.name === 'DCSettingIndex'), 'DC 自动挡位不得覆盖 AC 保存值');
+    const valueFor = (setting: string) => writes.find((item) => item.path.endsWith(`\\${setting}`))?.value;
+    assert(valueFor(CPU_FREQ0) === 3600, '自动模式必须应用用户保存的 DC 主频');
+    assert(valueFor(CPU_BOOST) === 2, '自动模式必须应用用户保存的 DC 睿频');
+    assert(valueFor(CPU_SCHED0) === 23, '自动模式必须应用用户保存的 DC 积极性');
+    assert(valueFor(CPU_MIN0) === 77, '自动模式必须同步用户保存的最小处理器状态');
+    assert(valueFor(CPU_MAX_STATE) === 100, '自动模式必须恢复最大处理器状态 100%');
+    assert(valueFor(CPU_THROTTLE) === 2, '自动模式必须同步频率对应的节流状态');
+    assert(templateScriptCalls === 0, '自动模式不得运行任何 CPU 模板脚本');
 
     config.profiles.dc.balanced.fpsTarget = 45;
     const relockApplied = await schedule.applyPerformanceSchedule('dc', 'balanced', config);
@@ -110,9 +175,21 @@ async function main(): Promise<void> {
     config.profiles.dc.balanced.cpuTarget = 'none';
     config.profiles.dc.balanced.tdpStrategy = 'none';
     powerLifecycleStates = ['ready', 'resuming', 'ready'];
+    blockedProfileAttempts = 0;
+    blockNextProfileWrite = true;
     const recoveredApply = await schedule.applyPerformanceSchedule('dc', 'balanced', config);
     assert(recoveredApply, '短暂电源写入闸门应在 native Ready 后自动重试一次');
     assert(blockedProfileAttempts === 2, `CPU 挡位应重试一次，实际=${blockedProfileAttempts}`);
+
+    failNextRequiredProfileWrite = true;
+    let strictFailureObserved = false;
+    try {
+      await schedule.applyPerformanceSchedule('dc', 'balanced', config);
+    } catch (error) {
+      strictFailureObserved = String(error).includes('CPU 挡位参数写入失败');
+    }
+    assert(strictFailureObserved, '固定 CPU 主类参数失败不得被吞掉或显示假成功');
+    assert(templateScriptCalls === 0, '失败重试也不得回退运行模板脚本');
 
     const autoAppliedAgain = await schedule.applyPerformanceSchedule('dc', 'balanced', config);
     assert(autoAppliedAgain, '相同 TDP 不支持错误再次出现时仍不得阻断自动模式');

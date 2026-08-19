@@ -1,6 +1,6 @@
 {
-  "version": "0.0.15",
-  "notes": "性能计划与快捷应用标注清晰化，完善下拉提示、游戏名单冲突处理及睡眠任务策略。",
+  "version": "0.0.16",
+  "notes": "重构睡眠守卫核心修复路径，强化异常唤醒重睡、性能计划 TDP 识别及系统黑名单规则。",
   "sha256": "",
   "publishedAt": "",
   "package": "Packages/YeManCC.zip"

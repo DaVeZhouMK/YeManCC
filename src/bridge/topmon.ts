@@ -11,6 +11,8 @@
 //   ac        = ACLineStatus (1=AC 0=DC)
 //   chargeW   = Battery Charge Rate（正=充电 负=放电, W；无传感器=0）
 //   remainMin = 放电剩余时间（Win32_Battery.EstimatedRunTime 分钟；充电/无电池=-1）
+//   thermalThrottle* = Core Thermal Throttling / Thermal Throttling (HTC) 融合结果
+//   virtualMemory*   = Virtual Memory Committed (MB) / Virtual Memory Load (%)
 //   hwDown    = HWiNFO 共享内存不可用（守护已尝试自动修复仍失败）
 import { ref } from 'vue';
 import { fs } from './api';
@@ -32,6 +34,13 @@ export interface TopMonData {
   cpuUsage: number; // 系统 CPU 总占用 %（Total CPU Usage）
   gpuPowerW: number; // 显卡瓦数 W（多 GPU 取功耗最高者）
   gpuClockMhz: number; // 显卡主频 MHz（多 GPU 取频率最高者）
+  thermalThrottleFound: boolean; // 两种过热降频传感器至少存在一个
+  thermalThrottleMax: number; // HWiNFO Yes/No 最大值（0=否，1=是）
+  thermalThrottleAvgPct: number; // 历史平均触发占比 %
+  virtualMemoryCommittedFound: boolean; // Virtual Memory Committed 可读
+  virtualMemoryCommittedMb: number; // 已提交虚拟内存 MB
+  virtualMemoryLoadFound: boolean; // Virtual Memory Load 可读
+  virtualMemoryLoadPct: number; // 虚拟内存使用率 %
   hwDown: boolean; // HWiNFO 共享内存不可用
 }
 
@@ -42,6 +51,11 @@ export const topMonitorData = ref<TopMonData | null>(null);
 
 export function setTopMonitorData(data: TopMonData | null): void {
   topMonitorData.value = data;
+}
+
+function clampPercent(value: unknown): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.min(100, Math.max(0, parsed)) : 0;
 }
 
 export async function startTopMonitor(): Promise<void> {
@@ -81,6 +95,13 @@ export async function readTopMonitor(): Promise<TopMonData | null> {
       cpuUsage: Number(raw.cpuUsage) || 0,
       gpuPowerW: Number(raw.gpuPowerW) || 0,
       gpuClockMhz: Number(raw.gpuClockMhz) || 0,
+      thermalThrottleFound: raw.thermalThrottleFound === true,
+      thermalThrottleMax: Number(raw.thermalThrottleMax) || 0,
+      thermalThrottleAvgPct: clampPercent(raw.thermalThrottleAvgPct),
+      virtualMemoryCommittedFound: raw.virtualMemoryCommittedFound === true,
+      virtualMemoryCommittedMb: Number(raw.virtualMemoryCommittedMb) || 0,
+      virtualMemoryLoadFound: raw.virtualMemoryLoadFound === true,
+      virtualMemoryLoadPct: clampPercent(raw.virtualMemoryLoadPct),
       hwDown: !!raw.hwDown,
     };
   } catch {

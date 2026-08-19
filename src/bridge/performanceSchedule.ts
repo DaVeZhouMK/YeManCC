@@ -2,20 +2,16 @@ import { fs, powerLifecycle } from './api';
 import { readSettingsSection, replaceSettingsSection, saveSettingsSection } from './settingsRepository';
 import { detectGame } from './gamedetect';
 import {
-  PW,
-  RESET_PROFILES,
   detectPowerMode,
   ensureRememberedYemanSchemeActive,
-  applyPowerParams,
-  readPowerParams,
+  applyCpuProfilePowerParams,
   setCoreModeAc,
   setCoreModeDc,
   detectCoreArchitecture,
   rebuildYemanScheme,
-  runResetProfile,
-  setActiveScheme,
   setTdp,
 } from './yeman';
+import { loadCpuProfiles } from './cpuProfiles';
 import {
   applyFloatSettings,
   disableFloat,
@@ -361,22 +357,11 @@ export async function savePerformanceSchedule(config: PerformanceScheduleConfig)
   await queueScheduleWrite(config);
 }
 
-function cpuProfilePath(preset: CpuPreset): string {
-  const match = RESET_PROFILES.find((item) => item.id === preset);
-  if (!match) throw new Error('未找到对应的 CPU 挡位');
-  return match.path;
-}
-
-async function applyCpuPresetBaseline(preset: CpuPreset): Promise<void> {
+async function applyCpuPresetBaseline(side: PowerSide, preset: CpuPreset): Promise<void> {
   assertScheduleOpCurrent();
-  await runResetProfile(cpuProfilePath(preset));
-  // CPU 浮动旧版本曾错误写入最大处理器状态。基线应用时只恢复这个
-  // 全局安全上限，动态浮动本身不再触碰该参数。
-  const params = await readPowerParams();
+  const cpuProfiles = await loadCpuProfiles();
   assertScheduleOpCurrent();
-  if (params) await applyPowerParams(params);
-  assertScheduleOpCurrent();
-  await setActiveScheme();
+  await applyCpuProfilePowerParams(cpuProfiles.profiles[preset], side);
 }
 
 async function applyCoreModeIfHybrid(side: PowerSide, mode: CoreMode): Promise<boolean> {
@@ -531,9 +516,9 @@ async function applyPerformanceScheduleUnsafe(
       // 不锁帧=0：RTSS 解锁，停止 CPU/TDP 浮动，并用固定 CPU 挡位接管。
       await setFloatTarget(0);
       assertScheduleOpCurrent();
-      await applyCpuPresetBaseline(profile.cpuPreset);
+      await applyCpuPresetBaseline(side, profile.cpuPreset);
     } else {
-      if (cpuTarget === 'none') await applyCpuPresetBaseline(profile.cpuPreset);
+      if (cpuTarget === 'none') await applyCpuPresetBaseline(side, profile.cpuPreset);
       assertScheduleOpCurrent();
       await applyFloatSettings(profile.fpsTarget, cpuTarget, profile.tdpStrategy);
     }
@@ -554,9 +539,9 @@ async function applyPerformanceScheduleUnsafe(
   if (!fpsFloatEnabled) {
     await setFloatTarget(0);
     assertScheduleOpCurrent();
-    await applyCpuPresetBaseline(profile.cpuPreset);
+    await applyCpuPresetBaseline(side, profile.cpuPreset);
   } else {
-    if (cpuTarget === 'none') await applyCpuPresetBaseline(profile.cpuPreset);
+    if (cpuTarget === 'none') await applyCpuPresetBaseline(side, profile.cpuPreset);
     assertScheduleOpCurrent();
     await enableFloat(
       profile.fpsTarget,
@@ -872,9 +857,9 @@ async function applyGameCustomProfilesUnsafe(
       // 专属档位同样遵守 0=不锁帧：不继承上一个游戏/档位的 CPU/TDP 浮动。
       await setFloatTarget(0);
       if (!(await checkpoint())) return false;
-      await applyCpuPresetBaseline(profile.cpuPreset);
+      await applyCpuPresetBaseline(side, profile.cpuPreset);
     } else {
-      if (cpuTarget === 'none') await applyCpuPresetBaseline(profile.cpuPreset);
+      if (cpuTarget === 'none') await applyCpuPresetBaseline(side, profile.cpuPreset);
       if (!(await checkpoint())) return false;
       await applyFloatSettings(profile.fpsTarget, cpuTarget, profile.tdpStrategy);
     }
@@ -889,9 +874,9 @@ async function applyGameCustomProfilesUnsafe(
   if (!fpsFloatEnabled) {
     await setFloatTarget(0);
     if (!(await checkpoint())) return false;
-    await applyCpuPresetBaseline(profile.cpuPreset);
+    await applyCpuPresetBaseline(side, profile.cpuPreset);
   } else {
-    if (cpuTarget === 'none') await applyCpuPresetBaseline(profile.cpuPreset);
+    if (cpuTarget === 'none') await applyCpuPresetBaseline(side, profile.cpuPreset);
     if (!(await checkpoint()) || (await detectPowerMode()) !== side) return false;
     await enableFloat(profile.fpsTarget, cpuTarget, profile.tdpStrategy);
   }

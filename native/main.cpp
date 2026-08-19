@@ -1625,8 +1625,15 @@ struct NativeMonitorHw {
     double remainMin = -1.0;
     double gpuPowerW = 0.0;
     double gpuClockMhz = 0.0;
+    double thermalThrottleMax = 0.0;
+    double thermalThrottleAvgPct = 0.0;
+    double virtualMemoryCommittedMb = 0.0;
+    double virtualMemoryLoadPct = 0.0;
     bool sharedOk = false;
     bool fpsSensor = false;
+    bool thermalThrottleFound = false;
+    bool virtualMemoryCommittedFound = false;
+    bool virtualMemoryLoadFound = false;
 };
 
 static std::string monitorField(const BYTE* p, size_t n) {
@@ -1714,9 +1721,45 @@ static bool monitorReadHWiNFO(NativeMonitorHw& out) {
             const std::string unit = monitorField(view + base + 268, 16);
             const std::string low = ascii_lower(label);
             const std::string unitLow = ascii_lower(unit);
-            double value = 0.0, average = 0.0;
-            if (!readDouble(base + 284, value)) value = 0.0;
-            if (!readDouble(base + 308, average)) average = 0.0;
+            double value = 0.0, maximum = 0.0, average = 0.0;
+            const bool valueOk = readDouble(base + 284, value);
+            const bool maximumOk = readDouble(base + 300, maximum);
+            const bool averageOk = readDouble(base + 308, average);
+            if (!valueOk) value = 0.0;
+            if (!maximumOk) maximum = 0.0;
+            if (!averageOk) average = 0.0;
+
+            // HWiNFO exposes the original English label even when the user has
+            // renamed the visible sensor. Intel desktop and AMD HTC variants
+            // are fused: any matching sensor is sufficient, and duplicate
+            // readings keep the highest historical state/average percentage.
+            const bool thermalThrottle = low == "core thermal throttling" ||
+                low == "thermal throttling (htc)";
+            if (thermalThrottle && unitLow == "yes/no") {
+                if (maximumOk && averageOk && finiteNonNegative(maximum) && finiteNonNegative(average)) {
+                    out.thermalThrottleFound = true;
+                    out.thermalThrottleMax = (std::max)(out.thermalThrottleMax, maximum);
+                    const double averagePct = (std::min)(100.0, average);
+                    out.thermalThrottleAvgPct = (std::max)(out.thermalThrottleAvgPct, averagePct);
+                }
+                continue;
+            }
+
+            if (low == "virtual memory committed" && unitLow == "mb") {
+                if (valueOk && finiteNonNegative(value)) {
+                    out.virtualMemoryCommittedFound = true;
+                    out.virtualMemoryCommittedMb = value;
+                }
+                continue;
+            }
+
+            if (low == "virtual memory load" && unitLow == "%") {
+                if (valueOk && finiteNonNegative(value)) {
+                    out.virtualMemoryLoadFound = true;
+                    out.virtualMemoryLoadPct = (std::min)(100.0, value);
+                }
+                continue;
+            }
 
             if (low.find("framerate") != std::string::npos) {
                 if (low.find("presented") != std::string::npos && low.find("(avg)") != std::string::npos) {
@@ -2599,6 +2642,13 @@ static void nativeMonitorLoop() {
                 {"cpuUsage", static_cast<int>(std::round(cpuUsage))},
                 {"gpuPowerW", std::round(hw.gpuPowerW * 10.0) / 10.0},
                 {"gpuClockMhz", static_cast<int>(std::round(hw.gpuClockMhz))},
+                {"thermalThrottleFound", hw.thermalThrottleFound},
+                {"thermalThrottleMax", hw.thermalThrottleMax},
+                {"thermalThrottleAvgPct", std::round(hw.thermalThrottleAvgPct * 10.0) / 10.0},
+                {"virtualMemoryCommittedFound", hw.virtualMemoryCommittedFound},
+                {"virtualMemoryCommittedMb", std::round(hw.virtualMemoryCommittedMb * 10.0) / 10.0},
+                {"virtualMemoryLoadFound", hw.virtualMemoryLoadFound},
+                {"virtualMemoryLoadPct", std::round(hw.virtualMemoryLoadPct * 10.0) / 10.0},
                 {"hwDown", !hwHealthy}
             };
             sgWriteFileAtomic(MONITOR_TOP_JSON, topJson.dump());

@@ -139,9 +139,13 @@ type MonitorPoint = {
   fps: number;
   fps1: number;
   targetFps: number;
-  actualW: number;
-  appliedW: number;
-  targetW: number;
+  thermalThrottleFound: boolean;
+  thermalThrottleMax: number;
+  thermalThrottleAvgPct: number;
+  virtualMemoryCommittedFound: boolean;
+  virtualMemoryCommittedMb: number;
+  virtualMemoryLoadFound: boolean;
+  virtualMemoryLoadPct: number;
   cpuFreqMhz: number; // 系统 CPU 主频（topMon.freqMhz）
   cpuUsage: number;   // 系统 CPU 占用 %（topMon.cpuUsage）
   gpuPowerW: number;  // 显卡瓦数 W（topMon.gpuPowerW，多 GPU 取最高）
@@ -284,7 +288,12 @@ const latestMonitor = computed(() => {
   return points.length > 0 ? points[points.length - 1] : null;
 });
 
-// 8 项核心指标磁贴（FPS / 1%Low / 当前功耗 / 执行瓦数 / CPU主频 / CPU占用 / 显卡主频 / 显卡瓦数【均 HWiNFO，多 GPU 取最高】）
+function clampMonitorPercent(value: number | undefined): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.min(100, Math.max(0, parsed)) : 0;
+}
+
+// 8 项核心指标磁贴（FPS / 1%Low / 过热降频 / 虚拟内存 / CPU主频 / CPU占用 / 显卡主频 / 显卡瓦数）
 const monitorTiles = computed(() => {
   const m = latestMonitor.value;
   const num = (v: number | undefined, digits = 0, unit?: string) => {
@@ -295,11 +304,20 @@ const monitorTiles = computed(() => {
   const cpuFreqV = cpuFreq.value === '--' ? '--' : (Number(cpuFreq.value) / 1000).toFixed(1);
   const gpuClock = num(m?.gpuClockMhz, 1);
   const gpuClockV = gpuClock.value === '--' ? '--' : (Number(gpuClock.value) / 1000).toFixed(1);
+  const thermalAveragePct = Math.round(clampMonitorPercent(m?.thermalThrottleAvgPct));
+  const thermalThrottle = !m?.thermalThrottleFound
+    ? '无数据'
+    : m.thermalThrottleMax > 0
+      ? thermalAveragePct > 0 ? `记录到过热 ${thermalAveragePct}%` : '记录到过热 <1%'
+      : '正常-未记录到过热';
+  const virtualMemory = m?.virtualMemoryCommittedFound && m.virtualMemoryLoadFound
+    ? `${Math.trunc(Math.max(0, m.virtualMemoryCommittedMb) / 1024)}G/${Math.trunc(clampMonitorPercent(m.virtualMemoryLoadPct))}%`
+    : '无数据';
   return [
     { key: 'fps',     label: 'FPS',        value: num(m?.fps).value,            unit: '' },
     { key: 'fps1',    label: '1% Low',     value: num(m?.fps1).value,           unit: '' },
-    { key: 'power',   label: '当前功耗',   value: num(m?.actualW, 1).value,     unit: 'W' },
-    { key: 'applied', label: '执行瓦数',   value: num(m?.appliedW).value,       unit: 'W' },
+    { key: 'thermal', label: '过热降频',   value: thermalThrottle,              unit: '' },
+    { key: 'vmem',    label: '虚拟内存',   value: virtualMemory,                unit: '' },
     { key: 'freq',    label: 'CPU主频',    value: cpuFreqV,                     unit: 'GHz' },
     { key: 'usage',   label: 'CPU占用',    value: num(m?.cpuUsage).value,       unit: '%' },
     { key: 'gpuclk',  label: '显卡主频',   value: gpuClockV,                    unit: 'GHz' },
@@ -315,9 +333,13 @@ function sampleMonitor(): void {
     fps: Math.max(0, Number(status?.fps) || 0),
     fps1: Math.max(0, Number(status?.fps1) || 0),
     targetFps: Math.max(0, Number(info.target) || activeProfile.value.fpsTarget),
-    actualW: Math.max(0, Number(status?.packagePower) || Number(topMon.value?.tdpW) || 0),
-    appliedW: Math.max(0, Number(info.tdpApplied) || 0),
-    targetW: Math.max(0, Number(info.tdpTarget) || activeProfile.value.tdpMax),
+    thermalThrottleFound: topMon.value?.thermalThrottleFound === true,
+    thermalThrottleMax: Math.max(0, Number(topMon.value?.thermalThrottleMax) || 0),
+    thermalThrottleAvgPct: clampMonitorPercent(topMon.value?.thermalThrottleAvgPct),
+    virtualMemoryCommittedFound: topMon.value?.virtualMemoryCommittedFound === true,
+    virtualMemoryCommittedMb: Math.max(0, Number(topMon.value?.virtualMemoryCommittedMb) || 0),
+    virtualMemoryLoadFound: topMon.value?.virtualMemoryLoadFound === true,
+    virtualMemoryLoadPct: clampMonitorPercent(topMon.value?.virtualMemoryLoadPct),
     cpuFreqMhz: Math.max(0, Number(topMon.value?.freqMhz) || 0),
     cpuUsage: Math.max(0, Number(topMon.value?.cpuUsage) || 0),
     gpuPowerW: Math.max(0, Number(topMon.value?.gpuPowerW) || 0),

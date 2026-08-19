@@ -3,6 +3,7 @@ import { ref, reactive, computed, inject, watch, onBeforeUnmount, type Ref } fro
 import Toggle from '@/components/Toggle.vue';
 import Slider from '@/components/Slider.vue';
 import SegButton from '@/components/SegButton.vue';
+import Dropdown from '@/components/Dropdown.vue';
 import InlineIcon from '@/components/InlineIcon.vue';
 import {
   sleepGuardGet,
@@ -18,6 +19,8 @@ import {
   readHibernateSize,
   setHibernateSize,
   readTotalMemoryGB,
+  readSleepTimeouts,
+  setSleepTimeout,
   getSleepPowerPlanOptimizationEnabled,
   setSleepPowerPlanOptimizationEnabled,
   sleepFactsGet,
@@ -25,6 +28,7 @@ import {
   sleepFactsOpenLog,
   type SleepGuardStatus,
   type SleepFactStatus,
+  type SleepTimeoutSettings,
   type PowerBtnIdx,
 } from '@/bridge/yeman';
 
@@ -42,6 +46,41 @@ const cfg = reactive<SleepGuardStatus>({
 const acBtnIdx = ref<PowerBtnIdx>(2);
 const dcBtnIdx = ref<PowerBtnIdx>(2);
 const sleepPowerPlanOptimizationEnabled = ref(true);
+
+// Windows 11“屏幕、睡眠和休眠超时”卡片：数值统一使用分钟，0=从不。
+const timeoutExpanded = ref(false);
+const timeoutLoading = ref(true);
+const sleepTimeouts = reactive<SleepTimeoutSettings>({
+  acScreen: null,
+  dcScreen: null,
+  acSleep: null,
+  dcSleep: null,
+  acHibernate: null,
+  dcHibernate: null,
+});
+const timeoutOptions = [
+  { value: 0, label: '从不' },
+  { value: 1, label: '1 分钟' },
+  { value: 2, label: '2 分钟' },
+  { value: 3, label: '3 分钟' },
+  { value: 5, label: '5 分钟' },
+  { value: 10, label: '10 分钟' },
+  { value: 15, label: '15 分钟' },
+  { value: 20, label: '20 分钟' },
+  { value: 25, label: '25 分钟' },
+  { value: 30, label: '30 分钟' },
+  { value: 45, label: '45 分钟' },
+  { value: 60, label: '1 小时' },
+  { value: 120, label: '2 小时' },
+  { value: 180, label: '3 小时' },
+  { value: 240, label: '4 小时' },
+  { value: 300, label: '5 小时' },
+  { value: 480, label: '8 小时' },
+  { value: 720, label: '12 小时' },
+  { value: 1440, label: '24 小时' },
+  { value: 2880, label: '48 小时' },
+  { value: 5760, label: '96 小时' },
+];
 
 // 系统休眠
 const hibernateOn = ref<boolean | null>(null); // null=未检测（不强制设默认值）
@@ -88,6 +127,24 @@ async function refreshHibernateState() {
   return hibernateOn.value;
 }
 
+async function refreshSleepTimeouts() {
+  timeoutLoading.value = true;
+  try {
+    Object.assign(sleepTimeouts, await readSleepTimeouts());
+  } catch {
+    Object.assign(sleepTimeouts, {
+      acScreen: null,
+      dcScreen: null,
+      acSleep: null,
+      dcSleep: null,
+      acHibernate: null,
+      dcHibernate: null,
+    });
+  } finally {
+    timeoutLoading.value = false;
+  }
+}
+
 async function refresh() {
   // 与整页其他检测解耦：AC/DC、电源方案或内存 IPC 异常不能拖死系统休眠开关。
   const hibernateRefresh = refreshHibernateState();
@@ -109,20 +166,49 @@ async function refresh() {
     /* 配置读取失败保持现状，绝不假定关闭 */
   }
   // 并行加载电源按钮、系统休眠状态
-  const [schemeRes, acBtnRes, dcBtnRes, hibSizeRes, memRes] = await Promise.allSettled([
+  const [schemeRes, acBtnRes, dcBtnRes, hibSizeRes, memRes, timeoutRes] = await Promise.allSettled([
     getActiveScheme(),
     getPowerBtnIdx(true),
     getPowerBtnIdx(false),
     readHibernateSize(),
     readTotalMemoryGB(),
+    refreshSleepTimeouts(),
   ]);
   if (schemeRes.status === 'fulfilled') activeSchemeGuid.value = schemeRes.value.toLowerCase();
   if (acBtnRes.status === 'fulfilled') acBtnIdx.value = acBtnRes.value;
   if (dcBtnRes.status === 'fulfilled') dcBtnIdx.value = dcBtnRes.value;
   if (hibSizeRes.status === 'fulfilled') hibSize.value = hibSizeRes.value;
   if (memRes.status === 'fulfilled') memGB.value = memRes.value;
+  if (timeoutRes.status === 'rejected') timeoutLoading.value = false;
   await hibernateRefresh;
   await refreshSleepFacts();
+}
+
+function timeoutDescription(kind: 'screen' | 'sleep' | 'hibernate', value: number | null): string {
+  if (kind !== 'screen') return '';
+  if (value === null) return '无法读取当前电源方案设置';
+  if (value === 0) return '屏幕不会自动关闭。';
+  const option = timeoutOptions.find((item) => item.value === value);
+  const label = option?.label ?? `${value} 分钟`;
+  return `${label}后关闭屏幕以节能。较高的设置使用更多能量`;
+}
+
+async function onSleepTimeout(field: 'screen' | 'sleep' | 'hibernate', ac: boolean, value: string | number) {
+  const key = `${ac ? 'ac' : 'dc'}${field[0].toUpperCase()}${field.slice(1)}` as keyof SleepTimeoutSettings;
+  const previous = sleepTimeouts[key];
+  const next = Number(value);
+  if (!Number.isFinite(next)) return;
+  sleepTimeouts[key] = next;
+  busy.value = true;
+  try {
+    await setSleepTimeout(field, ac, next);
+    msg.value = '';
+  } catch (e) {
+    sleepTimeouts[key] = previous;
+    msg.value = '屏幕、睡眠和休眠超时设置失败：' + (e as Error).message;
+  } finally {
+    busy.value = false;
+  }
 }
 
 async function refreshSleepFacts() {
@@ -403,6 +489,119 @@ refresh();
       />
     </div>
 
+    <!-- Windows 11 风格：默认折叠，标题区域（含图标）可用鼠标或手柄展开。 -->
+    <div class="card timeout-card">
+      <button
+        type="button"
+        class="timeout-header"
+        :aria-expanded="timeoutExpanded"
+        aria-controls="sleep-timeout-settings"
+        @click="timeoutExpanded = !timeoutExpanded"
+      >
+        <span class="timeout-header-main">
+          <span class="timeout-header-icon"><InlineIcon name="monitor" /></span>
+          <span class="timeout-header-copy">
+            <span class="timeout-title">屏幕、睡眠和休眠超时</span>
+            <span class="timeout-subtitle">选择设备在指定时间内处于空闲状态时会发生什么情况</span>
+          </span>
+        </span>
+        <svg class="timeout-caret" :class="{ open: timeoutExpanded }" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="m5 9 7 7 7-7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+      </button>
+
+      <div v-if="timeoutExpanded" id="sleep-timeout-settings" class="timeout-body">
+        <section class="timeout-group">
+          <h4>已接通电源</h4>
+          <div class="timeout-row">
+            <div class="timeout-label">
+              <span>在此时间后关闭我的屏幕</span>
+              <small>{{ timeoutDescription('screen', sleepTimeouts.acScreen) }}</small>
+            </div>
+            <Dropdown
+              :model-value="sleepTimeouts.acScreen ?? -1"
+              :options="timeoutOptions"
+              width="148px"
+              aria-label="已接通电源：关闭屏幕超时"
+              placeholder="读取失败"
+              :disabled="busy || timeoutLoading || sleepTimeouts.acScreen === null"
+              @update:model-value="(v) => onSleepTimeout('screen', true, v)"
+            />
+          </div>
+          <div class="timeout-row">
+            <div class="timeout-label"><span>使我的设备在以下时间后进入睡眠状态</span></div>
+            <Dropdown
+              :model-value="sleepTimeouts.acSleep ?? -1"
+              :options="timeoutOptions"
+              width="148px"
+              aria-label="已接通电源：睡眠超时"
+              placeholder="读取失败"
+              :disabled="busy || timeoutLoading || sleepTimeouts.acSleep === null"
+              @update:model-value="(v) => onSleepTimeout('sleep', true, v)"
+            />
+          </div>
+          <div class="timeout-row">
+            <div class="timeout-label"><span>使我的设备在以下时间后休眠</span></div>
+            <Dropdown
+              :model-value="sleepTimeouts.acHibernate ?? -1"
+              :options="timeoutOptions"
+              width="148px"
+              aria-label="已接通电源：休眠超时"
+              placeholder="读取失败"
+              :disabled="busy || timeoutLoading || sleepTimeouts.acHibernate === null"
+              @update:model-value="(v) => onSleepTimeout('hibernate', true, v)"
+            />
+          </div>
+        </section>
+
+        <section class="timeout-group">
+          <h4>使用电池</h4>
+          <div class="timeout-row">
+            <div class="timeout-label">
+              <span>在此时间后关闭我的屏幕</span>
+              <small>{{ timeoutDescription('screen', sleepTimeouts.dcScreen) }}</small>
+            </div>
+            <Dropdown
+              :model-value="sleepTimeouts.dcScreen ?? -1"
+              :options="timeoutOptions"
+              width="148px"
+              color="dc"
+              aria-label="使用电池：关闭屏幕超时"
+              placeholder="读取失败"
+              :disabled="busy || timeoutLoading || sleepTimeouts.dcScreen === null"
+              @update:model-value="(v) => onSleepTimeout('screen', false, v)"
+            />
+          </div>
+          <div class="timeout-row">
+            <div class="timeout-label"><span>使我的设备在以下时间后进入睡眠状态</span></div>
+            <Dropdown
+              :model-value="sleepTimeouts.dcSleep ?? -1"
+              :options="timeoutOptions"
+              width="148px"
+              color="dc"
+              aria-label="使用电池：睡眠超时"
+              placeholder="读取失败"
+              :disabled="busy || timeoutLoading || sleepTimeouts.dcSleep === null"
+              @update:model-value="(v) => onSleepTimeout('sleep', false, v)"
+            />
+          </div>
+          <div class="timeout-row">
+            <div class="timeout-label"><span>使我的设备在以下时间后休眠</span></div>
+            <Dropdown
+              :model-value="sleepTimeouts.dcHibernate ?? -1"
+              :options="timeoutOptions"
+              width="148px"
+              color="dc"
+              aria-label="使用电池：休眠超时"
+              placeholder="读取失败"
+              :disabled="busy || timeoutLoading || sleepTimeouts.dcHibernate === null"
+              @update:model-value="(v) => onSleepTimeout('hibernate', false, v)"
+            />
+          </div>
+        </section>
+      </div>
+    </div>
+
     <!-- 睡眠操作（总开关已移除，子项直接驱动 guard，始终显示） -->
     <div class="card">
       <h3 class="card-title"><InlineIcon name="sleep" /> 睡眠操作</h3>
@@ -506,6 +705,54 @@ refresh();
   line-height: 1.3;
 }
 .sleep-plan-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 0 0; border-top: 1px solid color-mix(in srgb, var(--text-dim) 18%, transparent); }
+
+/* Windows 11 风格的“屏幕、睡眠和休眠超时”折叠卡片 */
+.timeout-card { padding: 0; overflow: hidden; }
+.timeout-header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+.timeout-header:hover { background: color-mix(in srgb, var(--bg-input) 55%, transparent); }
+.timeout-header:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+.timeout-header-main { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.timeout-header-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+  color: var(--text-dim);
+}
+.timeout-header-copy { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.timeout-title { font-size: 13px; font-weight: 600; line-height: 1.25; }
+.timeout-subtitle { color: var(--text-dim); font-size: 11px; line-height: 1.35; }
+.timeout-caret { width: 18px; height: 18px; flex: 0 0 auto; color: var(--text-dim); transition: transform .18s ease, color .18s ease; }
+.timeout-caret.open { transform: rotate(180deg); color: var(--accent); }
+.timeout-body {
+  padding: 0 10px 10px;
+  border-top: 1px solid color-mix(in srgb, var(--text-dim) 18%, transparent);
+}
+.timeout-group { margin-top: 10px; background: color-mix(in srgb, var(--bg-input) 52%, transparent); border-radius: var(--radius-ctrl); overflow: hidden; }
+.timeout-group h4 { margin: 0; padding: 11px 12px 8px; color: var(--text); font-size: 12px; font-weight: 600; }
+.timeout-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 58px; padding: 9px 12px; border-top: 1px solid color-mix(in srgb, var(--text-dim) 14%, transparent); }
+.timeout-label { min-width: 0; flex: 1 1 auto; display: flex; flex-direction: column; gap: 3px; }
+.timeout-label span { color: var(--text); font-size: 12px; line-height: 1.35; }
+.timeout-label small { color: var(--text-dim); font-size: 10px; line-height: 1.3; }
+
 .confirm-bar {
   background: rgba(229, 72, 77, 0.12);
   border: 1px solid rgba(229, 72, 77, 0.4);
@@ -539,6 +786,12 @@ refresh();
   background: rgba(229, 72, 77, 0.85);
   color: #fff;
   border-color: rgba(229, 72, 77, 0.85);
+}
+
+@media (max-width: 520px) {
+  .timeout-row { align-items: flex-start; flex-direction: column; }
+  .timeout-row :deep(.dd) { width: 100% !important; }
+  .timeout-row :deep(.dd-trigger) { min-height: 36px; }
 }
 
 </style>
