@@ -6,7 +6,7 @@ import GameRulePanel from '@/components/GameRulePanel.vue';
 import Dropdown from '@/components/Dropdown.vue';
 import { focusGamepadElement, getGamepadPopupPlacement } from '@/gamepad/focus';
 import { detectGame, detectedGameName, type DetectedGame } from '@/bridge/gamedetect';
-import { openOrSearchGameTrainer } from '@/bridge/gameTrainer';
+import { GameTrainerCancelledError, openOrSearchGameTrainer } from '@/bridge/gameTrainer';
 import { oneClickFrameGen, optiscalerStatus, oneClickOptiScaler } from '@/bridge/quickapp';
 import { SPEED_PRESETS, applyGameSpeed, clearGameSpeed, getGameSpeedState, isMinecraftTarget } from '@/bridge/speedhack';
 import {
@@ -25,7 +25,7 @@ import {
   validateLockedGameTarget,
   type LockedGameTarget,
 } from '@/bridge/gameQuickSession';
-import { shell } from '@/bridge/api';
+import { proc, shell } from '@/bridge/api';
 import { tryAcquireQuickAction } from '@/bridge/quickActionLock';
 import { isMouseModeSuppressed } from '@/gamepad/engine';
 
@@ -39,6 +39,8 @@ const emit = defineEmits<{
 const locked = ref<LockedGameTarget | null>(getLockedGameTarget());
 const busy = ref(false);
 const trainerBusy = ref(false);
+const trainerCancelRequested = ref(false);
+const trainerWorkerPid = ref(0);
 const speedBusy = ref(false);
 const pauseBusy = ref(false);
 const closeBusy = ref(false);
@@ -68,7 +70,9 @@ const targetGame = computed(() => locked.value || props.game);
 const targetName = computed(() => targetGame.value
   ? (detectedGameName(targetGame.value) || targetGame.value.name)
   : '未识别游戏');
-const disabledForAction = computed(() => busy.value || trainerBusy.value || speedBusy.value || pauseBusy.value || closeBusy.value || mouseBusy.value || taskViewBusy.value);
+// 修改器是独立的异步任务：它处理中只锁住自身按钮，不能阻塞游戏菜单
+// 的其它功能（暂停、变速、FSR、黑白名单、专属配置等）。
+const disabledForAction = computed(() => busy.value || speedBusy.value || pauseBusy.value || closeBusy.value || mouseBusy.value || taskViewBusy.value);
 
 function status(message = '', error = ''): void {
   statusMsg.value = message;
@@ -268,10 +272,18 @@ function onTargetLost(): void {
 }
 
 async function runTrainer(): Promise<void> {
-  if (trainerBusy.value) return;
+  if (trainerBusy.value) {
+    trainerCancelRequested.value = true;
+    const pid = trainerWorkerPid.value;
+    if (pid > 0) await proc.terminateTree(pid).catch(() => undefined);
+    status('已终止游戏修改器搜索');
+    return;
+  }
   const release = tryAcquireQuickAction('top-trainer');
   if (!release) { status('', '已有其它快捷操作正在执行，请稍候'); return; }
   trainerBusy.value = true;
+  trainerCancelRequested.value = false;
+  trainerWorkerPid.value = 0;
   status('正在准备游戏修改器…');
   try {
     const target = await ensureTarget();
@@ -279,12 +291,21 @@ async function runTrainer(): Promise<void> {
     if (!name) throw new Error('未识别到真实游戏名，无法搜索修改器');
     const result = await openOrSearchGameTrainer(name, (progress) => {
       if (progress.message) status(progress.message);
-    }, target.path);
-    status(result.action === 'opened' ? '已打开游戏修改器' : '修改器搜索已完成');
+    }, target.path, {
+      isCancelled: () => trainerCancelRequested.value,
+      onWorkerStarted: (pid) => { trainerWorkerPid.value = pid; },
+    });
+    if (!trainerCancelRequested.value) {
+      status(result.action === 'opened' ? '已打开游戏修改器' : '修改器搜索已完成');
+    }
   } catch (error) {
-    status('', `游戏修改器操作失败：${(error as Error).message}`);
+    if (!(error instanceof GameTrainerCancelledError) && !trainerCancelRequested.value) {
+      status('', `游戏修改器操作失败：${(error as Error).message}`);
+    }
   } finally {
     trainerBusy.value = false;
+    trainerWorkerPid.value = 0;
+    trainerCancelRequested.value = false;
     release();
   }
 }
@@ -294,13 +315,13 @@ async function runLosslessScaling(): Promise<void> {
   const release = tryAcquireQuickAction('top-lossless');
   if (!release) { status('', '已有其它快捷操作正在执行，请稍候'); return; }
   busy.value = true;
-  status('正在启动小黄鸭…');
+  status('正在启动 Lossless Scaling…');
   try {
     const target = await ensureTarget();
     const result = await oneClickFrameGen(target.path);
-    status(result.alreadyHadProfile ? '已启动小黄鸭' : '已写入预设并启动小黄鸭');
+    status(result.alreadyHadProfile ? '已启动 Lossless Scaling' : '已写入预设并启动 Lossless Scaling');
   } catch (error) {
-    status('', `小黄鸭启动失败：${(error as Error).message}`);
+    status('', `Lossless Scaling 启动失败：${(error as Error).message}`);
   } finally {
     busy.value = false;
     release();
@@ -391,10 +412,10 @@ async function runSpeed(factor: number): Promise<void> {
       : await applyGameSpeed(target.pid, factor, target, 'user-factor');
     if (!result.ok && !result.safeFallback) throw new Error(result.msgs.join('；') || '变速失败');
     speedFactor.value = factor === 1 ? 1 : factor;
-    status(factor === 1 ? '已恢复 1×' : `已应用 ${factor}× 游戏加速`);
+    status(factor === 1 ? '已恢复 1×' : `已应用 ${factor}× 游戏变速`);
   } catch (error) {
     speedFactor.value = 1;
-    status('', `游戏加速失败：${(error as Error).message}`);
+    status('', `游戏变速失败：${(error as Error).message}`);
   } finally {
     speedBusy.value = false;
     release();
@@ -445,7 +466,7 @@ onBeforeUnmount(() => {
       <div class="game-quick-target"><AppIcon :name="locked ? 'lock' : 'gamepad'" /><span>{{ targetName }}</span><small>{{ locked ? '已锁定' : '未锁定' }}</small></div>
     </div>
 
-    <div class="quick-game-controls" data-gp-group="game-quick-game-controls">
+    <div class="quick-game-controls" data-gp-group="game-quick-game-controls" data-gp-game-row="controls">
       <button ref="pauseButtonEl" type="button" :disabled="disabledForAction || !targetGame" @click="togglePause">
         <AppIcon :name="paused ? 'play' : 'pause'" />{{ paused ? '继续游戏' : '暂停游戏' }}
       </button>
@@ -462,18 +483,18 @@ onBeforeUnmount(() => {
     <div v-if="mouseNotice" class="quick-control-notice">{{ mouseNotice }}</div>
 
     <div class="game-quick-actions" data-gp-group="game-quick-actions">
-      <button type="button" class="quick-action" :disabled="disabledForAction || !targetGame" @click="runTrainer">
-        <AppIcon name="play" /><span><strong>游戏修改器</strong><small>{{ trainerBusy ? '处理中…' : '识别后打开' }}</small></span>
-      </button>
-      <button type="button" class="quick-action" :disabled="disabledForAction || !targetGame" @click="runLosslessScaling">
-        <AppIcon name="rocket" /><span><strong>小黄鸭</strong><small>一键插帧</small></span>
-      </button>
-      <button type="button" class="quick-action" :disabled="disabledForAction || !targetGame" @click="runFsr">
+      <button type="button" class="quick-action" data-gp-game-row="actions-1" :disabled="disabledForAction || !targetGame" @click="runFsr">
         <AppIcon name="bolt" /><span><strong>FSR4.1</strong><small>安装 / 卸载</small></span>
       </button>
-      <div class="quick-speed">
-        <span class="quick-speed-title"><AppIcon name="speed" /> 游戏加速</span>
-        <Dropdown :model-value="speedFactor" :options="speedOptions" :disabled="disabledForAction || !targetGame" aria-label="游戏加速倍率" @change="(v) => runSpeed(Number(v))" />
+      <button type="button" class="quick-action" data-gp-game-row="actions-1" :disabled="disabledForAction || !targetGame" @click="runLosslessScaling">
+        <AppIcon name="rocket" /><span><strong>Lossless Scaling</strong><small>小黄鸭一键插帧</small></span>
+      </button>
+      <button type="button" class="quick-action" data-gp-game-row="actions-2" :disabled="disabledForAction || !targetGame" @click="runTrainer">
+        <AppIcon :name="trainerBusy ? 'close' : 'play'" /><span><strong>游戏修改器</strong><small>{{ trainerBusy ? '处理中…点击终止' : '识别后打开' }}</small></span>
+      </button>
+      <div class="quick-speed" :class="{ 'is-disabled': disabledForAction || !targetGame }" data-gp-game-row="actions-2">
+        <span class="quick-speed-title"><AppIcon name="speed" /> 游戏变速</span>
+        <Dropdown :model-value="speedFactor" :options="speedOptions" :disabled="disabledForAction || !targetGame" aria-label="游戏变速倍率" @change="(v) => runSpeed(Number(v))" />
       </div>
     </div>
 
@@ -492,7 +513,7 @@ onBeforeUnmount(() => {
       @status="onCustomStatus"
     />
 
-    <div class="game-quick-footer" data-gp-group="game-quick-footer">
+    <div class="game-quick-footer" data-gp-group="game-quick-footer" data-gp-game-row="footer">
       <button type="button" :disabled="disabledForAction" @click="refreshGame"><strong class="quick-key-y">Y</strong>刷新游戏获取</button>
       <button type="button" class="cancel" @click="$emit('close-request')"><strong class="quick-key-b">B</strong>关闭页面</button>
     </div>
@@ -538,6 +559,8 @@ onBeforeUnmount(() => {
 .quick-action strong { font-size: 11px; }
 .quick-action small, .quick-speed-title { color: var(--text-dim); font-size: 9px; }
 .quick-speed { display: grid; grid-template-columns: minmax(0, 1fr) 82px; align-items: center; gap: 5px; }
+.quick-speed.is-disabled { opacity: .45; cursor: default; }
+.quick-speed.is-disabled :deep(.dd-trigger:disabled) { opacity: 1; }
 .quick-speed-title { display: inline-flex; align-items: center; gap: 4px; color: var(--text); font-size: 11px; font-weight: 700; }
 .quick-rules-entry { display: flex; align-items: center; gap: 7px; width: 100%; min-height: 42px; padding: 7px 8px; border: 1px solid rgba(255,255,255,.08); border-radius: 8px; background: var(--bg-input); color: var(--text); text-align: left; cursor: pointer; }
 .quick-rules-entry :deep(svg) { width: 16px; height: 16px; color: var(--accent); flex: 0 0 auto; }

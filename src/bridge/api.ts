@@ -50,7 +50,7 @@ export const shell = {
   execute: (program: string, args: string[] = []) =>
     invoke<boolean>('shell.execute', { program, args }),
   hidden: (program: string, args: string[] = []) =>
-    invoke<{ ok: boolean }>('shell.hidden', { program, args }),
+    invoke<{ ok: boolean; pid?: number }>('shell.hidden', { program, args }),
 };
 
 export interface TdpDaemonResponse {
@@ -202,6 +202,7 @@ export const tray = {
 
 export const proc = {
   running: (names: string[]) => invoke<Record<string, boolean>>('proc.running', { names }),
+  terminateTree: (pid: number) => invoke<{ ok: boolean; attempted: number; terminated: number }>('process.terminateTree', { pid }),
   identity: (pid: number) => invoke<{
     valid: boolean;
     pid: number;

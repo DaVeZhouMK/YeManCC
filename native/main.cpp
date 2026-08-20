@@ -10288,6 +10288,45 @@ static void reg_shell_app() {
             {"path", valid ? W2U(path) : ""},
         };
     });
+    ipc_on("process.terminateTree", [](const json& args) -> json {
+        const DWORD rootPid = args.value("pid", 0u);
+        if (!rootPid || rootPid == 4 || rootPid == GetCurrentProcessId())
+            return json{{"ok", false}, {"attempted", 0}, {"terminated", 0}};
+
+        struct ProcNode { DWORD pid; DWORD parent; };
+        std::vector<ProcNode> nodes;
+        HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if (snap == INVALID_HANDLE_VALUE)
+            return json{{"ok", false}, {"attempted", 0}, {"terminated", 0}};
+        PROCESSENTRY32W pe{sizeof(pe)};
+        if (Process32FirstW(snap, &pe)) {
+            do { nodes.push_back({pe.th32ProcessID, pe.th32ParentProcessID}); }
+            while (Process32NextW(snap, &pe));
+        }
+        CloseHandle(snap);
+
+        std::vector<DWORD> targets{rootPid};
+        for (size_t i = 0; i < targets.size(); ++i) {
+            for (const auto& node : nodes) {
+                if (node.parent == targets[i] &&
+                    std::find(targets.begin(), targets.end(), node.pid) == targets.end())
+                    targets.push_back(node.pid);
+            }
+        }
+        int attempted = 0;
+        int terminated = 0;
+        for (auto it = targets.rbegin(); it != targets.rend(); ++it) {
+            if (*it == GetCurrentProcessId()) continue;
+            HANDLE h = OpenProcess(PROCESS_TERMINATE | SYNCHRONIZE, FALSE, *it);
+            if (!h) continue;
+            ++attempted;
+            const bool requested = TerminateProcess(h, ERROR_CANCELLED) != FALSE;
+            const bool stopped = requested && WaitForSingleObject(h, 1500) == WAIT_OBJECT_0;
+            if (stopped) ++terminated;
+            CloseHandle(h);
+        }
+        return json{{"ok", terminated > 0}, {"attempted", attempted}, {"terminated", terminated}};
+    });
     ipc_on("game.rules.get", [](const json&) -> json {
         std::lock_guard<std::mutex> rulesLock(g_gameRulesMx);
         return sgGameRulesSnapshot();
@@ -10436,9 +10475,10 @@ static void reg_shell_app() {
             throw std::runtime_error("Failed to bind TDP daemon lifetime (Win32 " + std::to_string(le) + ")");
         }
         ResumeThread(pi.hThread);
+        const auto pid = static_cast<unsigned long long>(pi.dwProcessId);
         CloseHandle(pi.hThread);
         CloseHandle(pi.hProcess);
-        return json{{"ok", true}};
+        return json{{"ok", true}, {"pid", pid}};
     });
     ipc_on("tdpDaemon.request", [](const json& a) -> json {
         auto op = a.value("op", std::string{});
@@ -10514,9 +10554,10 @@ static void reg_shell_app() {
             DWORD le = GetLastError();
             throw std::runtime_error(("Failed to start hidden process (Win32 " + std::to_string(le) + ")").c_str());
         }
+        const auto pid = static_cast<unsigned long long>(pi.dwProcessId);
         CloseHandle(pi.hThread);
         CloseHandle(pi.hProcess);
-        return json{{"ok", true}};
+        return json{{"ok", true}, {"pid", pid}};
     });
     ipc_on("app.exit", [](const json& a) -> json {
         // IPC 可能运行在工作线程；窗口销毁和退出清理必须切回 UI 线程。

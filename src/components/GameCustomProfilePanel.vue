@@ -273,9 +273,15 @@ async function createConfiguration(): Promise<void> {
 
 function focusExpandedEntry(): void {
   nextTick(() => {
-    const first = document.querySelector<HTMLElement>('[data-gp-custom-body] button:not(:disabled), [data-gp-custom-body] [data-gp-dropdown]:not([disabled])');
+    const first = document.querySelector<HTMLElement>('[data-gp-custom-body] button:not(:disabled), [data-gp-custom-body] select:not(:disabled), [data-gp-custom-body] input:not(:disabled), [data-gp-custom-body] [tabindex]:not([tabindex="-1"])');
     if (first) focusGamepadElement(first);
   });
+}
+
+function disableLeavingBody(el: Element): void {
+  if (!(el instanceof HTMLElement)) return;
+  el.inert = true;
+  el.setAttribute('aria-hidden', 'true');
 }
 
 function onGamepadCustomBack(): void {
@@ -448,19 +454,22 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="custom-top-panel" :class="{ expanded, disabled: !gameAvailable }">
-    <div
+  <div
+    class="custom-top-panel"
+    :class="{ expanded, disabled: !gameAvailable }"
+    data-gp-custom-panel
+    :data-gp-expanded="expanded && gameAvailable"
+  >
+    <button
+      type="button"
       :class="{ active: expanded }"
-      class="custom-top-head"
-      role="button"
-      :tabindex="!gameAvailable || expanded ? -1 : 0"
-      :data-gp-ignore="!gameAvailable || expanded ? true : undefined"
+      class="custom-top-head game-menu-steam-row"
+      :tabindex="!gameAvailable ? -1 : 0"
       data-gp-custom-entry
+      data-gp-game-row="custom-entry"
       :aria-expanded="expanded"
       :aria-disabled="!gameAvailable"
       @click.stop="togglePanel"
-      @keydown.enter.prevent.stop="togglePanel"
-      @keydown.space.prevent.stop="togglePanel"
     >
       <div class="custom-top-label">
         <AppIcon name="settings" class="custom-top-label-icon" />
@@ -470,15 +479,16 @@ onUnmounted(() => {
       <div class="custom-top-head-actions">
         <span class="custom-top-chevron" aria-hidden="true">{{ expanded ? '⌃' : '⌄' }}</span>
       </div>
-    </div>
+    </button>
 
-    <Transition name="custom-submenu-pop">
+    <Transition name="custom-submenu-pop" @before-leave="disableLeavingBody">
       <div v-if="expanded && gameAvailable" class="custom-top-body" data-gp-custom-body>
       <div class="power-mode-list">
         <div
           v-for="item in POWER_SIDES"
           :key="item"
           class="power-mode-row"
+          :data-gp-game-row="`custom-${item}`"
           :class="[{ current: powerSide === item }, item]"
         >
           <AppIcon :name="item === 'ac' ? 'plug' : 'battery'" class="side-icon" :aria-label="item === 'ac' ? '交流电' : '电池'" />
@@ -500,7 +510,7 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <div v-if="hasConfiguration" class="custom-top-actions" data-gp-custom-actions>
+      <div v-if="hasConfiguration" class="custom-top-actions" data-gp-custom-actions data-gp-game-row="custom-actions">
         <button
           type="button"
           data-gp-custom-action
@@ -522,14 +532,7 @@ onUnmounted(() => {
 
 <style scoped>
 .custom-top-panel {
-  display: grid;
-  gap: 0;
-  border: 1px solid rgba(255,255,255,.08);
-  border-radius: var(--radius);
-  /* Steam 大屏二级入口的闭合态：严格使用输入控件底色 #151e2b。 */
-  background: var(--bg-input);
-  box-shadow: 0 12px 30px rgba(0,0,0,.28);
-  overflow: hidden;
+  display: block;
 }
 .custom-top-panel.disabled {
   opacity: .45;
@@ -539,23 +542,54 @@ onUnmounted(() => {
   cursor: default;
 }
 .custom-top-panel.expanded {
-  /* 展开态外壳与 Steam 大屏 card/气泡一致，内部控件仍使用 --bg-input。 */
-  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
-  background: color-mix(in srgb, var(--bg-panel) 72%, transparent);
+  display: block;
 }
 .custom-top-head {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  box-sizing: border-box;
   display: grid;
   grid-template-columns: minmax(0, 1fr) 22px;
   align-items: center;
   gap: 8px;
   min-height: 48px;
   padding: 7px 9px;
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: var(--radius-ctrl);
+  background: var(--bg-input);
+  box-shadow: 0 12px 30px rgba(0,0,0,.28);
   cursor: pointer;
+}
+.custom-top-head.game-menu-steam-row {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 54px;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: var(--radius-ctrl);
+  background: var(--bg-input);
+}
+.custom-top-head.game-menu-steam-row .custom-top-label {
+  flex: 1 1 auto;
+}
+.custom-top-head.game-menu-steam-row .custom-top-head-actions {
+  margin-left: auto;
 }
 .custom-top-head.active {
   color: var(--accent);
   border-color: color-mix(in srgb, var(--accent) 45%, transparent);
   background: color-mix(in srgb, var(--accent) 10%, var(--bg-input));
+}
+/* 与游戏黑/白名单一致：父气泡 overflow:hidden 会裁掉全局外发光，
+ * 手柄焦点改用内描边。 */
+.custom-top-head.focused {
+  box-shadow: inset 0 0 0 2px var(--accent), inset 0 0 10px color-mix(in srgb, var(--accent) 35%, transparent);
 }
 .custom-top-head > div:first-child { min-width: 0; }
 .custom-top-label { display: flex; align-items: center; gap: 7px; min-width: 0; text-align: center; }
@@ -585,11 +619,12 @@ onUnmounted(() => {
 .custom-top-body {
   display: grid;
   gap: 8px;
-  margin: 0 8px 8px;
+  margin: 8px 0 0;
   padding: 8px;
   border: 1px solid rgba(255,255,255,.08);
-  border-radius: var(--radius);
-  background: color-mix(in srgb, var(--bg-panel) 72%, transparent);
+  border-radius: var(--radius-ctrl);
+  background: var(--bg-input);
+  box-shadow: 0 16px 40px rgba(0,0,0,.4);
 }
 .custom-submenu-pop-enter-active, .custom-submenu-pop-leave-active {
   transition: opacity .16s ease, transform .16s ease;

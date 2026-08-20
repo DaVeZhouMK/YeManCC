@@ -344,6 +344,11 @@ function focusables(): HTMLElement[] {
       if (el.closest('[aria-hidden="true"]')) return false;
       if (el.closest('[hidden], [inert]')) return false;
       if (el.getAttribute('aria-disabled') === 'true') return false;
+      // Vue Transition 会在离场动画期间保留二级菜单 DOM。父气泡状态
+      // 已经折叠时，即使旧按钮仍有尺寸，也绝不能进入手柄候选列表。
+      const submenuBody = el.closest<HTMLElement>('[data-gp-game-rules-body], [data-gp-custom-body]');
+      const submenuPanel = submenuBody?.closest<HTMLElement>('[data-gp-expanded]');
+      if (submenuBody && submenuPanel?.dataset.gpExpanded !== 'true') return false;
       const style = getComputedStyle(el);
       if (style.display === 'none' || style.visibility === 'hidden') return false;
       const r = el.getBoundingClientRect();
@@ -360,6 +365,58 @@ function focusables(): HTMLElement[] {
 function isInsideCustomPanel(el: HTMLElement): boolean {
   return !!el.closest('[data-gp-custom-body]');
 }
+
+function firstGameMenuControl(root: ParentNode | null): HTMLElement | null {
+  if (!root) return null;
+  const selector = 'button:not(:disabled):not([data-gp-ignore]), input:not(:disabled):not([data-gp-ignore]), select:not(:disabled):not([data-gp-ignore]), [tabindex]:not([tabindex="-1"]):not([data-gp-ignore])';
+  const direct = root instanceof HTMLElement && root.matches(selector) ? root : null;
+  return direct || root.querySelector<HTMLElement>(selector);
+}
+
+function gameMenuControlForRow(menu: HTMLElement, rowKey: string): HTMLElement | null {
+  if (!rowKey) return null;
+  const row = menu.querySelector<HTMLElement>(`[data-gp-game-row="${rowKey}"]`);
+  if (!row) return null;
+  const target = firstGameMenuControl(row);
+  if (!target) return null;
+  if (target.hasAttribute('disabled') || target.getAttribute('aria-disabled') === 'true') return null;
+  if (target.closest('[hidden], [inert], [aria-hidden="true"]')) return null;
+  const body = target.closest<HTMLElement>('[data-gp-game-rules-body], [data-gp-custom-body]');
+  const panel = body?.closest<HTMLElement>('[data-gp-expanded]');
+  if (body && panel?.dataset.gpExpanded !== 'true') return null;
+  const style = getComputedStyle(target);
+  const rect = target.getBoundingClientRect();
+  return style.display === 'none' || style.visibility === 'hidden' || rect.width <= 0 || rect.height <= 0
+    ? null
+    : target;
+}
+
+function moveGameMenuFocus(menu: HTMLElement, base: HTMLElement, dy: number): HTMLElement | null {
+  const currentRow = base.closest<HTMLElement>('[data-gp-game-row]')?.dataset.gpGameRow || '';
+  const rows = [
+    'controls',
+    'actions-1',
+    'actions-2',
+    'rules-entry',
+    'rules-current',
+    'rules-editor',
+    'rules-dropdown',
+    'rules-footer',
+    'custom-entry',
+    'custom-ac',
+    'custom-dc',
+    'custom-actions',
+    'footer',
+  ];
+  const index = rows.indexOf(currentRow);
+  if (index < 0) return null;
+  for (let i = index + (dy > 0 ? 1 : -1); i >= 0 && i < rows.length; i += dy > 0 ? 1 : -1) {
+    const target = gameMenuControlForRow(menu, rows[i]);
+    if (target && target !== base) return target;
+  }
+  return null;
+}
+
 function moveFocus(dx: number, dy: number) {
   const els = focusables();
   if (els.length === 0) return;
@@ -374,13 +431,29 @@ function moveFocus(dx: number, dy: number) {
   // controller stop. The action buttons remain in the list when expanded so A
   // can still activate them, but the header itself is excluded to prevent the
   // first profile row from becoming a duplicate/overlapping focus target.
-  const navEls = customExpanded
-    ? els.filter((el) => !el.matches('[data-gp-custom-entry]'))
-    : els;
+  const rulesExpanded = !!activeGameMenu?.querySelector<HTMLElement>('[data-gp-game-rules-body]');
+  // 可见的入口和可见的独立气泡内容都是真实焦点目标；只有 v-if 已移除、
+  // inert/aria-hidden 或不可见的内容才由 focusables() 排除。
+  const navEls = els;
   const cur = document.activeElement as HTMLElement | null;
   // 当前焦点元素必须在列表中，否则从第一个开始
   const baseIdx = cur ? navEls.indexOf(cur) : -1;
   const base = baseIdx >= 0 ? navEls[baseIdx] : navEls[0];
+  if (activeGameMenu && dy !== 0 && activeGameMenu.contains(base)) {
+    const currentGameRow = base.closest<HTMLElement>('[data-gp-game-row]')?.dataset.gpGameRow || '';
+    const target = moveGameMenuFocus(activeGameMenu, base, dy);
+    if (target) {
+      try {
+        focusGamepadElement(target, dy < 0);
+      } catch {
+        // Ignore transient DOM changes during Vue transitions.
+      }
+      return;
+    }
+    // 顶部游戏菜单任何已声明行都由上面的专用导航负责；没有目标时
+    // 停在当前行，禁止旧的全页空间算法把焦点穿到其它控件。
+    if (currentGameRow) return;
+  }
   const br = base.getBoundingClientRect();
   const bx = br.left + br.width / 2;
   const by = br.top + br.height / 2;
@@ -398,6 +471,44 @@ function moveFocus(dx: number, dy: number) {
     const customEntry = activeGameMenu?.querySelector<HTMLElement>('[data-gp-custom-entry]');
     const customBody = activeGameMenu?.querySelector<HTMLElement>('[data-gp-custom-body]');
     const customExpanded = !!customBody;
+    const gameRowKey = (el: HTMLElement | null): string => {
+      if (!activeGameMenu || !el || !activeGameMenu.contains(el)) return '';
+      return el.closest<HTMLElement>('[data-gp-game-row]')?.dataset.gpGameRow || '';
+    };
+    const nearestGameRow = (rowKey: string): HTMLElement | null => {
+      if (!rowKey) return null;
+      const candidates = navEls.filter((el) => el !== base && gameRowKey(el) === rowKey);
+      if (!candidates.length) return null;
+      candidates.sort((a, b) => {
+        const ar = a.getBoundingClientRect();
+        const br = b.getBoundingClientRect();
+        const ax = ar.left + ar.width / 2;
+        const bx2 = br.left + br.width / 2;
+        return Math.abs(ax - bx) - Math.abs(bx2 - bx);
+      });
+      return candidates[0];
+    };
+    // 一级入口必须是“可直接聚焦”的目标。不要只依赖空间导航的候选数组：
+    // Vue 在切换气泡/动画的中间帧可能会让入口暂时不在 navEls 中，导致
+    // 手柄上下时把它跳过，但鼠标仍然可以点击。这里按菜单行语义直接
+    // 抓取入口，作为顶部游戏菜单的硬兜底。
+    const directGameMenuTarget = (rowKey: string): HTMLElement | null => {
+      if (!activeGameMenu || !rowKey) return null;
+      const row = activeGameMenu.querySelector<HTMLElement>(
+        `[data-gp-game-row="${rowKey}"]`,
+      );
+      if (!row) return null;
+      const target = row.matches(FOCUSABLE)
+        ? row
+        : row.querySelector<HTMLElement>(FOCUSABLE);
+      if (!target || target === base) return null;
+      if (target.hasAttribute('disabled') || target.getAttribute('aria-disabled') === 'true') return null;
+      if (target.closest('[data-gp-ignore]')) return null;
+      const style = getComputedStyle(target);
+      const rect = target.getBoundingClientRect();
+      if (style.display === 'none' || style.visibility === 'hidden' || rect.width <= 0 || rect.height <= 0) return null;
+      return target;
+    };
     // 专属配置展开后，标题本身会主动从焦点列表移除，避免标题和第一
     // 个 AC 下拉重叠。因此跨气泡导航必须把目标改成展开内容的第一个
     // 可用控件，而不是硬跳到被 data-gp-ignore 排除的标题。
@@ -411,7 +522,7 @@ function moveFocus(dx: number, dy: number) {
     const customTargetAvailable = !!customTarget &&
       !customTarget.matches('[data-gp-ignore]') &&
       customTarget.getAttribute('aria-disabled') !== 'true';
-    const insideRules = !!base.closest('[data-gp-game-rules]');
+    const insideRules = !!base.closest('[data-gp-game-rules-body]');
     // 黑/白名单入口与其二级气泡都属于同一条菜单路径：按下时明确
     // 跳到专属配置入口/内容，不能让空间距离算法把焦点穿到页脚或其它控件。
     if (dy > 0 && customTarget && customTargetAvailable &&
@@ -420,8 +531,31 @@ function moveFocus(dx: number, dy: number) {
     }
     // 从专属配置内部按上，永远直接返回“游戏黑 / 白名单”这一排；
     // 不再经过专属配置标题或第一条 AC 气泡，避免焦点重叠。
-    if (dy < 0 && rulesEntry && (isInsideCustomPanel(base) || base === customEntry)) {
+    if (dy < 0 && rulesEntry && navEls.includes(rulesEntry) &&
+      (isInsideCustomPanel(base) || base === customEntry)) {
       best = rulesEntry;
+    }
+
+    // 顶部游戏菜单是固定的菜单序列，不让浮动布局/动画参与“下一个气泡”
+    // 的判断。尤其 FSR4.1 / 游戏加速按下必须先到黑白名单入口，再到专属配置。
+    if (!best && activeGameMenu) {
+      const currentRow = gameRowKey(base);
+      const targetRow = dy > 0
+        ? ({
+            controls: 'actions-1',
+            'actions-1': 'actions-2',
+            'actions-2': 'rules-entry',
+            'rules-entry': 'custom-entry',
+            'custom-entry': 'footer',
+          } as Record<string, string>)[currentRow]
+        : ({
+            footer: 'custom-entry',
+            'custom-entry': 'rules-entry',
+            'rules-entry': 'actions-2',
+            'actions-2': 'actions-1',
+            'actions-1': 'controls',
+          } as Record<string, string>)[currentRow];
+      best = directGameMenuTarget(targetRow) || nearestGameRow(targetRow);
     }
     // ── 上下导航：行优先 ──
     // 用户希望方向键按“内容行”移动。例如从“帧数目标 30”按上，应跳到
@@ -459,15 +593,31 @@ function moveFocus(dx: number, dy: number) {
     }
     }
   } else {
-    // 左右导航严格锁定当前视觉行.不要用空间导航的垂直偏离评分，
-    // 因为那会在同行没有目标时把下方/上方的按钮当成左右目标。
-    // 以实际控件矩形的纵向重叠定义同行，天然适配 CSS zoom 和不同控件高度。
-    const sameRow = boxes.filter((box) => {
-      const distance = box.x - bx;
-      const inDirection = dx > 0 ? distance > 0 : distance < 0;
-      const overlapsVertically = Math.min(br.bottom, box.r.bottom) > Math.max(br.top, box.r.top);
-      return inDirection && overlapsVertically;
-    });
+    // 左右导航严格锁定当前视觉行。游戏菜单的控件高度、过渡动画和
+    // 2x2 快捷功能网格不能再交给全页空间算法猜测，否则会从左右串到
+    // 上下行。data-gp-game-row 是页面声明的视觉行边界；其它页面继续
+    // 使用下面的矩形重叠兜底规则。
+    const gameMenu = activeGameMenu;
+    const baseGameRow = gameMenu?.contains(base)
+      ? base.closest<HTMLElement>('[data-gp-game-row]')
+      : null;
+    const baseGameRowKey = baseGameRow?.dataset.gpGameRow || '';
+    const sameRow = baseGameRowKey
+      ? navEls
+        // Some rows mark the individual button (FSR), while others mark the
+        // wrapping container (游戏加速). Compare row keys, never DOM identity.
+        .filter((el) => el !== base && el.closest<HTMLElement>('[data-gp-game-row]')?.dataset.gpGameRow === baseGameRowKey)
+        .map((el) => {
+          const r = el.getBoundingClientRect();
+          return { el, r, x: r.left + r.width / 2, y: r.top + r.height / 2 };
+        })
+        .filter((box) => dx > 0 ? box.x > bx : box.x < bx)
+      : boxes.filter((box) => {
+        const distance = box.x - bx;
+        const inDirection = dx > 0 ? distance > 0 : distance < 0;
+        const overlapsVertically = Math.min(br.bottom, box.r.bottom) > Math.max(br.top, box.r.top);
+        return inDirection && overlapsVertically;
+      });
     if (sameRow.length === 0) return;
 
     // 同一行内只按横向距离选择，垂直误差仅用于稳定相同距离时的结果。
@@ -499,6 +649,20 @@ function isRangeInput(el: HTMLElement | null): el is HTMLInputElement {
 function activate(opts: GamepadEngineOptions) {
   const el = document.activeElement as HTMLElement | null;
   if (!el) return;
+  // Vue 的离场动画会短暂保留已经折叠的二级菜单 DOM。即使组件已经
+  // 把焦点恢复到入口，WebView2 仍可能在同一帧报告旧 activeElement。
+  // A 只能激活“当前焦点列表”中的节点，禁止程序化 click 穿透到已折叠
+  // 的黑白名单按钮或专属配置 AC/DC 下拉。
+  if (!focusables().includes(el)) {
+    const gameMenu = document.querySelector<HTMLElement>('[data-gp-game-quick-menu]');
+    const recovery = el.closest('[data-gp-custom-body]')
+      ? gameMenu?.querySelector<HTMLElement>('[data-gp-custom-entry]')
+      : el.closest('[data-gp-game-rules-body]')
+        ? gameMenu?.querySelector<HTMLElement>('[data-gp-game-rules-entry]')
+        : null;
+    if (!recovery || !focusGamepadElement(recovery)) focusFirst();
+    return;
+  }
   // 滑块：A 进入/退出编辑模式
   if (isRangeInput(el)) {
     if (sliderEditMode) {

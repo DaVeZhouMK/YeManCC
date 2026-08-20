@@ -140,6 +140,28 @@ async function removeRule(kind: GameRuleList, value: string): Promise<void> {
   }
 }
 
+function focusOpenedBody(): void {
+  nextTick(() => {
+    const first = document.querySelector<HTMLElement>(
+      '[data-gp-game-rules-body] button:not(:disabled), [data-gp-game-rules-body] select:not(:disabled), [data-gp-game-rules-body] input:not(:disabled), [data-gp-game-rules-body] [tabindex]:not([tabindex="-1"])',
+    );
+    if (first) focusGamepadElement(first);
+  });
+}
+
+function restoreRulesEntry(): void {
+  nextTick(() => {
+    const entry = document.querySelector<HTMLElement>('[data-gp-game-rules-entry]');
+    if (entry) focusGamepadElement(entry);
+  });
+}
+
+function disableLeavingBody(el: Element): void {
+  if (!(el instanceof HTMLElement)) return;
+  el.inert = true;
+  el.setAttribute('aria-hidden', 'true');
+}
+
 function onBack(): void {
   if (!props.open) return;
   if (editorOpen.value) {
@@ -152,11 +174,16 @@ function onBack(): void {
   emit('close');
 }
 
-watch(() => [props.open, props.game?.pid, props.game?.processCreated], () => {
+watch(() => [props.open, props.game?.pid, props.game?.processCreated], (next, previous) => {
   if (props.open) {
     editorOpen.value = null;
     draft.value = '';
     void loadRules();
+    // The head is removed from the focus list while open. Move focus into the
+    // body immediately so the next D-pad press cannot restart from page[0].
+    focusOpenedBody();
+  } else if (previous?.[0] === true) {
+    restoreRulesEntry();
   }
 });
 
@@ -173,19 +200,18 @@ onBeforeUnmount(() => {
   <div
     class="game-rules-panel game-submenu-bubble"
     :class="{ expanded: open }"
-    :data-gp-game-rules="open ? true : undefined"
+    data-gp-game-rules
+    :data-gp-expanded="open"
   >
-    <div
-      class="game-rules-head"
+    <button
+      type="button"
+      class="game-rules-head game-menu-steam-row"
       :class="{ active: open }"
       data-gp-game-rules-entry
-      role="button"
-      :tabindex="open ? -1 : 0"
-      :data-gp-ignore="open ? true : undefined"
+      data-gp-game-row="rules-entry"
+      tabindex="0"
       :aria-expanded="open"
       @click.stop="emit('toggle')"
-      @keydown.enter.prevent.stop="emit('toggle')"
-      @keydown.space.prevent.stop="emit('toggle')"
     >
       <div>
         <AppIcon name="list" class="game-rules-head-icon" />
@@ -193,12 +219,12 @@ onBeforeUnmount(() => {
         <small>{{ open ? '正在编辑识别名单' : (currentRule ? currentLabel : '编辑识别游戏') }}</small>
       </div>
       <span class="game-rules-chevron" aria-hidden="true">{{ open ? '⌃' : '⌄' }}</span>
-    </div>
+    </button>
 
     <!-- 与专属配置使用同一套二级气泡展开动画，避免打开时突然跳出。 -->
-    <Transition name="custom-submenu-pop">
-      <div v-if="open" class="game-rules-body">
-      <div class="game-rule-actions game-rule-current-actions" data-gp-group="game-rule-current-actions">
+    <Transition name="custom-submenu-pop" @before-leave="disableLeavingBody">
+      <div v-if="open" class="game-rules-body" data-gp-game-rules-body>
+      <div class="game-rule-actions game-rule-current-actions" data-gp-group="game-rule-current-actions" data-gp-game-row="rules-current">
         <button type="button" class="danger" :disabled="busy || !currentRule" @click="addCurrentToBlacklist">
           <AppIcon name="close" />排除到黑名单
         </button>
@@ -207,7 +233,7 @@ onBeforeUnmount(() => {
         </button>
       </div>
 
-      <div class="game-rule-actions game-rule-editor-actions" data-gp-group="game-rule-editor-actions">
+      <div class="game-rule-actions game-rule-editor-actions" data-gp-group="game-rule-editor-actions" data-gp-game-row="rules-editor">
         <button type="button" :class="{ active: editorOpen === 'blacklist' }" :disabled="busy" @click="openEditor('blacklist')">
           <AppIcon name="list" />编辑黑名单
         </button>
@@ -216,7 +242,7 @@ onBeforeUnmount(() => {
         </button>
       </div>
 
-      <div v-if="editorOpen" class="game-rule-dropdown" data-gp-group="game-rule-dropdown">
+      <div v-if="editorOpen" class="game-rule-dropdown" data-gp-group="game-rule-dropdown" data-gp-game-row="rules-dropdown">
         <div class="game-rule-dropdown-head">
           <strong>{{ editorOpen === 'blacklist' ? '编辑用户黑名单' : '编辑白名单' }}</strong>
           <small>{{ rules[editorOpen].length }} 项</small>
@@ -244,7 +270,7 @@ onBeforeUnmount(() => {
 
       <div v-if="message || error" class="game-rules-message" :class="{ error: !!error }">{{ error || message }}</div>
 
-      <div class="game-rules-bottom-actions" data-gp-group="game-rules-bottom-actions">
+      <div class="game-rules-bottom-actions" data-gp-group="game-rules-bottom-actions" data-gp-game-row="rules-footer">
         <button type="button" class="rules-close-bottom" @click="emit('close')"><strong>B</strong>关闭页面</button>
       </div>
       </div>
@@ -254,34 +280,53 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .game-submenu-bubble {
-  display: grid;
-  gap: 0;
-  padding: 0;
-  border: 1px solid rgba(255,255,255,.08);
-  border-radius: var(--radius);
-  background: var(--bg-input);
-  box-shadow: 0 12px 30px rgba(0,0,0,.28);
-  overflow: hidden;
+  display: block;
 }
 .game-rules-panel {
-  display: grid;
+  display: block;
 }
 .game-rules-panel.expanded {
-  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
-  background: color-mix(in srgb, var(--bg-panel) 72%, transparent);
+  display: block;
 }
 .game-rules-head {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  box-sizing: border-box;
   display: flex;
   align-items: center;
   justify-content: space-between;
   min-height: 48px;
   padding: 7px 9px;
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: var(--radius-ctrl);
+  background: var(--bg-input);
+  box-shadow: 0 12px 30px rgba(0,0,0,.28);
   cursor: pointer;
+}
+.game-rules-head.game-menu-steam-row {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 54px;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: var(--radius-ctrl);
+  background: var(--bg-input);
 }
 .game-rules-head.active {
   color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
   background: color-mix(in srgb, var(--accent) 10%, var(--bg-input));
-  border-bottom: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
+}
+/* 手柄焦点：父气泡 overflow:hidden 会裁掉全局 .focused 的外发光，
+ * 这里改用内描边，保证入口按钮选中态始终可见。 */
+.game-rules-head.focused {
+  box-shadow: inset 0 0 0 2px var(--accent), inset 0 0 10px color-mix(in srgb, var(--accent) 35%, transparent);
 }
 .game-rules-head > div { display: flex; align-items: center; gap: 7px; min-width: 0; }
 .game-rules-head-icon { width: 15px; height: 15px; color: var(--accent); flex: 0 0 auto; }
@@ -297,11 +342,12 @@ onBeforeUnmount(() => {
 .game-rules-body {
   display: grid;
   gap: 8px;
-  margin: 0 8px 8px;
+  margin: 8px 0 0;
   padding: 8px;
   border: 1px solid rgba(255,255,255,.08);
-  border-radius: var(--radius);
-  background: color-mix(in srgb, var(--bg-panel) 72%, transparent);
+  border-radius: var(--radius-ctrl);
+  background: var(--bg-input);
+  box-shadow: 0 16px 40px rgba(0,0,0,.4);
 }
 .game-rules-head strong { font-size: 13px; }
 .game-rules-head small, .game-rule-dropdown-head small, .game-rule-empty { color: var(--text-dim); font-size: 10px; }
