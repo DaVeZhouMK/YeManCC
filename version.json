@@ -1,7 +1,7 @@
 ﻿{
-    "version":  "0.0.17",
-    "notes":  "强化游戏快捷操作、规则面板与手柄导航，完善性能计划交互及睡眠卡死恢复。",
-    "sha256":  "425B46928F2FF83F78F7F1D536BFBDAD5EABD8183C367744B2ED94DD5F11EE67",
+    "version":  "0.0.18",
+    "notes":  "完善游戏快捷操作与训练器进程控制，修复规则面板及手柄导航焦点链路。",
+    "sha256":  "A534C607A2602AB3C9847BB284876ACD936CDDA54D52E284CC0F1288CCCBF37F",
     "publishedAt":  "2026-08-20",
     "package":  "Packages/YeManCC.zip"
 }
