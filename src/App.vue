@@ -1418,6 +1418,6 @@ onUnmounted(() => {
   overflow-y: auto;
   /* Leave room for the gamepad focus ring and the final control itself. */
   padding: 12px 12px calc(var(--gamepad-safe-bottom, 24px) + var(--gamepad-clip-bottom, 0px));
-  scroll-padding: 8px 0 var(--gamepad-safe-bottom, 24px);
+  scroll-padding: 24px 0 var(--gamepad-safe-bottom, 24px);
 }
 </style>

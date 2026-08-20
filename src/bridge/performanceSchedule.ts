@@ -10,6 +10,8 @@ import {
   detectCoreArchitecture,
   rebuildYemanScheme,
   setTdp,
+  setRtssLimit,
+  readRtssLimit,
 } from './yeman';
 import { loadCpuProfiles } from './cpuProfiles';
 import {
@@ -21,6 +23,7 @@ import {
   setFloatTarget,
   type FloatProfile,
   type TdpFloatStrategy,
+  cancelPendingRtssSync,
 } from './autofloat';
 
 export type PowerSide = 'ac' | 'dc';
@@ -591,14 +594,15 @@ export async function restorePerformanceScheduleIfConfigured(): Promise<Performa
     // 系统级恢复必须独立于性能调度页是否激活：启动、唤醒、AC/DC 切换时，
     // 当前游戏存在自定义档位则优先恢复自定义；否则才应用普通自动档位。
     const game = await detectGame(true).catch(() => null);
-  if (game) {
+    if (game) {
       const custom = await loadGameCustomConfig();
       const fromPath = game.path ? game.path.split(/[\\/]/).pop() : '';
       const key = (fromPath || game.name || '').toLowerCase().trim();
       const entry = key ? custom.entries[key.endsWith('.exe') ? key : `${key}.exe`] : undefined;
-      if (entry) {
+      if (entry && entry.enabled !== false) {
         const side = await detectPowerMode();
-        await applyGameCustomProfilesUnsafe(side, entry.ac, entry.dc, {
+        const resolved = resolveGameCustomProfiles(entry, config);
+        await applyGameCustomProfilesUnsafe(side, resolved.ac, resolved.dc, {
           pid: game.pid,
           processCreated: game.processCreated,
         });
@@ -636,7 +640,7 @@ export async function refreshPerformanceScheduleCoreMode(): Promise<boolean> {
       const fromPath = game.path ? game.path.split(/[\\/]/).pop() : '';
       const key = (fromPath || game.name || '').toLowerCase().trim();
       const entry = key ? custom.entries[key.endsWith('.exe') ? key : `${key}.exe`] : undefined;
-      if (entry) {
+      if (entry && entry.enabled !== false) {
         const side = await detectPowerMode();
         const current = await detectGame(true).catch(() => null);
         if (!current || current.pid !== game.pid || current.processCreated !== game.processCreated) return false;
@@ -668,7 +672,7 @@ export async function cyclePerformanceScheduleMode(direction: 1 | -1): Promise<{
       const fromPath = game.path ? game.path.split(/[\\/]/).pop() : '';
       const key = (fromPath || game.name || '').toLowerCase().trim();
       const entry = key ? custom.entries[key.endsWith('.exe') ? key : `${key}.exe`] : undefined;
-      if (entry) return { applied: false, side, blocked: 'custom' };
+      if (entry && entry.enabled !== false) return { applied: false, side, blocked: 'custom' };
     }
     if (Date.now() < gamepadModeCooldownUntil) {
       return { applied: false, side, mode: config.active[side], blocked: 'cooldown' };
@@ -691,13 +695,27 @@ export async function cyclePerformanceScheduleMode(direction: 1 | -1): Promise<{
 
 export interface GameCustomProfile {
   displayName: string;
+  // Persisted separately from the profile definition: saved does not mean active.
+  enabled: boolean;
+  // ac/dc 保留用于兼容旧版快照；新配置只持久化挡位，应用时从自动优化 profiles 实时解析。
   ac: ScheduleProfile;
   dc: ScheduleProfile;
+  acMode?: ScheduleMode;
+  dcMode?: ScheduleMode;
+}
+
+export interface GameCustomRtssProfile {
+  enabled: boolean;
+  acFps: number;
+  dcFps: number;
 }
 
 export interface GameCustomConfig {
   version: 1;
   entries: Record<string, GameCustomProfile>;
+  // Independent RTSS-only linkage. This never activates the full custom
+  // TDP/CPU/core/automatic-schedule profile.
+  rtss: Record<string, GameCustomRtssProfile>;
 }
 
 const GAME_CUSTOM_PATH = 'C:\\SOFT\\YeMan\\PowerControl\\game-custom.json';
@@ -705,15 +723,19 @@ const GAME_CUSTOM_BACKUP_PATH = `${GAME_CUSTOM_PATH}.bak`;
 const GAME_CUSTOM_MAX_BYTES = 4 * 1024 * 1024;
 
 function defaultGameCustomConfig(): GameCustomConfig {
-  return { version: 1, entries: {} };
+  return { version: 1, entries: {}, rtss: {} };
 }
 
 function normalizeCustomProfile(raw: unknown, fallback: ScheduleProfile): GameCustomProfile {
   const r = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
   return {
     displayName: typeof r.displayName === 'string' ? r.displayName : '',
+    // Legacy entries were implicitly active; only an explicit false disables them.
+    enabled: r.enabled !== false,
     ac: normalizeProfile(r.ac, fallback),
     dc: normalizeProfile(r.dc, fallback),
+    acMode: isMode(r.acMode) ? r.acMode : undefined,
+    dcMode: isMode(r.dcMode) ? r.dcMode : undefined,
   };
 }
 
@@ -725,11 +747,25 @@ function normalizeGameCustom(value: unknown): GameCustomConfig {
   for (const [key, val] of Object.entries(entriesRaw)) {
     if (!key) continue;
     const k = key.toLowerCase();
-    // 仅大小写不同的重复键：保留第一个（先出现的配置优先），避免静默覆盖丢数据
-    // （2026-08-05 修复）。
+    // 仅大小写不同的重复键：保留第一个（先出现的配置优先），避免静默覆盖丢数据。
     if (!(k in entries)) entries[k] = normalizeCustomProfile(val, fallback);
   }
-  return { version: 1, entries };
+  const rtssRaw = raw.rtss && typeof raw.rtss === 'object'
+    ? (raw.rtss as Record<string, unknown>)
+    : {};
+  const rtss: Record<string, GameCustomRtssProfile> = {};
+  for (const [key, val] of Object.entries(rtssRaw)) {
+    if (!key) continue;
+    const k = key.toLowerCase();
+    if (k in rtss) continue;
+    const r = val && typeof val === 'object' ? (val as Record<string, unknown>) : {};
+    rtss[k] = {
+      enabled: r.enabled !== false,
+      acFps: Math.max(0, Math.round(Number(r.acFps) || 0)),
+      dcFps: Math.max(0, Math.round(Number(r.dcFps) || 0)),
+    };
+  }
+  return { version: 1, entries, rtss };
 }
 
 let gameCustomCache: GameCustomConfig | null = null;
@@ -817,7 +853,35 @@ export function getCustomProfileFor(
   side: PowerSide,
 ): ScheduleProfile | null {
   const entry = config.entries[exeName.toLowerCase()];
-  return entry ? entry[side] : null;
+  return entry && entry.enabled !== false ? entry[side] : null;
+}
+
+/**
+ * Resolve a game's dedicated AC/DC profiles from the current automatic
+ * optimization configuration. New entries store only acMode/dcMode, so an
+ * edit made on the automatic optimization page is used the next time the
+ * game profile is applied. The snapshot fields remain a compatibility
+ * fallback for entries written by older versions.
+ */
+export function resolveGameCustomProfiles(
+  entry: GameCustomProfile,
+  schedule: PerformanceScheduleConfig,
+): { ac: ScheduleProfile; dc: ScheduleProfile } {
+  return {
+    ac: entry.acMode && isMode(entry.acMode)
+      ? schedule.profiles.ac[entry.acMode]
+      : entry.ac,
+    dc: entry.dcMode && isMode(entry.dcMode)
+      ? schedule.profiles.dc[entry.dcMode]
+      : entry.dc,
+  };
+}
+
+export function getCustomRtssFor(
+  config: GameCustomConfig,
+  exeName: string,
+): GameCustomRtssProfile | null {
+  return config.rtss[exeName.toLowerCase()] ?? null;
 }
 
 async function applyGameCustomProfilesUnsafe(
@@ -885,19 +949,70 @@ async function applyGameCustomProfilesUnsafe(
   return checkpoint();
 }
 
+/**
+ * Apply only the RTSS/FPS part of a game-custom profile.
+ *
+ * This deliberately does not enable the performance schedule, switch the
+ * YeMan scheme, touch TDP/CPU/core mode, or start/stop autofloat.
+ */
+let customRtssOnlyQueue: Promise<void> = Promise.resolve();
+
+export async function applyGameCustomRtssOnly(
+  acProfile: ScheduleProfile,
+  dcProfile: ScheduleProfile,
+  expectedTarget?: PerformanceScheduleTarget,
+): Promise<{ applied: boolean; side: PowerSide; fps: number }> {
+  const run = customRtssOnlyQueue.then(async () => {
+    if (expectedTarget) {
+      const current = await detectGame(true, expectedTarget.pid);
+      if (!current || current.pid !== expectedTarget.pid ||
+          String(current.processCreated) !== String(expectedTarget.processCreated)) {
+        return { applied: false, side: await detectPowerMode(), fps: 0 };
+      }
+    }
+    // RTSS-only is an explicit one-shot owner. Drop a stale debounced
+    // autofloat write before committing the requested FPS; this does not
+    // enable/disable autofloat or touch its CPU/TDP/core state.
+    cancelPendingRtssSync();
+    const side = await detectPowerMode();
+    const profile = side === 'ac' ? acProfile : dcProfile;
+    const fps = Math.max(0, Math.round(Number(profile.fpsTarget) || 0));
+    await setRtssLimit(fps);
+    const actual = await readRtssLimit();
+    if (actual !== fps) throw new Error(`RTSS FPS 回读不一致：期望 ${fps}，实际 ${actual}`);
+    return { applied: true, side, fps };
+  });
+  customRtssOnlyQueue = run.then(() => undefined, () => undefined);
+  return run;
+}
 // 应用自定义档位：绕开自动档位选择，直接把该游戏的 AC/DC 配置下发到当前电源侧。
 export async function applyGameCustomProfiles(
   acProfile: ScheduleProfile,
   dcProfile: ScheduleProfile,
   expectedTarget?: PerformanceScheduleTarget,
 ): Promise<boolean> {
-  const schedule = await loadPerformanceSchedule();
-  if (!schedule.enabled) return false;
-  return withScheduleOp(true, async () => {
-    assertScheduleOpCurrent();
-    await ensureRememberedYemanSchemeActive();
-    assertScheduleOpCurrent();
-    const side = await detectPowerMode();
-    return applyGameCustomProfilesUnsafe(side, acProfile, dcProfile, expectedTarget);
-  });
+  // This is an explicit top-menu action. It is allowed in both automatic and
+  // manual global modes; manual mode only changes hardware when the user asks
+  // to apply the dedicated game profile.
+  //
+  // AC/DC broadcasts and boot/resume reconciliation can legitimately supersede
+  // one scheduling operation while this one is between hardware writes. A
+  // dedicated profile must not surface that internal cancellation as the user
+  // visible error "outdated", so retry after the newer operation drains.
+  const maxAttempts = 3;
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    try {
+      return await withScheduleOp(true, async () => {
+        assertScheduleOpCurrent();
+        await ensureRememberedYemanSchemeActive();
+        assertScheduleOpCurrent();
+        const side = await detectPowerMode();
+        return applyGameCustomProfilesUnsafe(side, acProfile, dcProfile, expectedTarget);
+      });
+    } catch (error) {
+      if (!(error instanceof SkipApplyError) || attempt === maxAttempts - 1) throw error;
+      await new Promise<void>((resolve) => setTimeout(resolve, 120));
+    }
+  }
+  return false;
 }

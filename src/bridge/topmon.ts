@@ -36,7 +36,6 @@ export interface TopMonData {
   gpuClockMhz: number; // 显卡主频 MHz（多 GPU 取频率最高者）
   thermalThrottleFound: boolean; // 两种过热降频传感器至少存在一个
   thermalThrottleMax: number; // HWiNFO Yes/No 最大值（0=否，1=是）
-  thermalThrottleAvgPct: number; // 历史平均触发占比 %
   virtualMemoryCommittedFound: boolean; // Virtual Memory Committed 可读
   virtualMemoryCommittedMb: number; // 已提交虚拟内存 MB
   virtualMemoryLoadFound: boolean; // Virtual Memory Load 可读
@@ -97,7 +96,6 @@ export async function readTopMonitor(): Promise<TopMonData | null> {
       gpuClockMhz: Number(raw.gpuClockMhz) || 0,
       thermalThrottleFound: raw.thermalThrottleFound === true,
       thermalThrottleMax: Number(raw.thermalThrottleMax) || 0,
-      thermalThrottleAvgPct: clampPercent(raw.thermalThrottleAvgPct),
       virtualMemoryCommittedFound: raw.virtualMemoryCommittedFound === true,
       virtualMemoryCommittedMb: Number(raw.virtualMemoryCommittedMb) || 0,
       virtualMemoryLoadFound: raw.virtualMemoryLoadFound === true,

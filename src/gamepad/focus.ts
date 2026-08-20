@@ -1,4 +1,4 @@
-const DEFAULT_SAFE_TOP = 8;
+const DEFAULT_SAFE_TOP = 24;
 const DEFAULT_SAFE_BOTTOM = 24;
 
 function parsePixels(value: string, fallback: number): number {
@@ -177,8 +177,12 @@ function getVisibleScrollRect(container: HTMLElement): { top: number; bottom: nu
   return { top, bottom: Math.max(top, bottom) };
 }
 
-/** Keep an element fully inside every scrollable ancestor's safe area. */
-export function scrollElementIntoSafeArea(el: HTMLElement): void {
+/** Keep an element fully inside every scrollable ancestor's safe area.
+ * When moving upward with the gamepad, prefer the existing bottom safe edge
+ * while the target is already visible. This lets the same scroll correction
+ * naturally unwind to scrollTop=0 and reveal the page content above it.
+ */
+export function scrollElementIntoSafeArea(el: HTMLElement, preferBottom = false): void {
   for (const container of findScrollableAncestors(el)) {
     const style = getComputedStyle(container);
     let visualPerScrollUnit = visualScale(container);
@@ -199,6 +203,8 @@ export function scrollElementIntoSafeArea(el: HTMLElement): void {
 
       if (elementRect.height > availableHeight) {
         visualDelta = elementRect.top - viewportTop;
+      } else if (preferBottom && elementRect.bottom < viewportBottom) {
+        visualDelta = elementRect.bottom - viewportBottom;
       } else if (elementRect.top < viewportTop) {
         visualDelta = elementRect.top - viewportTop;
       } else if (elementRect.bottom > viewportBottom) {
@@ -235,14 +241,14 @@ export function setGamepadFocused(el: HTMLElement | null): void {
 }
 
 /** Programmatic focus entry point for controller navigation and modal restore. */
-export function focusGamepadElement(el: HTMLElement | null): boolean {
+export function focusGamepadElement(el: HTMLElement | null, preferBottom = false): boolean {
   if (!el || !el.isConnected || el.hasAttribute('disabled')) return false;
   if (el.getAttribute('aria-hidden') === 'true' || el.closest('[hidden], [inert], [aria-hidden="true"]')) return false;
   const style = getComputedStyle(el);
   if (style.display === 'none' || style.visibility === 'hidden') return false;
   el.focus({ preventScroll: true });
   getGamepadViewportSafeArea();
-  scrollElementIntoSafeArea(el);
+  scrollElementIntoSafeArea(el, preferBottom);
   setGamepadFocused(el);
   return document.activeElement === el;
 }

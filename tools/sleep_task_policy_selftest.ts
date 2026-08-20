@@ -46,12 +46,13 @@ const markerWriter = section('static bool sgWriteProcessMarker(', 'struct SgSusp
 assert.ok(markerWriter.includes('|generation='),
   'sleep marker must persist power generation');
 
-const resumeSignature =
-  'static SgResumeResult sgResumeSleepTarget(\n    unsigned long long expectedGeneration';
-const resumeDefinition = native.indexOf(
-  resumeSignature,
-  native.indexOf(resumeSignature) + resumeSignature.length,
+// main.cpp may be checked out with either LF or CRLF. Locate the definition
+// by structure rather than a newline-specific literal so this guard remains
+// valid after Git/editor line-ending normalization.
+const resumeDefinitionMatch = native.match(
+  /static SgResumeResult sgResumeSleepTarget\(\s*unsigned long long expectedGeneration,\s*bool focusResumedGame\)\s*\{/,
 );
+const resumeDefinition = resumeDefinitionMatch?.index ?? -1;
 assert.ok(resumeDefinition >= 0, 'missing sgResumeSleepTarget definition');
 const resumeSleepTarget = native.slice(
   resumeDefinition,

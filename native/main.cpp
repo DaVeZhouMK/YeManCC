@@ -872,6 +872,7 @@ static bool g_resumeProbeInFlight = false;
 static bool g_resumeProbeForcedReset = false;
 static void traceLog(const char* fmt, ...);
 static void traceInit();
+static void appendNativeLifecycleLog(const char* event, json detail = json::object());
 
 static const char* powerLifecycleName(PowerLifecycle state) {
     switch (state) {
@@ -1626,7 +1627,6 @@ struct NativeMonitorHw {
     double gpuPowerW = 0.0;
     double gpuClockMhz = 0.0;
     double thermalThrottleMax = 0.0;
-    double thermalThrottleAvgPct = 0.0;
     double virtualMemoryCommittedMb = 0.0;
     double virtualMemoryLoadPct = 0.0;
     bool sharedOk = false;
@@ -1732,15 +1732,13 @@ static bool monitorReadHWiNFO(NativeMonitorHw& out) {
             // HWiNFO exposes the original English label even when the user has
             // renamed the visible sensor. Intel desktop and AMD HTC variants
             // are fused: any matching sensor is sufficient, and duplicate
-            // readings keep the highest historical state/average percentage.
+            // readings keep the highest reported historical state.
             const bool thermalThrottle = low == "core thermal throttling" ||
                 low == "thermal throttling (htc)";
             if (thermalThrottle && unitLow == "yes/no") {
-                if (maximumOk && averageOk && finiteNonNegative(maximum) && finiteNonNegative(average)) {
+                if (maximumOk && finiteNonNegative(maximum)) {
                     out.thermalThrottleFound = true;
                     out.thermalThrottleMax = (std::max)(out.thermalThrottleMax, maximum);
-                    const double averagePct = (std::min)(100.0, average);
-                    out.thermalThrottleAvgPct = (std::max)(out.thermalThrottleAvgPct, averagePct);
                 }
                 continue;
             }
@@ -2644,7 +2642,6 @@ static void nativeMonitorLoop() {
                 {"gpuClockMhz", static_cast<int>(std::round(hw.gpuClockMhz))},
                 {"thermalThrottleFound", hw.thermalThrottleFound},
                 {"thermalThrottleMax", hw.thermalThrottleMax},
-                {"thermalThrottleAvgPct", std::round(hw.thermalThrottleAvgPct * 10.0) / 10.0},
                 {"virtualMemoryCommittedFound", hw.virtualMemoryCommittedFound},
                 {"virtualMemoryCommittedMb", std::round(hw.virtualMemoryCommittedMb * 10.0) / 10.0},
                 {"virtualMemoryLoadFound", hw.virtualMemoryLoadFound},
@@ -6820,8 +6817,12 @@ static void joinStartupResumeThread() {
 static void startStartupResumeThread() {
     joinStartupResumeThread();
     g_startupResumeThread = std::thread([] {
+        appendNativeLifecycleLog("sleep-orphan-recovery-start");
         // PID 记录缺失、失效或恢复数为 0 时，也要尽最大可能解除遗留挂起。
-        sgResumeTrackedAll();
+        const SgResumeResult recovered = sgResumeTrackedAll();
+        appendNativeLifecycleLog("sleep-orphan-recovery-complete", {
+            {"resumed", recovered.count}
+        });
     });
 }
 
@@ -6837,6 +6838,7 @@ static bool sgHasMarkerFiles(const std::wstring& dir) {
 static void sgCleanupBeforeExit() {
     if (g_sgCleanupDone) return;
     g_sgCleanupDone = true;
+    appendNativeLifecycleLog("sleep-exit-cleanup-start");
     // 正常退出必须解除所有由本程序挂起的进程。
     SgSleepTarget currentTarget;
     if (sgReadSleepTarget(currentTarget) && currentTarget.markerOwned)
@@ -6847,6 +6849,9 @@ static void sgCleanupBeforeExit() {
     const bool pending = sgHasMarkerFiles(SG_SLEEP_LEASE_DIR) ||
         sgHasMarkerFiles(SG_MANUAL_DIR);
     if (pending) g_sgCleanupDone = false;
+    appendNativeLifecycleLog("sleep-exit-cleanup-complete", {
+        {"pendingMarkers", pending}, {"resumed", rr.count}
+    });
     g_sgInSuspend = false;
 }
 
@@ -7311,6 +7316,145 @@ static std::wstring app_data_dir() {
     return g_appDataDir;
 }
 
+// T0 sleep-hang repair: this log is intentionally independent of the optional
+// debug trace and of the WebView renderer. It is only an audit trail; failures
+// here must never affect startup, sleep, resume, or shutdown behavior.
+static std::mutex g_nativeLifecycleLogMx;
+static std::string nativeLifecycleTimestamp() {
+    SYSTEMTIME st{};
+    GetLocalTime(&st);
+    char value[40]{};
+    snprintf(value, sizeof(value), "%04u-%02u-%02uT%02u:%02u:%02u.%03u",
+        st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond, st.wMilliseconds);
+    return value;
+}
+static void appendNativeLifecycleLog(const char* event, json detail) {
+    try {
+        if (!detail.is_object()) detail = json::object();
+        detail["time"] = nativeLifecycleTimestamp();
+        detail["event"] = event ? event : "unknown";
+        detail["pid"] = GetCurrentProcessId();
+        detail["hwnd"] = static_cast<uintptr_t>(reinterpret_cast<uintptr_t>(g_hwnd));
+        detail["hwndValid"] = g_hwnd && IsWindow(g_hwnd);
+        detail["powerLifecycle"] = powerLifecycleName(
+            g_powerLifecycle.load(std::memory_order_acquire));
+        detail["powerGeneration"] = g_powerGeneration.load(std::memory_order_acquire);
+        std::lock_guard<std::mutex> lock(g_nativeLifecycleLogMx);
+        std::ofstream out(fspath::path(app_data_dir()) / L"native-lifecycle.log",
+            std::ios::binary | std::ios::app);
+        if (out) {
+            out << detail.dump() << '\n';
+            out.flush();
+        }
+    } catch (...) {}
+}
+
+static std::wstring currentExecutablePath() {
+    std::vector<wchar_t> path(32768);
+    const DWORD length = GetModuleFileNameW(nullptr, path.data(), static_cast<DWORD>(path.size()));
+    if (length == 0 || length >= path.size()) return {};
+    return std::wstring(path.data(), length);
+}
+
+static bool queryFullProcessImagePath(DWORD pid, std::wstring& path) {
+    path.clear();
+    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    if (!process) return false;
+    std::vector<wchar_t> value(32768);
+    DWORD length = static_cast<DWORD>(value.size());
+    const bool ok = QueryFullProcessImageNameW(process, 0, value.data(), &length) != FALSE &&
+        length > 0 && length < value.size();
+    CloseHandle(process);
+    if (!ok) return false;
+    path.assign(value.data(), length);
+    return true;
+}
+
+struct ExistingInstanceWindowContext {
+    DWORD pid = 0;
+    const std::wstring* title = nullptr;
+    HWND hwnd = nullptr;
+};
+static BOOL CALLBACK findExistingInstanceWindowEnum(HWND hwnd, LPARAM param) {
+    auto* context = reinterpret_cast<ExistingInstanceWindowContext*>(param);
+    if (!context || !context->title) return TRUE;
+    DWORD pid = 0;
+    GetWindowThreadProcessId(hwnd, &pid);
+    if (pid != context->pid) return TRUE;
+    wchar_t className[32]{};
+    if (!GetClassNameW(hwnd, className, _countof(className)) || wcscmp(className, L"QQ") != 0)
+        return TRUE;
+    const int textLength = GetWindowTextLengthW(hwnd);
+    if (textLength < 0) return TRUE;
+    std::wstring text(static_cast<size_t>(textLength) + 1, L'\0');
+    GetWindowTextW(hwnd, text.data(), static_cast<int>(text.size()));
+    text.resize(wcslen(text.c_str()));
+    if (text != *context->title) return TRUE;
+    context->hwnd = hwnd;
+    return FALSE;
+}
+static HWND findExistingInstanceWindowForPid(DWORD pid, const std::wstring& title) {
+    ExistingInstanceWindowContext context{pid, &title, nullptr};
+    EnumWindows(findExistingInstanceWindowEnum, reinterpret_cast<LPARAM>(&context));
+    return context.hwnd;
+}
+
+static std::vector<DWORD> findWindowlessSameImageInstances(
+    const std::wstring& currentImage, const std::wstring& title) {
+    std::vector<DWORD> candidates;
+    DWORD currentSession = 0;
+    if (currentImage.empty() || !ProcessIdToSessionId(GetCurrentProcessId(), &currentSession))
+        return candidates;
+    HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snapshot == INVALID_HANDLE_VALUE) return candidates;
+    PROCESSENTRY32W entry{sizeof(entry)};
+    if (Process32FirstW(snapshot, &entry)) {
+        do {
+            const DWORD pid = entry.th32ProcessID;
+            if (!pid || pid == GetCurrentProcessId()) continue;
+            DWORD session = 0;
+            if (!ProcessIdToSessionId(pid, &session) || session != currentSession) continue;
+            std::wstring image;
+            if (!queryFullProcessImagePath(pid, image) ||
+                _wcsicmp(image.c_str(), currentImage.c_str()) != 0) continue;
+            if (findExistingInstanceWindowForPid(pid, title)) continue;
+            candidates.push_back(pid);
+        } while (Process32NextW(snapshot, &entry));
+    }
+    CloseHandle(snapshot);
+    return candidates;
+}
+
+static bool waitForExistingInstanceWindow(const std::wstring& title, DWORD timeoutMs, HWND& existing) {
+    existing = nullptr;
+    const ULONGLONG deadline = GetTickCount64() + timeoutMs;
+    do {
+        existing = FindWindowW(L"QQ", title.c_str());
+        if (existing && IsWindow(existing)) return true;
+        Sleep(100);
+    } while (GetTickCount64() < deadline);
+    existing = FindWindowW(L"QQ", title.c_str());
+    return existing && IsWindow(existing);
+}
+
+static bool terminateConfirmedWindowlessInstance(
+    DWORD pid, const std::wstring& currentImage, const std::wstring& title, DWORD timeoutMs) {
+    DWORD currentSession = 0;
+    DWORD candidateSession = 0;
+    std::wstring candidateImage;
+    if (!pid || !ProcessIdToSessionId(GetCurrentProcessId(), &currentSession) ||
+        !ProcessIdToSessionId(pid, &candidateSession) || candidateSession != currentSession ||
+        !queryFullProcessImagePath(pid, candidateImage) ||
+        _wcsicmp(candidateImage.c_str(), currentImage.c_str()) != 0 ||
+        findExistingInstanceWindowForPid(pid, title)) return false;
+    HANDLE process = OpenProcess(PROCESS_TERMINATE | SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION,
+        FALSE, pid);
+    if (!process) return false;
+    const bool requested = TerminateProcess(process, 0) != FALSE;
+    const bool stopped = requested && WaitForSingleObject(process, timeoutMs) == WAIT_OBJECT_0;
+    CloseHandle(process);
+    return stopped;
+}
 static std::wstring readEnvironmentString(const wchar_t* name) {
     DWORD required = GetEnvironmentVariableW(name, nullptr, 0);
     if (required == 0) return {};
@@ -13212,6 +13356,12 @@ static void reg_multiwindow() {
 // ================================================================
 
 static void reg_extras() {
+    // 触摸屏/鼠标聚焦进程名输入框时，使用可见路径启动 Windows TabTip。
+    ipc_on("keyboard.open", [](const json&) -> json {
+        openTouchKeyboard();
+        return true;
+    });
+
     // System theme detection
     ipc_on("os.isDarkMode", [](const json&) -> json {
         return systemUsesDarkMode();
@@ -14996,6 +15146,9 @@ static void recoverWebViewProcess(const WebViewFailureInfo& info) {
     }
 
     if (info.kind == COREWEBVIEW2_PROCESS_FAILED_KIND_BROWSER_PROCESS_EXITED) {
+        appendNativeLifecycleLog("webview-browser-process-failed", {
+            {"attempt", attempt}, {"exitCode", info.exitCode}
+        });
         if (attempt > 2) {
             appendWebViewDiagnostic({{"event", "recovery-exhausted"}, {"kind", kind}, {"attempt", attempt}});
             beginAsyncExit(g_hwnd, 1);
@@ -15048,6 +15201,9 @@ static void completeWebViewRecovery() {
         {"action", g_webviewRecoveryAction},
         {"generation", g_webviewGeneration.load(std::memory_order_acquire)}
     });
+    appendNativeLifecycleLog("webview-recovery-complete", {
+        {"generation", g_webviewGeneration.load(std::memory_order_acquire)}
+    });
     g_webviewRecoveryInProgress = false;
     g_webviewRecoveryAction.clear();
     if (powerResumeRecovery)
@@ -15055,6 +15211,9 @@ static void completeWebViewRecovery() {
 }
 
 static void handlePowerResumeNotification(SgWork work, const char* reason) {
+    appendNativeLifecycleLog("power-resume-notification", {
+        {"reason", reason ? reason : "unknown"}, {"work", static_cast<int>(work)}
+    });
     const ULONGLONG now = GetTickCount64();
     g_sgSleepQueryGateClosed = false;
     g_sgSleepQueryOwnsGeneration = false;
@@ -15906,6 +16065,7 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         beginAsyncExit(h, 0);
         return 0;
     case WM_DESTROY:
+        appendNativeLifecycleLog("window-destroy", {{"exitRequested", g_exitRequested.load()}});
         if (g_exitRequested.load()) {
             g_summonQuit = true;
             PostQuitMessage((int)g_exitCode.load(std::memory_order_relaxed));
@@ -16689,17 +16849,29 @@ int WINAPI wWinMain(HINSTANCE hi, HINSTANCE, LPWSTR, int ns) {
     auto winCfg    = g_cfg.value("window", json::object());
     auto title     = U2W(winCfg.value("title", std::string{"\xe5\xbc\xba\xe5\xbc\xba"}));
 
-    // Single instance lock
+    // T0 sleep-hang repair: normal single-instance behavior remains unchanged,
+    // but a stale YeManCC process with no main window must not silently block
+    // every later launch forever. We wait briefly for a just-starting instance
+    // to create its window, then require explicit user confirmation before
+    // ending only same-session, same-image, still-windowless candidates.
     bool singleInstance = winCfg.value("singleInstance", true);
     HANDLE hMutex = nullptr;
     if (singleInstance) {
-        auto mutexName = U2W("QQ_" + winCfg.value("title", std::string{"app"}));
+        const auto mutexName = U2W("QQ_" + winCfg.value("title", std::string{"app"}));
         hMutex = CreateMutexW(nullptr, FALSE, mutexName.c_str());
-        if (GetLastError() == ERROR_ALREADY_EXISTS) {
-            HWND existing = FindWindowW(L"QQ", title.c_str());
-            if (existing) {
+        if (!hMutex) {
+            appendNativeLifecycleLog("single-instance-mutex-create-failed", {
+                {"error", GetLastError()}
+            });
+        } else if (GetLastError() == ERROR_ALREADY_EXISTS) {
+            appendNativeLifecycleLog("single-instance-mutex-existing");
+            HWND existing = nullptr;
+            if (waitForExistingInstanceWindow(title, 1500, existing)) {
                 DWORD existingPid = 0;
                 GetWindowThreadProcessId(existing, &existingPid);
+                appendNativeLifecycleLog("single-instance-existing-window", {
+                    {"existingPid", existingPid}
+                });
                 if (existingPid) AllowSetForegroundWindow(existingPid);
                 if (!g_showExistingInstanceMsg ||
                     !PostMessageW(existing, g_showExistingInstanceMsg, 0, 0)) {
@@ -16707,13 +16879,82 @@ int WINAPI wWinMain(HINSTANCE hi, HINSTANCE, LPWSTR, int ns) {
                     ShowWindow(existing, IsIconic(existing) ? SW_RESTORE : SW_SHOW);
                     SetForegroundWindow(existing);
                 }
+                CloseHandle(hMutex);
+                shutdownSplashGraphics();
+                CoUninitialize();
+                return 0;
             }
-            if (hMutex) CloseHandle(hMutex);
-            shutdownSplashGraphics();
-            CoUninitialize();
-            return 0;
+
+            const auto currentImage = currentExecutablePath();
+            const auto candidates = findWindowlessSameImageInstances(currentImage, title);
+            appendNativeLifecycleLog("single-instance-windowless-candidates", {
+                {"count", candidates.size()}
+            });
+            bool recovered = false;
+            if (candidates.size() == 1) {
+                const DWORD candidatePid = candidates.front();
+                const int answer = MessageBoxW(
+                    nullptr,
+                    L"检测到一个 YeManCC 残留进程：它仍占用单实例锁，但未找到主窗口。\n\n"
+                    L"是否结束该残留进程并重新启动 YeManCC？\n\n"
+                    L"仅会处理当前用户会话中、路径与本程序完全一致且仍无主窗口的一个进程。",
+                    L"YeManCC — T0 睡眠卡死恢复",
+                    MB_ICONWARNING | MB_YESNO | MB_DEFBUTTON2);
+                if (answer == IDYES) {
+                    const bool stopped = terminateConfirmedWindowlessInstance(
+                        candidatePid, currentImage, title, 3000);
+                    appendNativeLifecycleLog(stopped
+                        ? "single-instance-windowless-terminated"
+                        : "single-instance-windowless-terminate-failed", {
+                        {"existingPid", candidatePid}
+                    });
+                    if (stopped) {
+                        CloseHandle(hMutex);
+                        hMutex = nullptr;
+                        const ULONGLONG deadline = GetTickCount64() + 3000;
+                        do {
+                            hMutex = CreateMutexW(nullptr, FALSE, mutexName.c_str());
+                            if (hMutex && GetLastError() != ERROR_ALREADY_EXISTS) {
+                                recovered = true;
+                                break;
+                            }
+                            if (hMutex) {
+                                CloseHandle(hMutex);
+                                hMutex = nullptr;
+                            }
+                            Sleep(100);
+                        } while (GetTickCount64() < deadline);
+                        appendNativeLifecycleLog(recovered
+                            ? "single-instance-windowless-takeover-succeeded"
+                            : "single-instance-windowless-takeover-failed", {
+                            {"existingPid", candidatePid}, {"stopped", stopped}
+                        });
+                    }
+                } else {
+                    appendNativeLifecycleLog("single-instance-windowless-takeover-declined", {
+                        {"existingPid", candidatePid}
+                    });
+                }
+            } else if (candidates.size() > 1) {
+                appendNativeLifecycleLog("single-instance-windowless-ambiguous", {
+                    {"count", candidates.size()}
+                });
+                MessageBoxW(
+                    nullptr,
+                    L"检测到多个无主窗口的同路径 YeManCC 进程。为避免错误结束进程，本次不会自动处理。\n\n"
+                    L"请在任务管理器中确认后结束残留 YeManCC 进程，再重新启动。",
+                    L"YeManCC — T0 睡眠卡死恢复",
+                    MB_ICONWARNING | MB_OK);
+            }
+            if (!recovered) {
+                if (hMutex) CloseHandle(hMutex);
+                shutdownSplashGraphics();
+                CoUninitialize();
+                return 0;
+            }
         }
     }
+    appendNativeLifecycleLog("boot-single-instance-acquired");
     // Recoverable runtime markers can outlive a forced process termination.
     // Clear them after acquiring the single-instance lock so the frontend
     // cannot treat stale monitor/float files as a live session.
@@ -16792,6 +17033,7 @@ int WINAPI wWinMain(HINSTANCE hi, HINSTANCE, LPWSTR, int ns) {
         CW_USEDEFAULT, CW_USEDEFAULT, windowWidth, windowHeight,
         nullptr, nullptr, hi, nullptr);
     traceLog("BOOT window-created ok=%d", g_hwnd != nullptr ? 1 : 0);
+    appendNativeLifecycleLog("window-created", {{"created", g_hwnd != nullptr}});
     if (g_hwnd) {
         if (g_appIconLarge) SendMessageW(g_hwnd, WM_SETICON, ICON_BIG, (LPARAM)g_appIconLarge);
         if (g_appIconSmall) SendMessageW(g_hwnd, WM_SETICON, ICON_SMALL, (LPARAM)g_appIconSmall);

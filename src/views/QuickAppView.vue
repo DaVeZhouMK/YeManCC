@@ -25,6 +25,7 @@ import {
   closeGame,
   waitForProcessExit,
 } from '@/bridge/gameproc';
+import { tryAcquireQuickAction } from '@/bridge/quickActionLock';
 import { fs, shell, dialog, display, registry, type DisplayMode, type DisplayTopology } from '@/bridge/api';
 import { readSettingsSection, saveSettingsSection } from '@/bridge/settingsRepository';
 import {
@@ -386,6 +387,8 @@ async function onSpeedApply(factor: number) {
     errMsg.value = '请先刷新识别当前游戏，再加速。';
     return;
   }
+  const release = tryAcquireQuickAction('quickapp-speed');
+  if (!release) { errMsg.value = '已有其它快捷操作正在执行，请稍候。'; return; }
   speedBusy.value = true;
   try {
     const target = game.value;
@@ -416,6 +419,7 @@ async function onSpeedApply(factor: number) {
     statusMsg.value = '变速执行异常，未继续改变速度；当前按 1× 处理';
   } finally {
     speedBusy.value = false;
+    release();
   }
 }
 
@@ -431,6 +435,8 @@ async function onSpeedOff() {
     statusMsg.value = 'Minecraft 未执行变速，保持 1×';
     return;
   }
+  const release = tryAcquireQuickAction('quickapp-speed-reset');
+  if (!release) { errMsg.value = '已有其它快捷操作正在执行，请稍候。'; return; }
   speedBusy.value = true;
   try {
     const r = await clearGameSpeed(game.value.pid, 'user-reset');
@@ -447,15 +453,19 @@ async function onSpeedOff() {
     errMsg.value = '关闭变速失败：' + (e as Error).message;
   } finally {
     speedBusy.value = false;
+    release();
   }
 }
 
 
 async function onLaunchLs() {
+  const release = tryAcquireQuickAction('quickapp-lossless');
+  if (!release) { errMsg.value = '已有其它快捷操作正在执行，请稍候。'; return; }
   errMsg.value = '';
   statusMsg.value = '';
   if (!game.value) {
     errMsg.value = '请先刷新识别当前游戏，再一键插帧。';
+    release();
     return;
   }
   busy.value = true;
@@ -469,6 +479,7 @@ async function onLaunchLs() {
     errMsg.value = '插帧失败：' + (e as Error).message;
   } finally {
     busy.value = false;
+    release();
   }
 }
 
@@ -477,6 +488,8 @@ async function onLaunchLs() {
 // 不重新识别游戏，避免把新启动的进程误当成刚才的目标。
 async function onOptiScalerCurrent() {
   if (busy.value) return;
+  const release = tryAcquireQuickAction('quickapp-fsr');
+  if (!release) { errMsg.value = '已有其它快捷操作正在执行，请稍候。'; return; }
   errMsg.value = '';
   statusMsg.value = '';
   // 从强制识别开始就锁定按钮，避免双击并发启动两条安装/卸载事务。
@@ -504,6 +517,7 @@ async function onOptiScalerCurrent() {
     if (!chooseManual) {
       statusMsg.value = '已取消 FSR4.1 操作。';
       busy.value = false;
+      release();
       focusFsrTrigger();
       return;
     }
@@ -516,6 +530,7 @@ async function onOptiScalerCurrent() {
     if (!picked) {
       if (!errMsg.value) statusMsg.value = '已取消 FSR4.1 操作。';
       busy.value = false;
+      release();
       focusFsrTrigger();
       return;
     }
@@ -524,6 +539,7 @@ async function onOptiScalerCurrent() {
     if (!gamePath || !/\.exe$/i.test(gamePath)) {
       errMsg.value = '请选择 exe 可执行程序。';
       busy.value = false;
+      release();
       focusFsrTrigger();
       return;
     }
@@ -617,6 +633,7 @@ async function onOptiScalerCurrent() {
     await showFsrMessage('FSR4.1 操作失败', errMsg.value, 'error').catch(() => {});
   } finally {
     busy.value = false;
+    release();
     void refreshGameStatus();
     focusFsrTrigger();
   }

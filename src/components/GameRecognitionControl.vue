@@ -1,16 +1,17 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import AppIcon from '@/components/AppIcon.vue';
-import { dialog } from '@/bridge/api';
+import GameQuickActions from '@/components/GameQuickActions.vue';
 import {
   refreshGameStatus,
+  refreshGameStatusStrict,
   subscribeGameStatus,
   detectedGameName,
   type DetectedGame,
 } from '@/bridge/gamedetect';
 import { on as onIpc } from '@/bridge/ipc';
-import { gameRuleNameFromPath, getGameRules, setGameRuleList, type GameRulesSnapshot } from '@/bridge/gameRules';
 import { focusGamepadElement } from '@/gamepad/focus';
+import { getLockedGameTarget, isGameTargetSame, unlockGameTarget } from '@/bridge/gameQuickSession';
 
 type SummonCandidate = {
   valid?: boolean;
@@ -30,14 +31,9 @@ type SummonRegistrationResult = SummonCandidate & {
 const game = ref<DetectedGame | null>(null);
 const summonCandidate = ref<SummonCandidate | null>(null);
 const gameIdentifying = ref(false);
-const showUnrecognizedPrompt = ref(false);
-const gameRuleMenu = ref<'root' | 'edit' | 'whitelist' | 'manual' | null>(null);
+const gameRuleMenu = ref<'quick' | null>(null);
 const gameRuleTriggerEl = ref<HTMLElement | null>(null);
 const gameRulePanelEl = ref<HTMLElement | null>(null);
-const gameRules = ref<GameRulesSnapshot>({ blacklist: [], whitelist: [] });
-const gameRulesBusy = ref(false);
-const gameRuleDraft = ref('');
-const manualGameDraft = ref('');
 const statusMsg = ref('');
 const errMsg = ref('');
 
@@ -48,6 +44,7 @@ let summonIdentifySequence = 0;
 let activeSummonPid = 0;
 let activeSummonGeneration = 0;
 let blockedSummonPid = 0;
+let refreshAfterIdentification = false;
 
 function displayProcessName(value: string): string {
   return value.trim().replace(/\.exe$/i, '').trim();
@@ -55,36 +52,35 @@ function displayProcessName(value: string): string {
 
 const gameDisplayName = computed(() => {
   if (gameIdentifying.value) return '识别中…';
-  if (showUnrecognizedPrompt.value) {
-    return summonCandidate.value?.name
-      ? displayProcessName(summonCandidate.value.name)
-      : '未识别游戏';
-  }
   const current = game.value;
   if (!current) return '未识别游戏';
   return detectedGameName(current) || displayProcessName(current.name || '') || '未识别游戏';
 });
 
-const recognitionTitle = computed(() => {
-  if (gameIdentifying.value) return '正在识别当前游戏';
-  if (showUnrecognizedPrompt.value) return '点击识别游戏或按 Y 编辑名单';
-  return game.value ? `当前游戏：${gameDisplayName.value}，按 Y 编辑名单` : '未识别游戏，点击识别游戏';
-});
+const recognitionTitle = computed(() => game.value
+  ? `当前游戏：${gameDisplayName.value}，按 Y 编辑`
+  : '未识别游戏，按 Y 编辑');
 
-const gameButtonStatus = computed(() => {
-  if (gameIdentifying.value) return '识别中…';
-  if (game.value) return `${gameDisplayName.value} · 已识别`;
-  return summonCandidate.value?.name
-    ? `${displayProcessName(summonCandidate.value.name)} · 未识别`
-    : '未识别游戏 · 点击识别游戏';
-});
-
-const ruleTarget = computed(() => game.value || summonCandidate.value);
+const gameButtonStatus = computed(() => gameIdentifying.value
+  ? '识别中…'
+  : game.value
+    ? `${gameDisplayName.value} · 已识别`
+    : '未识别游戏');
 
 function syncGame(next: DetectedGame | null, preserveRuleMenu = false): void {
+  const locked = getLockedGameTarget();
+  // A locked top-menu target owns the quick-action session. Background polls
+  // must not replace it with a newly detected foreground game.
+  if (locked && !next) {
+    // A real disappearance is authoritative: do not leave the top menu bound
+    // to a dead PID while background polling continues.
+    unlockGameTarget();
+    window.dispatchEvent(new CustomEvent('game-quick-target-lost'));
+  } else if (locked && !isGameTargetSame(locked, next)) {
+    return;
+  }
   game.value = next;
   if (gameIdentifying.value) return;
-  showUnrecognizedPrompt.value = !next;
   if (next) {
     summonCandidate.value = null;
     if (!preserveRuleMenu) gameRuleMenu.value = null;
@@ -98,133 +94,52 @@ function focusGameRulePanel(): void {
   });
 }
 
-async function loadGameRules(): Promise<void> {
-  try {
-    gameRules.value = await getGameRules();
-  } catch {
-    // Keep the last successful snapshot visible if IPC is temporarily unavailable.
-  }
-}
-
-function openGameRuleRoot(): void {
-  if (gameIdentifying.value) return;
-  statusMsg.value = '';
-  errMsg.value = '';
-  gameRuleMenu.value = 'root';
-  void loadGameRules();
-}
-
-function closeGameRuleMenus(): void {
-  gameRuleMenu.value = null;
-  gameRuleDraft.value = '';
-  manualGameDraft.value = '';
-  const trigger = gameRuleTriggerEl.value;
-  nextTick(() => focusGamepadElement(trigger));
-}
-
 async function refreshGameRecognition(): Promise<void> {
-  if (gameIdentifying.value) return;
+  if (gameIdentifying.value) {
+    refreshAfterIdentification = true;
+    return;
+  }
   statusMsg.value = '';
   errMsg.value = '';
   gameIdentifying.value = true;
   try {
-    const detected = await refreshGameStatus();
+    const detected = await refreshGameStatusStrict();
     gameIdentifying.value = false;
     // Refresh is an action inside the root rule menu. Keep that menu open so
     // Y does not look like a back/close operation after the result arrives.
     syncGame(detected, true);
+    // A Y request during recognition must finish in the same menu action:
+    // recognized game -> quick actions; no game -> recognition root.
+    gameRuleMenu.value = 'quick';
+    refreshAfterIdentification = false;
     statusMsg.value = detected ? '已刷新游戏识别' : '刷新完成，当前未识别游戏';
   } catch (e) {
     gameIdentifying.value = false;
+    refreshAfterIdentification = false;
     errMsg.value = '刷新游戏识别失败：' + (e as Error).message;
   }
-}
-
-function displayRuleName(value: string): string {
-  return value.includes('*') ? value : `${value}.exe`;
 }
 
 watch(gameRuleMenu, (menu) => {
   if (menu) focusGameRulePanel();
 });
 
-async function addTargetToBlacklist(): Promise<void> {
-  const target = ruleTarget.value;
-  if (!target?.name || gameRulesBusy.value) return;
-  const ruleName = gameRuleNameFromPath(target.name);
-  if (!ruleName) return;
-  gameRulesBusy.value = true;
-  try {
-    gameRules.value = await setGameRuleList('blacklist', [...gameRules.value.blacklist, ruleName]);
-    summonCandidate.value = null;
-    closeGameRuleMenus();
-    statusMsg.value = `已排除 ${displayProcessName(target.name)}`;
-    await refreshGameStatus();
-  } catch (e) {
-    errMsg.value = '保存黑名单失败：' + (e as Error).message;
-  } finally {
-    gameRulesBusy.value = false;
-  }
+function openGameRuleRoot(): void {
+  statusMsg.value = '';
+  errMsg.value = '';
+  // There is exactly one top-level game menu. It is valid before, during and
+  // after recognition; Y refreshes the same menu instead of switching roots.
+  gameRuleMenu.value = 'quick';
 }
 
-async function saveGameRuleDraft(kind: 'blacklist' | 'whitelist'): Promise<void> {
-  if (gameRulesBusy.value) return;
-  const value = gameRuleDraft.value.trim();
-  if (!value) return;
-  gameRulesBusy.value = true;
-  try {
-    const rule = gameRuleNameFromPath(value);
-    const next = gameRules.value[kind].includes(rule)
-      ? gameRules.value[kind]
-      : [...gameRules.value[kind], rule];
-    gameRules.value = await setGameRuleList(kind, next);
-    gameRuleDraft.value = '';
-    statusMsg.value = `${kind === 'blacklist' ? '黑名单' : '白名单'}已更新`;
-  } catch (e) {
-    errMsg.value = (e as Error).message;
-  } finally {
-    gameRulesBusy.value = false;
-  }
+function closeQuickMenu(): void {
+  gameRuleMenu.value = null;
+  nextTick(() => focusGamepadElement(gameRuleTriggerEl.value));
 }
 
-async function removeGameRule(kind: 'blacklist' | 'whitelist', value: string): Promise<void> {
-  if (gameRulesBusy.value) return;
-  gameRulesBusy.value = true;
-  try {
-    gameRules.value = await setGameRuleList(kind, gameRules.value[kind].filter((item) => item !== value));
-  } catch (e) {
-    errMsg.value = (e as Error).message;
-  } finally {
-    gameRulesBusy.value = false;
-  }
-}
-
-async function addManualGameRule(): Promise<void> {
-  if (gameRulesBusy.value) return;
-  const value = manualGameDraft.value.trim();
-  if (!value) return;
-  gameRulesBusy.value = true;
-  try {
-    const rule = gameRuleNameFromPath(value);
-    const next = gameRules.value.whitelist.includes(rule)
-      ? gameRules.value.whitelist
-      : [...gameRules.value.whitelist, rule];
-    gameRules.value = await setGameRuleList('whitelist', next);
-    manualGameDraft.value = '';
-    statusMsg.value = '已添加游戏白名单';
-  } catch (e) {
-    errMsg.value = (e as Error).message;
-  } finally {
-    gameRulesBusy.value = false;
-  }
-}
-
-async function chooseManualGameExe(): Promise<void> {
-  const picked = await dialog.openFile([{ name: '可执行程序', extensions: ['exe'] }]);
-  if (picked) {
-    manualGameDraft.value = picked;
-    await addManualGameRule();
-  }
+function closeGameRuleMenus(): void {
+  gameRuleMenu.value = null;
+  nextTick(() => focusGamepadElement(gameRuleTriggerEl.value));
 }
 
 function beginSummonIdentification(detail: SummonCandidate): void {
@@ -244,7 +159,6 @@ function beginSummonIdentification(detail: SummonCandidate): void {
   // passed the blacklist check yet. Do not expose its process name in the
   // status bar; the async registration result below is authoritative.
   summonCandidate.value = null;
-  showUnrecognizedPrompt.value = false;
   gameIdentifying.value = true;
   gameRuleMenu.value = null;
   statusMsg.value = '';
@@ -257,15 +171,25 @@ function beginSummonIdentification(detail: SummonCandidate): void {
     if (sequence !== summonIdentifySequence) return;
     if (blocked) {
       syncGame(null);
-      showUnrecognizedPrompt.value = true;
+          if (refreshAfterIdentification) {
+        gameRuleMenu.value = 'quick';
+        refreshAfterIdentification = false;
+      }
       return;
     }
     if (detected) {
       // The status subscriber intentionally ignores background polls while the
       // two-second summon state is visible. Apply the authoritative result now.
       syncGame(detected);
+      if (refreshAfterIdentification) {
+        gameRuleMenu.value = 'quick';
+        refreshAfterIdentification = false;
+      }
     } else {
-      showUnrecognizedPrompt.value = true;
+      if (refreshAfterIdentification) {
+        gameRuleMenu.value = 'quick';
+        refreshAfterIdentification = false;
+      }
     }
   }, 2000);
 }
@@ -285,7 +209,6 @@ function onSummonRegistrationResult(raw: SummonRegistrationResult): void {
   }
   blockedSummonPid = 0;
   summonCandidate.value = raw;
-  if (!gameIdentifying.value && !game.value) showUnrecognizedPrompt.value = true;
 }
 
 function cancelSummonIdentification(): void {
@@ -296,7 +219,6 @@ function cancelSummonIdentification(): void {
   activeSummonGeneration = 0;
   blockedSummonPid = 0;
   gameIdentifying.value = false;
-  if (!game.value) showUnrecognizedPrompt.value = true;
 }
 
 function onGamepadSummon(e: Event): void {
@@ -304,18 +226,41 @@ function onGamepadSummon(e: Event): void {
 }
 
 function onGamepadBack(e: Event): void {
+  if (document.querySelector('[data-gp-game-quick-dialog]')) {
+    e.preventDefault();
+    return;
+  }
+  if (document.querySelector('[data-gp-custom-body]')) {
+    e.preventDefault();
+    window.dispatchEvent(new CustomEvent('game-quick-custom-back'));
+    return;
+  }
+  if (document.querySelector('[data-gp-game-rules]')) {
+    e.preventDefault();
+    window.dispatchEvent(new CustomEvent('game-quick-rules-back'));
+    return;
+  }
   if (!gameRuleMenu.value) return;
   e.preventDefault();
   closeGameRuleMenus();
 }
 
 function onGamepadEdit(e: Event): void {
-  if (gameIdentifying.value) return;
+  if (document.querySelector('[data-gp-game-quick-dialog]')) {
+    e.preventDefault();
+    return;
+  }
+  if (gameIdentifying.value) {
+    e.preventDefault();
+    refreshAfterIdentification = true;
+    gameRuleMenu.value = 'quick';
+    return;
+  }
   e.preventDefault();
   if (!gameRuleMenu.value) {
     openGameRuleRoot();
-  } else if (gameRuleMenu.value === 'root') {
-    void refreshGameRecognition();
+  } else if (gameRuleMenu.value === 'quick') {
+    window.dispatchEvent(new CustomEvent('game-quick-refresh'));
   }
 }
 
@@ -345,87 +290,27 @@ onUnmounted(() => {
       ref="gameRuleTriggerEl"
       type="button"
       class="game-recognition-status"
-      :class="{ identifying: gameIdentifying, unrecognized: showUnrecognizedPrompt, recognized: !!game && !gameIdentifying && !showUnrecognizedPrompt }"
-      :disabled="gameIdentifying"
+      :class="{ identifying: gameIdentifying, unrecognized: !game, recognized: !!game && !gameIdentifying }"
+      :disabled="false"
       data-gp-group="game-recognition"
       data-gp-global-y
       :title="recognitionTitle"
       @click="openGameRuleRoot"
     >
-      <AppIcon :name="gameIdentifying ? 'search' : showUnrecognizedPrompt ? 'warning' : 'gamepad'" />
+      <AppIcon :name="gameIdentifying ? 'search' : 'gamepad'" />
       <span class="game-recognition-label">{{ gameButtonStatus }}</span>
-      <small v-if="!gameIdentifying" class="game-recognition-hint">按<strong class="game-action-key game-action-key-y">Y</strong>编辑</small>
+      <small class="game-recognition-hint">按<strong class="game-action-key game-action-key-y">Y</strong>编辑</small>
     </button>
 
     <div v-if="gameRuleMenu" ref="gameRulePanelEl" class="game-recognition-popover" data-gp-modal>
-      <div v-if="gameRuleMenu === 'root'" class="game-rule-panel">
-        <div class="game-rule-panel-title"><AppIcon :name="game ? 'gamepad' : 'warning'" />{{ game ? '已识别游戏' : '未识别游戏' }}</div>
-        <div class="game-rule-panel-sub">
-          {{ ruleTarget?.name ? displayProcessName(ruleTarget.name) : '没有可用的游戏进程' }}
-          <template v-if="ruleTarget?.pid"> · PID {{ ruleTarget.pid }}</template>
-        </div>
-        <div class="game-rule-actions game-rule-root-actions" data-gp-group="game-recognition-root">
-          <button type="button" class="danger" :disabled="!ruleTarget?.name || gameRulesBusy" @click="addTargetToBlacklist">
-            <strong class="game-action-key game-action-key-x">X</strong>排除此游戏到黑名单
-          </button>
-          <button type="button" :disabled="gameRulesBusy" @click="gameRuleMenu = 'edit'; void loadGameRules()">
-            <AppIcon name="list" />编辑名单
-          </button>
-          <button type="button" :disabled="gameRulesBusy || gameIdentifying" @click="refreshGameRecognition">
-            按<strong class="game-action-key game-action-key-y">Y</strong> 刷新
-          </button>
-          <button type="button" class="editor-cancel" @click="closeGameRuleMenus">
-            按<strong class="game-action-key game-action-key-b">B</strong>取消
-          </button>
-        </div>
-      </div>
-
-      <div v-else class="game-rule-panel game-rule-editor">
-        <div class="game-rule-panel-title"><AppIcon name="list" />编辑名单</div>
-        <div class="game-rule-actions game-rule-tabs" data-gp-group="game-recognition-edit">
-          <button type="button" :class="{ active: gameRuleMenu === 'edit' }" @click="gameRuleMenu = 'edit'">黑名单</button>
-          <button type="button" :class="{ active: gameRuleMenu === 'whitelist' }" @click="gameRuleMenu = 'whitelist'">白名单</button>
-          <button type="button" :class="{ active: gameRuleMenu === 'manual' }" @click="gameRuleMenu = 'manual'">手动添加</button>
-          <button type="button" class="editor-cancel" @click="closeGameRuleMenus">按<strong class="game-action-key game-action-key-b">B</strong>取消</button>
-        </div>
-
-        <div v-if="gameRuleMenu === 'edit'" class="game-rule-list-block">
-          <div class="game-rule-list-title">用户黑名单</div>
-          <div v-if="gameRules.blacklist.length" class="game-rule-list">
-            <div v-for="item in gameRules.blacklist" :key="`b-${item}`" class="game-rule-item">
-              <span>{{ displayRuleName(item) }}</span>
-              <button type="button" aria-label="移除黑名单规则" :disabled="gameRulesBusy" @click="removeGameRule('blacklist', item)"><AppIcon name="trash" /></button>
-            </div>
-          </div>
-          <div v-else class="game-rule-empty">暂无用户添加的黑名单规则</div>
-          <div class="game-rule-add-row">
-            <input v-model="gameRuleDraft" type="text" placeholder="输入 exe 名称或规则" @keyup.enter="saveGameRuleDraft('blacklist')" />
-            <button type="button" :disabled="gameRulesBusy || !gameRuleDraft.trim()" @click="saveGameRuleDraft('blacklist')"><AppIcon name="plus" />添加</button>
-          </div>
-        </div>
-
-        <div v-else-if="gameRuleMenu === 'whitelist'" class="game-rule-list-block">
-          <div class="game-rule-list-title">白名单</div>
-          <div v-if="gameRules.whitelist.length" class="game-rule-list">
-            <div v-for="item in gameRules.whitelist" :key="`w-${item}`" class="game-rule-item">
-              <span>{{ displayRuleName(item) }}</span>
-              <button type="button" aria-label="移除白名单规则" :disabled="gameRulesBusy" @click="removeGameRule('whitelist', item)"><AppIcon name="trash" /></button>
-            </div>
-          </div>
-          <div class="game-rule-add-row">
-            <input v-model="gameRuleDraft" type="text" placeholder="输入 exe 名称或规则" @keyup.enter="saveGameRuleDraft('whitelist')" />
-            <button type="button" :disabled="gameRulesBusy || !gameRuleDraft.trim()" @click="saveGameRuleDraft('whitelist')"><AppIcon name="plus" />添加</button>
-          </div>
-        </div>
-
-        <div v-else class="game-rule-list-block">
-          <div class="game-rule-list-title">手动添加指定 exe</div>
-          <div class="game-rule-add-row">
-            <input v-model="manualGameDraft" type="text" placeholder="输入 exe 名称或完整路径" @keyup.enter="addManualGameRule" />
-            <button type="button" :disabled="gameRulesBusy || !manualGameDraft.trim()" @click="addManualGameRule"><AppIcon name="plus" />添加</button>
-            <button type="button" :disabled="gameRulesBusy" aria-label="选择 exe 文件" @click="chooseManualGameExe"><AppIcon name="folder" /></button>
-          </div>
-        </div>
+      <div v-if="gameRuleMenu === 'quick'" class="game-rule-panel game-quick-panel">
+        <GameQuickActions
+          :game="game"
+          :open="gameRuleMenu === 'quick'"
+          @game-updated="(next) => syncGame(next, true)"
+          @status="({ message, error }) => { statusMsg = message || ''; errMsg = error || ''; }"
+          @close-request="closeQuickMenu"
+        />
       </div>
 
       <div v-if="statusMsg || errMsg" class="game-recognition-message" :class="{ error: !!errMsg }">
@@ -482,9 +367,6 @@ onUnmounted(() => {
 .game-recognition-status :deep(svg) { width: 15px; height: 15px; flex: 0 0 auto; }
 .game-recognition-status.recognized { color: var(--text); }
 .game-recognition-status.recognized :deep(svg) { color: var(--accent); }
-.game-recognition-status.unrecognized { color: #f5b942; border-color: color-mix(in srgb, #f5b942 42%, transparent); }
-.game-recognition-status.unrecognized :deep(svg) { color: #f5b942; }
-.game-recognition-status.identifying { color: var(--accent); cursor: wait; }
 .game-recognition-status:disabled { opacity: 1; }
 .game-recognition-status:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 

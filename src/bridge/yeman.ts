@@ -1787,11 +1787,21 @@ export function setRtssLimit(fps: number): Promise<void> {
   // NaN/Infinity 防护：非法输入写入 0（不锁帧），绝不写坏 RTSS 配置（2026-08-05 修复）
   const v = Number.isFinite(fps) ? Math.max(0, Math.round(fps)) : 0;
   const txt = await fs.readTextFile(global);
-  const out = txt
-    .split(/\r?\n/)
-    .map((l) => (l.match(/^Limit=\d+/) ? `Limit=${v}` : l))
-    .join('\r\n');
-  await fs.writeTextFileAtomic(global, out);
+  const lines = txt.split(/\r?\n/);
+  let found = false;
+  const outLines = lines.map((line) => {
+    if (/^Limit=\d+/i.test(line)) {
+      found = true;
+      return `Limit=${v}`;
+    }
+    return line;
+  });
+  if (!found) {
+    // RTSS Global profiles normally contain Limit=. If a damaged/older file
+    // lacks it, insert it at the top rather than silently reporting success.
+    outLines.unshift(`Limit=${v}`);
+  }
+  await fs.writeTextFileAtomic(global, outLines.join('\r\n'));
   // 重载配置：外部改完文件后只 LoadProfile(重新载入磁盘) + UpdateProfiles(套用到运行中的游戏)。
   // ⚠ 不要 SaveProfile —— 它会把 RTSS 内存里的旧状态写回磁盘，覆盖刚改的内容甚至写坏（损坏根因）。
   await shell.run('rundll32', [`${dir}\\RTSSHooks64.dll`, 'LoadProfile']);

@@ -32,6 +32,10 @@ export const settingsStore = {
   write: (path: string, content: string) => invoke<boolean>('settings.write', { path, content }),
 };
 
+export const keyboard = {
+  open: () => invoke<boolean>('keyboard.open'),
+};
+
 export const shell = {
   run: (program: string, args: string[] = [], timeoutMs = 30000) => {
     const nativeTimeout = Math.max(100, Math.min(600000, Math.round(timeoutMs)));

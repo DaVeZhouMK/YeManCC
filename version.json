@@ -1,6 +1,6 @@
 {
-  "version": "0.0.16",
-  "notes": "重构睡眠守卫核心修复路径，强化异常唤醒重睡、性能计划 TDP 识别及系统黑名单规则。",
+  "version": "0.0.17",
+  "notes": "强化游戏快捷操作、规则面板与手柄导航，完善性能计划交互及睡眠卡死恢复。",
   "sha256": "",
   "publishedAt": "",
   "package": "Packages/YeManCC.zip"
