@@ -275,7 +275,6 @@ NVIDIA Share.exe
 RadeonSoftware.exe
 iCUE.exe
 ArmouryCrate.UserSessionHelper.exe
-FanControl.exe
 SignalRgb.exe
 OpenRGB.exe
 CapFrameX.exe

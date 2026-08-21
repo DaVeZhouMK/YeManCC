@@ -203,7 +203,7 @@ $requiredPowerControl = @(
   'MG-AUTO\memreduct.exe', 'physpanel.exe',
   'pawnio\YeManTdpCtl.exe', 'pawnio\PawnIO_setup.exe',
   'pawnio\AMDFamily17.bin', 'pawnio\IntelMSR.bin',
-  'pawnio\LpcIO.bin', 'pawnio\RyzenSMU.bin',
+  'pawnio\RyzenSMU.bin',
   'pawnio\_internal\python313.dll',
   'RTSS-Overlays\YeManOBS-W-1.ovl',
   'RTSS-Overlays\YeManOBS-L-1.ovl',
@@ -217,10 +217,6 @@ foreach ($relative in $requiredPowerControl) {
 $pawnioExpected = @($assetLock.files | Where-Object component -eq 'PawnIO' | ForEach-Object { ([string]$_.releasePath).Substring('pawnio/'.Length).Replace('/', '\') } | Sort-Object)
 $pawnioActual = @(Get-ChildItem -LiteralPath (Join-Path $StagingPowerControl 'pawnio') -Recurse -File | ForEach-Object { Get-RelativePath (Join-Path $StagingPowerControl 'pawnio') $_.FullName } | Sort-Object)
 if (Compare-Object $pawnioExpected $pawnioActual) { throw 'PawnIO runtime does not exactly match the locked atomic file set' }
-
-$topLpc = Get-Sha256 (Join-Path $StagingPowerControl 'pawnio\LpcIO.bin')
-$internalLpc = Get-Sha256 (Join-Path $StagingPowerControl 'pawnio\_internal\LpcIO.bin')
-if ($topLpc -ne $internalLpc) { throw 'PawnIO top-level and _internal LpcIO.bin do not match' }
 
 $forbidden = @()
 foreach ($file in Get-ChildItem -LiteralPath $StagingRoot -Recurse -Force -File) {

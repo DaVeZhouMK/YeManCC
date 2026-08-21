@@ -20,6 +20,7 @@ import { summonGet, type GamepadSettings } from '@/bridge/yeman';
 import { isUiVisible, onUiVisibilityChange } from '@/bridge/uiLifecycle';
 import { focusGamepadElement, setGamepadFocused } from '@/gamepad/focus';
 import { enqueueGamepadTaskDetached } from '@/gamepad/serial';
+import { spatialNavigationTarget } from '@/gamepad/spatial';
 
 export interface GamepadEngineOptions {
   router: Router;
@@ -456,6 +457,42 @@ function moveFocus(dx: number, dy: number) {
   // 当前焦点元素必须在列表中，否则从第一个开始
   const baseIdx = cur ? navEls.indexOf(cur) : -1;
   const base = baseIdx >= 0 ? navEls[baseIdx] : navEls[0];
+
+  // A graph point may opt into in-place editing while focused (for example,
+  // Fan temperature with left/right and duty with up/down). The page handles
+  // the cancellable event; when it does not consume it, normal row/column
+  // focus navigation continues unchanged.
+  const inlineEditor = base.closest<HTMLElement>('[data-gp-inline-edit]');
+  if (inlineEditor && (dx !== 0 || dy !== 0)) {
+    const editEvent = new CustomEvent('gp:spatial-edit', {
+      bubbles: true,
+      cancelable: true,
+      detail: { dx: dx > 0 ? 1 : dx < 0 ? -1 : 0, dy: dy > 0 ? 1 : dy < 0 ? -1 : 0 },
+    });
+    if (!inlineEditor.dispatchEvent(editEvent)) return;
+  }
+
+  // Feature pages may declare an exact row/column map. This is intentionally
+  // checked before the geometry heuristic so Fan's four node columns cannot
+  // jump into a neighbouring row or wrap from node 4 back to node 1. Pages
+  // without data-gp-row/data-gp-col retain the existing shared geometry path.
+  const explicitTarget = spatialNavigationTarget(navEls, base, {
+    dx: dx === 0 ? 0 : dx > 0 ? 1 : -1,
+    dy: dy === 0 ? 0 : dy > 0 ? 1 : -1,
+  });
+  if (explicitTarget !== undefined) {
+    if (explicitTarget) {
+      try {
+        if (!focusGamepadElement(explicitTarget, dy < 0)) {
+          explicitTarget.focus({ preventScroll: false });
+          setGamepadFocused(explicitTarget);
+        }
+      } catch {
+        // Ignore transient DOM changes during route transitions.
+      }
+    }
+    return;
+  }
   if (activeGameMenu && dy !== 0 && activeGameMenu.contains(base)) {
     const currentGameRow = base.closest<HTMLElement>('[data-gp-game-row]')?.dataset.gpGameRow || '';
     const target = moveGameMenuFocus(activeGameMenu, base, dy);
