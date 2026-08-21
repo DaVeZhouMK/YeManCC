@@ -230,12 +230,20 @@ function onGamepadBack(e: Event): void {
     e.preventDefault();
     return;
   }
-  if (document.querySelector('[data-gp-custom-body]')) {
+  // A teleported dropdown is the deepest open editor. Let Dropdown consume B
+  // first so it closes the option list instead of collapsing its parent panel.
+  if (document.querySelector('[aria-expanded="true"][aria-haspopup="listbox"]')) {
+    return;
+  }
+  // Transition nodes can remain mounted briefly after a submenu closes. Only
+  // an actually expanded panel owns B; otherwise B must continue to the next
+  // parent level and eventually close the top menu.
+  if (document.querySelector('[data-gp-custom-panel][data-gp-expanded="true"]')) {
     e.preventDefault();
     window.dispatchEvent(new CustomEvent('game-quick-custom-back'));
     return;
   }
-  if (document.querySelector('[data-gp-game-rules]')) {
+  if (document.querySelector('[data-gp-game-rules][data-gp-expanded="true"]')) {
     e.preventDefault();
     window.dispatchEvent(new CustomEvent('game-quick-rules-back'));
     return;
@@ -247,6 +255,12 @@ function onGamepadBack(e: Event): void {
 
 function onGamepadEdit(e: Event): void {
   if (document.querySelector('[data-gp-game-quick-dialog]')) {
+    e.preventDefault();
+    return;
+  }
+  // Y is a top-bar command. Do not let it refresh/search while a teleported
+  // dropdown owns the current controller focus.
+  if (document.querySelector('[aria-expanded="true"][aria-haspopup="listbox"]')) {
     e.preventDefault();
     return;
   }

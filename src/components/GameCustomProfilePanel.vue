@@ -286,11 +286,14 @@ function disableLeavingBody(el: Element): void {
 
 function onGamepadCustomBack(): void {
   if (!expanded.value) return;
+  // B 在专属配置气泡内必须真实收起该气泡，而不是只依赖全局页面返回。
+  // preventDefault 由外层识别控制器负责；这里保证组件自身状态先变更。
   closePanel();
 }
 
 function closePanel(): void {
   expanded.value = false;
+  emit('close');
   nextTick(() => {
     const entryEl = document.querySelector<HTMLElement>('[data-gp-custom-entry]');
     if (entryEl) focusGamepadElement(entryEl);

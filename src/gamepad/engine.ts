@@ -29,7 +29,7 @@ export interface GamepadEngineOptions {
 // 可聚焦元素选择器（需与各 View 的 tabindex 配合）。
 // 带 data-gp-ignore 的元素被排除——用于左侧 NavRail 的页面图标/刷新/退出，避免上下左右误切页/退出。
 const FOCUSABLE =
-  'button:not([data-gp-ignore]), [tabindex]:not([tabindex="-"]):not([data-gp-ignore]), input:not([disabled]):not([data-gp-ignore]), select:not([disabled]):not([data-gp-ignore])';
+  'button:not([disabled]):not([tabindex="-1"]):not([data-gp-ignore]), [tabindex]:not([tabindex="-"]):not([tabindex="-1"]):not([data-gp-ignore]), input:not([disabled]):not([tabindex="-1"]):not([data-gp-ignore]), select:not([disabled]):not([tabindex="-1"]):not([data-gp-ignore])';
 
 let rafId = 0;
 let prevButtons: boolean[] = [];
@@ -336,8 +336,19 @@ function focusables(): HTMLElement[] {
       return style.display !== 'none' && style.visibility !== 'hidden' && r.width > 0 && r.height > 0;
     });
   const modal = modals[modals.length - 1] ?? null;
-  const root: ParentNode = modal || document;
-  return Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE)).filter(
+  // Dropdown options are teleported to body. Keep them in the same focus
+  // scope as the open top-menu modal so A can activate the option after D-pad
+  // navigation instead of treating the option as an out-of-scope element.
+  const roots: ParentNode[] = [modal || document];
+  const openDropdowns = Array.from(document.querySelectorAll<HTMLElement>('[role="listbox"]'))
+    .filter((el) => {
+      const style = getComputedStyle(el);
+      const r = el.getBoundingClientRect();
+      return style.display !== 'none' && style.visibility !== 'hidden' && r.width > 0 && r.height > 0;
+    });
+  roots.push(...openDropdowns);
+  const candidates = roots.flatMap((root) => Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE)));
+  return Array.from(new Set(candidates)).filter(
     (el) => {
       if (el.hasAttribute('disabled')) return false;
       if (el.getAttribute('aria-hidden') === 'true') return false;
@@ -368,7 +379,7 @@ function isInsideCustomPanel(el: HTMLElement): boolean {
 
 function firstGameMenuControl(root: ParentNode | null): HTMLElement | null {
   if (!root) return null;
-  const selector = 'button:not(:disabled):not([data-gp-ignore]), input:not(:disabled):not([data-gp-ignore]), select:not(:disabled):not([data-gp-ignore]), [tabindex]:not([tabindex="-1"]):not([data-gp-ignore])';
+  const selector = 'button:not(:disabled):not([tabindex="-1"]):not([data-gp-ignore]), input:not(:disabled):not([tabindex="-1"]):not([data-gp-ignore]), select:not(:disabled):not([tabindex="-1"]):not([data-gp-ignore]), [tabindex]:not([tabindex="-1"]):not([data-gp-ignore])';
   const direct = root instanceof HTMLElement && root.matches(selector) ? root : null;
   return direct || root.querySelector<HTMLElement>(selector);
 }
@@ -398,16 +409,22 @@ function moveGameMenuFocus(menu: HTMLElement, base: HTMLElement, dy: number): HT
     'actions-1',
     'actions-2',
     'rules-entry',
-    'rules-current',
-    'rules-editor',
-    'rules-dropdown',
-    'rules-footer',
     'custom-entry',
-    'custom-ac',
-    'custom-dc',
-    'custom-actions',
     'footer',
   ];
+  const rulesPanel = menu.querySelector<HTMLElement>('[data-gp-game-rules][data-gp-expanded="true"]');
+  if (rulesPanel) {
+    const entryIndex = rows.indexOf('custom-entry');
+    rows.splice(entryIndex, 0, 'rules-current', 'rules-editor');
+    if (rulesPanel.querySelector('[data-gp-game-row="rules-dropdown"]')) rows.splice(entryIndex + 2, 0, 'rules-dropdown');
+    rows.splice(entryIndex + (rows.includes('rules-dropdown') ? 3 : 2), 0, 'rules-footer');
+  }
+  const customPanel = menu.querySelector<HTMLElement>('[data-gp-custom-panel][data-gp-expanded="true"]');
+  if (customPanel) {
+    const footerIndex = rows.indexOf('footer');
+    rows.splice(footerIndex, 0, 'custom-ac', 'custom-dc');
+    if (customPanel.querySelector('[data-gp-game-row="custom-actions"]')) rows.splice(footerIndex + 2, 0, 'custom-actions');
+  }
   const index = rows.indexOf(currentRow);
   if (index < 0) return null;
   for (let i = index + (dy > 0 ? 1 : -1); i >= 0 && i < rows.length; i += dy > 0 ? 1 : -1) {
@@ -516,7 +533,7 @@ function moveFocus(dx: number, dy: number) {
       // Dropdown 的外层只是事件容器，不能接收 DOM focus；必须命中真正
       // 可聚焦的 trigger button。此前命中外层 div 后 focus 失败，因此
       // 手柄看起来会“穿过”专属配置。
-      'button:not(:disabled):not([data-gp-ignore]), [tabindex]:not([tabindex="-"]):not([data-gp-ignore]), select:not([disabled]), input:not([disabled])',
+      'button:not(:disabled):not([tabindex="-1"]):not([data-gp-ignore]), [tabindex]:not([tabindex="-"]):not([tabindex="-1"]):not([data-gp-ignore]), select:not([disabled]):not([tabindex="-1"]), input:not([disabled]):not([tabindex="-1"])',
     ) || null;
     const customTarget = customExpanded ? customBodyTarget : customEntry;
     const customTargetAvailable = !!customTarget &&

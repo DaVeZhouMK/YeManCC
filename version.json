@@ -1,6 +1,6 @@
 {
-  "version": "0.0.18",
-  "notes": "完善游戏快捷操作与训练器进程控制，修复规则面板及手柄导航焦点链路。",
+  "version": "0.0.19",
+  "notes": "修复游戏专属配置返回、下拉菜单焦点与手柄导航边界。",
   "sha256": "",
   "publishedAt": "",
   "package": "Packages/YeManCC.zip"
