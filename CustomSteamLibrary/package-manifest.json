@@ -100,8 +100,8 @@
                       },
                       {
                           "path":  "run-workspace.bat",
-                          "bytes":  578,
-                          "sha256":  "50a9c7374073c77d0952742b61d653193da7d0f9617a6d25cbc639d855ba0860"
+                          "bytes":  597,
+                          "sha256":  "8de9f08333a6748df5812f8b8f2f54cf305741773e7ee8246a44a2f2ab7784ce"
                       },
                       {
                           "path":  "assets/custom-steam-library.ico",
