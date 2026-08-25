@@ -84,12 +84,14 @@
 
 #include <psapi.h>      // GetProcessMemoryInfo（进程工作集）
 #include <tlhelp32.h>   // CreateToolhelp32Snapshot / Process32*W（进程枚举）
+#include <iphlpapi.h>   // GetExtendedTcpTable（loopback listener 所有权核对）
 #include <powrprof.h>   // SetSuspendState / GetPwrCapabilities（升级 S4/关机）
 #include <winternl.h>
 #include <winevt.h>
 #pragma comment(lib, "psapi.lib")
 #pragma comment(lib, "PowrProf.lib")
 #pragma comment(lib, "wevtapi.lib")
+#pragma comment(lib, "iphlpapi.lib")
 #pragma comment(lib, "xinput9_1_0.lib")  // 后台手柄呼出：LB+RB 2 秒呼出程序（系统自带，无需重分发）
 
 #include "json.hpp"
@@ -148,6 +150,15 @@ static bool isSteamHostName(const wchar_t* host) {
            value == "steamusercontent.com" || value.ends_with(".steamusercontent.com") ||
            value == "akamaihd.net" || value.ends_with(".akamaihd.net") ||
            value == "eccdnx.com" || value.ends_with(".eccdnx.com");
+}
+
+// Fan Host is deliberately loopback-only.  A system WinHTTP proxy must never
+// receive these requests: on machines with a configured proxy the old default
+// session could fail before reaching 127.0.0.1:8765, leaving the UI with no
+// handshake result and hiding the capability-gated Fan route.
+static bool isLoopbackHost(const wchar_t* host) {
+    const auto value = ascii_lower(W2U(host));
+    return value == "127.0.0.1" || value == "localhost" || value == "::1";
 }
 
 static constexpr DWORD DEFAULT_HTTP_TIMEOUT_MS = 30000;
@@ -340,6 +351,13 @@ static const std::wstring POWER_CONTROL_DIR = resolve_power_control_dir();
 // ================================================================
 
 static HWND                              g_hwnd;
+// YeManCC is the only raw XInput owner in parent mode.  The native gamepad
+// loop identifies the parent-owned Custom Steam Library window and makes the
+// single arbitration decision: block parent-global shortcuts and forward one
+// semantic action to the child.  The renderer does not own this gate.
+enum class CustomSteamLibraryInputPhase : int { disabled = 0, launching = 1, active = 2, returning = 3 };
+static std::atomic<int>                  g_customSteamLibraryInputPhase{static_cast<int>(CustomSteamLibraryInputPhase::disabled)};
+static std::atomic<ULONGLONG>            g_customSteamLibraryInputDeadline{0};
 static ComPtr<ICoreWebView2Environment>  g_env;
 static ComPtr<ICoreWebView2Controller>   g_ctrl;
 static ComPtr<ICoreWebView2>             g_view;
@@ -358,6 +376,10 @@ static bool                              g_webviewNeedsShowNudge = false;
 static std::wstring                      g_updateHandshakePath;
 static std::string                       g_updateHandshakeToken;
 static std::mutex                        g_updateProgressMtx;
+// Download and install both use the same package/state files.  The UI normally
+// serializes them, but IPC callers and a second renderer must not be able to
+// race two operations against one partial package or two helper scripts.
+static std::mutex                        g_updateOperationMtx;
 static json                               g_updateProgress = json::object();
 
 static void updateProgressPost(const json& data);
@@ -435,10 +457,10 @@ static ULONGLONG g_bClosePendingSince = 0;
 static ULONGLONG g_bCloseReadyAt = 0;
 static bool g_tdpShortcut = true;    // Start + 上/下 快捷调节 TDP 最大值（前端处理，持久化在 native）
 static bool g_fpsShortcut = true;    // Start + 左/右 快捷调节 RTSS 锁帧（前端处理，持久化在 native）
-static bool g_killGame = false;       // 选择(Back) + B 长按 0.5s → 结束当前游戏（执行 KiLL-EXE.bat）
-static bool g_openKeyboard = false;   // 选择(Back) + X 长按 0.5s → 打开 Windows 触摸键盘
-static bool g_returnDesktop = false;  // 选择(Back) + A 组合按下瞬间 → 返回桌面
-static bool g_mouseToggle = false;    // 选择(Back) + Y 长按 0.5s → 模拟鼠标开/关
+static bool g_killGame = true;        // 选择(Back) + B 长按 0.5s → 结束当前游戏（执行 KiLL-EXE.bat）
+static bool g_openKeyboard = true;    // 选择(Back) + X 长按 0.5s → 打开 Windows 触摸键盘
+static bool g_returnDesktop = true;   // 选择(Back) + A 组合按下瞬间 → 返回桌面
+static bool g_mouseToggle = true;     // 选择(Back) + Y 长按 0.5s → 模拟鼠标开/关
 static std::string g_mouseBackend = "joyxoff"; // 模拟鼠标方案：joyxoff / gamebar
 static std::atomic<bool> g_summonQuit{false};  // 退出信号（跨线程原子；手柄已改 Raw Input，掌机自动关闭线程仍复用）
 
@@ -448,6 +470,7 @@ static std::vector<std::string> g_autoCloseProcs;     // 目标进程名列表�
 static std::mutex g_autoCloseMx;                       // 保护 procs 列表（前端 set 与后台线程读）
 static HANDLE g_autoCloseThread = nullptr;
 static std::atomic<bool> g_exitRequested{false};
+static std::atomic<bool> g_exitReadyPosted{false};
 static std::atomic<bool> g_joyXoffCloseInFlight{false};
 static std::mutex g_gamepadSettingsMx;
 static std::atomic<WPARAM> g_exitCode{0};
@@ -633,7 +656,9 @@ static bool gamepadSerialSubmit(std::function<void()> job) {
     return true;
 }
 
-static void gamepadSerialStop() {
+static bool joinThreadBoundedForExit(std::thread& thread, DWORD timeoutMs, const char* name);
+
+static void gamepadSerialStop(DWORD timeoutMs = INFINITE) {
     {
         std::lock_guard<std::mutex> lock(g_gamepadSerialMx);
         if (!g_gamepadSerialStarted) return;
@@ -641,7 +666,7 @@ static void gamepadSerialStop() {
         g_gamepadSerialQ.clear();
     }
     g_gamepadSerialCv.notify_all();
-    if (g_gamepadSerialThread.joinable()) g_gamepadSerialThread.join();
+    (void)joinThreadBoundedForExit(g_gamepadSerialThread, timeoutMs, "gamepad-serial");
     std::lock_guard<std::mutex> lock(g_gamepadSerialMx);
     g_gamepadSerialStarted = false;
 }
@@ -653,9 +678,8 @@ static void gamepadSerialStop() {
 #define WM_WEBVIEW_PROCESS_FAILED (WM_USER + 10) // COM 回调只采集信息，UI 线程统一记录和处置
 #define WM_WEBVIEW_RECOVERY_RESTART (WM_USER + 11) // browser 数据目录隔离完成，UI 线程重建 environment
 #define WM_UPDATE_PROGRESS (WM_USER + 12) // 更新线程 -> UI 线程转发进度
-#define WM_SG_S0_INTENT (WM_USER + 13) // Kernel-Power 506: user requested Modern Standby
+#define WM_SG_S0_INTENT (WM_USER + 13) // Kernel-Power 506: w=reason, l=event FILETIME
 #define WM_SG_S0_WAKE (WM_USER + 14)   // Kernel-Power 507: Modern Standby exit
-#define WM_SG_S0_REENTER (WM_USER + 20)
 #define WM_GAMEPAD_SUMMON_REGISTER (WM_USER + 15) // 后台完成呼出游戏识别后回到 UI 线程
 #define WM_SG_S4_WAKE (WM_USER + 17) // Kernel-Power 107/TargetState=5: hibernate resume
 #define WM_SG_RESUME_GAME_FOCUS (WM_USER + 18) // serialized resume completed for one process
@@ -693,28 +717,26 @@ static std::vector<DWORD> g_acSwitchTicks;          // 5 秒滑动窗口内的�
 #define ACDC_BURST_MS     5000    // 熔断滑动窗口 = 5s
 #define ACDC_BURST_LIMIT  10      // 5s 内 >10 次切换 → 直接退出，防止系统卡死
 #define MEM_TRAY_TIMER_ID 0xA201  // 内存变色托盘图标刷新（30 s）
-#define SG_RESLEEP_TIMER_ID 0xA202 // 入睡失败重睡检查（250 ms）
-#define SG_S0_WAKE_CLASSIFY_TIMER_ID 0xA20B // S0 唤醒原因等待超时（Kernel-Power 507）
-#define SG_RETRY_TIMER_ID 0xA20C // 同模式重睡退避计时器
-#define SG_S0_STATE_TIMER_ID 0xA20D // S0 状态采样，仅用于发现系统重新可运行
-#define SG_EXTERNAL_DEVICE_RETRY_TIMER_ID 0xA20E // 外接设备变化唤醒独立重睡计时器
-#define SG_S0_WAKE_CLASSIFY_TIMEOUT_MS 10000U
-#define SG_S0_STATE_POLL_MS 250U
-#define SG_ACDC_MANUAL_DETECT_WINDOW_MS 5000ULL
-static constexpr ULONGLONG SG_POWER_BUTTON_SLEEP_RECENCY_100NS = 1200ULL * 1000ULL * 1000ULL;
-#define SG_RESLEEP_OBSERVATION_MS 30000ULL // 异常唤醒最多观察 30 秒，超时必须恢复游戏
-#define SG_WAKE_SOURCE_EVIDENCE_MS 15000ULL // 仅接受唤醒后短窗口内的系统来源证据
-static constexpr ULONGLONG SG_ENTRY_FAILURE_BASE_WINDOW_MS = 3000ULL;
-static constexpr ULONGLONG SG_ENTRY_FAILURE_STEP_MS = 3000ULL;
+#define SG_RETRY_TIMER_ID 0xA20C // 入睡失败与意外唤醒共用的唯一重睡计时器
+#define EXIT_CLEANUP_WATCHDOG_TIMER_ID 0xA20D // 退出收尾硬上限，不能由后台任务无限延长
+#define EXIT_CLEANUP_WATCHDOG_MS 8000
 // Kernel-Power 507 Reason=7 is the platform's immediate S0 flow exit. It is
 // an entry failure only when it follows the current 506 Reason=1/3 intent
 // within this short monotonic window; USB4's 120-second marker is unrelated.
 static constexpr ULONGLONG SG_S0_REASON7_FAILURE_WINDOW_MS = 2000ULL;
 static constexpr ULONGLONG SG_ENTRY_RETRY_DELAYS_MS[] = {500ULL, 1000ULL, 2000ULL};
+static constexpr ULONGLONG SG_PAUSE_READY_WAIT_MAX_MS = 2000ULL;
+static constexpr UINT SG_PAUSE_READY_POLL_MS = 50U;
+static constexpr ULONGLONG SG_SLEEP_RESUME_RETRY_DELAYS_MS[] = {0ULL, 100ULL, 300ULL, 600ULL};
 static constexpr unsigned int SG_MAX_ENTRY_RETRIES =
     static_cast<unsigned int>(std::size(SG_ENTRY_RETRY_DELAYS_MS));
 static constexpr ULONGLONG SG_USER_STANDBY_DEVICE_DELAY_MS = 120000ULL;
-static constexpr ULONGLONG SG_EXTERNAL_WAKE_EVIDENCE_WINDOW_MS = 15000ULL;
+// A programmatic SetSuspendState request can publish its Kernel-Power 506
+// message after PBT_APMSUSPEND has already closed the active retry flag. Keep
+// a bounded request identity so that delayed internal 506 events never replace
+// the original user's 120-second sleep-intent timestamp.
+static constexpr ULONGLONG SG_INTERNAL_SLEEP_506_WINDOW_MS = 60000ULL;
+static constexpr ULONGLONG SG_INTERNAL_SLEEP_506_CLOCK_SKEW_MS = 2000ULL;
 static constexpr UINT_PTR WEBVIEW_RECOVERY_TIMER_ID = 0xA205;
 static constexpr UINT_PTR WEBVIEW_RECOVERY_ACTION_TIMER_ID = 0xA206;
 static constexpr UINT_PTR POWER_RESUME_NUDGE_TIMER_ID = 0xA207;
@@ -727,11 +749,11 @@ static constexpr UINT POWER_RESUME_WATCHDOG_RETRY_MS = 5000;
 static constexpr UINT POWER_RESUME_PROBE_RETRY_MS = 450;
 
 // ================================================================
-// 睡眠守护：入睡冻结 → 唤醒恢复；可选异常唤醒后单次重睡。
-// 重睡只在启用后生效，观察窗口最多30秒，连续10秒无输入才触发，
-// 每次重睡尝试后使用单调时钟抑制300秒；系统时间仅用于审计记录。
-// 不升级 S4，不创建外部保底任务。
+// 睡眠守护：入睡冻结 → 明确用户唤醒后恢复。
+// EntryFailure 与意外唤醒各自使用独立证据、状态和重试计时器；
+// AC/DC 与普通输入只记录，不参与自动重睡判定。不升级 S4。
 static const std::wstring SG_DIR = POWER_CONTROL_DIR + L"\\Sleep";
+static const std::wstring SG_SLEEP_LEASE_DIR = SG_DIR + L"\\suspended";
 static const std::wstring SG_MANUAL_DIR = SG_DIR + L"\\manual-suspended";
 static const std::wstring SG_GAME_WHITELIST = SG_DIR + L"\\game-whitelist.txt";
 // Game-recognition exclusions have two ownership domains.  The system list
@@ -753,12 +775,10 @@ struct NativeGameRulesFileStamp {
 static std::vector<NativeGameRulesFileStamp> g_gameRulesDiskStamp;
 static bool g_gameRulesDiskStampReady = false;
 static const std::wstring SG_SLEEP_TRIGGER_MARKER = SG_DIR + L"\\sleep-trigger-last.txt";
-static const std::wstring SG_RESLEEP_MARKER = SG_DIR + L"\\resleep-last.txt";
 static const std::wstring SG_FACT_LOG = SG_DIR + L"\\sleep-facts.log";
 static const std::wstring TOPMON_STOP_MARKER = POWER_CONTROL_DIR + L"\\topmon.stop";
 static const uint64_t     SG_MIN_WS   = 500ULL * 1024 * 1024; // 仅冻结工作集≥500MB的进程(避开系统/小进程)
 static const uint64_t     SG_CAPTURE_MIN_WS = 50ULL * 1024 * 1024; // 仅对呼出时捕获/白名单目标放宽门槛
-static const uint64_t     SG_GLOBAL_RECOVERY_MIN_WS = 40ULL * 1024 * 1024;
 
 static bool g_guardEnabled = false;  // 总开关（统一配置；Enable.txt 兼容镜像）
 static std::atomic<bool> g_sgInSuspend{false};  // 本周期是否已冻结游戏 PID
@@ -772,16 +792,16 @@ static std::mutex g_sgOpMtx;         // 串行化冻结/恢复/退出清理，�
 static DWORD g_sgSessionId = 0;      // 当前会话 ID（仅冻结同会话进程，避开系统/其他用户会话）
 static bool g_sgSessionValid = false; // 会话获取失败时 fail-closed，禁止跨会话冻结/击杀
 
-static void stopNativeMonitorForExit();
+static void stopNativeMonitorForExit(DWORD timeoutMs = INFINITE);
 static void cleanupExitArtifacts();
-static void sgCleanupBeforeExit();
-static void sgStopWorkThread();
-static void poolStop();
+static bool sgCleanupBeforeExit(bool nonBlocking = false);
+static void sgStopWorkThread(DWORD timeoutMs = INFINITE);
+static void poolStop(DWORD timeoutMs = INFINITE);
 static bool stopWatcher(FileWatcher* w, DWORD timeoutMs);
 static void beginAsyncExit(HWND hwnd, WPARAM code);
 
-static void stopTopMonitorForExit() {
-    stopNativeMonitorForExit();
+static void stopTopMonitorForExit(DWORD monitorTimeoutMs = INFINITE) {
+    stopNativeMonitorForExit(monitorTimeoutMs);
     cleanupExitArtifacts();
 }
 
@@ -794,76 +814,39 @@ static std::mutex g_sgFactMx;
 static std::deque<std::string> g_sgFacts;
 static constexpr size_t SG_FACT_HISTORY_LIMIT = 64;
 static bool g_sgPauseResume   = true;  // 睡眠时暂停游戏 + 唤醒时自动恢复（两者绑定，只一个开关）
-static bool g_sgResleepEnabled = true; // 异常唤醒后满足静默条件时重新进入睡眠
+static bool g_sgResleepEnabled = true; // code=7 / Kernel-Power 507 Reason=5 意外唤醒后重睡
 static bool g_sgRetryEntryFailure = true; // 明确 S0/S3 入睡失败时同模式重试一次
 static bool g_monitorOn       = true;  // 当前显示器状态
 static ULONGLONG g_sgSleepTriggerTick = 0; // 最近一次睡眠触发的单调时间
-static ULONGLONG g_sgWakeTick = 0; // 最近一次唤醒的单调时间
-static ULONGLONG g_sgLastInputTick = 0; // 最近一次手柄/键盘输入的单调时间
-static ULONGLONG g_sgResleepCooldownTick = 0; // 最近一次重睡后的5分钟抑制截止时间
-static double g_sgResleepCooldownEpoch = 0.0; // 跨进程保留的重睡系统时间
 static ULONGLONG g_lastResumeNotifyTick = 0; // 同一唤醒周期的前端事件去重时间
 static ULONGLONG g_lastSuspendNotifyTick = 0;
-static bool g_sgResleepPending = false; // 已进入重睡观察窗口
 static double g_sgSleepTriggerEpoch = 0.0; // 审计用系统时间（Unix秒）
 static bool g_sgRepairEligible = false; // 本轮是否有明确的程序/用户睡眠意图
-static bool g_sgWakeSourceEvidence = false; // Resume 后是否观察到外部来源证据
-static ULONGLONG g_sgWakeSourceTick = 0; // 外部来源证据的单调时钟时间
 static int g_sgLastS0WakeReason = -1;
 static ULONGLONG g_sgLastS0WakeTick = 0;
-static bool g_sgS0ReentryActive = false;
 enum class SgSleepMode : uint8_t { Unknown, S3, S4 };
-enum class SgSleepTaskPhase : uint8_t {
-    Idle,
-    QueryPaused,
-    SleepConfirmed,
-    WakeClassifying,
-    RetryScheduled,
-    Recovering,
-};
-enum class SgRetryKind : uint8_t { None, EntryFailure, NonUserWake };
+enum class SgRetryKind : uint8_t { None, EntryFailure, UnexpectedWake };
 
 // This is the lifecycle valve for one system sleep transaction.  It never
 // elects a game PID; that remains exclusively owned by GameTargetArbiter.
 struct SgSleepTask {
     unsigned long long generation = 0;
     SgSleepMode mode = SgSleepMode::Unknown;
-    SgSleepTaskPhase phase = SgSleepTaskPhase::Idle;
     SgRetryKind retryKind = SgRetryKind::None;
-    unsigned int entryFailureAttempts = 0;
-    unsigned int nonUserWakeAttempts = 0;
-    bool nonUserWakeResleepUsed = false;
-    bool suspendConfirmed = false;
-    unsigned long long timerToken = 0;
+    unsigned int retryAttempt = 0;
+    bool unexpectedWakeConsumed = false;
 };
 static SgSleepTask g_sgTask;
 static bool g_sgRetryInProgress = false;
 static ULONGLONG g_sgRetryDueTick = 0;
-static ULONGLONG g_sgEnteredTick = 0;
-static bool g_sgEntryFailureObserved = false;
+static std::atomic<unsigned long long> g_sgPauseWorkCompletedGeneration{0};
 static bool g_sgSleepIntentArmed = false;
 static bool g_sgPowerButtonSleepConfigured = false;
 static bool g_sgModernStandbyActive = false;
-static bool g_sgModernWakePending = false; // RESUME* arrived; wait for Kernel-Power 507
-static ULONGLONG g_sgModernWakeCandidateTick = 0;
-static ULONGLONG g_sgModernWakeCandidateFileTime = 0;
-static ULONGLONG g_sgS0StateLastWallFileTime = 0;
-static ULONGLONG g_sgS0StateLastUnbiasedTime = 0;
-static ULONGLONG g_sgLastAcDcBroadcastTick = 0;
-static bool g_sgAcDcManualSleepDetected = false;
-static bool g_sgS0SystemResumeObserved = false;
 static ULONGLONG g_sgModernStandbyGeneration = 0; // suppress duplicate PBT resume broadcasts
 static bool g_sgModernWakeClassified = false;
 static ULONGLONG g_sgModernWakeClassifiedTick = 0;
 static ULONGLONG g_sgLastPowerButtonWakeTick = 0;
-// User-initiated standby marker. It is intentionally memory-only and is reset
-// on every process start; it is not a replacement for the sleep lifecycle.
-static std::atomic<ULONGLONG> g_sgUserStandbyTick{0};
-static std::atomic<ULONGLONG> g_sgUserStandbyFileTime{0};
-static std::atomic<int> g_sgUserStandbyReason{-1};
-static bool g_sgUserStandbyCandidate = false;
-static ULONGLONG g_sgUserStandbyCandidateTick = 0;
-static bool g_sgUserStandbyDeviceTriggered = false;
 // Written by the event subscription before it queues the UI message.  This
 // is the event-log timestamp for Kernel-Power 507 Reason=1, not a UI timer.
 static std::atomic<ULONGLONG> g_sgLastPowerButtonWakeEventFileTime{0};
@@ -875,22 +858,14 @@ static std::atomic<int> g_sgLastKernel506Reason{-1};
 static std::atomic<int> g_sgLastKernel507Reason{-1};
 static std::atomic<ULONGLONG> g_sgLastKernel506EventFileTime{0};
 static std::atomic<ULONGLONG> g_sgLastKernel507EventFileTime{0};
-// 外接设备变化唤醒独立于 SleepTask：只使用“主动按键睡眠”的
-// 506/Reason=1 或 Reason=3 时间与外接设备变化证据，绝不依赖 repairEligible/taskMode。
-struct SgExternalDeviceWakeState {
-    bool deviceNodeChangeSeen = false;
-    bool acdcChangeSeen = false;
-    bool kernel507Reason5Seen = false;
-    bool retryActive = false;
-    bool consumed = false;
-    ULONGLONG deviceNodeChangeTick = 0;
-    ULONGLONG acdcChangeTick = 0;
-    ULONGLONG kernel507Reason5Tick = 0;
-    ULONGLONG retryScheduledTick = 0;
-    ULONGLONG retryLastDispatchTick = 0;
-    unsigned int retryAttempt = 0;
+// 程序自己的 SetSuspendState 只保留最小身份标记，防止它产生的 506
+// 被误认为新一轮用户按键睡眠。它不再拥有第二套状态机。
+struct SgInternalSleepRequestState {
+    SgRetryKind kind = SgRetryKind::None;
+    ULONGLONG dispatchTick = 0;
+    ULONGLONG dispatchFileTime = 0;
 };
-static SgExternalDeviceWakeState g_sgExternalDeviceWake;
+static SgInternalSleepRequestState g_sgInternalSleepRequest;
 // PBT_APMQUERYSUSPEND is the earliest reliable S3 intent callback.  Keep a
 // separate marker so a cancelled query can reopen the write gate without
 // touching a real S0/S3 generation that may already be in progress.
@@ -898,11 +873,11 @@ static bool g_sgSleepQueryGateClosed = false;
 static unsigned long long g_sgSleepQueryGeneration = 0;
 static bool g_sgSleepQueryOwnsGeneration = false;
 static ULONGLONG g_sgLastModernStandbyIntentTick = 0;
-static void sgRequestSleepRetry(SgRetryKind kind, const char* reason);
-static void sgAdvanceRetry(const char* reason);
-static void sgAdvanceEntryFailureRetry(const char* reason);
-static ULONGLONG sgUnbiasedInterruptTime();
-static void sgObserveAcDcForManualSleep();
+static void sgStartSleepRetry(SgRetryKind kind, const char* reason);
+static void sgAdvanceSleepRetry(const char* reason);
+static bool sgSleepRetryActive();
+static void stopPowerResumeWatchdog();
+static void armPowerResumeWatchdog(unsigned long long generation, UINT delayMs);
 static void closeJoyXoffAsync(const char* reason);
 
 // 电源生命周期状态。WM_POWERBROADCAST 只切换状态/排队，不阻塞系统电源回调；
@@ -914,6 +889,11 @@ static std::atomic<bool> g_hardwareWriteGate{true};
 static std::atomic<unsigned int> g_hardwareWriteInFlight{0};
 static std::atomic<bool> g_inputReady{true};
 static std::atomic<bool> g_inputReleaseRequired{false};
+// At most one detached fallback cleanup may be in flight.  This flag is only
+// touched by the tiny scheduler in the power callback and by its worker; the
+// callback never waits for the worker or for the Host response.
+static std::atomic<bool> g_fanSleepCleanupInFlight{false};
+static std::atomic<unsigned long long> g_fanSleepCleanupGeneration{0};
 static ULONGLONG g_resumeReadyTick = 0;
 static std::atomic<unsigned long long> g_resumeReadyGeneration{0};
 static unsigned long long g_resumeWatchdogGeneration = 0;
@@ -923,7 +903,38 @@ static unsigned int g_resumeProbeAttempts = 0;
 static bool g_resumeProbeInFlight = false;
 static bool g_resumeProbeForcedReset = false;
 static void traceLog(const char* fmt, ...);
+// Sleep is a hard safety boundary, but the Windows power callback is an
+// equally hard non-blocking boundary.  The native side may only enqueue a
+// best-effort Host cleanup; it must never perform HTTP, HC, Sleep, Wait or
+// any other potentially blocking operation inline in a power callback.
+static void fanHostScheduleEmergencySuspend(const char* reason,
+                                            unsigned long long generation);
+static bool fanHostCleanupForAppExit();
 static void traceInit();
+static void appendNativeLifecycleLog(const char* event, json detail = json::object());
+
+// A process exit cannot wait forever for a worker that is already inside an
+// external API. The normal stop signal is always sent first. When the bounded
+// wait expires, detach only while the whole application is terminating; the
+// OS tears down that remaining worker with the process, and independent Host
+// recovery remains alive outside this process.
+static bool joinThreadBoundedForExit(std::thread& thread, DWORD timeoutMs, const char* name) {
+    if (!thread.joinable()) return true;
+    if (timeoutMs == INFINITE) {
+        thread.join();
+        return true;
+    }
+    const HANDLE handle = reinterpret_cast<HANDLE>(thread.native_handle());
+    const DWORD wait = handle ? WaitForSingleObject(handle, timeoutMs) : WAIT_FAILED;
+    if (wait == WAIT_OBJECT_0) {
+        thread.join();
+        return true;
+    }
+    traceLog("exit worker detached name=%s wait=%lu", name ? name : "unknown",
+             static_cast<unsigned long>(wait));
+    thread.detach();
+    return false;
+}
 
 static const char* powerLifecycleName(PowerLifecycle state) {
     switch (state) {
@@ -943,21 +954,10 @@ static const char* sgSleepModeName(SgSleepMode mode) {
     }
 }
 
-static const char* sgSleepTaskPhaseName(SgSleepTaskPhase phase) {
-    switch (phase) {
-    case SgSleepTaskPhase::QueryPaused: return "query-paused";
-    case SgSleepTaskPhase::SleepConfirmed: return "sleep-confirmed";
-    case SgSleepTaskPhase::WakeClassifying: return "wake-classifying";
-    case SgSleepTaskPhase::RetryScheduled: return "retry-scheduled";
-    case SgSleepTaskPhase::Recovering: return "recovering";
-    default: return "idle";
-    }
-}
-
 static const char* sgRetryKindName(SgRetryKind kind) {
     switch (kind) {
     case SgRetryKind::EntryFailure: return "entry-failure";
-    case SgRetryKind::NonUserWake: return "non-user-wake";
+    case SgRetryKind::UnexpectedWake: return "unexpected-wake";
     default: return "none";
     }
 }
@@ -996,15 +996,12 @@ static json sgFactSnapshot() {
         {"sleepCycleActive", g_sgSleepCycleActive.load(std::memory_order_acquire)},
         {"gameSuspended", g_sgGameActuallySuspended.load(std::memory_order_acquire)},
         {"taskMode", sgSleepModeName(g_sgTask.mode)},
-        {"taskPhase", sgSleepTaskPhaseName(g_sgTask.phase)},
         {"retryKind", sgRetryKindName(g_sgTask.retryKind)},
-        {"entryFailureAttempts", g_sgTask.entryFailureAttempts},
-        {"nonUserWakeAttempts", g_sgTask.nonUserWakeAttempts},
+        {"retryAttempt", g_sgTask.retryAttempt},
         {"userStandby", {
-            {"active", g_sgUserStandbyTick.load(std::memory_order_acquire) != 0},
-            {"reason", g_sgUserStandbyReason.load(std::memory_order_acquire)},
-            {"time", sgFormatFactFileTime(g_sgUserStandbyFileTime.load(std::memory_order_acquire))},
-            {"deviceTriggered", g_sgUserStandbyDeviceTriggered}
+            {"active", g_sgLastPowerButtonSleepIntentFileTime.load(std::memory_order_acquire) != 0},
+            {"reason", g_sgLastKernel506Reason.load(std::memory_order_acquire)},
+            {"time", sgFormatFactFileTime(g_sgLastPowerButtonSleepIntentFileTime.load(std::memory_order_acquire))}
         }},
         {"last506", {
             {"reason", g_sgLastKernel506Reason.load(std::memory_order_acquire)},
@@ -1021,14 +1018,7 @@ static json sgFactSnapshot() {
             {"time", sgFormatFactFileTime(g_sgLastPowerButtonSleepIntentFileTime.load(std::memory_order_acquire))},
             {"evidence", "Kernel-Power EventID=506 Reason=1 or Reason=3"}
         }},
-        {"externalDeviceWake", {
-            {"deviceNodeChangeSeen", g_sgExternalDeviceWake.deviceNodeChangeSeen},
-            {"acdcChangeSeen", g_sgExternalDeviceWake.acdcChangeSeen},
-            {"kernel507Reason5Seen", g_sgExternalDeviceWake.kernel507Reason5Seen},
-            {"retryActive", g_sgExternalDeviceWake.retryActive},
-            {"consumed", g_sgExternalDeviceWake.consumed},
-            {"retryAttempt", g_sgExternalDeviceWake.retryAttempt}
-        }},
+        {"unexpectedWakeConsumed", g_sgTask.unexpectedWakeConsumed},
         {"facts", facts}
     };
 }
@@ -1069,6 +1059,7 @@ static std::condition_variable g_sgWorkCv;
 static std::deque<SgWorkItem> g_sgWorkQ;
 static std::thread g_sgWorkThread;
 static bool g_sgWorkStop = false;
+static void sgQueueWork(SgWork work, unsigned long long generation);
 struct SgSleepTarget {
     DWORD pid = 0;
     ULONGLONG processCreated = 0;
@@ -1083,54 +1074,8 @@ static SgSleepTarget g_sgSleepTarget;
 // ntdll 运行时解析（无需额外链接库）
 typedef LONG (NTAPI* NtSuspendProcess_t)(HANDLE);
 typedef LONG (NTAPI* NtResumeProcess_t)(HANDLE);
-typedef NTSTATUS (NTAPI* NtQuerySystemInformation_t)(
-    SYSTEM_INFORMATION_CLASS, PVOID, ULONG, PULONG);
-
-// The SDK intentionally omits the variable thread tail of
-// SYSTEM_PROCESS_INFORMATION. SystemProcessInformation still returns it;
-// keep a local read-only layout for the documented thread state fields.
-struct SgSystemThreadInformation {
-    LARGE_INTEGER KernelTime;
-    LARGE_INTEGER UserTime;
-    LARGE_INTEGER CreateTime;
-    ULONG WaitTime;
-    PVOID StartAddress;
-    CLIENT_ID ClientId;
-    KPRIORITY Priority;
-    KPRIORITY BasePriority;
-    ULONG ContextSwitches;
-    ULONG ThreadState;
-    ULONG WaitReason;
-};
-struct SgSystemProcessInformation {
-    ULONG NextEntryOffset;
-    ULONG NumberOfThreads;
-    BYTE Reserved1[48];
-    UNICODE_STRING ImageName;
-    KPRIORITY BasePriority;
-    HANDLE UniqueProcessId;
-    PVOID Reserved2;
-    ULONG HandleCount;
-    ULONG SessionId;
-    PVOID Reserved3;
-    SIZE_T PeakVirtualSize;
-    SIZE_T VirtualSize;
-    ULONG Reserved4;
-    SIZE_T PeakWorkingSetSize;
-    SIZE_T WorkingSetSize;
-    PVOID Reserved5;
-    SIZE_T QuotaPagedPoolUsage;
-    PVOID Reserved6;
-    SIZE_T QuotaNonPagedPoolUsage;
-    SIZE_T PagefileUsage;
-    SIZE_T PeakPagefileUsage;
-    SIZE_T PrivatePageCount;
-    LARGE_INTEGER Reserved7[6];
-    SgSystemThreadInformation Threads[1];
-};
 static NtSuspendProcess_t fnNtSuspend = nullptr;
 static NtResumeProcess_t  fnNtResume  = nullptr;
-static NtQuerySystemInformation_t fnNtQuerySystemInformation = nullptr;
 static bool g_sgNtInit = false;
 static void sgInitNt() {
     if (g_sgNtInit) return;
@@ -1139,8 +1084,6 @@ static void sgInitNt() {
     if (h) {
         fnNtSuspend = (NtSuspendProcess_t)GetProcAddress(h, "NtSuspendProcess");
         fnNtResume  = (NtResumeProcess_t)GetProcAddress(h, "NtResumeProcess");
-        fnNtQuerySystemInformation = (NtQuerySystemInformation_t)GetProcAddress(
-            h, "NtQuerySystemInformation");
     }
 }
 
@@ -1222,9 +1165,8 @@ static json sgSleepEnvironmentSnapshot() {
         {"lifecycle", powerLifecycleName(g_powerLifecycle.load(std::memory_order_acquire))},
         {"generation", currentPowerGeneration()},
         {"taskMode", sgSleepModeName(g_sgTask.mode)},
-        {"taskPhase", sgSleepTaskPhaseName(g_sgTask.phase)},
         {"retryKind", sgRetryKindName(g_sgTask.retryKind)},
-        {"externalRetryActive", g_sgExternalDeviceWake.retryActive}
+        {"retryActive", sgSleepRetryActive()}
     };
 }
 
@@ -1263,14 +1205,54 @@ static void sgRecordFact(const char* event, const json& details = json::object()
     if (log) log << line << '\n';
 }
 
+static void sgMarkInternalSleepRequest(SgRetryKind kind) {
+    g_sgInternalSleepRequest.kind = kind;
+    g_sgInternalSleepRequest.dispatchTick = GetTickCount64();
+    g_sgInternalSleepRequest.dispatchFileTime = sgNowFileTime();
+    sgRecordFact("internal-sleep-request-armed", {
+        {"kind", sgRetryKindName(kind)},
+        {"generation", currentPowerGeneration()},
+        {"fileTime", sgFormatFactFileTime(g_sgInternalSleepRequest.dispatchFileTime)}
+    });
+}
+
+static void sgClearInternalSleepRequest(const char* source) {
+    if (g_sgInternalSleepRequest.kind != SgRetryKind::None) {
+        sgRecordFact("internal-sleep-request-cleared", {
+            {"source", source ? source : "unknown"},
+            {"kind", sgRetryKindName(g_sgInternalSleepRequest.kind)},
+            {"generation", currentPowerGeneration()}
+        });
+    }
+    g_sgInternalSleepRequest = {};
+}
+
+static bool sgInternalSleepRequestMatches506(int reason, ULONGLONG eventFileTime) {
+    if (reason != 1 && reason != 3) return false;
+    if (g_sgInternalSleepRequest.kind == SgRetryKind::None ||
+        g_sgInternalSleepRequest.dispatchTick == 0)
+        return false;
+
+    const ULONGLONG now = GetTickCount64();
+    if (now < g_sgInternalSleepRequest.dispatchTick ||
+        now - g_sgInternalSleepRequest.dispatchTick > SG_INTERNAL_SLEEP_506_WINDOW_MS)
+        return false;
+
+    if (eventFileTime == 0 || g_sgInternalSleepRequest.dispatchFileTime == 0)
+        return true;
+    const ULONGLONG earlyAllowance =
+        SG_INTERNAL_SLEEP_506_CLOCK_SKEW_MS * 10000ULL;
+    const ULONGLONG lateAllowance =
+        SG_INTERNAL_SLEEP_506_WINDOW_MS * 10000ULL;
+    const ULONGLONG dispatchFileTime = g_sgInternalSleepRequest.dispatchFileTime;
+    if (eventFileTime < dispatchFileTime)
+        return dispatchFileTime - eventFileTime <= earlyAllowance;
+    return eventFileTime - dispatchFileTime <= lateAllowance;
+}
+
 static void sgMarkUserStandby(const char* source, int reason = -1,
                               ULONGLONG eventFileTime = 0) {
-    const ULONGLONG nowTick = GetTickCount64();
     const ULONGLONG fileTime = eventFileTime != 0 ? eventFileTime : sgNowFileTime();
-    g_sgUserStandbyTick.store(nowTick, std::memory_order_release);
-    g_sgUserStandbyFileTime.store(fileTime, std::memory_order_release);
-    g_sgUserStandbyReason.store(reason, std::memory_order_release);
-    g_sgUserStandbyDeviceTriggered = false;
     sgRecordFact("user-standby", {
         {"label", "主动按键睡眠"},
         {"source", source ? source : "unknown"},
@@ -1280,29 +1262,7 @@ static void sgMarkUserStandby(const char* source, int reason = -1,
 }
 
 static void sgClearUserStandby(const char* source) {
-    g_sgUserStandbyTick.store(0, std::memory_order_release);
-    g_sgUserStandbyFileTime.store(0, std::memory_order_release);
-    g_sgUserStandbyReason.store(-1, std::memory_order_release);
-    g_sgUserStandbyCandidate = false;
-    g_sgUserStandbyCandidateTick = 0;
-    g_sgUserStandbyDeviceTriggered = false;
     sgRecordFact("user-standby-cleared", {{"source", source ? source : "unknown"}});
-}
-
-static bool sgUserStandbyDeviceEligible(ULONGLONG nowTick, ULONGLONG& ageMs) {
-    const ULONGLONG standbyTick = g_sgUserStandbyTick.load(std::memory_order_acquire);
-    const ULONGLONG standbyFileTime = g_sgUserStandbyFileTime.load(std::memory_order_acquire);
-    ageMs = 0;
-    const ULONGLONG nowFileTime = sgNowFileTime();
-    if (standbyFileTime != 0 && nowFileTime >= standbyFileTime) {
-        ageMs = (nowFileTime - standbyFileTime) / 10000ULL;
-    } else if (standbyTick != 0 && nowTick >= standbyTick) {
-        // Monotonic fallback for a transient wall-clock correction.
-        ageMs = nowTick - standbyTick;
-    } else {
-        return false;
-    }
-    return ageMs >= SG_USER_STANDBY_DEVICE_DELAY_MS;
 }
 
 static bool sgExternalDeviceWakeIntentAge(ULONGLONG& ageMs) {
@@ -1315,149 +1275,57 @@ static bool sgExternalDeviceWakeIntentAge(ULONGLONG& ageMs) {
     return ageMs >= SG_USER_STANDBY_DEVICE_DELAY_MS;
 }
 
-static bool sgExternalDeviceWakeTicksNear(ULONGLONG first, ULONGLONG second) {
-    if (first == 0 || second == 0) return false;
-    const ULONGLONG delta = first >= second ? first - second : second - first;
-    return delta <= SG_EXTERNAL_WAKE_EVIDENCE_WINDOW_MS;
-}
-
-static void sgClearExternalDeviceWake(const char* source, bool clearUserPowerButtonSleep) {
-    if (g_hwnd) KillTimer(g_hwnd, SG_EXTERNAL_DEVICE_RETRY_TIMER_ID);
-    const bool hadState = g_sgExternalDeviceWake.deviceNodeChangeSeen ||
-        g_sgExternalDeviceWake.acdcChangeSeen ||
-        g_sgExternalDeviceWake.kernel507Reason5Seen ||
-        g_sgExternalDeviceWake.retryActive || g_sgExternalDeviceWake.consumed;
-    g_sgExternalDeviceWake = {};
+static void sgClearUnexpectedWake(const char* source, bool clearUserPowerButtonSleep) {
+    const bool hadState = g_sgTask.unexpectedWakeConsumed;
+    g_sgTask.unexpectedWakeConsumed = false;
     if (clearUserPowerButtonSleep)
         g_sgLastPowerButtonSleepIntentFileTime.store(0, std::memory_order_release);
     if (hadState) {
-        sgRecordFact("external-device-wake-cleared", {
+        sgRecordFact("unexpected-wake-cleared", {
             {"source", source ? source : "unknown"},
             {"clearedUserPowerButtonSleep", clearUserPowerButtonSleep}
         });
     }
 }
 
-static void sgScheduleExternalDeviceWakeRetry() {
-    if (!g_hwnd || !g_guardEnabled || !g_sgResleepEnabled ||
-        g_sgExternalDeviceWake.retryActive || !g_sgExternalDeviceWake.consumed)
-        return;
-    g_sgExternalDeviceWake.retryActive = true;
-    g_sgExternalDeviceWake.retryAttempt = 0;
-    g_sgExternalDeviceWake.retryScheduledTick =
-        GetTickCount64() + SG_ENTRY_RETRY_DELAYS_MS[0];
-    g_sgExternalDeviceWake.retryLastDispatchTick = 0;
-    SetTimer(g_hwnd, SG_EXTERNAL_DEVICE_RETRY_TIMER_ID,
-             static_cast<UINT>(SG_ENTRY_RETRY_DELAYS_MS[0]), nullptr);
-    sgRecordFact("external-device-wake-retry-scheduled", {
-        {"label", "外接设备变化唤醒"},
-        {"delaysMs", {500, 1000, 2000}},
-        {"firstDueInMs", SG_ENTRY_RETRY_DELAYS_MS[0]},
-        {"environment", sgSleepEnvironmentSnapshot()},
-        {"independentOf", {"repairEligible", "taskMode"}}
-    });
-}
-
 static void sgEvaluateExternalDeviceWake() {
-    if (!g_sgExternalDeviceWake.deviceNodeChangeSeen ||
-        g_sgExternalDeviceWake.consumed || g_sgExternalDeviceWake.retryActive)
-        return;
-    const bool corroboratedByAcDc = sgExternalDeviceWakeTicksNear(
-        g_sgExternalDeviceWake.deviceNodeChangeTick,
-        g_sgExternalDeviceWake.acdcChangeTick);
-    const bool corroboratedByKernel507 = sgExternalDeviceWakeTicksNear(
-        g_sgExternalDeviceWake.deviceNodeChangeTick,
-        g_sgExternalDeviceWake.kernel507Reason5Tick);
-    if (!corroboratedByAcDc && !corroboratedByKernel507) return;
-
     ULONGLONG intentAgeMs = 0;
     const bool intentAgeEligible = sgExternalDeviceWakeIntentAge(intentAgeMs);
     sgRecordFact("external-device-wake-evaluated", {
-        {"label", "外接设备变化唤醒"},
+        {"label", "意外唤醒"},
         {"intentAgeMs", intentAgeMs},
         {"intentAgeEligible", intentAgeEligible},
-        {"deviceNodeChange", true},
-        {"acdcEvidence", corroboratedByAcDc},
-        {"kernel507Reason5Evidence", corroboratedByKernel507},
         {"guardEnabled", g_guardEnabled},
-        {"resleepEnabled", g_sgResleepEnabled}
+        {"resleepEnabled", g_sgResleepEnabled},
+        {"consumed", g_sgTask.unexpectedWakeConsumed},
+        {"retryActive", sgSleepRetryActive()}
     });
-    if (!intentAgeEligible || !g_guardEnabled || !g_sgResleepEnabled) return;
+    if (!intentAgeEligible || !g_guardEnabled || !g_sgResleepEnabled ||
+        g_sgTask.unexpectedWakeConsumed || sgSleepRetryActive())
+        return;
 
-    g_sgExternalDeviceWake.consumed = true;
+    g_sgTask.unexpectedWakeConsumed = true;
     sgRecordFact("external-device-wake-confirmed", {
-        {"label", "外接设备变化唤醒"},
+        {"label", "意外唤醒"},
         {"intentAgeMs", intentAgeMs},
         {"retryDelaysMs", {500, 1000, 2000}}
     });
-    sgScheduleExternalDeviceWakeRetry();
+    sgStartSleepRetry(SgRetryKind::UnexpectedWake, "external-device-wake");
 }
 
 static void sgNoteExternalDeviceNodeChange() {
-    const ULONGLONG now = GetTickCount64();
-    const bool recentResume = g_lastResumeNotifyTick != 0 &&
-        now >= g_lastResumeNotifyTick &&
-        now - g_lastResumeNotifyTick <= SG_EXTERNAL_WAKE_EVIDENCE_WINDOW_MS;
-    const auto lifecycle = g_powerLifecycle.load(std::memory_order_acquire);
-    const bool sleepWakeContext = recentResume || g_sgModernStandbyActive ||
-        g_sgModernWakePending || lifecycle == PowerLifecycle::Suspended ||
-        lifecycle == PowerLifecycle::Resuming;
-    if (!sleepWakeContext) return;
-    g_sgExternalDeviceWake.deviceNodeChangeSeen = true;
-    g_sgExternalDeviceWake.deviceNodeChangeTick = now;
+    // AMD USB4 实机证据：DBT_DEVNODES_CHANGED(code=7)。120 秒睡眠意图
+    // 是唯一上下文门槛；连续 code=7 由本轮 consumed 位去重。
     sgEvaluateExternalDeviceWake();
 }
 
 static void sgNoteExternalDeviceAcDcChange() {
-    g_sgExternalDeviceWake.acdcChangeSeen = true;
-    g_sgExternalDeviceWake.acdcChangeTick = GetTickCount64();
-    sgEvaluateExternalDeviceWake();
+    // AC/DC remains diagnostic-only. Only code=7 or Kernel-Power 507
+    // Reason=5 may submit an unexpected-wake retry transaction.
 }
 
 static void sgNoteExternalDeviceKernel507Reason5() {
-    g_sgExternalDeviceWake.kernel507Reason5Seen = true;
-    g_sgExternalDeviceWake.kernel507Reason5Tick = GetTickCount64();
     sgEvaluateExternalDeviceWake();
-}
-
-static void sgDispatchExternalDeviceWakeRetry() {
-    if (g_hwnd) KillTimer(g_hwnd, SG_EXTERNAL_DEVICE_RETRY_TIMER_ID);
-    if (!g_sgExternalDeviceWake.retryActive) return;
-    if (g_sgExternalDeviceWake.retryAttempt >= std::size(SG_ENTRY_RETRY_DELAYS_MS)) {
-        g_sgExternalDeviceWake.retryActive = false;
-        sgRecordFact("external-device-wake-retry-finished", {{"result", "exhausted"}});
-        return;
-    }
-    const unsigned int attempt = ++g_sgExternalDeviceWake.retryAttempt;
-    const ULONGLONG dispatchTick = GetTickCount64();
-    const ULONGLONG scheduledToDispatchMs =
-        g_sgExternalDeviceWake.retryScheduledTick != 0 &&
-        dispatchTick >= g_sgExternalDeviceWake.retryScheduledTick
-        ? dispatchTick - g_sgExternalDeviceWake.retryScheduledTick
-        : 0;
-    g_sgExternalDeviceWake.retryLastDispatchTick = dispatchTick;
-    const SgSystemSleepRequestResult request = sgRequestSystemSleep();
-    json requestDetails = {
-        {"attempt", attempt}, {"accepted", request.accepted},
-        {"api", "SetSuspendState"}, {"shutdownPrivilegeEnabled", request.shutdownPrivilegeEnabled},
-        {"shutdownPrivilegeError", request.shutdownPrivilegeError},
-        {"requestError", request.requestError}, {"label", "外接设备变化唤醒"},
-        {"scheduledToDispatchMs", scheduledToDispatchMs},
-        {"environment", sgSleepEnvironmentSnapshot()}
-    };
-    sgRecordFact("external-device-wake-retry-request", requestDetails);
-    traceLog("external device wake retry request api=SetSuspendState attempt=%u accepted=%d privilege=%d privilegeError=%lu requestError=%lu",
-             attempt, request.accepted ? 1 : 0, request.shutdownPrivilegeEnabled ? 1 : 0,
-             request.shutdownPrivilegeError, request.requestError);
-    if (attempt < std::size(SG_ENTRY_RETRY_DELAYS_MS) && g_hwnd) {
-        g_sgExternalDeviceWake.retryScheduledTick =
-            dispatchTick + SG_ENTRY_RETRY_DELAYS_MS[attempt];
-        SetTimer(g_hwnd, SG_EXTERNAL_DEVICE_RETRY_TIMER_ID,
-                 static_cast<UINT>(SG_ENTRY_RETRY_DELAYS_MS[attempt]), nullptr);
-    } else {
-        g_sgExternalDeviceWake.retryActive = false;
-        sgRecordFact("external-device-wake-retry-finished", {{"result", "attempts-dispatched"}});
-    }
 }
 
 static std::wstring sgBaseName(const std::wstring& path) { // 取文件名并去 .exe/小写
@@ -1820,8 +1688,14 @@ struct NativeMonitorHw {
     double remainMin = -1.0;
     double gpuPowerW = 0.0;
     double gpuClockMhz = 0.0;
+    double thermalThrottleMax = 0.0;
+    double virtualMemoryCommittedMb = 0.0;
+    double virtualMemoryLoadPct = 0.0;
     bool sharedOk = false;
     bool fpsSensor = false;
+    bool thermalThrottleFound = false;
+    bool virtualMemoryCommittedFound = false;
+    bool virtualMemoryLoadFound = false;
 };
 
 static std::string monitorField(const BYTE* p, size_t n) {
@@ -1909,9 +1783,43 @@ static bool monitorReadHWiNFO(NativeMonitorHw& out) {
             const std::string unit = monitorField(view + base + 268, 16);
             const std::string low = ascii_lower(label);
             const std::string unitLow = ascii_lower(unit);
-            double value = 0.0, average = 0.0;
-            if (!readDouble(base + 284, value)) value = 0.0;
-            if (!readDouble(base + 308, average)) average = 0.0;
+            double value = 0.0, maximum = 0.0, average = 0.0;
+            const bool valueOk = readDouble(base + 284, value);
+            const bool maximumOk = readDouble(base + 300, maximum);
+            const bool averageOk = readDouble(base + 308, average);
+            if (!valueOk) value = 0.0;
+            if (!maximumOk) maximum = 0.0;
+            if (!averageOk) average = 0.0;
+
+            // HWiNFO exposes the original English label even when the user has
+            // renamed the visible sensor. Intel desktop and AMD HTC variants
+            // are fused: any matching sensor is sufficient, and duplicate
+            // readings keep the highest reported historical state.
+            const bool thermalThrottle = low == "core thermal throttling" ||
+                low == "thermal throttling (htc)";
+            if (thermalThrottle && unitLow == "yes/no") {
+                if (maximumOk && finiteNonNegative(maximum)) {
+                    out.thermalThrottleFound = true;
+                    out.thermalThrottleMax = (std::max)(out.thermalThrottleMax, maximum);
+                }
+                continue;
+            }
+
+            if (low == "virtual memory committed" && unitLow == "mb") {
+                if (valueOk && finiteNonNegative(value)) {
+                    out.virtualMemoryCommittedFound = true;
+                    out.virtualMemoryCommittedMb = value;
+                }
+                continue;
+            }
+
+            if (low == "virtual memory load" && unitLow == "%") {
+                if (valueOk && finiteNonNegative(value)) {
+                    out.virtualMemoryLoadFound = true;
+                    out.virtualMemoryLoadPct = (std::min)(100.0, value);
+                }
+                continue;
+            }
 
             if (low.find("framerate") != std::string::npos) {
                 if (low.find("presented") != std::string::npos && low.find("(avg)") != std::string::npos) {
@@ -2794,6 +2702,12 @@ static void nativeMonitorLoop() {
                 {"cpuUsage", static_cast<int>(std::round(cpuUsage))},
                 {"gpuPowerW", std::round(hw.gpuPowerW * 10.0) / 10.0},
                 {"gpuClockMhz", static_cast<int>(std::round(hw.gpuClockMhz))},
+                {"thermalThrottleFound", hw.thermalThrottleFound},
+                {"thermalThrottleMax", hw.thermalThrottleMax},
+                {"virtualMemoryCommittedFound", hw.virtualMemoryCommittedFound},
+                {"virtualMemoryCommittedMb", std::round(hw.virtualMemoryCommittedMb * 10.0) / 10.0},
+                {"virtualMemoryLoadFound", hw.virtualMemoryLoadFound},
+                {"virtualMemoryLoadPct", std::round(hw.virtualMemoryLoadPct * 10.0) / 10.0},
                 {"hwDown", !hwHealthy}
             };
             sgWriteFileAtomic(MONITOR_TOP_JSON, topJson.dump());
@@ -2861,7 +2775,7 @@ static void nativeMonitorSetMode(bool top, bool fps, bool enabled) {
     g_nativeMonitorCv.notify_all();
 }
 
-static void stopNativeMonitorForExit() {
+static void stopNativeMonitorForExit(DWORD timeoutMs) {
     {
         std::lock_guard<std::mutex> lock(g_nativeMonitorMx);
         g_nativeMonitorTop = false;
@@ -2869,7 +2783,7 @@ static void stopNativeMonitorForExit() {
         g_nativeMonitorStop = true;
         g_nativeMonitorCv.notify_all();
     }
-    if (g_nativeMonitorThread.joinable()) g_nativeMonitorThread.join();
+    (void)joinThreadBoundedForExit(g_nativeMonitorThread, timeoutMs, "native-monitor");
     nativeMonitorDeleteOutputs();
 }
 
@@ -3426,24 +3340,38 @@ static void stopTdpDaemonForExit() {
     cleanupExitArtifacts();
 }
 
+static void postExitReadyOnce(HWND hwnd, WPARAM code = 0) {
+    bool expected = false;
+    if (!g_exitReadyPosted.compare_exchange_strong(expected, true)) return;
+    if (hwnd && IsWindow(hwnd)) PostMessageW(hwnd, WM_APP_EXIT_READY, code, 0);
+}
+
 static DWORD WINAPI exitCleanupThreadProc(LPVOID param) {
     HWND hwnd = reinterpret_cast<HWND>(param);
     g_summonQuit = true;
-    sgStopWorkThread();
-    poolStop();
+    // The WebView can be destroyed before Vue finishes an async unmount hook.
+    // A confirmed restore is ideal; otherwise the resident Host accepts the
+    // recovery handoff and keeps retrying after YeManCC exits. Never trap the
+    // main application behind a wedged ACPI call.
+    const bool oemRestoreConfirmed = fanHostCleanupForAppExit();
+    appendNativeLifecycleLog(oemRestoreConfirmed
+        ? "fan-exit-cleanup-confirmed"
+        : "fan-exit-recovery-handed-off");
+    sgStopWorkThread(1000);
+    poolStop(1000);
     for (auto& [id, w] : g_watchers) {
         if (stopWatcher(w, 1000)) delete w;
     }
     g_watchers.clear();
     stopTdpDaemonForExit();
-    stopTopMonitorForExit();
-    sgCleanupBeforeExit();
+    stopTopMonitorForExit(1000);
+    (void)sgCleanupBeforeExit(true);
     if (g_autoCloseThread) {
         WaitForSingleObject(g_autoCloseThread, 3000);
         CloseHandle(g_autoCloseThread);
         g_autoCloseThread = nullptr;
     }
-    PostMessageW(hwnd, WM_APP_EXIT_READY, 0, 0);
+    postExitReadyOnce(hwnd, 0);
     return 0;
 }
 
@@ -3468,12 +3396,21 @@ static void beginAsyncExit(HWND hwnd, WPARAM code) {
         g_exitCleanupThread = CreateThread(nullptr, 0, exitCleanupThreadProc,
                                            reinterpret_cast<LPVOID>(hwnd), 0, nullptr);
         if (!g_exitCleanupThread) {
-            // The fallback remains synchronous only if the OS refuses to
-            // create the cleanup worker; correctness is more important here.
-            stopTdpDaemonForExit();
-            stopTopMonitorForExit();
-            sgCleanupBeforeExit();
-            PostMessageW(hwnd, WM_APP_EXIT_READY, g_exitCode.load(std::memory_order_relaxed), 0);
+            // The Host has an independent parent watchdog. If Windows cannot
+            // create the cleanup worker, exit rather than running any HTTP or
+            // EC-adjacent operation synchronously on the UI thread.
+            appendNativeLifecycleLog("fan-exit-worker-unavailable");
+            // The TDP lifetime Job has KILL_ON_JOB_CLOSE. Closing it is
+            // non-blocking; the remaining process-local cleanup is handled by
+            // the final bounded fallback after the message loop exits.
+            if (g_tdpDaemonJob) {
+                CloseHandle(g_tdpDaemonJob);
+                g_tdpDaemonJob = nullptr;
+            }
+            postExitReadyOnce(hwnd, g_exitCode.load(std::memory_order_relaxed));
+        } else {
+            SetTimer(hwnd, EXIT_CLEANUP_WATCHDOG_TIMER_ID,
+                     EXIT_CLEANUP_WATCHDOG_MS, nullptr);
         }
     }
 }
@@ -3540,98 +3477,38 @@ static std::string sgDetectVendor() { // 对齐 yeman.detectVendor
 
 // ── 睡眠守护配置（统一 sleep section；Sleep\sleepguard.json 仅迁移）──
 static void sgClearSleepTarget();
-static void sgAbortSleepIntent(const char* reason, bool preserveRetryContext);
+static bool sgReadSleepTarget(SgSleepTarget& target);
+struct SgResumeResult;
+static SgResumeResult sgResumeSleepTarget(
+    unsigned long long expectedGeneration, bool focusResumedGame = false);
+static void sgAbortSleepIntent(const char* reason);
 static void sgMarkSleepTrigger() {
-    const bool continuingRetry = g_sgRetryInProgress &&
-        g_sgTask.retryKind != SgRetryKind::None;
-    if (continuingRetry) {
-        // Keep the original pause lease across all entry retries. Re-pausing a
-        // process that is already frozen can leave an unmatched suspend count.
-        g_sgTask.generation = currentPowerGeneration();
-        g_sgTask.phase = SgSleepTaskPhase::QueryPaused;
-        g_sgTask.suspendConfirmed = false;
-        g_sgSleepTriggerTick = GetTickCount64();
-        g_sgSleepTriggerEpoch = sgNowEpoch();
-        g_sgWakeTick = 0;
-        g_sgResleepPending = false;
-        g_sgWakeSourceEvidence = false;
-        g_sgWakeSourceTick = 0;
-        g_sgLastS0WakeReason = -1;
-        g_sgLastS0WakeTick = 0;
-        g_sgLastPowerButtonWakeTick = 0;
-        g_sgLastPowerButtonWakeEventFileTime.store(0, std::memory_order_release);
-        g_sgS0ReentryActive = false;
-        g_sgEntryFailureObserved = false;
-        g_sgEnteredTick = 0;
-        return;
-    }
-    if (!continuingRetry) {
-        g_sgTask.entryFailureAttempts = 0;
-        g_sgTask.nonUserWakeResleepUsed = false;
-    }
     g_sgTask.generation = currentPowerGeneration();
-    g_sgTask.phase = SgSleepTaskPhase::QueryPaused;
-    g_sgTask.suspendConfirmed = false;
+    g_sgTask.retryKind = SgRetryKind::None;
+    g_sgTask.retryAttempt = 0;
+    g_sgTask.unexpectedWakeConsumed = false;
     g_sgSleepTriggerTick = GetTickCount64();
     g_sgSleepTriggerEpoch = sgNowEpoch();
-    g_sgLastInputTick = g_sgSleepTriggerTick;
-    g_sgWakeTick = 0;
-    g_sgResleepPending = false;
     g_sgRepairEligible = g_sgSleepIntentArmed && g_guardEnabled;
     g_sgSleepCycleActive.store(g_sgRepairEligible, std::memory_order_release);
     g_sgGameActuallySuspended.store(false, std::memory_order_release);
     g_sgSleepIntentArmed = false;
     closeJoyXoffAsync("sleep-trigger");
-    g_sgWakeSourceEvidence = false;
-    g_sgWakeSourceTick = 0;
     g_sgLastS0WakeReason = -1;
     g_sgLastS0WakeTick = 0;
     g_sgLastPowerButtonWakeTick = 0;
     g_sgLastPowerButtonWakeEventFileTime.store(0, std::memory_order_release);
-    g_sgS0ReentryActive = false;
     g_sgRetryInProgress = false;
     g_sgRetryDueTick = 0;
-    // The task retains its independent retry budgets across an internal retry,
-    // but the consumed timer no longer owns the new physical sleep request.
-    g_sgTask.retryKind = SgRetryKind::None;
-    g_sgEnteredTick = 0;
-    g_sgEntryFailureObserved = false;
-    sgClearSleepTarget();
     sgWriteFileAtomic(
         SG_SLEEP_TRIGGER_MARKER,
         "triggerEpoch=" + std::to_string(g_sgSleepTriggerEpoch) + "\n"
     );
-    // 观察窗口从唤醒信号开始，不能在入睡前启动定时器；睡眠期间消息线程不会可靠运行。
+    // EntryFailure 仅由本轮 506/507 或查询失败证据推进，不启动静默观察器。
 }
 
-static void sgMarkInputActivity() {
-    const ULONGLONG now = GetTickCount64();
-    if (g_sgResleepEnabled && g_sgSleepTriggerTick != 0)
-        g_sgLastInputTick = now;
-}
-
-static void sgStopResleepObservation();
-struct SgResumeResult;
+static void sgStopSleepRetry();
 static bool sgEnsureMarkerDir(const std::wstring& dir);
-
-// 任何自动唤醒观察路径都必须最终 fail-open。只恢复本轮写入
-// Sleep\suspended 的 PID，不使用全局候选扫描，避免恢复用户手动暂停的进程。
-static void sgReleaseAfterWakeObservation();
-
-static void sgStartResleepObservation() {
-    if (!g_sgResleepEnabled || !g_sgRepairEligible || g_sgSleepTriggerTick == 0 || !g_hwnd ||
-        g_sgTask.mode != SgSleepMode::S3) return;
-    const ULONGLONG now = GetTickCount64();
-    if (now < g_sgResleepCooldownTick) {
-        sgReleaseAfterWakeObservation();
-        return;
-    }
-    g_sgTask.phase = SgSleepTaskPhase::WakeClassifying;
-    g_sgWakeTick = now;
-    g_sgLastInputTick = now;
-    g_sgResleepPending = true;
-    SetTimer(g_hwnd, SG_RESLEEP_TIMER_ID, 250, nullptr);
-}
 
 static const char* sgKernelPowerReasonName(int reason) {
     switch (reason) {
@@ -3642,121 +3519,17 @@ static const char* sgKernelPowerReasonName(int reason) {
     }
 }
 
-static bool sgMarkModernStandbyReentry(const char* source) {
-    const ULONGLONG now = GetTickCount64();
-    if (g_sgLastS0WakeReason != 28 || g_sgLastS0WakeTick == 0 ||
-        now - g_sgLastS0WakeTick > 5000ULL ||
-        !g_sgSleepCycleActive.load(std::memory_order_acquire) ||
-        !g_sgRepairEligible)
-        return false;
-    if (g_hwnd) KillTimer(g_hwnd, SG_RESLEEP_TIMER_ID);
-    g_sgResleepPending = false;
-    g_sgWakeTick = 0;
-    g_sgWakeSourceEvidence = false;
-    g_sgWakeSourceTick = 0;
-    g_sgS0ReentryActive = true;
-    g_sgModernStandbyActive = true;
-    g_sgModernWakePending = false;
-    g_sgModernWakeClassified = false;
-    g_sgModernWakeClassifiedTick = 0;
-    g_sgTask.phase = SgSleepTaskPhase::SleepConfirmed;
-    g_sgTask.suspendConfirmed = true;
-    g_powerLifecycle.store(PowerLifecycle::Suspended, std::memory_order_release);
-    traceLog("s0 automatic reentry classified source=%s reason=%d class=%s",
-             source ? source : "unknown", g_sgLastS0WakeReason,
-             sgKernelPowerReasonName(g_sgLastS0WakeReason));
-    return true;
-}
-
-static void sgStopResleepObservation() {
-    if (g_hwnd) KillTimer(g_hwnd, SG_RESLEEP_TIMER_ID);
+static void sgStopSleepRetry() {
     if (g_hwnd) KillTimer(g_hwnd, SG_RETRY_TIMER_ID);
-    g_sgResleepPending = false;
     g_sgSleepTriggerTick = 0;
-    g_sgWakeTick = 0;
+    g_sgRetryInProgress = false;
+    g_sgRetryDueTick = 0;
+    g_sgTask.retryKind = SgRetryKind::None;
+    g_sgTask.retryAttempt = 0;
 }
 
-static void sgTryResleep() {
-    if (g_sgRetryInProgress && g_sgTask.retryKind != SgRetryKind::None)
-        return;
-    // USB4/external-device retry is no longer part of the SleepTask observer.
-    // Keep the paused lease only while its short evidence window is open; the
-    // independent external-device state schedules all actual retry requests.
-    if (!g_sgUserStandbyDeviceTriggered) {
-        if (g_sgExternalDeviceWake.retryActive)
-            return;
-        const ULONGLONG now = GetTickCount64();
-        if (g_sgWakeTick != 0 && now >= g_sgWakeTick &&
-            now - g_sgWakeTick < SG_EXTERNAL_WAKE_EVIDENCE_WINDOW_MS)
-            return;
-        sgReleaseAfterWakeObservation();
-        return;
-    }
-    if (!g_sgResleepPending) return;
-    if (!g_sgResleepEnabled || !g_sgRepairEligible) {
-        sgReleaseAfterWakeObservation();
-        return;
-    }
-    const ULONGLONG now = GetTickCount64();
-    if (now < g_sgResleepCooldownTick ||
-        now - g_sgWakeTick > SG_RESLEEP_OBSERVATION_MS) {
-        sgReleaseAfterWakeObservation();
-        return;
-    }
-    // A quiet window alone is not a wake classification.  Require a concrete
-    // system source (AC/DC, device/USB4, timer, or troubleshooter evidence).
-    // Kernel-Power 507 and AC/DC/device notifications can race the resume
-    // broadcast by a few milliseconds.  Accept evidence in a symmetric
-    // window around the observation start, never only "after" it.
-    const ULONGLONG sourceDelta = g_sgWakeSourceTick > g_sgWakeTick
-        ? g_sgWakeSourceTick - g_sgWakeTick
-        : g_sgWakeTick - g_sgWakeSourceTick;
-    const bool acdcDisplayBurst = g_sgLastS0WakeReason == 5;
-    if (!g_sgWakeSourceEvidence || sourceDelta > SG_WAKE_SOURCE_EVIDENCE_MS ||
-        (!acdcDisplayBurst && now - g_sgLastInputTick < 5000ULL)) return;
-    if (g_sgTask.nonUserWakeAttempts >= SG_MAX_ENTRY_RETRIES) {
-        g_sgResleepCooldownTick = now + 300000ULL;
-        sgReleaseAfterWakeObservation();
-        return;
-    }
-    g_sgResleepPending = false;
-    sgRequestSleepRetry(SgRetryKind::NonUserWake,
-                        acdcDisplayBurst ? "acdc-display-burst" : "non-user-wake");
-}
-
-static bool sgEntryRetryIsExclusive() {
-    return g_sgRetryInProgress &&
-        g_sgTask.retryKind == SgRetryKind::EntryFailure;
-}
-
-static bool sgRetryIsExclusive() {
-    return g_sgRetryInProgress &&
-        g_sgTask.retryKind != SgRetryKind::None;
-}
-
-static ULONGLONG sgEntryFailureWindowMs() {
-    return SG_ENTRY_FAILURE_BASE_WINDOW_MS +
-        static_cast<ULONGLONG>(g_sgTask.entryFailureAttempts) * SG_ENTRY_FAILURE_STEP_MS;
-}
-
-static void sgLoadResleepCooldown() {
-    g_sgResleepCooldownTick = 0;
-    g_sgResleepCooldownEpoch = 0.0;
-    const std::string c = sgReadFile(SG_RESLEEP_MARKER);
-    const std::string key = "resleepEpoch=";
-    const size_t p = c.find(key);
-    if (p == std::string::npos) return;
-    try {
-        const double epoch = std::stod(c.substr(p + key.size()));
-        const double age = sgNowEpoch() - epoch;
-        if (age >= 0.0 && age < 300.0) {
-            g_sgResleepCooldownEpoch = epoch;
-            g_sgResleepCooldownTick = GetTickCount64() +
-                static_cast<ULONGLONG>((300.0 - age) * 1000.0);
-        }
-    } catch (...) {
-        // 损坏的冷却记录不阻断主程序；本次启动按无冷却处理。
-    }
+static bool sgSleepRetryActive() {
+    return g_sgRetryInProgress && g_sgTask.retryKind != SgRetryKind::None;
 }
 
 static void sgLoadConfig() {
@@ -3832,10 +3605,10 @@ static void summonLoad() {
             loadBool("bDoubleMinimize", g_bDoubleMinimize, true);
             loadBool("tdpShortcut", g_tdpShortcut, true);
             loadBool("fpsShortcut", g_fpsShortcut, true);
-            loadBool("killGame", g_killGame, false);
-            loadBool("openKeyboard", g_openKeyboard, false);
-            loadBool("returnDesktop", g_returnDesktop, false);
-            loadBool("mouseToggle", g_mouseToggle, false);
+            loadBool("killGame", g_killGame, true);
+            loadBool("openKeyboard", g_openKeyboard, true);
+            loadBool("returnDesktop", g_returnDesktop, true);
+            loadBool("mouseToggle", g_mouseToggle, true);
             const std::string backend = j.value("mouseBackend", std::string("joyxoff"));
             if (backend == "joyxoff" || backend == "gamebar") g_mouseBackend = backend;
             else {
@@ -4934,13 +4707,170 @@ static bool gpAnyShortcutHeld() {
         g_curPad.bRightTrigger >= XINPUT_GAMEPAD_TRIGGER_THRESHOLD;
 }
 
+static HWND customSteamLibraryWindow() {
+    return FindWindowW(L"YeManSteamLibraryWorkspace", nullptr);
+}
+
+static constexpr wchar_t kCustomSteamLibraryInputOwnerProperty[] =
+    L"YeManSteamLibrary.InputOwner";
+static constexpr wchar_t kCustomSteamLibraryParentPidProperty[] =
+    L"YeManSteamLibrary.ParentPid";
+static constexpr ULONG_PTR kCustomSteamLibraryHostInputOwnerMarker = 1;
+static constexpr ULONG_PTR kCustomSteamLibraryParentInputOwnerMarker = 2;
+static constexpr ULONGLONG kCustomSteamLibraryLaunchTimeoutMs = 10000;
+
+static ULONG_PTR customSteamLibraryWindowProperty(HWND window, const wchar_t* name) {
+    return reinterpret_cast<ULONG_PTR>(GetPropW(window, name));
+}
+
+static bool customSteamLibraryProcessMatches(HWND window) {
+    if (!window || !IsWindow(window)) return false;
+    DWORD pid = 0;
+    GetWindowThreadProcessId(window, &pid);
+    if (!pid) return false;
+    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    if (!process) return false;
+    wchar_t imagePath[32768]{};
+    DWORD length = static_cast<DWORD>(std::size(imagePath));
+    const bool queried = QueryFullProcessImageNameW(process, 0, imagePath, &length) != FALSE;
+    CloseHandle(process);
+    if (!queried || length == 0) return false;
+    const std::wstring path(imagePath, length);
+    const auto slash = path.find_last_of(L"\\/");
+    const std::wstring name = slash == std::wstring::npos ? path : path.substr(slash + 1);
+    return _wcsicmp(name.c_str(), L"CustomSteamLibrary.exe") == 0 ||
+        _wcsicmp(name.c_str(), L"SteamLibraryWorkspace.exe") == 0;
+}
+
+static bool customSteamLibraryParentOwned(HWND window) {
+    if (!window || !IsWindow(window)) return false;
+    if (customSteamLibraryWindowProperty(window, kCustomSteamLibraryInputOwnerProperty) !=
+        kCustomSteamLibraryParentInputOwnerMarker) return false;
+    const auto parentPid = customSteamLibraryWindowProperty(window, kCustomSteamLibraryParentPidProperty);
+    if (parentPid != static_cast<ULONG_PTR>(GetCurrentProcessId())) return false;
+    return customSteamLibraryProcessMatches(window);
+}
+
+static HWND customSteamLibraryParentWindow() {
+    HWND window = customSteamLibraryWindow();
+    return customSteamLibraryParentOwned(window) ? window : nullptr;
+}
+
+static bool customSteamLibraryInputSuppressed() {
+    const auto phase = static_cast<CustomSteamLibraryInputPhase>(
+        g_customSteamLibraryInputPhase.load(std::memory_order_acquire));
+    const HWND parentWindow = customSteamLibraryParentWindow();
+    if (phase == CustomSteamLibraryInputPhase::disabled) {
+        // The child window is the authoritative integration signal. The
+        // bridge may arm launch suppression before creation, but once a
+        // correctly identified parent-owned EXE exists, native input control
+        // is recovered even if the renderer missed a lifecycle callback.
+        if (!parentWindow) return false;
+        g_customSteamLibraryInputPhase.store(
+            static_cast<int>(CustomSteamLibraryInputPhase::active), std::memory_order_release);
+        return true;
+    }
+    if (parentWindow) {
+        // The native controller owns the transition to active as soon as it
+        // sees the correctly identified child. No renderer state is needed.
+        g_customSteamLibraryInputPhase.store(
+            static_cast<int>(CustomSteamLibraryInputPhase::active), std::memory_order_release);
+        return true;
+    }
+
+    if (phase == CustomSteamLibraryInputPhase::active) {
+        // Child disappeared or changed ownership. Keep the parent blocked for
+        // the return boundary; gamepadEval releases it only after neutral.
+        g_customSteamLibraryInputPhase.store(
+            static_cast<int>(CustomSteamLibraryInputPhase::returning), std::memory_order_release);
+        return true;
+    }
+    if (phase == CustomSteamLibraryInputPhase::launching &&
+        GetTickCount64() >= g_customSteamLibraryInputDeadline.load(std::memory_order_acquire)) {
+        g_customSteamLibraryInputPhase.store(
+            static_cast<int>(CustomSteamLibraryInputPhase::returning), std::memory_order_release);
+    }
+    return true;
+}
+
+static bool customSteamLibraryChildForeground() {
+    if (!customSteamLibraryInputSuppressed()) return false;
+    HWND child = customSteamLibraryParentWindow();
+    return child && IsWindow(child) && IsWindowVisible(child) && !IsIconic(child) &&
+        GetForegroundWindow() == child;
+}
+
+// Clear only parent-owned hold/double-click state. Keep g_curW/g_prevW intact
+// so the same physical button cannot become a fresh edge when the child
+// session starts or ends.
+static void resetParentShortcutStateForCustomSteamLibrary() {
+    gpArmed = true;
+    gpPrevB = (g_curW & XINPUT_GAMEPAD_B) != 0;
+    gpHoldStart = 0;
+    gpLastBPress = 0;
+    g_bClosePending = false;
+    g_bClosePendingSince = 0;
+    g_bCloseReadyAt = 0;
+    g_pendingSummonTarget = {};
+    gpKbArmed = gpKxArmed = gpKyArmed = true;
+    gpKbHoldStart = gpKxHoldStart = gpKyHoldStart = 0;
+    s_dpHeldStart = s_dpLastEmit = 0;
+    s_brightnessHeldStart = s_brightnessLastEmit = 0;
+}
+
+static const char* customSteamLibrarySemanticAction(const char* action) {
+    if (!action) return nullptr;
+    if (strcmp(action, "page-prev") == 0) return "tab-previous";
+    if (strcmp(action, "page-next") == 0) return "tab-next";
+    if (strcmp(action, "confirm") == 0 || strcmp(action, "dropdown") == 0) return "accept";
+    if (strcmp(action, "back") == 0) return "back";
+    if (strcmp(action, "edit-game") == 0) return "edit";
+    if (strcmp(action, "navigate-left") == 0 || strcmp(action, "navigate-right") == 0 ||
+        strcmp(action, "navigate-up") == 0 || strcmp(action, "navigate-down") == 0 ||
+        strcmp(action, "accept") == 0 || strcmp(action, "tab-previous") == 0 ||
+        strcmp(action, "tab-next") == 0 || strcmp(action, "edit") == 0) return action;
+    if (strcmp(action, "nav-left") == 0) return "navigate-left";
+    if (strcmp(action, "nav-right") == 0) return "navigate-right";
+    if (strcmp(action, "nav-up") == 0) return "navigate-up";
+    if (strcmp(action, "nav-down") == 0) return "navigate-down";
+    return nullptr;
+}
+
+static bool customSteamLibrarySendSemanticAction(const char* action) {
+    const char* semantic = customSteamLibrarySemanticAction(action);
+    if (!semantic) return false;
+    HWND child = customSteamLibraryParentWindow();
+    if (!child || !IsWindow(child)) return false;
+    const auto payload = U2W(semantic);
+    COPYDATASTRUCT data{};
+    data.dwData = 0x594D4343; // Y M C C: versioned semantic-action channel marker
+    data.cbData = static_cast<DWORD>((payload.size() + 1) * sizeof(wchar_t));
+    data.lpData = const_cast<wchar_t*>(payload.c_str());
+    DWORD_PTR result = 0;
+    const auto delivered = SendMessageTimeoutW(
+        child, WM_COPYDATA, reinterpret_cast<WPARAM>(g_hwnd),
+        reinterpret_cast<LPARAM>(&data), SMTO_ABORTIFHUNG | SMTO_BLOCK, 200, &result);
+    return delivered != FALSE && result != 0;
+}
+
 static bool gamepadUiInputEligible() {
-    return g_hwnd && IsWindow(g_hwnd) && IsWindowVisible(g_hwnd) &&
-        !IsIconic(g_hwnd) && focusMainWindowIsForeground();
+    // Once the bridge is armed, the parent must not receive any controller
+    // action while the child is launching/returning. This is the hard gate
+    // that prevents one physical press from becoming a parent+child double.
+    if (customSteamLibraryInputSuppressed()) return customSteamLibraryChildForeground();
+    if (!g_hwnd || !IsWindow(g_hwnd) || !IsWindowVisible(g_hwnd) || IsIconic(g_hwnd)) return false;
+    return focusMainWindowIsForeground();
 }
 
 static void gamepadEmitUiAction(const char* action) {
     if (!action || !*action || !gamepadUiInputEligible()) return;
+    // The native YeManCC gamepad loop is the sole owner in parent mode. Do
+    // not emit a renderer event and ask TypeScript to arbitrate again: send
+    // the already-normalized semantic action directly to the child window.
+    if (customSteamLibraryChildForeground()) {
+        (void)customSteamLibrarySendSemanticAction(action);
+        return;
+    }
     ipc_emit("gamepad.ui-input", {{"action", action}});
 }
 
@@ -5066,8 +4996,6 @@ static void gamepadEval() {
             g_inputReleaseRequired.store(false, std::memory_order_release);
         return;
     }
-    if (g_padConnected && memcmp(&g_curPad, &g_prevPad, sizeof(XINPUT_GAMEPAD)) != 0)
-        sgMarkInputActivity();
     WORD w = g_curW;
     bool both       = (w & XINPUT_GAMEPAD_LEFT_SHOULDER) && (w & XINPUT_GAMEPAD_RIGHT_SHOULDER);
     bool bPressed   = (w & XINPUT_GAMEPAD_B) != 0;
@@ -5081,6 +5009,51 @@ static void gamepadEval() {
     bool dpLeft = (w & XINPUT_GAMEPAD_DPAD_LEFT) != 0;
     bool dpRight= (w & XINPUT_GAMEPAD_DPAD_RIGHT) != 0;
     ULONGLONG now = GetTickCount64();
+
+    // Returning is a native boundary. Once every physical control is
+    // neutral, ownership can be released; a later press then belongs to the
+    // parent again. This is deliberately decided beside the XInput snapshot,
+    // not by the renderer lifecycle.
+    if (static_cast<CustomSteamLibraryInputPhase>(
+            g_customSteamLibraryInputPhase.load(std::memory_order_acquire)) ==
+            CustomSteamLibraryInputPhase::returning && !gpAnyShortcutHeld()) {
+        g_customSteamLibraryInputPhase.store(
+            static_cast<int>(CustomSteamLibraryInputPhase::disabled), std::memory_order_release);
+        g_customSteamLibraryInputDeadline.store(0, std::memory_order_release);
+    }
+
+    // Custom Steam Library owns the foreground controller session after its
+    // hidden bridge is armed. Do this before every parent-global shortcut:
+    // B double-minimize, LB+RB summon, Start+direction tuning, Select+face
+    // combos, and page navigation must not run in parallel with the child.
+    // The child still receives one semantic action through gamepadProcessUiInput.
+    static bool customSessionWasSuppressed = false;
+    const bool customSessionSuppressed = customSteamLibraryInputSuppressed();
+    if (customSessionSuppressed != customSessionWasSuppressed) {
+        resetParentShortcutStateForCustomSteamLibrary();
+        customSessionWasSuppressed = customSessionSuppressed;
+        // Renderer receives only an ownership notification. It never makes
+        // the arbitration decision; this prevents its browser fallback poll
+        // from observing the same physical controller while the child owns it.
+        ipc_emit("gamepad.input-owner", {
+            {"owner", customSessionSuppressed ? "custom-steam-library" : "yemancc"}
+        });
+    }
+    if (customSessionSuppressed) {
+        gamepadProcessUiInput(w, now);
+        if (gpAnyShortcutHeld()) {
+            if (!g_gpHoldTimerOn) {
+                SetTimer(g_hwnd, GP_HOLD_TIMER_ID, 50, nullptr);
+                g_gpHoldTimerOn = true;
+            }
+        } else if (g_gpHoldTimerOn) {
+            KillTimer(g_hwnd, GP_HOLD_TIMER_ID);
+            g_gpHoldTimerOn = false;
+        }
+        g_prevW = w;
+        g_prevPad = g_curPad;
+        return;
+    }
 
     const bool shoulderDown = (w & (XINPUT_GAMEPAD_LEFT_SHOULDER | XINPUT_GAMEPAD_RIGHT_SHOULDER)) != 0;
     const bool shoulderWasDown = (g_prevW & (XINPUT_GAMEPAD_LEFT_SHOULDER | XINPUT_GAMEPAD_RIGHT_SHOULDER)) != 0;
@@ -5340,6 +5313,67 @@ static bool sgRunExeSync(const std::wstring& exe, const std::wstring& args, DWOR
     bool ok = wait == WAIT_OBJECT_0 && GetExitCodeProcess(pi.hProcess, &exitCode) && exitCode == 0;
     CloseHandle(pi.hThread); CloseHandle(pi.hProcess); CloseHandle(job);
     return ok;
+}
+
+// RTSSHooks exports use their own SDK signatures.  They are not rundll32
+// entry points: LoadProfile takes LPCSTR and UpdateProfiles takes no args.
+// Calling them through rundll32 passes HWND/HINSTANCE/LPSTR/int instead and
+// can make LoadProfile treat a window handle as a string pointer.
+using RtssLoadProfileFn = void (*)(LPCSTR);
+using RtssUpdateProfilesFn = void (*)();
+
+// Keep the SEH boundary in a function with no C++ objects that need
+// destruction; MSVC otherwise rejects __try in the surrounding function.
+static DWORD nativeRtssInvokeProfiles(RtssLoadProfileFn loadProfile,
+                                       RtssUpdateProfilesFn updateProfiles) {
+    __try {
+        loadProfile("");
+        updateProfiles();
+        return ERROR_SUCCESS;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return GetExceptionCode();
+    }
+}
+
+static json nativeRtssReloadProfiles(const std::wstring& dllPath) {
+    const auto fileName = ascii_lower(W2U(fspath::path(dllPath).filename().wstring()));
+    const auto path = fspath::path(dllPath);
+    if (fileName != "rtsshooks64.dll")
+        return json{{"ok", false}, {"error", "YeManCC 只支持 64 位 RTSSHooks64.dll"}};
+    if (!fspath::is_regular_file(path))
+        return json{{"ok", false}, {"error", "RTSSHooks DLL 不存在"}};
+    if (!fspath::is_regular_file(path.parent_path() / L"RTSS.exe"))
+        return json{{"ok", false}, {"error", "RTSSHooks64.dll 未与同目录 RTSS.exe 配套"}};
+
+    HMODULE hooks = LoadLibraryExW(
+        dllPath.c_str(), nullptr,
+        LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
+    if (!hooks) {
+        return json{{"ok", false}, {"error", "加载 RTSSHooks DLL 失败"},
+                    {"win32Error", static_cast<int>(GetLastError())}};
+    }
+
+    auto loadProfile = reinterpret_cast<RtssLoadProfileFn>(
+        GetProcAddress(hooks, "LoadProfile"));
+    auto updateProfiles = reinterpret_cast<RtssUpdateProfilesFn>(
+        GetProcAddress(hooks, "UpdateProfiles"));
+    if (!loadProfile || !updateProfiles) {
+        const DWORD error = GetLastError();
+        FreeLibrary(hooks);
+        return json{{"ok", false}, {"error", "RTSSHooks DLL 缺少 RTSS SDK 导出函数"},
+                    {"win32Error", static_cast<int>(error)}};
+    }
+
+    // Empty profile name means the RTSS Global profile, per the RTSS SDK.
+    // Keep a faulty/incompatible third-party DLL from taking down YeManCC.
+    const DWORD exceptionCode = nativeRtssInvokeProfiles(loadProfile, updateProfiles);
+    if (exceptionCode != ERROR_SUCCESS) {
+        FreeLibrary(hooks);
+        return json{{"ok", false}, {"error", "RTSSHooks SDK 调用异常"},
+                    {"win32Error", static_cast<int>(exceptionCode)}};
+    }
+    FreeLibrary(hooks);
+    return json{{"ok", true}};
 }
 
 // 同步运行命令并捕获 stdout（CREATE_NO_WINDOW），stderr 合并到 stdout 避免管道死锁。
@@ -5891,7 +5925,7 @@ static void nativeApplyBrightness(int dir, bool enabled) {
     gamepadSerialPostEvent("gamepad.brightness", json{{"ok", rc == ERROR_SUCCESS}, {"value", (int)next},
         {"mode", dc ? "dc" : "ac"}, {"reason", rc == ERROR_SUCCESS ? "" : "write-failed"}});
 }
-// RTSS 锁帧：读/改写 Profiles\Global 的 Limit=，rundll32 重载配置（对齐前端 setRtssLimit）。
+// RTSS 锁帧：读/改写 Profiles\Global 的 Limit=，再通过 RTSS SDK 重载配置。
 static void nativeAdjustRtss(int delta) {
     if (!g_fpsShortcut) return;
     std::wstring g = L"C:\\Program Files (x86)\\RivaTuner Statistics Server\\Profiles\\Global";
@@ -5923,12 +5957,10 @@ static void nativeAdjustRtss(int delta) {
         out += "Limit=" + std::to_string(next) + "\r\n";
     }
     sgWriteFileAtomic(g, out); // 原子写，避免 RTSS 在游戏内读 Global 时读到半截
-    std::wstring dll = L"\"C:\\Program Files (x86)\\RivaTuner Statistics Server\\RTSSHooks64.dll\"";
-    std::wstring ru  = L"C:\\Windows\\System32\\rundll32.exe";
+    const std::wstring dll = L"C:\\Program Files (x86)\\RivaTuner Statistics Server\\RTSSHooks64.dll";
     // 外部改完文件后：LoadProfile 重新载入磁盘 → UpdateProfiles 套用到运行中的游戏。
-    // ⚠ 不要 SaveProfile：那会让 RTSS 把"内存里的旧状态"写回磁盘，覆盖刚改的内容甚至写坏（损坏根因）。
-    sgRunExeSync(ru, dll + L" LoadProfile");
-    sgRunExeSync(ru, dll + L" UpdateProfiles");
+    // 直接按 RTSS SDK 签名调用，不能再经由 rundll32 传参。
+    nativeRtssReloadProfiles(dll);
     ipc_emit("gamepad.refresh", {});
 }
 
@@ -6458,7 +6490,11 @@ static bool sgValidatePauseTarget(
     return true;
 }
 
-static bool sgWriteProcessMarker(const std::wstring& dir, DWORD pid, const char* state) {
+static bool sgWriteProcessMarker(
+    const std::wstring& dir,
+    DWORD pid,
+    const char* state,
+    unsigned long long powerGeneration = 0) {
     if (!sgEnsureMarkerDir(dir)) return false;
     const std::wstring markerPath = dir + L"\\" + std::to_wstring(pid) + L".txt";
     ULONGLONG created = 0;
@@ -6466,6 +6502,8 @@ static bool sgWriteProcessMarker(const std::wstring& dir, DWORD pid, const char*
     std::string body = "pid=" + std::to_string(pid) +
         "|created=" + std::to_string(created) +
         "|epoch=" + std::to_string(sgNowEpoch()) + "|state=" + state;
+    if (powerGeneration != 0)
+        body += "|generation=" + std::to_string(powerGeneration);
     return sgWriteFileAtomic(markerPath, body);
 }
 
@@ -6492,89 +6530,16 @@ static json sgSuspendGameByPidUnlocked(
     DWORD rootPid,
     const std::wstring& markerDir,
     ULONGLONG expectedCreated,
-    const NativeDetectedGame* prevalidatedValveTarget = nullptr);
+    const NativeDetectedGame* prevalidatedValveTarget = nullptr,
+    bool releaseConflictingLease = true,
+    unsigned long long leaseGeneration = 0);
 static SgResumeResult sgResumeMarkedDirectoryUnlocked(
     const std::wstring& dir, bool skipActiveSleepLease = true);
 static ULONGLONG sgMarkerCreated(const std::wstring& markerDir, DWORD pid);
+static unsigned long long sgMarkerGeneration(const std::wstring& markerDir, DWORD pid);
 static bool sgMarkerIsSuspended(const std::wstring& markerDir, DWORD pid);
 static bool sgReleaseConflictingPauseLeaseUnlocked(DWORD nextPid);
-
-static SgSuspendResult sgSuspendTarget(unsigned long long generation) {
-    std::lock_guard<std::mutex> opLock(g_sgOpMtx);
-    SgSuspendResult r;
-    try {
-        sgInitNt();
-        // A very fast S0/S3 wake can change the lifecycle to Resuming while
-        // this worker is still being scheduled.  The sleep intent was already
-        // accepted, so finish the one pause operation and let the queued wake
-        // item undo it.  Do not start if the generation has already committed
-        // back to Ready or belongs to another transition.
-        const auto phaseAtStart = g_powerLifecycle.load(std::memory_order_acquire);
-        if (currentPowerGeneration() != generation ||
-            (phaseAtStart != PowerLifecycle::Suspending &&
-             phaseAtStart != PowerLifecycle::Suspended &&
-             phaseAtStart != PowerLifecycle::Resuming))
-            return r;
-        // 睡眠和手动暂停共用同一根 PID 规则：只选唯一最大候选进程，
-        // 实际操作由 sgSuspendGameByPidUnlocked 再次校验后只冻结该 PID。
-        // Sleep Guard consumes the same process instance retained by the
-        // game recognition valve. Focus/UI memory is not a second source of
-        // truth for process control.
-        const auto game = nativeDetectGame();
-        NativeDetectedGame valveTarget;
-        unsigned long long valveGeneration = 0;
-        if (!game.pid || !nativeValveReadCurrentTarget(&valveTarget, &valveGeneration) ||
-            valveTarget.pid != game.pid || valveTarget.processCreated != game.processCreated)
-            return r;
-        r.pid = valveTarget.pid;
-        if (r.pid) {
-            HANDLE q = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ, FALSE, r.pid);
-            if (q) {
-                PROCESS_MEMORY_COUNTERS_EX memory{}; memory.cb = sizeof(memory);
-                if (GetProcessMemoryInfo(q, reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&memory), sizeof(memory)))
-                    r.ws = memory.WorkingSetSize;
-                CloseHandle(q);
-            }
-        }
-        // 写"目标"展示文件（仅展示，不参与恢复）
-        sgWriteFile(SG_DIR + L"\\target.txt",
-            "pid=" + std::to_string(r.pid) +
-            "|created=" + std::to_string(static_cast<unsigned long long>(valveTarget.processCreated)) +
-            "|valveGeneration=" + std::to_string(valveGeneration) +
-            "|epoch=" + std::to_string(sgNowEpoch()));
-        {
-            std::lock_guard<std::mutex> lock(g_sgSleepTargetMx);
-            g_sgSleepTarget = {
-                valveTarget.pid,
-                valveTarget.processCreated,
-                valveGeneration,
-                generation,
-                true,
-                false
-            };
-        }
-        const auto phaseBeforeFreeze = g_powerLifecycle.load(std::memory_order_acquire);
-        if (g_sgPauseResume && r.pid != 0 &&
-            currentPowerGeneration() == generation &&
-            (phaseBeforeFreeze == PowerLifecycle::Suspending ||
-             phaseBeforeFreeze == PowerLifecycle::Resuming)) {
-            const json result = sgSuspendGameByPidUnlocked(
-                r.pid, SG_MANUAL_DIR, valveTarget.processCreated, &valveTarget);
-            r.frozen = result.value("paused", false);
-            if (r.frozen)
-                g_manualPausedPid.store(r.pid, std::memory_order_release);
-            {
-                std::lock_guard<std::mutex> lock(g_sgSleepTargetMx);
-                if (g_sgSleepTarget.powerGeneration == generation &&
-                    g_sgSleepTarget.pid == valveTarget.pid &&
-                    g_sgSleepTarget.processCreated == valveTarget.processCreated)
-                    g_sgSleepTarget.markerOwned = r.frozen;
-            }
-            return r;
-        }
-    } catch (...) {}
-    return r;
-}
+static bool sgHasMarkerFiles(const std::wstring& dir);
 
 // 睡眠守护测试入口也只接受根 PID；未传入时复用 native 游戏识别结果。
 static json sgSuspendCurrent(DWORD rootPid = 0) {
@@ -6594,7 +6559,9 @@ static json sgSuspendGameByPidUnlocked(
     DWORD rootPid,
     const std::wstring& markerDir,
     ULONGLONG expectedCreated,
-    const NativeDetectedGame* prevalidatedValveTarget) {
+    const NativeDetectedGame* prevalidatedValveTarget,
+    bool releaseConflictingLease,
+    unsigned long long leaseGeneration) {
     json out = {
         {"paused", false}, {"rootPid", static_cast<int>(rootPid)},
         {"pids", json::array()}, {"processes", json::array()},
@@ -6623,13 +6590,22 @@ static json sgSuspendGameByPidUnlocked(
             !ProcessIdToSessionId(rootPid, &rootSession) || rootSession != currentSession) {
             return out;
         }
-        if (!sgReleaseConflictingPauseLeaseUnlocked(rootPid)) {
+        if (releaseConflictingLease && !sgReleaseConflictingPauseLeaseUnlocked(rootPid)) {
             out["failedPids"].push_back(static_cast<int>(rootPid));
             out["failCount"] = 1;
             out["error"] = "previous pause lease could not be released";
             return out;
         }
-        if (!nativeValveValidateCurrentTarget(rootPid, expectedCreated, &valveTarget)) {
+        if (prevalidatedValveTarget) {
+            ULONGLONG actualCreated = 0;
+            if (!focusQueryProcessIdentity(rootPid, nullptr, &actualCreated) ||
+                actualCreated != expectedCreated) {
+                out["failedPids"].push_back(static_cast<int>(rootPid));
+                out["failCount"] = 1;
+                out["error"] = "sleep target process instance changed";
+                return out;
+            }
+        } else if (!nativeValveValidateCurrentTarget(rootPid, expectedCreated, &valveTarget)) {
             out["failedPids"].push_back(static_cast<int>(rootPid));
             out["failCount"] = 1;
             out["error"] = "game valve target changed while releasing previous pause lease";
@@ -6649,6 +6625,13 @@ static json sgSuspendGameByPidUnlocked(
                  !sgMarkerIsSuspended(markerDir, pid))) {
                 fspath::remove(marker);
             }
+            if (!marker.empty() && fspath::exists(marker) && leaseGeneration != 0 &&
+                sgMarkerGeneration(markerDir, pid) != leaseGeneration) {
+                out["failedPids"].push_back(static_cast<int>(pid));
+                out["failCount"] = 1;
+                out["error"] = "sleep lease belongs to another power generation";
+                return out;
+            }
             if (!marker.empty() && fspath::exists(marker)) {
                 out["pids"].push_back(static_cast<int>(pid));
                 out["processes"].push_back({
@@ -6656,11 +6639,17 @@ static json sgSuspendGameByPidUnlocked(
                     {"processCreated", std::to_string(static_cast<unsigned long long>(
                         pid == rootPid ? valveTarget.processCreated : 0))}
                 });
-                if (pid == rootPid) sgWriteProcessMarker(markerDir, pid, "suspended");
+                if (pid == rootPid)
+                    sgWriteProcessMarker(markerDir, pid, "suspended", leaseGeneration);
                 if (pid == rootPid) rootPaused = true;
                 continue;
             }
-            if (!markerDir.empty() && !sgWriteProcessMarker(markerDir, pid, "pending")) {
+            // The marker is the crash-recovery lease. Write the final state
+            // before NtSuspendProcess and delete it if the call fails; this
+            // removes the old pending/suspended split and leaves one exact PID
+            // identity that startup recovery can always retry.
+            if (!markerDir.empty() &&
+                !sgWriteProcessMarker(markerDir, pid, "suspended", leaseGeneration)) {
                 out["failedPids"].push_back(static_cast<int>(pid));
                 if (pid == rootPid) break;
                 continue;
@@ -6674,7 +6663,8 @@ static json sgSuspendGameByPidUnlocked(
                 ? fnNtSuspend(h) : static_cast<LONG>(-1);
             if (h) CloseHandle(h);
             if (status >= 0) {
-                if (!markerDir.empty()) sgWriteProcessMarker(markerDir, pid, "suspended");
+                if (!markerDir.empty())
+                    sgWriteProcessMarker(markerDir, pid, "suspended", leaseGeneration);
                 out["pids"].push_back(static_cast<int>(pid));
                 out["processes"].push_back({
                     {"pid", static_cast<int>(pid)},
@@ -6694,12 +6684,6 @@ static json sgSuspendGameByPidUnlocked(
     } catch (...) {}
     return out;
 }
-
-static json sgSuspendGameByPidUnlocked(
-    DWORD rootPid,
-    const std::wstring& markerDir,
-    ULONGLONG expectedCreated,
-    const NativeDetectedGame* prevalidatedValveTarget);
 
 static ULONGLONG sgMarkerCreated(const std::wstring& markerDir, DWORD pid) {
     if (markerDir.empty() || !pid) return 0;
@@ -6753,11 +6737,6 @@ static json sgResumeGameByPids(const json& values, const std::wstring& markerDir
     try {
         sgInitNt();
         if (!fnNtResume || !values.is_array()) return out;
-        // Re-run arbitration before consuming a resume request so a newly
-        // running dedicated executable can take the unique current target
-        // immediately. The recorded marker below still owns the exact old
-        // process instance and is the only permitted resume input.
-        (void)nativeValveAcquire();
         if (values.empty()) {
             // Restore only native markers. Each marker is validated as an
             // arbiter-issued ownership lease below, so a missing state file
@@ -6848,10 +6827,6 @@ static SgResumeResult sgResumeMarkedDirectoryUnlocked(
     try {
         sgInitNt();
         if (!fspath::exists(dir)) return rr;
-        // Keep the arbiter current before releasing any tracked suspension;
-        // this can elect a just-started dedicated target without allowing the
-        // marker loop to select an unrelated PID.
-        (void)nativeValveAcquire();
         for (auto& e : fspath::directory_iterator(dir)) {
             if (!e.is_regular_file()) continue;
             std::wstring fn = e.path().filename().wstring();
@@ -6861,7 +6836,7 @@ static SgResumeResult sgResumeMarkedDirectoryUnlocked(
             if (digits.empty()) { fspath::remove(e.path()); continue; }
             DWORD pid = (DWORD)_wtol(digits.c_str());
             if (pid == 0) { fspath::remove(e.path()); continue; }
-            if (skipActiveSleepLease && dir == SG_DIR + L"\\suspended") {
+            if (skipActiveSleepLease && dir == SG_SLEEP_LEASE_DIR) {
                 std::lock_guard<std::mutex> targetLock(g_sgSleepTargetMx);
                 if (g_sgSleepTarget.captured && g_sgSleepTarget.markerOwned &&
                     g_sgSleepTarget.pid == pid) {
@@ -6909,79 +6884,6 @@ static SgResumeResult sgResumeMarkedDirectoryUnlocked(
     return rr;
 }
 
-static bool sgSystemProcessLooksSuspended(const SgSystemProcessInformation* process) {
-    if (!process || !process->NumberOfThreads) return false;
-    ULONG liveThreads = 0;
-    ULONG suspendedThreads = 0;
-    for (ULONG i = 0; i < process->NumberOfThreads; ++i) {
-        const auto& thread = process->Threads[i];
-        // KTHREAD_STATE: 4=terminated, 5=waiting. KWAIT_REASON: 5=suspended.
-        if (thread.ThreadState == 4) continue;
-        ++liveThreads;
-        if (thread.ThreadState == 5 && thread.WaitReason == 5) ++suspendedThreads;
-    }
-    return liveThreads != 0 && liveThreads == suspendedThreads;
-}
-
-// This is deliberately an emergency orphan recovery, not a game detector.
-// A candidate must be in this user session, non-system, over 40 MB, and have
-// every live thread reported as suspended before NtResumeProcess is attempted.
-static SgResumeResult sgResumeGlobalSuspendedLargeProcesses(DWORD excludedPid = 0) {
-    SgResumeResult rr;
-    sgInitNt();
-    if (!fnNtResume || !fnNtQuerySystemInformation) return rr;
-
-    DWORD currentSession = 0;
-    if (!ProcessIdToSessionId(GetCurrentProcessId(), &currentSession)) return rr;
-
-    std::vector<BYTE> buffer(256 * 1024);
-    ULONG returned = 0;
-    NTSTATUS status = static_cast<NTSTATUS>(-1);
-    for (unsigned attempt = 0; attempt < 6; ++attempt) {
-        status = fnNtQuerySystemInformation(SystemProcessInformation, buffer.data(),
-                                            static_cast<ULONG>(buffer.size()), &returned);
-        if (status >= 0) break;
-        const size_t nextSize = (std::max)(buffer.size() * 2,
-            static_cast<size_t>(returned) + 64 * 1024);
-        if (nextSize > 32ULL * 1024ULL * 1024ULL) return rr;
-        buffer.resize(nextSize);
-    }
-    if (status < 0) return rr;
-
-    for (BYTE* cursor = buffer.data();;) {
-        const auto* process = reinterpret_cast<const SgSystemProcessInformation*>(cursor);
-        const DWORD pid = static_cast<DWORD>(reinterpret_cast<ULONG_PTR>(process->UniqueProcessId));
-        if (pid && pid != 4 && pid != GetCurrentProcessId() && pid != excludedPid &&
-            process->SessionId == currentSession && sgSystemProcessLooksSuspended(process)) {
-            HANDLE handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ |
-                                        PROCESS_SUSPEND_RESUME, FALSE, pid);
-            if (handle) {
-                PROCESS_MEMORY_COUNTERS_EX memory{};
-                memory.cb = sizeof(memory);
-                wchar_t path[MAX_PATH * 4]{};
-                DWORD pathLength = static_cast<DWORD>(std::size(path));
-                const bool pathOk = QueryFullProcessImageNameW(handle, 0, path, &pathLength) != FALSE;
-                const std::wstring name = pathOk ? sgBaseName(path) : std::wstring{};
-                const bool eligible = pathOk && !name.empty() && !nativeMonitorExcluded(name) &&
-                    GetProcessMemoryInfo(handle, reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&memory),
-                                         sizeof(memory)) != FALSE &&
-                    memory.WorkingSetSize >= SG_GLOBAL_RECOVERY_MIN_WS;
-                if (eligible && fnNtResume(handle) >= 0) {
-                    ++rr.count;
-                    rr.pids.push_back(pid);
-                    traceLog("global suspended recovery resumed pid=%lu ws=%llu",
-                             static_cast<unsigned long>(pid),
-                             static_cast<unsigned long long>(memory.WorkingSetSize));
-                }
-                CloseHandle(handle);
-            }
-        }
-        if (!process->NextEntryOffset) break;
-        cursor += process->NextEntryOffset;
-    }
-    return rr;
-}
-
 static bool sgHasPauseMarkerForOtherPid(const std::wstring& dir, DWORD pid) {
     std::error_code ec;
     if (!fspath::exists(dir, ec) || ec) return false;
@@ -7002,28 +6904,37 @@ static bool sgHasPauseMarkerForOtherPid(const std::wstring& dir, DWORD pid) {
     return false;
 }
 
-// Exactly one pause lease may exist. Before a new PID is paused, release the
-// previous app-owned marker and then run the bounded suspended-process sweep.
+// Manual pause switching may only touch manual markers. An active sleep lease
+// is a separate owner and blocks manual suspension until the sleep transaction
+// releases its exact PID.
 static bool sgReleaseConflictingPauseLeaseUnlocked(DWORD nextPid) {
+    SgSleepTarget sleepTarget;
+    if ((sgReadSleepTarget(sleepTarget) && sleepTarget.markerOwned) ||
+        sgHasPauseMarkerForOtherPid(SG_SLEEP_LEASE_DIR, 0))
+        return false;
+
     const DWORD activePid = g_manualPausedPid.load(std::memory_order_acquire);
     const bool hasOtherLease = (activePid && activePid != nextPid) ||
-        sgHasPauseMarkerForOtherPid(SG_MANUAL_DIR, nextPid) ||
-        sgHasPauseMarkerForOtherPid(SG_DIR + L"\\suspended", nextPid);
+        sgHasPauseMarkerForOtherPid(SG_MANUAL_DIR, nextPid);
     if (!hasOtherLease) return true;
 
     SgResumeResult released = sgResumeMarkedDirectoryUnlocked(SG_MANUAL_DIR);
-    const SgResumeResult legacy = sgResumeMarkedDirectoryUnlocked(SG_DIR + L"\\suspended", false);
-    released.count += legacy.count;
-    const SgResumeResult global = sgResumeGlobalSuspendedLargeProcesses(nextPid);
-    released.count += global.count;
     g_manualPausedPid.store(0, std::memory_order_release);
 
-    const bool remaining = sgHasPauseMarkerForOtherPid(SG_MANUAL_DIR, nextPid) ||
-        sgHasPauseMarkerForOtherPid(SG_DIR + L"\\suspended", nextPid);
-    traceLog("pause lease switch nextPid=%lu released=%d global=%d remaining=%d",
-             static_cast<unsigned long>(nextPid), released.count, global.count,
-             remaining ? 1 : 0);
+    const bool remaining = sgHasPauseMarkerForOtherPid(SG_MANUAL_DIR, nextPid);
+    traceLog("manual pause lease switch nextPid=%lu released=%d remaining=%d",
+             static_cast<unsigned long>(nextPid), released.count, remaining ? 1 : 0);
     return !remaining;
+}
+
+static unsigned long long sgMarkerGeneration(const std::wstring& markerDir, DWORD pid) {
+    if (markerDir.empty() || !pid) return 0;
+    const std::string markerText = sgReadFile(
+        markerDir + L"\\" + std::to_wstring(pid) + L".txt");
+    const size_t generationPos = markerText.find("|generation=");
+    if (generationPos == std::string::npos) return 0;
+    try { return std::stoull(markerText.substr(generationPos + 12)); }
+    catch (...) { return 0; }
 }
 
 static void sgClearSleepTarget() {
@@ -7037,66 +6948,84 @@ static bool sgReadSleepTarget(SgSleepTarget& target) {
     return target.captured;
 }
 
-// Restore exactly the process captured at the sleep intent boundary.  This
-// deliberately does not call nativeValveAcquire(): the valve may have
-// elected another game while the old game was frozen, but that new target is
-// not allowed to replace the ownership lease from this sleep cycle.
-static SgResumeResult sgResumeSleepTarget(bool allowGlobalFallback = false,
-                                          bool includeManualLease = false,
-                                          bool focusResumedGame = false) {
+static bool sgSleepLeaseOwnedByGeneration(unsigned long long generation) {
+    std::lock_guard<std::mutex> lock(g_sgSleepTargetMx);
+    return generation != 0 && g_sgSleepTarget.captured &&
+        g_sgSleepTarget.markerOwned &&
+        g_sgSleepTarget.powerGeneration == generation;
+}
+
+static void sgClearSleepTargetIfMatches(const SgSleepTarget& expected) {
+    std::lock_guard<std::mutex> lock(g_sgSleepTargetMx);
+    if (g_sgSleepTarget.pid == expected.pid &&
+        g_sgSleepTarget.processCreated == expected.processCreated &&
+        g_sgSleepTarget.powerGeneration == expected.powerGeneration)
+        g_sgSleepTarget = {};
+}
+
+// Restore only the PID instance leased by one sleep generation. Manual pause
+// markers and the currently detected game are deliberately outside this path.
+// Transient failures are bounded; the exact marker is retained for a later
+// wake, exit, or startup retry without blocking the application lifecycle.
+static SgResumeResult sgResumeSleepTargetUnlocked(
+    unsigned long long expectedGeneration, bool focusResumedGame) {
     SgResumeResult rr;
-    std::lock_guard<std::mutex> opLock(g_sgOpMtx);
     SgSleepTarget target;
-    const bool hasTrackedLease = sgReadSleepTarget(target) && target.markerOwned &&
-        target.pid && target.processCreated;
-    json values = json::array();
-    if (hasTrackedLease) {
-        values.push_back({
-            {"pid", static_cast<int>(target.pid)},
-            {"processCreated", std::to_string(static_cast<unsigned long long>(target.processCreated))}
-        });
+    if (!sgReadSleepTarget(target) || !target.markerOwned || !target.pid ||
+        !target.processCreated || target.powerGeneration != expectedGeneration)
+        return rr;
+
+    const std::wstring marker =
+        SG_SLEEP_LEASE_DIR + L"\\" + std::to_wstring(target.pid) + L".txt";
+    std::error_code ec;
+    if (!fspath::exists(marker, ec) || ec) {
+        sgClearSleepTargetIfMatches(target);
+        return rr;
+    }
+    if (sgMarkerGeneration(SG_SLEEP_LEASE_DIR, target.pid) != expectedGeneration ||
+        !nativeValveValidateOwnedSuspendedTarget(
+            SG_SLEEP_LEASE_DIR, target.pid, target.processCreated)) {
+        fspath::remove(marker, ec);
+        sgClearSleepTargetIfMatches(target);
+        traceLog("sleep resume discarded stale lease generation=%llu pid=%lu",
+                 expectedGeneration, static_cast<unsigned long>(target.pid));
+        return rr;
     }
 
-    // Sleep recovery intentionally delegates to the exact same marker and
-    // identity route as the Performance Schedule "resume game" command.
-    // A manual lease is included only for a real wake, never for a canceled
-    // sleep query, so the user's manual pause remains meaningful otherwise.
-    const bool hasManualMarker = includeManualLease &&
-        sgHasPauseMarkerForOtherPid(SG_MANUAL_DIR, 0);
-    const bool hasLegacySleepMarker = includeManualLease &&
-        sgHasPauseMarkerForOtherPid(SG_DIR + L"\\suspended", 0);
-    if (hasTrackedLease || includeManualLease) {
-        const json result = sgResumeGameByPids(values, SG_MANUAL_DIR);
-        rr.count = result.value("resumed", 0);
-        sgAppendJsonResumedPids(rr, result);
-    }
-    if (includeManualLease) {
-        // The exact sleep PID call above may intentionally leave a second
-        // marker from a prior Performance Schedule operation. Retry remaining
-        // identity-validated markers before considering the global sweep.
-        const SgResumeResult remainingManual = sgResumeMarkedDirectoryUnlocked(SG_MANUAL_DIR);
-        sgAppendResumeResult(rr, remainingManual);
-        const SgResumeResult legacySleep = sgResumeMarkedDirectoryUnlocked(SG_DIR + L"\\suspended", false);
-        sgAppendResumeResult(rr, legacySleep);
-    }
-    const bool expectedResume = allowGlobalFallback || hasTrackedLease || hasManualMarker || hasLegacySleepMarker ||
-        g_sgInSuspend.load(std::memory_order_acquire) ||
-        g_sgGameActuallySuspended.load(std::memory_order_acquire);
-    if (expectedResume && rr.count == 0) {
-        const SgResumeResult global = sgResumeGlobalSuspendedLargeProcesses();
-        sgAppendResumeResult(rr, global);
-        traceLog("sleep resume global fallback resumed=%d", global.count);
-    }
+    sgInitNt();
+    for (const ULONGLONG delayMs : SG_SLEEP_RESUME_RETRY_DELAYS_MS) {
+        if (delayMs != 0) Sleep(static_cast<DWORD>(delayMs));
+        ULONGLONG actualCreated = 0;
+        if (!focusQueryProcessIdentity(target.pid, nullptr, &actualCreated) ||
+            actualCreated != target.processCreated) {
+            fspath::remove(marker, ec);
+            sgClearSleepTargetIfMatches(target);
+            break;
+        }
+        HANDLE process = OpenProcess(PROCESS_SUSPEND_RESUME, FALSE, target.pid);
+        const bool resumed = process && fnNtResume && fnNtResume(process) >= 0;
+        if (process) CloseHandle(process);
+        if (!resumed) continue;
 
-    if (hasTrackedLease) {
-        const std::wstring marker = SG_MANUAL_DIR + L"\\" + std::to_wstring(target.pid) + L".txt";
-        std::error_code ec;
-        if (!fspath::exists(marker, ec)) sgClearSleepTarget();
+        fspath::remove(marker, ec);
+        rr.count = 1;
+        rr.pids.push_back(target.pid);
+        sgClearSleepTargetIfMatches(target);
+        traceLog("sleep resume succeeded generation=%llu pid=%lu",
+                 expectedGeneration, static_cast<unsigned long>(target.pid));
+        break;
     }
-    if (includeManualLease && !sgHasPauseMarkerForOtherPid(SG_MANUAL_DIR, 0))
-        g_manualPausedPid.store(0, std::memory_order_release);
+    if (rr.count == 0 && sgSleepLeaseOwnedByGeneration(expectedGeneration))
+        traceLog("sleep resume retained marker generation=%llu pid=%lu",
+                 expectedGeneration, static_cast<unsigned long>(target.pid));
     if (focusResumedGame) focusSingleResumedGame(rr.pids);
     return rr;
+}
+
+static SgResumeResult sgResumeSleepTarget(
+    unsigned long long expectedGeneration, bool focusResumedGame) {
+    std::lock_guard<std::mutex> opLock(g_sgOpMtx);
+    return sgResumeSleepTargetUnlocked(expectedGeneration, focusResumedGame);
 }
 
 // Capture and freeze the current valve lease synchronously.  The operation is
@@ -7105,9 +7034,11 @@ static SgResumeResult sgResumeSleepTarget(bool allowGlobalFallback = false,
 // game can veto entry into sleep.
 static SgSuspendResult sgPauseSleepTarget(unsigned long long generation) {
     SgSuspendResult result;
+    const auto initialPhase = g_powerLifecycle.load(std::memory_order_acquire);
     if (!g_sgPauseResume || !g_sgRepairEligible ||
         currentPowerGeneration() != generation ||
-        g_powerLifecycle.load(std::memory_order_acquire) != PowerLifecycle::Suspending)
+        (initialPhase != PowerLifecycle::Suspending &&
+         initialPhase != PowerLifecycle::Suspended))
         return result;
 
     NativeDetectedGame target;
@@ -7115,6 +7046,30 @@ static SgSuspendResult sgPauseSleepTarget(unsigned long long generation) {
     if (!nativeValveReadCurrentTarget(&target, &valveGeneration)) {
         traceLog("sleep target capture skipped generation=%llu reason=no-current-valve-target",
                  generation);
+        return result;
+    }
+
+    SgSleepTarget existing;
+    if (sgReadSleepTarget(existing) && existing.markerOwned) {
+        if (existing.powerGeneration == generation &&
+            existing.pid == target.pid &&
+            existing.processCreated == target.processCreated) {
+            result.pid = target.pid;
+            result.frozen = true;
+        }
+        traceLog("sleep target capture skipped generation=%llu reason=existing-sleep-lease leaseGeneration=%llu pid=%lu",
+                 generation, existing.powerGeneration,
+                 static_cast<unsigned long>(existing.pid));
+        return result;
+    }
+
+    // Manual pause and sleep pause are separate owners. Never suspend the
+    // same process twice or let a later sleep wake consume the manual lease.
+    if (nativeValveValidateOwnedSuspendedTarget(
+            SG_MANUAL_DIR, target.pid, target.processCreated)) {
+        result.pid = target.pid;
+        traceLog("sleep target capture skipped generation=%llu pid=%lu reason=manual-lease",
+                 generation, static_cast<unsigned long>(target.pid));
         return result;
     }
 
@@ -7136,15 +7091,34 @@ static SgSuspendResult sgPauseSleepTarget(unsigned long long generation) {
         "|epoch=" + std::to_string(sgNowEpoch()));
 
     std::lock_guard<std::mutex> opLock(g_sgOpMtx);
+    const auto phaseBeforePause = g_powerLifecycle.load(std::memory_order_acquire);
     if (currentPowerGeneration() != generation ||
-        g_powerLifecycle.load(std::memory_order_acquire) != PowerLifecycle::Suspending)
+        (phaseBeforePause != PowerLifecycle::Suspending &&
+         phaseBeforePause != PowerLifecycle::Suspended))
         return result;
+    if (nativeValveValidateOwnedSuspendedTarget(
+            SG_MANUAL_DIR, target.pid, target.processCreated)) {
+        sgClearSleepTargetIfMatches({
+            target.pid, target.processCreated, valveGeneration,
+            generation, true, false
+        });
+        traceLog("sleep pause canceled generation=%llu pid=%lu reason=manual-lease-race",
+                 generation, static_cast<unsigned long>(target.pid));
+        return result;
+    }
+    // Recover only exact stale YeManCC sleep markers before creating this
+    // generation. If recovery fails, the generation check below fails closed
+    // rather than applying a second NtSuspendProcess count.
+    if (sgHasMarkerFiles(SG_SLEEP_LEASE_DIR))
+        (void)sgResumeMarkedDirectoryUnlocked(SG_SLEEP_LEASE_DIR, false);
     const json paused = sgSuspendGameByPidUnlocked(
-        target.pid, SG_MANUAL_DIR, target.processCreated, &target);
+        target.pid, SG_SLEEP_LEASE_DIR, target.processCreated, &target,
+        false, generation);
     result.pid = target.pid;
-    result.frozen = paused.value("paused", false);
-    if (result.frozen)
-        g_manualPausedPid.store(target.pid, std::memory_order_release);
+    result.frozen = paused.value("paused", false) ||
+        (sgMarkerGeneration(SG_SLEEP_LEASE_DIR, target.pid) == generation &&
+         nativeValveValidateOwnedSuspendedTarget(
+             SG_SLEEP_LEASE_DIR, target.pid, target.processCreated));
     traceLog("sleep pause target pid=%lu frozen=%d ok=%d fail=%d error=%s",
              static_cast<unsigned long>(target.pid), result.frozen ? 1 : 0,
              paused.value("okCount", 0), paused.value("failCount", 0),
@@ -7156,56 +7130,54 @@ static SgSuspendResult sgPauseSleepTarget(unsigned long long generation) {
             g_sgSleepTarget.processCreated == target.processCreated)
             g_sgSleepTarget.markerOwned = result.frozen;
     }
+    if (!result.frozen) {
+        SgSleepTarget failedTarget{
+            target.pid, target.processCreated, valveGeneration,
+            generation, true, false
+        };
+        sgClearSleepTargetIfMatches(failedTarget);
+    }
     return result;
 }
 
 static SgResumeResult sgResumeAll(bool allowEligibleFallback = false) {
     std::lock_guard<std::mutex> opLock(g_sgOpMtx);
-    SgResumeResult result = sgResumeMarkedDirectoryUnlocked(SG_DIR + L"\\suspended");
+    SgResumeResult result = sgResumeMarkedDirectoryUnlocked(SG_SLEEP_LEASE_DIR, false);
     (void)allowEligibleFallback;
     return result;
 }
 
-static SgResumeResult sgResumeManualAll(bool allowEligibleFallback = false) {
-    std::lock_guard<std::mutex> opLock(g_sgOpMtx);
-    SgResumeResult result = sgResumeMarkedDirectoryUnlocked(SG_MANUAL_DIR);
-    (void)allowEligibleFallback;
-    return result;
-}
-
-// S4 is the one wake path that must also release a Performance Schedule
-// manual pause: hibernation resumes the entire machine, so leaving that
-// user-facing pause lease behind makes the game look frozen after wake.
-// Keep the same order as the unified recovery policy: exact marker first,
-// then the bounded global suspended-process fallback only when a marker was
-// expected but did not produce a resume.
+// Startup and application exit recover only markers created by YeManCC. The
+// two directories remain independent during normal sleep/manual operations.
 // 启动和正常退出需要同时处理睡眠、手动两套 PID 标记。只有两套记录都没有
 // 恢复成功时才执行一次高内存游戏兜底，避免分别扫描两次并重复 Resume 同一 PID。
-static SgResumeResult sgResumeTrackedAll(bool allowEligibleFallback = false) {
-    std::lock_guard<std::mutex> opLock(g_sgOpMtx);
-    SgResumeResult result = sgResumeMarkedDirectoryUnlocked(SG_DIR + L"\\suspended");
+static SgResumeResult sgResumeTrackedAllUnlocked() {
+    SgResumeResult result = sgResumeMarkedDirectoryUnlocked(SG_SLEEP_LEASE_DIR, false);
     const SgResumeResult manual = sgResumeMarkedDirectoryUnlocked(SG_MANUAL_DIR);
-    result.count += manual.count;
-    if (allowEligibleFallback && result.count == 0) {
-        const SgResumeResult global = sgResumeGlobalSuspendedLargeProcesses();
-        result.count += global.count;
-        if (global.count)
-            traceLog("tracked pause recovery used global fallback resumed=%d", global.count);
-    }
+    sgAppendResumeResult(result, manual);
     return result;
+}
+
+static SgResumeResult sgResumeTrackedAll() {
+    std::lock_guard<std::mutex> opLock(g_sgOpMtx);
+    return sgResumeTrackedAllUnlocked();
 }
 
 static std::thread g_startupResumeThread;
 
-static void joinStartupResumeThread() {
-    if (g_startupResumeThread.joinable()) g_startupResumeThread.join();
+static void joinStartupResumeThread(DWORD timeoutMs = INFINITE) {
+    (void)joinThreadBoundedForExit(g_startupResumeThread, timeoutMs, "startup-resume");
 }
 
 static void startStartupResumeThread() {
     joinStartupResumeThread();
     g_startupResumeThread = std::thread([] {
+        appendNativeLifecycleLog("sleep-orphan-recovery-start");
         // PID 记录缺失、失效或恢复数为 0 时，也要尽最大可能解除遗留挂起。
-        sgResumeTrackedAll(true);
+        const SgResumeResult recovered = sgResumeTrackedAll();
+        appendNativeLifecycleLog("sleep-orphan-recovery-complete", {
+            {"resumed", recovered.count}
+        });
     });
 }
 
@@ -7218,88 +7190,112 @@ static bool sgHasMarkerFiles(const std::wstring& dir) {
     return false;
 }
 
-static void sgCleanupBeforeExit() {
-    if (g_sgCleanupDone) return;
+static bool sgCleanupBeforeExit(bool nonBlocking) {
+    if (g_sgCleanupDone) return true;
+    std::unique_lock<std::mutex> opLock(g_sgOpMtx, std::defer_lock);
+    if (nonBlocking) {
+        if (!opLock.try_lock()) {
+            appendNativeLifecycleLog("sleep-exit-cleanup-deferred", {
+                {"reason", "sleep-worker-busy"}
+            });
+            return false;
+        }
+    } else {
+        opLock.lock();
+    }
     g_sgCleanupDone = true;
+    appendNativeLifecycleLog("sleep-exit-cleanup-start");
     // 正常退出必须解除所有由本程序挂起的进程。
-    const SgResumeResult currentCycle = sgResumeSleepTarget();
-    (void)currentCycle;
-    SgResumeResult rr = sgResumeTrackedAll(true);
+    SgSleepTarget currentTarget;
+    if (sgReadSleepTarget(currentTarget) && currentTarget.markerOwned)
+        (void)sgResumeSleepTargetUnlocked(currentTarget.powerGeneration, false);
+    SgResumeResult rr = sgResumeTrackedAllUnlocked();
     (void)rr;
     // 若仍有标记，说明恢复失败；允许 WM_DESTROY/消息循环退出再重试一次。
-    const bool pending = sgHasMarkerFiles(SG_DIR + L"\\suspended") ||
+    const bool pending = sgHasMarkerFiles(SG_SLEEP_LEASE_DIR) ||
         sgHasMarkerFiles(SG_MANUAL_DIR);
     if (pending) g_sgCleanupDone = false;
+    appendNativeLifecycleLog("sleep-exit-cleanup-complete", {
+        {"pendingMarkers", pending}, {"resumed", rr.count}
+    });
     g_sgInSuspend = false;
+    return !pending;
 }
 
 // ── 唤醒处置：恢复本周期资源；仅自动/代理唤醒进入重睡观察 ──
-static void sgRealWake(const char* src) {
+static void sgRealWake(const char* src, unsigned long long expectedGeneration) {
     SgSleepTarget sleepTarget;
-    const bool hadOwnedMarker = sgReadSleepTarget(sleepTarget) && sleepTarget.markerOwned;
-    const bool hadManualLease = g_manualPausedPid.load(std::memory_order_acquire) != 0 ||
-        sgHasPauseMarkerForOtherPid(SG_MANUAL_DIR, 0);
-    const bool hadSuspend = hadOwnedMarker || hadManualLease ||
-        g_sgGameActuallySuspended.load(std::memory_order_acquire) ||
-        g_sgInSuspend.load(std::memory_order_acquire);
+    const bool taskMatches = g_sgTask.generation == expectedGeneration;
+    const bool hadOwnedMarker = sgReadSleepTarget(sleepTarget) && sleepTarget.markerOwned &&
+        sleepTarget.powerGeneration == expectedGeneration;
+    const bool hadSuspend = hadOwnedMarker ||
+        (taskMatches && (g_sgGameActuallySuspended.load(std::memory_order_acquire) ||
+         g_sgInSuspend.load(std::memory_order_acquire)));
     // Hibernate resumes can restore before some volatile lifecycle flags have
     // settled. The persisted, identity-bound sleep lease is sufficient proof
     // that this is our transaction and must be recovered.
-    const bool hadSleepCycle = hadOwnedMarker ||
-        hadManualLease || g_sgSleepCycleActive.load(std::memory_order_acquire) ||
-        g_sgRepairEligible;
-    // S3 的 RESUMEAUTOMATIC 和 S0 的显示器亮起都只能作为“候选”信号；
-    // RESUMESUSPEND 代表用户主动唤醒，必须取消此前已经启动的观察窗口，
-    // 即使 RESUMEAUTOMATIC 已经先把 g_sgInSuspend 清零。
+    const bool hadSleepCycle = hadOwnedMarker || (taskMatches &&
+        (g_sgSleepCycleActive.load(std::memory_order_acquire) || g_sgRepairEligible));
+    // S3 的 RESUMEAUTOMATIC 不是用户唤醒确认；RESUMESUSPEND 才允许恢复
+    // 本轮 PID 租约，即使自动恢复广播先到达。
     if (strcmp(src, "resume_suspend") == 0) {
-        g_sgTask.phase = SgSleepTaskPhase::Recovering;
-        sgStopResleepObservation();
+        if (taskMatches) sgStopSleepRetry();
         if (hadSuspend) {
-            SgResumeResult rr = sgResumeSleepTarget(true, true, true);
+            SgResumeResult rr = sgResumeSleepTarget(expectedGeneration, true);
             (void)rr;
             SgSleepTarget remaining;
-            const bool stillOwned = sgReadSleepTarget(remaining) && remaining.markerOwned;
-            g_sgInSuspend = stillOwned;
-            g_sgGameActuallySuspended = stillOwned;
-            if (stillOwned) return;
-            sgClearSleepTarget();
+            const bool stillOwned = sgReadSleepTarget(remaining) && remaining.markerOwned &&
+                remaining.powerGeneration == expectedGeneration;
+            if (taskMatches) {
+                g_sgInSuspend = stillOwned;
+                g_sgGameActuallySuspended = stillOwned;
+            }
         }
         // Even when no game was found/frozen, this wake completes the armed
         // intent. Do not leave repair eligibility alive for a later cycle.
-        g_sgSleepCycleActive = false;
-        g_sgRepairEligible = false;
-        g_sgRetryInProgress = false;
-        g_sgTask = {};
+        if (taskMatches) {
+            g_sgSleepCycleActive = false;
+            g_sgRepairEligible = false;
+            g_sgRetryInProgress = false;
+            g_sgTask = {};
+        }
         return;
     }
     if (!hadSleepCycle) {
-        g_sgRepairEligible = false;
-        g_sgRetryInProgress = false;
-        g_sgTask = {};
+        if (taskMatches) {
+            g_sgRepairEligible = false;
+            g_sgRetryInProgress = false;
+            g_sgTask = {};
+        }
         return;
     }
-    if (g_sgResleepEnabled && g_sgTask.mode == SgSleepMode::S3 &&
+    if (taskMatches && g_sgTask.mode == SgSleepMode::S3 &&
         (strcmp(src, "resume_auto") == 0 || strcmp(src, "monitor_on") == 0)) {
-        // Keep the game suspended until the wake is classified.  The worker
-        // restores it only on a later confirmed user wake.
-        sgStartResleepObservation();
+        // An automatic S3 wake is not proof of user intent. Keep the exact PID
+        // lease paused until RESUMESUSPEND (or an S4 recovery signal) confirms
+        // a user-visible wake. The removed legacy observer must not own a
+        // fallback timer or silently release the game.
+        stopPowerResumeWatchdog();
+        traceLog("sleep automatic wake held for explicit user resume generation=%llu source=%s",
+                 expectedGeneration, src);
     } else {
-        g_sgTask.phase = SgSleepTaskPhase::Recovering;
-        sgStopResleepObservation();
+        if (taskMatches) sgStopSleepRetry();
         // S4 can return only RESUMECRITICAL.  The in-memory lease normally
         // survives hibernation, but do not let a missing/stale lease prevent
         // the bounded global suspended-process recovery from running.
         const bool criticalResume = strcmp(src, "resume_critical") == 0;
         if (hadSuspend || criticalResume) {
-            SgResumeResult rr = sgResumeSleepTarget(true, true, true);
+            SgResumeResult rr = sgResumeSleepTarget(expectedGeneration, true);
             (void)rr;
         }
         SgSleepTarget remaining;
-        const bool stillOwned = sgReadSleepTarget(remaining) && remaining.markerOwned;
-        g_sgInSuspend = stillOwned;
-        g_sgGameActuallySuspended = stillOwned;
-        if (!stillOwned) {
-            sgClearSleepTarget();
+        const bool stillOwned = sgReadSleepTarget(remaining) && remaining.markerOwned &&
+            remaining.powerGeneration == expectedGeneration;
+        if (taskMatches) {
+            g_sgInSuspend = stillOwned;
+            g_sgGameActuallySuspended = stillOwned;
+        }
+        if (taskMatches) {
             g_sgSleepCycleActive = false;
             g_sgRepairEligible = false;
             g_sgRetryInProgress = false;
@@ -7349,7 +7345,6 @@ static void sgQueueWork(SgWork work, unsigned long long generation) {
         if (queued.kind == work && queued.generation == generation) return;
     }
     // 电源事件偶尔会成组到达；保持小而有界的队列，且不让旧事件无限堆积。
-    if (g_sgWorkQ.size() >= 8) g_sgWorkQ.pop_front();
     g_sgWorkQ.push_back({work, generation});
     g_sgWorkCv.notify_one();
 }
@@ -7357,24 +7352,24 @@ static void sgQueueWork(SgWork work, unsigned long long generation) {
 // A suspend query can be vetoed after the game has already been frozen.  Undo
 // that exact lease before reopening the hardware gate; otherwise the canceled
 // sleep leaves the game paused with no later resume broadcast to repair it.
-static void sgAbortSleepIntent(const char* reason, bool preserveRetryContext) {
+static void sgAbortSleepIntent(const char* reason) {
+    sgClearInternalSleepRequest(reason ? reason : "sleep-intent-canceled");
     sgClearUserStandby("sleep-intent-canceled");
-    const bool hadRepair = g_sgRepairEligible;
-    const SgSleepTask task = g_sgTask;
-    const bool hadRetryInProgress = g_sgRetryInProgress;
-    const ULONGLONG triggerTick = g_sgSleepTriggerTick;
-    const double triggerEpoch = g_sgSleepTriggerEpoch;
+    const unsigned long long generation = g_sgTask.generation != 0
+        ? g_sgTask.generation : currentPowerGeneration();
 
-    sgStopResleepObservation();
+    sgStopSleepRetry();
     SgSleepTarget target;
-    const bool hadOwnedMarker = sgReadSleepTarget(target) && target.markerOwned;
+    const bool hadOwnedMarker = sgReadSleepTarget(target) && target.markerOwned &&
+        target.powerGeneration == generation;
     if (hadOwnedMarker) {
-        const SgResumeResult rr = sgResumeSleepTarget();
+        const SgResumeResult rr = sgResumeSleepTarget(generation, true);
         traceLog("sleep intent canceled reason=%s resumed=%d", reason ? reason : "unknown", rr.count);
     }
 
     SgSleepTarget remaining;
-    const bool stillOwned = sgReadSleepTarget(remaining) && remaining.markerOwned;
+    const bool stillOwned = sgReadSleepTarget(remaining) && remaining.markerOwned &&
+        remaining.powerGeneration == generation;
     g_sgInSuspend = stillOwned;
     g_sgGameActuallySuspended = stillOwned;
     g_sgSleepIntentArmed = false;
@@ -7382,47 +7377,19 @@ static void sgAbortSleepIntent(const char* reason, bool preserveRetryContext) {
     g_sgSleepQueryOwnsGeneration = false;
     g_sgSleepQueryGateClosed = false;
     g_sgModernStandbyActive = false;
-    g_sgModernWakePending = false;
-    g_sgModernWakeCandidateTick = 0;
-    g_sgModernWakeCandidateFileTime = 0;
     g_sgModernWakeClassified = false;
     g_sgModernWakeClassifiedTick = 0;
-    if (g_hwnd) KillTimer(g_hwnd, SG_S0_WAKE_CLASSIFY_TIMER_ID);
-    if (g_hwnd) KillTimer(g_hwnd, SG_S0_STATE_TIMER_ID);
     if (g_hwnd) KillTimer(g_hwnd, SG_RETRY_TIMER_ID);
 
-    if (stillOwned) {
-        // Keep the recovery transaction alive for the worker retry if a
-        // transient OpenProcess/NtResume failure prevented direct recovery.
-        g_sgSleepCycleActive = true;
-        g_sgRepairEligible = true;
-        g_sgTask.phase = SgSleepTaskPhase::Recovering;
-        g_powerLifecycle.store(PowerLifecycle::Resuming, std::memory_order_release);
-        sgQueueWork(SgWork::WakeSuspend, currentPowerGeneration());
-    } else {
-        sgClearSleepTarget();
-        g_sgSleepCycleActive = false;
-        g_sgRepairEligible = false;
-        g_sgRetryInProgress = false;
-        g_sgRetryDueTick = 0;
-        g_powerLifecycle.store(PowerLifecycle::Ready, std::memory_order_release);
-        g_resumeReadyGeneration.store(0, std::memory_order_release);
-        g_sgEnteredTick = 0;
-        if (!preserveRetryContext) {
-            g_sgTask = {};
-            g_sgSleepTriggerTick = 0;
-            g_sgSleepTriggerEpoch = 0;
-        } else {
-            g_sgRepairEligible = hadRepair;
-            g_sgTask = task;
-            g_sgTask.phase = SgSleepTaskPhase::Recovering;
-            g_sgTask.retryKind = SgRetryKind::None;
-            g_sgRetryInProgress = hadRetryInProgress;
-            g_sgSleepTriggerTick = triggerTick;
-            g_sgSleepTriggerEpoch = triggerEpoch;
-            g_sgSleepCycleActive = hadRepair;
-        }
-    }
+    g_sgSleepCycleActive = false;
+    g_sgRepairEligible = false;
+    g_sgRetryInProgress = false;
+    g_sgRetryDueTick = 0;
+    g_sgTask = {};
+    g_sgSleepTriggerTick = 0;
+    g_sgSleepTriggerEpoch = 0;
+    g_powerLifecycle.store(PowerLifecycle::Ready, std::memory_order_release);
+    g_resumeReadyGeneration.store(0, std::memory_order_release);
     g_inputReady.store(true, std::memory_order_release);
     openHardwareWriteGate();
 }
@@ -7445,14 +7412,17 @@ static void sgWorkLoop() {
                 if (currentPowerGeneration() != item.generation ||
                     (dispatchPhase != PowerLifecycle::Suspending &&
                      dispatchPhase != PowerLifecycle::Suspended &&
-                     dispatchPhase != PowerLifecycle::Resuming))
+                     dispatchPhase != PowerLifecycle::Resuming)) {
+                    g_sgPauseWorkCompletedGeneration.store(
+                        item.generation, std::memory_order_release);
                     continue;
+                }
                 // S4/hibernate notifications can use the same broadcast values.
                 // Only a just-armed S0/S3 intent may freeze a game; an unarmed
                 // or explicitly hibernate request remains observation-only.
                 if (g_guardEnabled && g_sgRepairEligible && !g_sgInSuspend.load()) {
                     g_sgInSuspend.store(true);
-                    const SgSuspendResult result = sgSuspendTarget(item.generation);
+                    const SgSuspendResult result = sgPauseSleepTarget(item.generation);
                     traceLog("sleep game pause generation=%llu pid=%lu frozen=%d ws=%llu",
                              item.generation, static_cast<unsigned long>(result.pid),
                              result.frozen ? 1 : 0, static_cast<unsigned long long>(result.ws));
@@ -7469,17 +7439,7 @@ static void sgWorkLoop() {
                     } else {
                         g_sgGameActuallySuspended.store(true, std::memory_order_release);
                     }
-                    // Entry-failure detection is about whether the suspend
-                    // worker completed before the wake, not whether a game
-                    // happened to be found/frozen.  A machine with no game or
-                    // with pause disabled must not be retried as a failure.
-                    if (currentPowerGeneration() == item.generation &&
-                        g_powerLifecycle.load(std::memory_order_acquire) == PowerLifecycle::Suspending)
-                        g_sgEnteredTick = GetTickCount64();
-                    else
-                        g_sgEnteredTick = 0;
                 } else {
-                    g_sgEnteredTick = 0;
                     sgRecordFact("sleep-game-pause-skipped", {
                         {"generation", item.generation},
                         {"guardEnabled", g_guardEnabled},
@@ -7488,7 +7448,7 @@ static void sgWorkLoop() {
                     });
                 }
                 // The cycle remains active even if PID freeze failed; this is
-                // required for S0 wake classification and non-user-wake retry.
+                // required for S0 wake classification and explicit-user recovery.
                 g_sgSleepCycleActive.store(g_sgRepairEligible, std::memory_order_release);
                 // A fast wake can arrive while the suspend worker is still
                 // enumerating processes. Never overwrite Resuming with the
@@ -7500,71 +7460,89 @@ static void sgWorkLoop() {
                         expected, PowerLifecycle::Suspended,
                         std::memory_order_acq_rel, std::memory_order_acquire);
                 }
+                g_sgPauseWorkCompletedGeneration.store(
+                    item.generation, std::memory_order_release);
                 continue;
             } else if (item.kind == SgWork::WakeAutomatic) {
                 if (!powerLifecycleMatches(PowerLifecycle::Resuming, item.generation))
                     continue;
-                if (sgRetryIsExclusive()) {
+                if (sgSleepRetryActive() &&
+                    g_sgTask.generation == item.generation) {
                     // Keep this wake event ordered behind the retry decision.
                     // It is evidence only; no recovery, focus, or frontend
                     // resume commit may run while retries remain.
-                    traceLog("sleep wake queued behind entry retry generation=%llu",
+                    traceLog("sleep wake queued behind sleep retry generation=%llu",
                              item.generation);
                     continue;
                 }
-                if (g_sgInSuspend.load() || g_sgSleepCycleActive.load()) sgRealWake("resume_auto");
-                else { sgStopResleepObservation(); g_sgRepairEligible = false; }
+                if (g_sgInSuspend.load() || g_sgSleepCycleActive.load())
+                    sgRealWake("resume_auto", item.generation);
+                else { sgStopSleepRetry(); g_sgRepairEligible = false; }
                 traceLog("sleep game wake candidate source=resume-auto generation=%llu suspended=%d",
                          item.generation, g_sgInSuspend.load() ? 1 : 0);
+                if (g_sgTask.generation == item.generation &&
+                    g_sgTask.mode == SgSleepMode::S3) {
+                    traceLog("sleep automatic wake commit held generation=%llu",
+                             item.generation);
+                    continue;
+                }
                 if (powerLifecycleMatches(PowerLifecycle::Resuming, item.generation) &&
                     g_resumeReadyGeneration.exchange(item.generation, std::memory_order_acq_rel) != item.generation && g_hwnd)
                     PostMessageW(g_hwnd, WM_POWER_RESUME_READY, 0, 0);
             } else if (item.kind == SgWork::WakeHibernate) {
-                if (currentPowerGeneration() != item.generation) continue;
-                if (sgRetryIsExclusive()) {
-                    traceLog("hibernate wake queued behind entry retry generation=%llu",
+                if (currentPowerGeneration() != item.generation &&
+                    !sgSleepLeaseOwnedByGeneration(item.generation)) continue;
+                if (sgSleepRetryActive() &&
+                    g_sgTask.generation == item.generation) {
+                    traceLog("hibernate wake queued behind sleep retry generation=%llu",
                              item.generation);
                     continue;
                 }
                 SgSleepTarget lease;
-                const bool hasOwnedLease = sgReadSleepTarget(lease) && lease.markerOwned;
-                const bool hasManualLease = g_manualPausedPid.load(std::memory_order_acquire) != 0 ||
-                    sgHasPauseMarkerForOtherPid(SG_MANUAL_DIR, 0);
-                if (g_sgInSuspend.load() || g_sgSleepCycleActive.load() || hasOwnedLease || hasManualLease)
-                    sgRealWake("resume_suspend");
+                const bool hasOwnedLease = sgReadSleepTarget(lease) && lease.markerOwned &&
+                    lease.powerGeneration == item.generation;
+                if (g_sgInSuspend.load() || g_sgSleepCycleActive.load() || hasOwnedLease)
+                    sgRealWake("resume_hibernate", item.generation);
                 else
-                    sgStopResleepObservation();
+                    sgStopSleepRetry();
                 traceLog("sleep game resume source=kernel-s4-107 generation=%llu",
                          item.generation);
                 if (powerLifecycleMatches(PowerLifecycle::Resuming, item.generation) &&
                     g_resumeReadyGeneration.exchange(item.generation, std::memory_order_acq_rel) != item.generation && g_hwnd)
                     PostMessageW(g_hwnd, WM_POWER_RESUME_READY, 0, 0);
             } else if (item.kind == SgWork::WakeSuspend) {
-                if (currentPowerGeneration() != item.generation) continue;
-                if (sgRetryIsExclusive()) {
-                    traceLog("user wake queued behind entry retry generation=%llu",
-                             item.generation);
-                    continue;
+                if (currentPowerGeneration() != item.generation &&
+                    !sgSleepLeaseOwnedByGeneration(item.generation)) continue;
+                if (sgSleepRetryActive() &&
+                    g_sgTask.generation == item.generation) {
+                    g_sgRetryInProgress = false;
+                    g_sgRetryDueTick = 0;
+                    g_sgTask.retryKind = SgRetryKind::None;
+                    sgClearInternalSleepRequest("explicit-user-wake");
+                    if (g_hwnd) KillTimer(g_hwnd, SG_RETRY_TIMER_ID);
                 }
                 // RESUMESUSPEND may follow RESUMEAUTOMATIC after the frontend
                 // has already committed. It must still cancel an automatic
                 // re-sleep observation, but it must not reopen a completed
                 // power transaction.
                 SgSleepTarget lease;
-                const bool hasOwnedLease = sgReadSleepTarget(lease) && lease.markerOwned;
-                const bool hasManualLease = g_manualPausedPid.load(std::memory_order_acquire) != 0 ||
-                    sgHasPauseMarkerForOtherPid(SG_MANUAL_DIR, 0);
-                if (g_sgInSuspend.load() || g_sgSleepCycleActive.load() || hasOwnedLease || hasManualLease)
-                    sgRealWake("resume_suspend");
+                const bool hasOwnedLease = sgReadSleepTarget(lease) && lease.markerOwned &&
+                    lease.powerGeneration == item.generation;
+                if (g_sgInSuspend.load() || g_sgSleepCycleActive.load() || hasOwnedLease)
+                    sgRealWake("resume_suspend", item.generation);
                 else
-                    sgStopResleepObservation();
+                    sgStopSleepRetry();
                 traceLog("sleep game resume source=resume-user generation=%llu", item.generation);
                 if (powerLifecycleMatches(PowerLifecycle::Resuming, item.generation) &&
                     g_resumeReadyGeneration.exchange(item.generation, std::memory_order_acq_rel) != item.generation && g_hwnd)
                     PostMessageW(g_hwnd, WM_POWER_RESUME_READY, 0, 0);
             }
         } catch (...) {
-            if (item.kind == SgWork::Suspend) g_sgInSuspend.store(false);
+            if (item.kind == SgWork::Suspend) {
+                g_sgInSuspend.store(false);
+                g_sgPauseWorkCompletedGeneration.store(
+                    item.generation, std::memory_order_release);
+            }
         }
     }
 }
@@ -7576,14 +7554,14 @@ static void sgStartWorkThread() {
     g_sgWorkThread = std::thread(sgWorkLoop);
 }
 
-static void sgStopWorkThread() {
+static void sgStopWorkThread(DWORD timeoutMs) {
     {
         std::lock_guard<std::mutex> lock(g_sgWorkMx);
         g_sgWorkStop = true;
         g_sgWorkQ.clear();
     }
     g_sgWorkCv.notify_all();
-    if (g_sgWorkThread.joinable()) g_sgWorkThread.join();
+    (void)joinThreadBoundedForExit(g_sgWorkThread, timeoutMs, "sleep-guard");
 }
 
 // Child windows
@@ -7646,6 +7624,9 @@ static int g_splashSurfaceH = 0;
 // Logging
 static std::wstring g_logFile;
 static std::mutex   g_logMtx;
+static std::atomic<bool> g_fanLogEnabled{false};
+static std::wstring g_fanLogFile;
+static std::mutex   g_fanLogMtx;
 
 // Background brush for frameless border area
 static HBRUSH   g_bgBrush = nullptr;
@@ -7705,6 +7686,168 @@ static std::wstring app_data_dir() {
     return g_appDataDir;
 }
 
+// Fan Host recovery also runs from native sleep/exit callbacks, when the
+// renderer may already be gone.  Keep its mutable session capability in a
+// stable product path rather than app_data_dir(), whose parent name follows a
+// user-configurable window title.  Renderer, native cleanup and the emergency
+// script must resolve the same directory across title/configuration changes.
+static std::wstring g_fanHostStateDir;
+static std::wstring fan_host_state_dir() {
+    if (!g_fanHostStateDir.empty()) return g_fanHostStateDir;
+    PWSTR p = nullptr;
+    if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, nullptr, &p))) {
+        g_fanHostStateDir = std::wstring(p) + L"\\YeManCC\\fan-host";
+        CoTaskMemFree(p);
+    } else {
+        // Keep the existing application-data fallback only when Windows cannot
+        // provide LocalAppData.  Both native and renderer still use this same
+        // helper through app.fanStateDir, so the session path remains shared.
+        g_fanHostStateDir = app_data_dir() + L"\\fan-host";
+    }
+    std::error_code ec;
+    fspath::create_directories(g_fanHostStateDir, ec);
+    return g_fanHostStateDir;
+}
+
+// T0 sleep-hang repair: this log is intentionally independent of the optional
+// debug trace and of the WebView renderer. It is only an audit trail; failures
+// here must never affect startup, sleep, resume, or shutdown behavior.
+static std::mutex g_nativeLifecycleLogMx;
+static std::string nativeLifecycleTimestamp() {
+    SYSTEMTIME st{};
+    GetLocalTime(&st);
+    char value[40]{};
+    snprintf(value, sizeof(value), "%04u-%02u-%02uT%02u:%02u:%02u.%03u",
+        st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond, st.wMilliseconds);
+    return value;
+}
+static void appendNativeLifecycleLog(const char* event, json detail) {
+    try {
+        if (!detail.is_object()) detail = json::object();
+        detail["time"] = nativeLifecycleTimestamp();
+        detail["event"] = event ? event : "unknown";
+        detail["pid"] = GetCurrentProcessId();
+        detail["hwnd"] = static_cast<uintptr_t>(reinterpret_cast<uintptr_t>(g_hwnd));
+        detail["hwndValid"] = g_hwnd && IsWindow(g_hwnd);
+        detail["powerLifecycle"] = powerLifecycleName(
+            g_powerLifecycle.load(std::memory_order_acquire));
+        detail["powerGeneration"] = g_powerGeneration.load(std::memory_order_acquire);
+        std::lock_guard<std::mutex> lock(g_nativeLifecycleLogMx);
+        std::ofstream out(fspath::path(app_data_dir()) / L"native-lifecycle.log",
+            std::ios::binary | std::ios::app);
+        if (out) {
+            out << detail.dump() << '\n';
+            out.flush();
+        }
+    } catch (...) {}
+}
+
+static std::wstring currentExecutablePath() {
+    std::vector<wchar_t> path(32768);
+    const DWORD length = GetModuleFileNameW(nullptr, path.data(), static_cast<DWORD>(path.size()));
+    if (length == 0 || length >= path.size()) return {};
+    return std::wstring(path.data(), length);
+}
+
+static bool queryFullProcessImagePath(DWORD pid, std::wstring& path) {
+    path.clear();
+    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    if (!process) return false;
+    std::vector<wchar_t> value(32768);
+    DWORD length = static_cast<DWORD>(value.size());
+    const bool ok = QueryFullProcessImageNameW(process, 0, value.data(), &length) != FALSE &&
+        length > 0 && length < value.size();
+    CloseHandle(process);
+    if (!ok) return false;
+    path.assign(value.data(), length);
+    return true;
+}
+
+struct ExistingInstanceWindowContext {
+    DWORD pid = 0;
+    const std::wstring* title = nullptr;
+    HWND hwnd = nullptr;
+};
+static BOOL CALLBACK findExistingInstanceWindowEnum(HWND hwnd, LPARAM param) {
+    auto* context = reinterpret_cast<ExistingInstanceWindowContext*>(param);
+    if (!context || !context->title) return TRUE;
+    DWORD pid = 0;
+    GetWindowThreadProcessId(hwnd, &pid);
+    if (pid != context->pid) return TRUE;
+    wchar_t className[32]{};
+    if (!GetClassNameW(hwnd, className, _countof(className)) || wcscmp(className, L"QQ") != 0)
+        return TRUE;
+    const int textLength = GetWindowTextLengthW(hwnd);
+    if (textLength < 0) return TRUE;
+    std::wstring text(static_cast<size_t>(textLength) + 1, L'\0');
+    GetWindowTextW(hwnd, text.data(), static_cast<int>(text.size()));
+    text.resize(wcslen(text.c_str()));
+    if (text != *context->title) return TRUE;
+    context->hwnd = hwnd;
+    return FALSE;
+}
+static HWND findExistingInstanceWindowForPid(DWORD pid, const std::wstring& title) {
+    ExistingInstanceWindowContext context{pid, &title, nullptr};
+    EnumWindows(findExistingInstanceWindowEnum, reinterpret_cast<LPARAM>(&context));
+    return context.hwnd;
+}
+
+static std::vector<DWORD> findWindowlessSameImageInstances(
+    const std::wstring& currentImage, const std::wstring& title) {
+    std::vector<DWORD> candidates;
+    DWORD currentSession = 0;
+    if (currentImage.empty() || !ProcessIdToSessionId(GetCurrentProcessId(), &currentSession))
+        return candidates;
+    HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snapshot == INVALID_HANDLE_VALUE) return candidates;
+    PROCESSENTRY32W entry{sizeof(entry)};
+    if (Process32FirstW(snapshot, &entry)) {
+        do {
+            const DWORD pid = entry.th32ProcessID;
+            if (!pid || pid == GetCurrentProcessId()) continue;
+            DWORD session = 0;
+            if (!ProcessIdToSessionId(pid, &session) || session != currentSession) continue;
+            std::wstring image;
+            if (!queryFullProcessImagePath(pid, image) ||
+                _wcsicmp(image.c_str(), currentImage.c_str()) != 0) continue;
+            if (findExistingInstanceWindowForPid(pid, title)) continue;
+            candidates.push_back(pid);
+        } while (Process32NextW(snapshot, &entry));
+    }
+    CloseHandle(snapshot);
+    return candidates;
+}
+
+static bool waitForExistingInstanceWindow(const std::wstring& title, DWORD timeoutMs, HWND& existing) {
+    existing = nullptr;
+    const ULONGLONG deadline = GetTickCount64() + timeoutMs;
+    do {
+        existing = FindWindowW(L"QQ", title.c_str());
+        if (existing && IsWindow(existing)) return true;
+        Sleep(100);
+    } while (GetTickCount64() < deadline);
+    existing = FindWindowW(L"QQ", title.c_str());
+    return existing && IsWindow(existing);
+}
+
+static bool terminateConfirmedWindowlessInstance(
+    DWORD pid, const std::wstring& currentImage, const std::wstring& title, DWORD timeoutMs) {
+    DWORD currentSession = 0;
+    DWORD candidateSession = 0;
+    std::wstring candidateImage;
+    if (!pid || !ProcessIdToSessionId(GetCurrentProcessId(), &currentSession) ||
+        !ProcessIdToSessionId(pid, &candidateSession) || candidateSession != currentSession ||
+        !queryFullProcessImagePath(pid, candidateImage) ||
+        _wcsicmp(candidateImage.c_str(), currentImage.c_str()) != 0 ||
+        findExistingInstanceWindowForPid(pid, title)) return false;
+    HANDLE process = OpenProcess(PROCESS_TERMINATE | SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION,
+        FALSE, pid);
+    if (!process) return false;
+    const bool requested = TerminateProcess(process, 0) != FALSE;
+    const bool stopped = requested && WaitForSingleObject(process, timeoutMs) == WAIT_OBJECT_0;
+    CloseHandle(process);
+    return stopped;
+}
 static std::wstring readEnvironmentString(const wchar_t* name) {
     DWORD required = GetEnvironmentVariableW(name, nullptr, 0);
     if (required == 0) return {};
@@ -8182,7 +8325,7 @@ static bool poolSubmit(std::function<void()> job) {
     return true;
 }
 
-static void poolStop() {
+static void poolStop(DWORD timeoutMs) {
     g_poolCancel.store(true, std::memory_order_release);
     {
         std::lock_guard<std::mutex> lk(g_poolMx);
@@ -8192,8 +8335,12 @@ static void poolStop() {
         g_poolQ.clear();
     }
     g_poolCv.notify_all();
+    const ULONGLONG deadline = timeoutMs == INFINITE
+        ? 0 : GetTickCount64() + timeoutMs;
     for (auto& thread : g_poolThreads) {
-        if (thread.joinable()) thread.join();
+        const DWORD remaining = timeoutMs == INFINITE ? INFINITE :
+            (GetTickCount64() >= deadline ? 0 : static_cast<DWORD>(deadline - GetTickCount64()));
+        (void)joinThreadBoundedForExit(thread, remaining, "ipc-pool");
     }
     g_poolThreads.clear();
     std::lock_guard<std::mutex> lk(g_poolMx);
@@ -9099,6 +9246,10 @@ static std::wstring updateProgressPath() {
     return app_data_dir() + L"\\update\\update-progress.json";
 }
 
+static std::wstring updateTransactionStatePath() {
+    return app_data_dir() + L"\\update\\update-state.json";
+}
+
 static void updateProgressPost(const json& data) {
     {
         std::lock_guard<std::mutex> lock(g_updateProgressMtx);
@@ -9124,6 +9275,47 @@ static json updateProgressRead() {
     } catch (...) {
         return json::object();
     }
+}
+
+static json updateTransactionStateRead() {
+    auto raw = sgReadFile(updateTransactionStatePath());
+    if (raw.size() >= 3 && static_cast<unsigned char>(raw[0]) == 0xEF &&
+        static_cast<unsigned char>(raw[1]) == 0xBB &&
+        static_cast<unsigned char>(raw[2]) == 0xBF) {
+        raw.erase(0, 3);
+    }
+    if (raw.empty()) return json::object();
+    try {
+        auto parsed = json::parse(raw);
+        return parsed.is_object() ? parsed : json::object();
+    } catch (...) {
+        return json::object();
+    }
+}
+
+static json updateStateReadWithTransaction() {
+    auto progress = updateProgressRead();
+    const auto state = updateTransactionStateRead();
+    const auto statePhase = state.value("phase", std::string{});
+    const auto stateVersion = state.value("version", std::string{});
+    const auto progressVersion = progress.value("version", std::string{});
+    const bool legacyStartedState = statePhase == "started" && stateVersion.empty() &&
+        progress.value("phase", std::string{}) == "installing";
+    if ((!stateVersion.empty() && stateVersion == progressVersion && statePhase == "committed") ||
+        legacyStartedState) {
+        progress["phase"] = "completed";
+        progress["percent"] = 100;
+        progress["message"] = "更新已完成";
+        progress["error"] = "";
+    } else if (stateVersion.empty() || stateVersion == progressVersion) {
+        if (progress.value("phase", std::string{}) == "installing" &&
+            (statePhase == "copying" || statePhase == "tdp-verified" ||
+             statePhase == "launching")) {
+            progress["phase"] = "interrupted";
+            progress["message"] = "上次安装在提交前中断，可重试安装";
+        }
+    }
+    return progress;
 }
 
 static void ipc_dispatch(LPCWSTR raw) {
@@ -10538,6 +10730,45 @@ static void reg_shell_app() {
             {"path", valid ? W2U(path) : ""},
         };
     });
+    ipc_on("process.terminateTree", [](const json& args) -> json {
+        const DWORD rootPid = args.value("pid", 0u);
+        if (!rootPid || rootPid == 4 || rootPid == GetCurrentProcessId())
+            return json{{"ok", false}, {"attempted", 0}, {"terminated", 0}};
+
+        struct ProcNode { DWORD pid; DWORD parent; };
+        std::vector<ProcNode> nodes;
+        HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if (snap == INVALID_HANDLE_VALUE)
+            return json{{"ok", false}, {"attempted", 0}, {"terminated", 0}};
+        PROCESSENTRY32W pe{sizeof(pe)};
+        if (Process32FirstW(snap, &pe)) {
+            do { nodes.push_back({pe.th32ProcessID, pe.th32ParentProcessID}); }
+            while (Process32NextW(snap, &pe));
+        }
+        CloseHandle(snap);
+
+        std::vector<DWORD> targets{rootPid};
+        for (size_t i = 0; i < targets.size(); ++i) {
+            for (const auto& node : nodes) {
+                if (node.parent == targets[i] &&
+                    std::find(targets.begin(), targets.end(), node.pid) == targets.end())
+                    targets.push_back(node.pid);
+            }
+        }
+        int attempted = 0;
+        int terminated = 0;
+        for (auto it = targets.rbegin(); it != targets.rend(); ++it) {
+            if (*it == GetCurrentProcessId()) continue;
+            HANDLE h = OpenProcess(PROCESS_TERMINATE | SYNCHRONIZE, FALSE, *it);
+            if (!h) continue;
+            ++attempted;
+            const bool requested = TerminateProcess(h, ERROR_CANCELLED) != FALSE;
+            const bool stopped = requested && WaitForSingleObject(h, 1500) == WAIT_OBJECT_0;
+            if (stopped) ++terminated;
+            CloseHandle(h);
+        }
+        return json{{"ok", terminated > 0}, {"attempted", attempted}, {"terminated", terminated}};
+    });
     ipc_on("game.rules.get", [](const json&) -> json {
         std::lock_guard<std::mutex> rulesLock(g_gameRulesMx);
         return sgGameRulesSnapshot();
@@ -10615,15 +10846,6 @@ static void reg_shell_app() {
         json values = a.contains("pids") ? a["pids"] : json::array();
         if (!values.is_array()) values = json::array();
         json result = sgResumeGameByPids(values, SG_MANUAL_DIR);
-        const bool expectedResume = !values.empty() || sgHasPauseMarkerForOtherPid(SG_MANUAL_DIR, 0);
-        if (expectedResume && result.value("resumed", 0) == 0) {
-            const SgResumeResult global = sgResumeGlobalSuspendedLargeProcesses();
-            result["resumed"] = global.count;
-            result["resumedPids"] = json::array();
-            for (const DWORD pid : global.pids) result["resumedPids"].push_back(pid);
-            result["globalFallback"] = global.count;
-            traceLog("manual resume global fallback resumed=%d", global.count);
-        }
         traceLog("manual resume requested=%zu resumed=%d failed=%zu stale=%zu",
                  values.size(), result.value("resumed", 0),
                  result.value("failedPids", json::array()).size(),
@@ -10695,9 +10917,10 @@ static void reg_shell_app() {
             throw std::runtime_error("Failed to bind TDP daemon lifetime (Win32 " + std::to_string(le) + ")");
         }
         ResumeThread(pi.hThread);
+        const auto pid = static_cast<unsigned long long>(pi.dwProcessId);
         CloseHandle(pi.hThread);
         CloseHandle(pi.hProcess);
-        return json{{"ok", true}};
+        return json{{"ok", true}, {"pid", pid}};
     });
     ipc_on("tdpDaemon.request", [](const json& a) -> json {
         auto op = a.value("op", std::string{});
@@ -10773,9 +10996,67 @@ static void reg_shell_app() {
             DWORD le = GetLastError();
             throw std::runtime_error(("Failed to start hidden process (Win32 " + std::to_string(le) + ")").c_str());
         }
+        const auto pid = static_cast<unsigned long long>(pi.dwProcessId);
         CloseHandle(pi.hThread);
         CloseHandle(pi.hProcess);
-        return json{{"ok", true}};
+        return json{{"ok", true}, {"pid", pid}};
+    });
+    ipc_on("customSteamLibrary.setIntegrationSession", [](const json& a) -> json {
+        const bool enabled = a.value("enabled", false);
+        if (enabled) {
+            // Enabling arms the native gamepad owner. Native code itself
+            // discovers the child window and promotes launching -> active.
+            g_customSteamLibraryInputDeadline.store(
+                GetTickCount64() + kCustomSteamLibraryLaunchTimeoutMs, std::memory_order_release);
+            g_customSteamLibraryInputPhase.store(
+                static_cast<int>(CustomSteamLibraryInputPhase::launching), std::memory_order_release);
+        } else {
+            // Do not let the final close/return press become a YeManCC action.
+            // The normal gamepad loop clears this release barrier after the
+            // physical controls are neutral again.
+            g_customSteamLibraryInputDeadline.store(0, std::memory_order_release);
+            g_customSteamLibraryInputPhase.store(
+                static_cast<int>(CustomSteamLibraryInputPhase::disabled), std::memory_order_release);
+            g_inputReleaseRequired.store(true, std::memory_order_release);
+        }
+        return true;
+    });
+    ipc_on("customSteamLibrary.status", [](const json&) -> json {
+        (void)customSteamLibraryInputSuppressed();
+        const auto phase = g_customSteamLibraryInputPhase.load(std::memory_order_acquire);
+        HWND child = customSteamLibraryWindow();
+        DWORD pid = 0;
+        if (child) GetWindowThreadProcessId(child, &pid);
+        const bool present = child && IsWindow(child);
+        const bool foreground = present && GetForegroundWindow() == child;
+        const ULONG_PTR ownerMarker = child
+            ? customSteamLibraryWindowProperty(child, kCustomSteamLibraryInputOwnerProperty) : 0;
+        const bool parentOwned = customSteamLibraryParentOwned(child);
+        const bool compatible = !present || parentOwned;
+        const char* inputOwner = ownerMarker == kCustomSteamLibraryParentInputOwnerMarker ? "parent" :
+            ownerMarker == kCustomSteamLibraryHostInputOwnerMarker ? "host" : "unknown";
+        return json{
+            {"configured", phase != static_cast<int>(CustomSteamLibraryInputPhase::disabled)},
+            {"present", present},
+            {"foreground", foreground},
+            {"pid", pid},
+            {"inputOwner", inputOwner},
+            {"compatible", compatible},
+            {"phase", phase == static_cast<int>(CustomSteamLibraryInputPhase::launching) ? "launching" :
+                       phase == static_cast<int>(CustomSteamLibraryInputPhase::active) ? "active" :
+                       phase == static_cast<int>(CustomSteamLibraryInputPhase::returning) ? "returning" : "disabled"},
+        };
+    });
+    ipc_on("customSteamLibrary.sendAction", [](const json& a) -> json {
+        const auto action = a.value("action", std::string{});
+        static const std::unordered_set<std::string> allowed = {
+            "navigate-left", "navigate-right", "navigate-up", "navigate-down",
+            "accept", "back", "tab-previous", "tab-next", "edit",
+        };
+        if (!allowed.contains(action)) throw std::runtime_error("unsupported Custom Steam Library action");
+        if (!customSteamLibraryInputSuppressed()) return json{{"ok", false}, {"reason", "bridge-disabled"}};
+        if (!customSteamLibraryParentWindow()) return json{{"ok", false}, {"reason", "window-not-running-or-not-parent-owned"}};
+        return json{{"ok", customSteamLibrarySendSemanticAction(action.c_str())}};
     });
     ipc_on("app.exit", [](const json& a) -> json {
         // IPC 可能运行在工作线程；窗口销毁和退出清理必须切回 UI 线程。
@@ -10786,8 +11067,14 @@ static void reg_shell_app() {
     ipc_on("app.dataDir", [](const json&) -> json {
         return W2U(app_data_dir());
     });
+    ipc_on("app.fanStateDir", [](const json&) -> json {
+        return W2U(fan_host_state_dir());
+    });
     ipc_on("app.exeDir", [](const json&) -> json {
         return W2U(exe_dir());
+    });
+    ipc_on("app.pid", [](const json&) -> json {
+        return GetCurrentProcessId();
     });
     ipc_on("app.powerControlDir", [](const json&) -> json {
         return W2U(POWER_CONTROL_DIR);
@@ -10901,7 +11188,6 @@ static void reg_shell_app() {
         if (a.contains("retryOnEntryFailure")) g_sgRetryEntryFailure = a.value("retryOnEntryFailure", g_sgRetryEntryFailure);
         if (a.contains("retryOnNonUserWake")) {
             g_sgResleepEnabled = a.value("retryOnNonUserWake", g_sgResleepEnabled);
-            if (!g_sgResleepEnabled) sgReleaseAfterWakeObservation();
         }
         sgSaveConfig();
         g_guardEnabled = sgConfigWantsGuard();
@@ -10910,8 +11196,10 @@ static void reg_shell_app() {
     });
     ipc_on("sleepGuard.recoverAll", [](const json& a) -> json {
         SgResumeResult rr = sgResumeAll(false); // 仅恢复 Sleep\suspended 中记录的 PID
-        if (rr.count > 0) {
+        if (!sgHasMarkerFiles(SG_SLEEP_LEASE_DIR)) {
             g_sgInSuspend = false;
+            g_sgGameActuallySuspended = false;
+            sgClearSleepTarget();
         }
         return {{"resumed", rr.count}};
     });
@@ -11105,6 +11393,9 @@ static void reg_http() {
         auto method = a.value("method", std::string{"GET"});
         auto body   = a.value("body", std::string{});
         auto hdrs   = a.value("headers", json::object());
+        const DWORD requestTimeoutMs = (std::max)(
+            static_cast<DWORD>(250),
+            (std::min)(static_cast<DWORD>(120000), a.value("timeoutMs", DEFAULT_HTTP_TIMEOUT_MS)));
 
         if (url.empty()) throw std::runtime_error("url is required");
 
@@ -11130,12 +11421,13 @@ static void reg_http() {
             }
         }
         const bool steamHost = isSteamHostName(host) || steamHostHeader;
+        const bool loopbackHost = isLoopbackHost(host);
         HINTERNET hSession = WinHttpOpen(L"QQ/1.0",
-                                          steamHost ? WINHTTP_ACCESS_TYPE_NO_PROXY
+                                          (steamHost || loopbackHost) ? WINHTTP_ACCESS_TYPE_NO_PROXY
                                                     : WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
                                           WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
         if (!hSession) throw std::runtime_error("WinHttpOpen failed");
-        setHttpTimeouts(hSession);
+        setHttpTimeouts(hSession, requestTimeoutMs);
         DWORD redirectPolicy = WINHTTP_OPTION_REDIRECT_POLICY_ALWAYS;
         WinHttpSetOption(hSession, WINHTTP_OPTION_REDIRECT_POLICY, &redirectPolicy, sizeof(redirectPolicy));
 
@@ -11172,12 +11464,18 @@ static void reg_http() {
         // Send
         LPVOID bodyPtr = body.empty() ? WINHTTP_NO_REQUEST_DATA : (LPVOID)body.data();
         DWORD bodyLen  = body.empty() ? 0 : (DWORD)body.size();
-        if (!WinHttpSendRequest(hRequest, WINHTTP_NO_ADDITIONAL_HEADERS, 0, bodyPtr, bodyLen, bodyLen, 0) ||
-            !WinHttpReceiveResponse(hRequest, nullptr)) {
+        const bool sent = WinHttpSendRequest(hRequest, WINHTTP_NO_ADDITIONAL_HEADERS, 0, bodyPtr, bodyLen, bodyLen, 0) != FALSE;
+        const DWORD sendError = sent ? ERROR_SUCCESS : GetLastError();
+        const bool received = sent && WinHttpReceiveResponse(hRequest, nullptr) != FALSE;
+        const DWORD receiveError = received ? ERROR_SUCCESS : GetLastError();
+        if (!received) {
             WinHttpCloseHandle(hRequest);
             WinHttpCloseHandle(hConnect);
             WinHttpCloseHandle(hSession);
-            throw std::runtime_error("HTTP request failed");
+            const DWORD errorCode = sent ? receiveError : sendError;
+            throw std::runtime_error("HTTP request failed (WinHTTP " +
+                                     std::to_string(static_cast<unsigned long>(errorCode)) +
+                                     ", path=" + W2U(objectPath) + ")");
         }
 
         // Status code
@@ -11196,7 +11494,7 @@ static void reg_http() {
         // Response body
         std::string respBody;
         constexpr size_t MAX_HTTP_RESPONSE_BYTES = 8u << 20;
-        const ULONGLONG responseDeadline = GetTickCount64() + 120000;
+        const ULONGLONG responseDeadline = GetTickCount64() + requestTimeoutMs + 5000;
         std::string responseError;
         DWORD available, read;
         for (;;) {
@@ -11230,10 +11528,341 @@ static void reg_http() {
         WinHttpCloseHandle(hConnect);
         WinHttpCloseHandle(hSession);
 
-        if (!responseError.empty()) throw std::runtime_error(responseError);
+        if (!responseError.empty())
+            throw std::runtime_error(responseError + " (path=" + W2U(objectPath) + ")");
 
         return json{{"status", statusCode}, {"headers", W2U(respHdrs)}, {"body", respBody}};
     });
+}
+
+/**
+ * Bounded Host cleanup operation.  This function is deliberately called only
+ * by the detached fallback worker below.  It must never be called from a
+ * WM_POWERBROADCAST or Kernel-Power callback: WinHTTP and its retry delays are
+ * allowed to take hundreds of milliseconds and therefore cannot be part of a
+ * sleep/veto path.
+ */
+static bool fanHostOwnsLoopbackPort(DWORD pid, unsigned short port = 8765) {
+    // Verify the owner PID of the actual LISTENING socket. An exact Host
+    // image elsewhere in the process list is not sufficient while its
+    // listener is restarting or another process occupies the loopback port.
+    ULONG bytes = 0;
+    constexpr ULONG kIpv4Family = 2; // AF_INET; keep native shell free of Winsock ABI headers
+    if (GetExtendedTcpTable(nullptr, &bytes, FALSE, kIpv4Family,
+                            TCP_TABLE_OWNER_PID_LISTENER, 0) != ERROR_INSUFFICIENT_BUFFER ||
+        bytes == 0) return false;
+    std::vector<unsigned char> buffer(bytes);
+    auto* table = reinterpret_cast<PMIB_TCPTABLE_OWNER_PID>(buffer.data());
+    if (GetExtendedTcpTable(table, &bytes, FALSE, kIpv4Family,
+                            TCP_TABLE_OWNER_PID_LISTENER, 0) != NO_ERROR) return false;
+    const auto decodeNetworkU16 = [](DWORD value) -> unsigned short {
+        return static_cast<unsigned short>(((value & 0xffu) << 8) | ((value >> 8) & 0xffu));
+    };
+    for (DWORD i = 0; i < table->dwNumEntries; ++i) {
+        const auto& row = table->table[i];
+        if (row.dwLocalAddr == 0x0100007Fu &&
+            decodeNetworkU16(row.dwLocalPort) == port && row.dwOwningPid == pid)
+            return true;
+    }
+    return false;
+}
+
+static bool fanHostExactProcessRunning() {
+    const auto expected = POWER_CONTROL_DIR + L"\\fan-host\\YeManFanHost.exe";
+    HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snapshot == INVALID_HANDLE_VALUE) return false;
+    PROCESSENTRY32W entry{};
+    entry.dwSize = sizeof(entry);
+    bool found = false;
+    if (Process32FirstW(snapshot, &entry)) {
+        do {
+            if (_wcsicmp(entry.szExeFile, L"YeManFanHost.exe") != 0) continue;
+            const auto image = processImagePath(entry.th32ProcessID);
+            if (!image.empty() && sameFinalPath(image, expected) &&
+                fanHostOwnsLoopbackPort(entry.th32ProcessID)) {
+                found = true;
+                break;
+            }
+        } while (Process32NextW(snapshot, &entry));
+    }
+    CloseHandle(snapshot);
+    return found;
+}
+
+static std::string fanHostReadSessionToken() {
+    // The Host executable is an immutable release payload. The loopback
+    // capability belongs in per-user app data so an update cannot replace it
+    // while the native sleep/exit fallback still needs to close the Host.
+    const auto path = fan_host_state_dir() + L"\\YeManFanHost.session";
+    std::ifstream input(path, std::ios::binary);
+    if (!input) return {};
+    std::string token((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
+    token = trim_ascii(std::move(token));
+    // The application creates a 32-byte hexadecimal token. Reject malformed
+    // sidecars rather than sending arbitrary local-file content as a header.
+    if (token.size() != 64 || !std::all_of(token.begin(), token.end(), [](unsigned char value) {
+        return std::isxdigit(value) != 0;
+    })) return {};
+    return token;
+}
+
+static bool fanHostEmergencyPost(const wchar_t* endpoint, const char* reason,
+                                 int maxAttempts = 2,
+                                 bool requireSafeState = true,
+                                 DWORD* lastResponseStatus = nullptr) {
+    maxAttempts = (std::max)(1, maxAttempts);
+    if (lastResponseStatus) *lastResponseStatus = 0;
+    const auto sessionToken = fanHostReadSessionToken();
+    if (sessionToken.empty()) {
+        traceLog("fan Host boundary skipped endpoint=%ls reason=%s missing-session-token",
+                 endpoint, reason ? reason : "unknown");
+        return false;
+    }
+    for (int attempt = 0; attempt < maxAttempts; ++attempt) {
+        // Never send the session token merely because something happens to
+        // listen on 8765. The executable identity is checked for every retry.
+        if (!fanHostExactProcessRunning()) return false;
+        HINTERNET session = WinHttpOpen(
+            L"YeManCC-FanSleep/1.0", WINHTTP_ACCESS_TYPE_NO_PROXY,
+            WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
+        if (!session) {
+            if (attempt + 1 < maxAttempts) Sleep(40);
+            continue;
+        }
+        // Keep the detached worker bounded; the Host's own power observer
+        // remains a parallel fallback if this local request stalls.
+        setHttpTimeouts(session, 650);
+        HINTERNET connect = WinHttpConnect(session, L"127.0.0.1", 8765, 0);
+        HINTERNET request = connect
+            ? WinHttpOpenRequest(connect, L"POST", endpoint, nullptr,
+                                 WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES,
+                                 WINHTTP_FLAG_BYPASS_PROXY_CACHE)
+            : nullptr;
+        bool safe = false;
+        DWORD status = 0;
+        std::string body;
+        if (request) {
+            const auto headers = std::wstring(L"Content-Type: application/json\r\n") +
+                L"X-YeMan-Fan-Session: " + U2W(sessionToken) + L"\r\n";
+            const char payload[] = "{}";
+            if (WinHttpAddRequestHeaders(request, headers.c_str(), (DWORD)-1,
+                                         WINHTTP_ADDREQ_FLAG_ADD) &&
+                WinHttpSendRequest(request, WINHTTP_NO_ADDITIONAL_HEADERS, 0,
+                                   (LPVOID)payload, 2, 2, 0) &&
+                WinHttpReceiveResponse(request, nullptr)) {
+                DWORD size = sizeof(status);
+                WinHttpQueryHeaders(request,
+                    WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
+                    WINHTTP_HEADER_NAME_BY_INDEX, &status, &size,
+                    WINHTTP_NO_HEADER_INDEX);
+                if (lastResponseStatus) *lastResponseStatus = status;
+                DWORD available = 0;
+                while (WinHttpQueryDataAvailable(request, &available) && available > 0) {
+                    if (body.size() + static_cast<size_t>(available) > 256u * 1024u) {
+                        body.clear();
+                        break;
+                    }
+                    std::string chunk(available, '\0');
+                    DWORD read = 0;
+                    if (!WinHttpReadData(request, chunk.data(), available, &read)) {
+                        body.clear();
+                        break;
+                    }
+                    chunk.resize(read);
+                    body += chunk;
+                }
+                if (!requireSafeState && status >= 200 && status < 300) {
+                    safe = true;
+                } else if (status >= 200 && status < 300 && !body.empty()) {
+                    try {
+                        const auto response = json::parse(body);
+                        const auto state = response.value("state", json::object());
+                        const auto stateName = state.value("state", std::string{});
+                        const auto powerState = state.value("powerState", std::string{});
+                        // YeManFanHost's canonical state field is
+                        // `hardwareWritesEnabled`.  Older safe/mock hosts
+                        // used `hardwareWrites`; accept that alias only when
+                        // the canonical field is absent.  Reading the old
+                        // name alone here made the native exit/sleep gate
+                        // believe an active real curve was idle.
+                        const bool hasCanonicalLiveWrites = state.contains("hardwareWritesEnabled");
+                        const bool hasLegacyLiveWrites = state.contains("hardwareWrites");
+                        const bool hasHcVirtualCloseEvidence =
+                            state.contains("hcVirtualCloseReturned");
+                        const bool hasHcDeviceManagerStopEvidence =
+                            state.contains("hcDeviceManagerStopCompleted");
+                        const bool hasAnyHcCloseEvidence =
+                            hasHcVirtualCloseEvidence || hasHcDeviceManagerStopEvidence;
+                        const bool hasCompleteHcCloseEvidence =
+                            hasHcVirtualCloseEvidence && hasHcDeviceManagerStopEvidence;
+                        const bool suspendBoundary = _wcsicmp(endpoint, L"/api/suspend") == 0;
+                        // A 2xx response with an incomplete/old state object is
+                        // not an OEM handoff acknowledgement. Do not let
+                        // json::value(..., false) turn missing safety bits into
+                        // a false success; the resident Host's own watchdog is
+                        // the fallback when telemetry cannot be proved.
+                        const bool telemetryComplete =
+                            state.contains("state") &&
+                            (hasCanonicalLiveWrites || hasLegacyLiveWrites) &&
+                            state.contains("hardwareWritesObserved") &&
+                            state.contains("oemRestoreConfirmed") &&
+                            state.contains("unknownState") &&
+                            state.contains("hcCloseCleanupPending") &&
+                            state.contains("openCalled") &&
+                            state.contains("openEventsCalled");
+                        const bool liveWrites = hasCanonicalLiveWrites
+                            ? state.value("hardwareWritesEnabled", false)
+                            : state.value("hardwareWrites", false);
+                        const bool historicalWrites = state.value("hardwareWritesObserved", false);
+                        const bool restoreConfirmed = state.value("oemRestoreConfirmed", false);
+                        const bool unknownState = state.value("unknownState", false);
+                        const bool closeCleanupPending = state.value("hcCloseCleanupPending", false);
+                        const bool openCalled = state.value("openCalled", false);
+                        const bool openEventsCalled = state.value("openEventsCalled", false);
+                        // HC has two distinct terminal paths. SystemPending
+                        // returns after CurrentDevice.Close() while retaining
+                        // DeviceManager; Window_Closed returns after virtual
+                        // Close plus manager Stop. Neither path has a generic
+                        // physical OEM acknowledgement. A Hardware callback
+                        // remains required only while the session stays open.
+                        const bool virtualCloseReturned = state.value("hcVirtualCloseReturned", false);
+                        const bool deviceManagerStopCompleted = state.value("hcDeviceManagerStopCompleted", false);
+                        const bool hcTerminalBoundary = suspendBoundary
+                            ? (stateName == "Suspended" && virtualCloseReturned)
+                            : (stateName == "Stopped" && virtualCloseReturned && deviceManagerStopCompleted);
+                        const bool hcCloseEvidenceSafe = !hasAnyHcCloseEvidence ||
+                            (virtualCloseReturned && (suspendBoundary || deviceManagerStopCompleted));
+                        const bool releaseEvidence = !historicalWrites || restoreConfirmed || hcTerminalBoundary;
+                        const bool expectedTerminalState = suspendBoundary
+                            ? stateName == "Suspended"
+                            : stateName == "Stopped";
+                        safe = telemetryComplete && expectedTerminalState &&
+                            (!hasAnyHcCloseEvidence || (suspendBoundary
+                                ? hasHcVirtualCloseEvidence
+                                : hasCompleteHcCloseEvidence)) &&
+                            hcCloseEvidenceSafe && !unknownState &&
+                            !closeCleanupPending && !liveWrites && !openCalled &&
+                            !openEventsCalled && releaseEvidence;
+                    } catch (...) {
+                        safe = false;
+                    }
+                }
+            }
+        }
+        if (request) WinHttpCloseHandle(request);
+        if (connect) WinHttpCloseHandle(connect);
+        WinHttpCloseHandle(session);
+        if (safe) {
+            traceLog("fan Host sleep boundary endpoint=%ls reason=%s attempt=%d status=%lu safe=1",
+                     endpoint, reason ? reason : "unknown", attempt + 1,
+                     static_cast<unsigned long>(status));
+            return true;
+        }
+        if (attempt + 1 < maxAttempts) Sleep(40);
+    }
+    traceLog("fan Host sleep boundary endpoint=%ls reason=%s safe=0",
+             endpoint, reason ? reason : "unknown");
+    return false;
+}
+
+static bool fanHostEmergencySuspend(const char* reason) {
+    DWORD suspendStatus = 0;
+    if (fanHostEmergencyPost(L"/api/suspend", reason, 2, true, &suspendStatus)) return true;
+    // Only an explicit legacy 404/405 proves that the Host has no suspend
+    // route. A timeout/409/5xx is ambiguous: the first request may still be
+    // inside the serialized HC gate. Sending /api/close in that case creates
+    // the same concurrent lifecycle race that previously caused false OEM
+    // acknowledgements. The resident Host power observer remains the owner
+    // of recovery for an ambiguous response.
+    if (suspendStatus != 404 && suspendStatus != 405) {
+        traceLog("fan Host suspend not confirmed status=%lu; no concurrent close fallback",
+                 static_cast<unsigned long>(suspendStatus));
+        return false;
+    }
+    // Legacy Hosts without /api/suspend still get the original close safety
+    // boundary, but only after the route absence is explicit.
+    return fanHostEmergencyPost(L"/api/close", reason, 1);
+}
+
+/**
+ * Main-process exit must never wait indefinitely for firmware. First ask the
+ * verified resident Host to block new writes and take recovery ownership.
+ * Its parent watchdog remains a second independent trigger after YeManCC
+ * exits. A successful close is still preferred, but is not a prerequisite for
+ * terminating the UI process.
+ */
+static bool fanHostCleanupForAppExit() {
+    if (!fanHostExactProcessRunning()) {
+        traceLog("fan Host app-exit cleanup: no verified resident Host");
+        return true;
+    }
+    DWORD handoffStatus = 0;
+    const bool handoffAccepted = fanHostEmergencyPost(
+        L"/api/parent-exit", "app-exit", 1, false, &handoffStatus);
+    if (handoffAccepted) {
+        // /api/parent-exit owns the recovery worker. Do not immediately send
+        // /api/close: that races the worker for the same HC gate and was the
+        // source of false close success/transport failures. The resident Host
+        // remains available to finish restore and the parent watchdog will
+        // close its listener afterwards.
+        traceLog("fan Host app-exit cleanup: recovery handed off=1; OEM restore not yet confirmed; no concurrent close; UI exit continues");
+        // The endpoint acknowledgement proves only that the resident Host
+        // accepted ownership of the recovery task. It is deliberately not a
+        // physical OEM-restore acknowledgement; callers must record this as
+        // recovery-handed-off rather than cleanup-confirmed.
+        return false;
+    }
+    // A transport failure is ambiguous: the request may have reached the Host
+    // even though its response was lost. Never issue a second close in that
+    // case. Only an explicit legacy 404/405 proves that parent-exit is absent.
+    if (handoffStatus != 404 && handoffStatus != 405) {
+        traceLog("fan Host app-exit cleanup: parent-exit not confirmed status=%lu; no concurrent close; recovery remains delegated",
+                 static_cast<unsigned long>(handoffStatus));
+        return false;
+    }
+    if (!fanHostEmergencyPost(L"/api/close", "app-exit", 1)) {
+        traceLog("fan Host app-exit cleanup: legacy close not confirmed; UI exit continues");
+        return false;
+    }
+    // Shutdown only follows a confirmed close. It is a process-lifetime
+    // optimization, never a prerequisite for declaring hardware safe.
+    if (!fanHostEmergencyPost(L"/api/shutdown", "app-exit", 1, false)) {
+        traceLog("fan Host app-exit cleanup: close confirmed; shutdown deferred");
+    }
+    return true;
+}
+
+// Fire-and-forget reinforcement for the Host's own SystemEvents listener.
+// The power callback performs only an atomic de-duplication and thread
+// creation, then returns immediately.  If the machine suspends before this
+// worker runs, the Host observer/lease expiry remains the authoritative
+// recovery path; this worker is never required for the OS transition itself.
+static void fanHostScheduleEmergencySuspend(const char* reason,
+                                            unsigned long long generation) {
+    if (g_fanSleepCleanupInFlight.exchange(true, std::memory_order_acq_rel)) {
+        traceLog("fan Host sleep cleanup already queued generation=%llu",
+                 generation);
+        return;
+    }
+    g_fanSleepCleanupGeneration.store(generation, std::memory_order_release);
+    try {
+        std::thread([reasonText = std::string(reason ? reason : "unknown"), generation] {
+            bool safe = false;
+            if (!g_exitRequested.load(std::memory_order_acquire)) {
+                safe = fanHostEmergencySuspend(reasonText.c_str());
+            }
+            traceLog("fan Host async sleep cleanup generation=%llu safe=%d",
+                     generation, safe ? 1 : 0);
+            g_fanSleepCleanupInFlight.store(false, std::memory_order_release);
+        }).detach();
+    } catch (...) {
+        // Scheduling failure cannot be allowed to surface through the power
+        // callback.  The Host observer and lease/parent watchdog still own
+        // the recovery path.
+        g_fanSleepCleanupInFlight.store(false, std::memory_order_release);
+        traceLog("fan Host async sleep cleanup scheduling failed generation=%llu",
+                 generation);
+    }
 }
 
 // ================================================================
@@ -11935,6 +12564,24 @@ static void writeLog(const std::string& level, const std::string& msg) {
     f << "[" << ts << "] [" << level << "] " << msg << "\n";
 }
 
+static void writeFanDiagnosticLog(const std::string& event, const json& details) {
+    if (!g_fanLogEnabled || g_fanLogFile.empty()) return;
+    std::lock_guard<std::mutex> lock(g_fanLogMtx);
+    auto parent = fspath::path(g_fanLogFile).parent_path();
+    fspath::create_directories(parent);
+    SYSTEMTIME st; GetLocalTime(&st);
+    char ts[32];
+    snprintf(ts, sizeof(ts), "%04d-%02d-%02dT%02d:%02d:%02d.%03d",
+             st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond, st.wMilliseconds);
+    json line = {
+        {"time", ts},
+        {"event", event},
+        {"details", details.is_object() ? details : json::object()},
+    };
+    std::ofstream f(g_fanLogFile, std::ios::app);
+    if (f) f << line.dump() << "\n";
+}
+
 static void reg_log() {
     ipc_on("log.setFile", [](const json& a) -> json {
         auto path = a.value("path", std::string{});
@@ -11962,6 +12609,79 @@ static void reg_log() {
     });
     ipc_on("log.getPath", [](const json&) -> json {
         return g_logFile.empty() ? nullptr : json(W2U(g_logFile));
+    });
+    ipc_on("fanLog.setEnabled", [](const json& a) -> json {
+        const bool enabled = a.value("enabled", false);
+        g_fanLogFile = app_data_dir() + L"\\fan-api.log";
+        auto parent = fspath::path(g_fanLogFile).parent_path();
+        fspath::create_directories(parent);
+        if (enabled) {
+            g_fanLogEnabled = true;
+            writeFanDiagnosticLog("logging-enabled", json::object());
+        } else {
+            writeFanDiagnosticLog("logging-disabled", json::object());
+            g_fanLogEnabled = false;
+        }
+        return json{{"enabled", g_fanLogEnabled.load()}, {"path", W2U(g_fanLogFile)}};
+    });
+    ipc_on("fanLog.write", [](const json& a) -> json {
+        if (!g_fanLogEnabled) return false;
+        const auto event = a.value("event", std::string{});
+        if (event.empty()) return false;
+        writeFanDiagnosticLog(event, a.value("details", json::object()));
+        return true;
+    });
+    ipc_on("fanLog.getPath", [](const json&) -> json {
+        return json(W2U(g_fanLogFile.empty() ? app_data_dir() + L"\\fan-api.log" : g_fanLogFile));
+    });
+    ipc_on("fanLog.clear", [](const json&) -> json {
+        const std::wstring uiPath = g_fanLogFile.empty() ? app_data_dir() + L"\\fan-api.log" : g_fanLogFile;
+        const std::wstring hostPath = fan_host_state_dir() + L"\\logs\\yeman-fan-host-runtime.log";
+        bool ok = true;
+        {
+            std::lock_guard<std::mutex> lock(g_fanLogMtx);
+            for (const auto& path : { uiPath, hostPath }) {
+                std::error_code existsEc;
+                if (!fspath::exists(path, existsEc)) continue;
+                std::ofstream file(path, std::ios::trunc);
+                if (!file.good()) ok = false;
+            }
+        }
+        return json{{"ok", ok}, {"uiPath", W2U(uiPath)}, {"hostPath", W2U(hostPath)}};
+    });
+    ipc_on("fanLog.export", [](const json&) -> json {
+        const std::wstring uiPath = g_fanLogFile.empty() ? app_data_dir() + L"\\fan-api.log" : g_fanLogFile;
+        const std::wstring hostPath = fan_host_state_dir() + L"\\logs\\yeman-fan-host-runtime.log";
+        std::vector<std::wstring> files;
+        for (const auto& path : { uiPath, hostPath }) {
+            std::error_code fileEc;
+            if (fspath::is_regular_file(path, fileEc)) files.push_back(path);
+        }
+        if (files.empty()) return json{{"ok", false}, {"reason", "暂无风扇日志"}};
+        const std::wstring desktop = getKnownFolder(FOLDERID_Desktop);
+        if (desktop.empty()) throw std::runtime_error("无法定位桌面目录");
+        SYSTEMTIME now{};
+        GetLocalTime(&now);
+        wchar_t stamp[64]{};
+        swprintf_s(stamp, L"%04u%02u%02u-%02u%02u%02u-%03u",
+                   now.wYear, now.wMonth, now.wDay, now.wHour, now.wMinute,
+                   now.wSecond, now.wMilliseconds);
+        const std::wstring zipPath = desktop + L"\\YeMan-fan-logs-" + stamp + L".zip";
+        auto quote = [](const std::wstring& value) { return L"\"" + value + L"\""; };
+        std::wstring command = L"\"C:\\Windows\\System32\\tar.exe\" -a -c -f " + quote(zipPath);
+        for (const auto& path : files) {
+            command += L" -C " + quote(fspath::path(path).parent_path().wstring()) + L" " +
+                       quote(fspath::path(path).filename().wstring());
+        }
+        const RunOut result = runCapture(command, 120000);
+        if (!result.ran || result.exitCode != 0) {
+            std::error_code removeEc;
+            fspath::remove(zipPath, removeEc);
+            throw std::runtime_error("风扇日志压缩失败");
+        }
+        json names = json::array();
+        for (const auto& path : files) names.push_back(W2U(fspath::path(path).filename().wstring()));
+        return json{{"ok", true}, {"path", W2U(zipPath)}, {"files", names}};
     });
 }
 
@@ -12092,162 +12812,165 @@ static void closeJoyXoffAsync(const char* reason) {
     }
 }
 
-static void sgDispatchSameModeRetry() {
-    if (!g_sgRetryInProgress || !g_guardEnabled || !g_sgRepairEligible ||
-        g_sgSleepTriggerTick == 0 || g_sgTask.retryKind == SgRetryKind::None ||
-        g_sgTask.mode != SgSleepMode::S3 ||
-        g_sgTask.generation != currentPowerGeneration())
-        return;
-    const ULONGLONG now = GetTickCount64();
-    if (g_sgRetryDueTick && now < g_sgRetryDueTick) {
-        const ULONGLONG remaining = g_sgRetryDueTick - now;
-        if (g_hwnd) SetTimer(g_hwnd, SG_RETRY_TIMER_ID,
-                             static_cast<UINT>((std::min)(remaining, static_cast<ULONGLONG>(UINT_MAX))), nullptr);
+static void sgFinishSleepRetryFailure(const char* reason) {
+    const SgRetryKind kind = g_sgTask.retryKind;
+    const unsigned int attempts = g_sgTask.retryAttempt;
+    if (g_hwnd) KillTimer(g_hwnd, SG_RETRY_TIMER_ID);
+    sgClearInternalSleepRequest(reason ? reason : "sleep-retry-failed");
+    g_sgRetryInProgress = false;
+    g_sgRetryDueTick = 0;
+    g_sgTask.retryKind = SgRetryKind::None;
+    g_sgTask.unexpectedWakeConsumed = false;
+    g_sgLastPowerButtonSleepIntentFileTime.store(0, std::memory_order_release);
+    sgRecordFact("sleep-retry-finished", {
+        {"kind", sgRetryKindName(kind)},
+        {"result", "exhausted"},
+        {"attempts", attempts},
+        {"reason", reason ? reason : "unknown"}
+    });
+
+    // Three explicit request failures end the repair transaction. Recover only
+    // the exact PID lease owned by this sleep generation.
+    const auto generation = currentPowerGeneration();
+    g_powerLifecycle.store(PowerLifecycle::Resuming, std::memory_order_release);
+    closeHardwareWriteGate("sleep-retry-exhausted");
+    g_inputReady.store(false, std::memory_order_release);
+    g_lastResumeNotifyTick = GetTickCount64();
+    armPowerResumeWatchdog(generation);
+    ipc_emit("power.resuming", {
+        {"generation", generation},
+        {"sleepRetryExhausted", true},
+        {"retryKind", sgRetryKindName(kind)}
+    });
+    sgQueueWork(SgWork::WakeSuspend, generation);
+}
+
+static void sgScheduleNextSleepRetry(const char* reason) {
+    if (!g_hwnd || !sgSleepRetryActive()) return;
+    if (g_sgTask.retryAttempt >= SG_MAX_ENTRY_RETRIES) {
+        sgFinishSleepRetryFailure(reason);
         return;
     }
+    const ULONGLONG delayMs = SG_ENTRY_RETRY_DELAYS_MS[g_sgTask.retryAttempt];
+    g_sgRetryDueTick = GetTickCount64() + delayMs;
+    SetTimer(g_hwnd, SG_RETRY_TIMER_ID, static_cast<UINT>(delayMs), nullptr);
+    sgRecordFact("sleep-retry-scheduled", {
+        {"kind", sgRetryKindName(g_sgTask.retryKind)},
+        {"attempt", g_sgTask.retryAttempt + 1},
+        {"delayMs", delayMs},
+        {"reason", reason ? reason : "unknown"}
+    });
+}
+
+static void sgDispatchSameModeRetry() {
+    if (!sgSleepRetryActive() || !g_guardEnabled ||
+        g_sgTask.generation != currentPowerGeneration())
+        return;
+
+    const ULONGLONG now = GetTickCount64();
+    if (g_sgRetryDueTick != 0 && now < g_sgRetryDueTick) {
+        const ULONGLONG remaining = g_sgRetryDueTick - now;
+        if (g_hwnd)
+            SetTimer(g_hwnd, SG_RETRY_TIMER_ID,
+                     static_cast<UINT>((std::min)(remaining, static_cast<ULONGLONG>(UINT_MAX))),
+                     nullptr);
+        return;
+    }
+
+    // The first EntryFailure retry waits briefly for the one PID pause worker.
+    // UnexpectedWake already occurs after the original sleep has lasted 120 s.
+    if (g_sgTask.retryKind == SgRetryKind::EntryFailure &&
+        g_sgPauseWorkCompletedGeneration.load(std::memory_order_acquire) !=
+            g_sgTask.generation) {
+        const ULONGLONG pauseWaitMs =
+            now >= g_sgSleepTriggerTick ? now - g_sgSleepTriggerTick : 0;
+        if (pauseWaitMs < SG_PAUSE_READY_WAIT_MAX_MS) {
+            if (g_hwnd)
+                SetTimer(g_hwnd, SG_RETRY_TIMER_ID, SG_PAUSE_READY_POLL_MS, nullptr);
+            return;
+        }
+        sgRecordFact("sleep-retry-pause-wait-timeout", {
+            {"generation", g_sgTask.generation},
+            {"waitedMs", pauseWaitMs},
+            {"limitMs", SG_PAUSE_READY_WAIT_MAX_MS}
+        });
+    }
+
     g_sgRetryDueTick = 0;
-    SYSTEM_POWER_CAPABILITIES caps{};
-    const bool capsKnown = GetPwrCapabilities(&caps) != FALSE;
-    // SYSTEM_POWER_CAPABILITIES has no SystemS0 bit: S0 is the working
-    // platform model, not a legacy sleep capability. If S3 is absent, the
-    // request is necessarily handled by the platform's S0 path.
+    const SgRetryKind kind = g_sgTask.retryKind;
+    const unsigned int attempt = ++g_sgTask.retryAttempt;
+
+    // Each actual SetSuspendState request owns a fresh 2-second 507 Reason=7/8
+    // failure window. This is the only correlation used for follow-up attempts.
+    g_sgSleepTriggerTick = now;
+    g_sgSleepTriggerEpoch = sgNowEpoch();
+    g_sgModernWakeClassified = false;
+    g_sgModernWakeClassifiedTick = 0;
+    g_sgModernStandbyActive = true;
+    g_sgModernStandbyGeneration = g_sgTask.generation;
+    g_powerLifecycle.store(PowerLifecycle::Suspending, std::memory_order_release);
+    sgMarkInternalSleepRequest(kind);
+
     const SgSystemSleepRequestResult request = sgRequestSystemSleep();
-    traceLog("sleep retry request api=SetSuspendState hibernate=0 forceCritical=0 capsKnown=%d s3=%d s4=%d s0OnlyCandidate=%d accepted=%d privilege=%d privilegeError=%lu requestError=%lu attempt=%u generation=%llu",
-             capsKnown ? 1 : 0,
-             capsKnown && caps.SystemS3 ? 1 : 0,
-             capsKnown && caps.SystemS4 ? 1 : 0,
-             capsKnown && !caps.SystemS3 ? 1 : 0,
-             request.accepted ? 1 : 0,
-             request.shutdownPrivilegeEnabled ? 1 : 0,
-             request.shutdownPrivilegeError,
-             request.requestError,
-             g_sgTask.entryFailureAttempts, currentPowerGeneration());
     sgRecordFact("sleep-retry-request", {
-        {"api", "SetSuspendState"}, {"accepted", request.accepted},
+        {"kind", sgRetryKindName(kind)},
+        {"attempt", attempt},
+        {"api", "SetSuspendState"},
+        {"accepted", request.accepted},
         {"shutdownPrivilegeEnabled", request.shutdownPrivilegeEnabled},
         {"shutdownPrivilegeError", request.shutdownPrivilegeError},
         {"requestError", request.requestError},
         {"environment", sgSleepEnvironmentSnapshot()}
     });
+    traceLog("sleep retry request kind=%s attempt=%u accepted=%d privilege=%d privilegeError=%lu requestError=%lu generation=%llu",
+             sgRetryKindName(kind), attempt, request.accepted ? 1 : 0,
+             request.shutdownPrivilegeEnabled ? 1 : 0,
+             request.shutdownPrivilegeError, request.requestError,
+             currentPowerGeneration());
+
+    // An accepted request waits only for real Windows evidence. There is no
+    // confirmation timeout and no second state machine.
     if (request.accepted) return;
 
-    const auto retryKind = g_sgTask.retryKind;
-    if (retryKind != SgRetryKind::None) {
-        // Treat an immediate API rejection exactly like a failed attempt. The
-        // exclusive transaction remains in force until its retry budget is
-        // exhausted, so no resume action can interleave here.
-        sgAdvanceRetry("retry-request-rejected");
-        return;
-    }
-    g_sgRetryInProgress = false;
-    g_sgTask.retryKind = SgRetryKind::None;
-    g_sgTask.phase = SgSleepTaskPhase::Recovering;
-    g_sgResleepPending = false;
-    g_sgWakeSourceEvidence = false;
-    g_sgWakeSourceTick = 0;
-    traceLog("sleep retry request failed kind=%u entryAttempt=%u nonUserUsed=%d generation=%llu",
-             static_cast<unsigned>(retryKind), g_sgTask.entryFailureAttempts,
-             g_sgTask.nonUserWakeAttempts, currentPowerGeneration());
-    sgWriteFileAtomic(SG_RESLEEP_MARKER,
-        "sleepTriggerEpoch=" + std::to_string(g_sgSleepTriggerEpoch) +
-        "\nretryEpoch=" + std::to_string(sgNowEpoch()) +
-        "\nkind=" + std::to_string(static_cast<unsigned>(retryKind)) +
-        "\nentryAttempt=" + std::to_string(g_sgTask.entryFailureAttempts) +
-        "\nnonUserWakeAttempt=" + std::to_string(g_sgTask.nonUserWakeAttempts) +
-        "\naction=retry-request-failed\n");
-    if (g_sgInSuspend.load(std::memory_order_acquire)) {
-        sgQueueWork(SgWork::WakeSuspend, currentPowerGeneration());
-    } else {
-        sgStopResleepObservation();
-        g_sgRepairEligible = false;
-    }
+    sgClearInternalSleepRequest("sleep-retry-request-rejected");
+    if (g_sgTask.retryAttempt < SG_MAX_ENTRY_RETRIES)
+        sgScheduleNextSleepRetry("request-rejected");
+    else
+        sgFinishSleepRetryFailure("requests-exhausted");
 }
 
-static void sgRequestSleepRetry(SgRetryKind kind, const char* reason) {
-    if (kind == SgRetryKind::None || !g_guardEnabled || !g_sgRepairEligible ||
-        g_sgTask.mode != SgSleepMode::S3 || g_sgRetryInProgress ||
-        g_sgSleepTriggerTick == 0)
+static void sgStartSleepRetry(SgRetryKind kind, const char* reason) {
+    if (kind == SgRetryKind::None || !g_guardEnabled || sgSleepRetryActive())
         return;
-    if (kind == SgRetryKind::EntryFailure && g_sgSleepTriggerTick != 0 &&
-        GetTickCount64() - g_sgSleepTriggerTick > 60000ULL)
+    if (g_sgTask.generation == 0 ||
+        g_sgTask.generation != currentPowerGeneration())
         return;
-    ULONGLONG delayMs = 0;
     if (kind == SgRetryKind::EntryFailure) {
-        if (!g_sgRetryEntryFailure || g_sgTask.entryFailureAttempts >= SG_MAX_ENTRY_RETRIES)
+        if (!g_sgRetryEntryFailure || !g_sgRepairEligible ||
+            g_sgTask.mode != SgSleepMode::S3 || g_sgSleepTriggerTick == 0)
             return;
-        ++g_sgTask.entryFailureAttempts;
-        delayMs = SG_ENTRY_RETRY_DELAYS_MS[g_sgTask.entryFailureAttempts - 1];
-    } else {
-        if (!g_sgResleepEnabled || g_sgTask.nonUserWakeAttempts >= SG_MAX_ENTRY_RETRIES)
+    } else if (kind == SgRetryKind::UnexpectedWake) {
+        if (!g_sgResleepEnabled || !g_sgTask.unexpectedWakeConsumed)
             return;
-        ++g_sgTask.nonUserWakeAttempts;
-        g_sgTask.nonUserWakeResleepUsed = true;
-        delayMs = SG_ENTRY_RETRY_DELAYS_MS[g_sgTask.nonUserWakeAttempts - 1];
     }
-    g_sgRetryInProgress = true;
-    // A resume watchdog is correct for a completed wake, but an entry retry
-    // deliberately keeps the game frozen and must not be committed as one.
+
     stopPowerResumeWatchdog();
+    closeHardwareWriteGate(kind == SgRetryKind::EntryFailure
+        ? "entry-failure-retry" : "unexpected-wake-retry");
     g_sgTask.retryKind = kind;
-    g_sgTask.phase = SgSleepTaskPhase::RetryScheduled;
-    ++g_sgTask.timerToken;
-    g_sgRetryDueTick = GetTickCount64() + delayMs;
-    sgWriteFileAtomic(SG_RESLEEP_MARKER,
-        "sleepTriggerEpoch=" + std::to_string(g_sgSleepTriggerEpoch) +
-        "\nretryEpoch=" + std::to_string(sgNowEpoch()) +
-        "\nreason=" + (reason ? reason : "unknown") +
-        "\nkind=" + std::to_string(static_cast<unsigned>(kind)) +
-        "\nentryAttempt=" + std::to_string(g_sgTask.entryFailureAttempts) +
-        "\nnonUserWakeAttempt=" + std::to_string(g_sgTask.nonUserWakeAttempts) +
-        "\ndelayMs=" + std::to_string(delayMs) + "\n");
-    if (g_hwnd) SetTimer(g_hwnd, SG_RETRY_TIMER_ID, static_cast<UINT>(delayMs), nullptr);
-    sgRecordFact("sleep-retry-scheduled", {
-        {"kind", sgRetryKindName(kind)},
-        {"attempt", kind == SgRetryKind::EntryFailure
-            ? g_sgTask.entryFailureAttempts : g_sgTask.nonUserWakeAttempts},
-        {"delayMs", delayMs}, {"reason", reason ? reason : "unknown"}
-    });
-    traceLog("sleep retry scheduled kind=%u entryAttempt=%u nonUserUsed=%d delayMs=%llu reason=%s",
-             static_cast<unsigned>(kind),
-             kind == SgRetryKind::EntryFailure
-                 ? g_sgTask.entryFailureAttempts : g_sgTask.nonUserWakeAttempts,
-             g_sgTask.nonUserWakeResleepUsed ? 1 : 0, delayMs, reason ? reason : "unknown");
+    g_sgTask.retryAttempt = 0;
+    g_sgRetryInProgress = true;
+    sgScheduleNextSleepRetry(reason);
 }
 
-static void sgAdvanceRetry(const char* reason) {
-    if (!sgRetryIsExclusive()) return;
-    const auto retryKind = g_sgTask.retryKind;
-    const unsigned int attempts = retryKind == SgRetryKind::EntryFailure
-        ? g_sgTask.entryFailureAttempts : g_sgTask.nonUserWakeAttempts;
-    if (attempts < SG_MAX_ENTRY_RETRIES) {
-        g_sgRetryInProgress = false;
-        g_sgTask.retryKind = SgRetryKind::None;
-        g_sgRetryDueTick = 0;
-        sgRequestSleepRetry(retryKind, reason);
-        return;
-    }
-
-    // The retry budget is exhausted. Only now may the queued recovery path
-    // consume the pause lease and hand control back to the game.
-    g_sgRetryInProgress = false;
-    g_sgRetryDueTick = 0;
-    g_sgTask.retryKind = SgRetryKind::None;
-    g_sgTask.phase = SgSleepTaskPhase::Recovering;
-    g_sgResleepPending = false;
-    g_sgWakeSourceEvidence = false;
-    g_sgWakeSourceTick = 0;
-    traceLog("sleep retry exhausted kind=%u attempts=%u reason=%s generation=%llu",
-             static_cast<unsigned>(retryKind), attempts,
-             reason ? reason : "unknown",
-             currentPowerGeneration());
-    sgQueueWork(SgWork::WakeSuspend, currentPowerGeneration());
+static void sgAdvanceSleepRetry(const char* reason) {
+    if (!sgSleepRetryActive()) return;
+    sgClearInternalSleepRequest(reason ? reason : "sleep-retry-advance");
+    if (g_sgTask.retryAttempt < SG_MAX_ENTRY_RETRIES)
+        sgScheduleNextSleepRetry(reason);
+    else
+        sgFinishSleepRetryFailure(reason);
 }
-
-static void sgAdvanceEntryFailureRetry(const char* reason) {
-    if (g_sgTask.retryKind != SgRetryKind::EntryFailure) return;
-    sgAdvanceRetry(reason);
-}
-
 static std::string queryWinHttpHeader(HINTERNET request, DWORD query) {
     DWORD bytes = 0;
     WinHttpQueryHeaders(request, query, WINHTTP_HEADER_NAME_BY_INDEX,
@@ -12546,44 +13269,6 @@ static DownloadAttemptResult downloadFileAttempt(
     return result;
 }
 
-static void sgReleaseAfterWakeObservation() {
-    g_sgTask.phase = SgSleepTaskPhase::Recovering;
-    if (g_hwnd) KillTimer(g_hwnd, SG_RESLEEP_TIMER_ID);
-    if (g_hwnd) KillTimer(g_hwnd, SG_RETRY_TIMER_ID);
-    if (g_hwnd) KillTimer(g_hwnd, SG_S0_WAKE_CLASSIFY_TIMER_ID);
-    SgSleepTarget sleepTarget;
-    const bool hasOwnedMarker = sgReadSleepTarget(sleepTarget) && sleepTarget.markerOwned;
-    if (hasOwnedMarker || g_sgInSuspend.load()) {
-        const SgResumeResult rr = sgResumeSleepTarget(true, true, true);
-        traceLog("sleep wake observation released resumed=%d", rr.count);
-    }
-    SgSleepTarget remaining;
-    const bool stillOwned = sgReadSleepTarget(remaining) && remaining.markerOwned;
-    g_sgInSuspend = stillOwned;
-    g_sgGameActuallySuspended = stillOwned;
-    if (stillOwned) return;
-    sgClearSleepTarget();
-    g_sgTask = {};
-    g_sgSleepCycleActive = false;
-    g_sgRepairEligible = false;
-    g_sgWakeSourceEvidence = false;
-    g_sgWakeSourceTick = 0;
-    g_sgLastS0WakeReason = -1;
-    g_sgLastS0WakeTick = 0;
-    g_sgLastPowerButtonWakeTick = 0;
-    g_sgS0ReentryActive = false;
-    g_sgResleepPending = false;
-    g_sgRetryInProgress = false;
-    g_sgRetryDueTick = 0;
-    g_sgSleepTriggerTick = 0;
-    g_sgWakeTick = 0;
-    g_sgModernWakePending = false;
-    g_sgModernWakeCandidateTick = 0;
-    g_sgModernWakeCandidateFileTime = 0;
-    g_sgModernWakeClassified = false;
-    g_sgModernWakeClassifiedTick = 0;
-}
-
 static bool downloadFile(const std::string& url, const std::wstring& dest,
                          const std::function<void(uint64_t, uint64_t)>& progress) {
     const ULONGLONG deadline = GetTickCount64() + 15ULL * 60ULL * 1000ULL;
@@ -12755,12 +13440,22 @@ static std::string readPackagedUpdateVersion(const std::wstring& staging) {
 static bool updatePackageLayoutIsSafe(const std::wstring& staging) {
     std::error_code ec;
     const fspath::path root(staging);
+    std::set<std::wstring> roots;
     for (fspath::directory_iterator it(root, ec), end; it != end && !ec; it.increment(ec)) {
         const auto name = it->path().filename().wstring();
-        if (_wcsicmp(name.c_str(), L"YeManCC") != 0 && _wcsicmp(name.c_str(), L"PowerControl") != 0)
+        if (it->is_symlink(ec) || ec) return false;
+        if (!it->is_directory(ec) || ec) return false;
+        if (name.empty() || name == L"." || name == L".." || name.find_first_of(L"\\/") != std::wstring::npos)
             return false;
+        roots.insert(name);
     }
     if (ec) return false;
+    // Root names are declared and validated by YeManCC/update-manifest.json.
+    // Keep this first pass format-agnostic so adding a future product root
+    // does not require another updater release solely for a count change.
+    if (roots.size() < 2 ||
+        std::none_of(roots.begin(), roots.end(), [](const std::wstring& name) { return _wcsicmp(name.c_str(), L"YeManCC") == 0; }))
+        return false;
     for (fspath::recursive_directory_iterator it(root, fspath::directory_options::skip_permission_denied, ec), end;
          it != end && !ec; it.increment(ec)) {
         if (it->is_symlink(ec)) return false;
@@ -12770,6 +13465,59 @@ static bool updatePackageLayoutIsSafe(const std::wstring& staging) {
         return false;
     }
     return !ec;
+}
+
+static bool isSafeZipEntryName(std::string name) {
+    name = trim_ascii(std::move(name));
+    while (!name.empty() && (name.back() == '/' || name.back() == '\\')) name.pop_back();
+    if (name.empty() || name.front() == '/' || name.front() == '\\' || name.find(':') != std::string::npos)
+        return false;
+    if (name.size() >= 2 && std::isalpha(static_cast<unsigned char>(name[0])) && name[1] == '/')
+        return false;
+    for (const unsigned char ch : name) {
+        if (ch < 0x20 || ch == 0x7F || ch == '\0') return false;
+    }
+    std::replace(name.begin(), name.end(), '\\', '/');
+    size_t begin = 0;
+    while (begin < name.size()) {
+        const size_t end = name.find('/', begin);
+        const auto component = name.substr(begin, end == std::string::npos ? std::string::npos : end - begin);
+        if (component.empty() || component == "." || component == "..") return false;
+        if (end == std::string::npos) break;
+        begin = end + 1;
+    }
+    return true;
+}
+
+static bool validateZipArchiveEntries(const std::wstring& zip) {
+    const auto quotedZip = quote_windows_arg(zip);
+    const auto listing = runCapture(L"\"C:\\Windows\\System32\\tar.exe\" -tf " + quotedZip, 120000);
+    if (!listing.ran || listing.exitCode != 0 || listing.out.empty()) return false;
+
+    std::set<std::string> entries;
+    std::istringstream names(listing.out);
+    std::string line;
+    while (std::getline(names, line)) {
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        if (!isSafeZipEntryName(line)) return false;
+        std::replace(line.begin(), line.end(), '\\', '/');
+        while (!line.empty() && line.back() == '/') line.pop_back();
+        if (!entries.insert(line).second) return false;
+    }
+    if (entries.empty()) return false;
+
+    // The post-extraction walk rejects symlinks, but it is too late if an
+    // archive entry is a link that tar resolves while extracting. Inspect the
+    // archive entry type before extraction and allow only directories/files.
+    const auto detailed = runCapture(L"\"C:\\Windows\\System32\\tar.exe\" -tvf " + quotedZip, 120000);
+    if (!detailed.ran || detailed.exitCode != 0 || detailed.out.empty()) return false;
+    std::istringstream types(detailed.out);
+    while (std::getline(types, line)) {
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        if (line.empty()) continue;
+        if (line.front() != 'd' && line.front() != '-') return false;
+    }
+    return true;
 }
 
 // 用系统 tar.exe 解压 zip 到目标目录（Windows 10+ 自带，无需第三方库）
@@ -12914,7 +13662,7 @@ static void reg_updater() {
         return httpGet(url);
     });
     ipc_on("app.updateState", [](const json&) -> json {
-        return updateProgressRead();
+        return updateStateReadWithTransaction();
     });
     // 下载完整更新包（exe + index.html + assets + ...）到 %LOCALAPPDATA%\YeManCC\update\package.zip，强制 SHA-256 校验
     ipc_on("app.downloadUpdate", [](const json& a) -> json {
@@ -12936,6 +13684,8 @@ static void reg_updater() {
         if (!isStrictUpdateSha256(sha)) failBeforeDownload("A valid SHA-256 is required");
         try { requireNewerUpdateVersion(version); }
         catch (const std::exception& e) { failBeforeDownload(e.what()); }
+        std::unique_lock<std::mutex> updateLock(g_updateOperationMtx, std::try_to_lock);
+        if (!updateLock.owns_lock()) failBeforeDownload("Another update operation is already in progress");
         std::error_code ec; fspath::create_directories(app_data_dir() + L"\\update", ec);
         if (ec) throw std::runtime_error("Failed to create update directory");
         auto dest = app_data_dir() + L"\\update\\package.zip";
@@ -13048,6 +13798,7 @@ static void reg_updater() {
                     }
                     result.ok = false;
                     result.retryable = true;
+                    result.restartRequired = true;
                     result.error = "Checksum mismatch (expected " + sha + ", got " + got + ")";
                     fspath::remove(part, ec);
                     fspath::remove(partMeta, ec);
@@ -13055,6 +13806,8 @@ static void reg_updater() {
                     sgWriteFileAtomic(partMeta, resumeMeta.dump());
                     existingBytes = 0;
                 }
+                const bool retryFromZero = result.restartRequired;
+                if (retryFromZero) result.receivedBytes = 0;
                 existingBytes = fspath::exists(part) ? fspath::file_size(part, ec) : 0;
                 if (ec) existingBytes = 0;
                 lastFailure = std::move(result);
@@ -13067,7 +13820,9 @@ static void reg_updater() {
                 const uint64_t retryTotal = lastFailure.expectedBytes;
                 const double retryPercent = retryTotal > 0
                     ? (std::min)(100.0, lastFailure.receivedBytes * 100.0 / retryTotal) : 0.0;
-                const std::string retryMessage = lastFailure.receivedBytes > 0
+                const std::string retryMessage = retryFromZero
+                    ? "下载校验或续传状态无效，5秒后从0字节重新下载第 " + std::to_string(nextAttempt) + " 次尝试"
+                    : lastFailure.receivedBytes > 0
                     ? "下载中断，5秒后从 " + std::to_string(lastFailure.receivedBytes) +
                         " 字节继续第 " + std::to_string(nextAttempt) + " 次尝试"
                     : "下载失败，5秒后重新尝试第 " + std::to_string(nextAttempt) + " 次";
@@ -13112,9 +13867,9 @@ static void reg_updater() {
         }
         return W2U(dest);
     });
-    // Install the complete release payload into the sibling YeManCC and
-    // PowerControl targets while preserving player-owned files.
-    // Merge-copy only: files added by players and absent from the package remain.
+    // Install the complete release payload into sibling YeManCC, PowerControl
+    // and CustomSteamLibrary targets while preserving player-owned files.
+    // CustomSteamLibrary is manifest-scoped; unknown files and data remain.
     ipc_on("app.installUpdate", [](const json& a) -> json {
         const auto operationId = a.value("operationId", std::string{});
         const auto version = a.value("version", std::string{});
@@ -13131,6 +13886,8 @@ static void reg_updater() {
         if (!isStrictUpdateSha256(sha)) failInstall("A valid SHA-256 is required", "更新包 SHA-256 无效");
         try { requireNewerUpdateVersion(version); }
         catch (const std::exception& e) { failInstall(e.what(), "目标版本不是可安装的新版本"); }
+        std::unique_lock<std::mutex> updateLock(g_updateOperationMtx, std::try_to_lock);
+        if (!updateLock.owns_lock()) failInstall("Another update operation is already in progress", "已有更新任务正在进行");
         updateProgressPost({
             {"operationId", operationId}, {"phase", "installing"}, {"stage", "install"},
             {"version", version},
@@ -13147,6 +13904,11 @@ static void reg_updater() {
             std::error_code cleanupEc;
             fspath::remove(zip, cleanupEc);
             failInstall("Update package checksum mismatch before installation", "安装前校验更新包失败");
+        }
+        if (!validateZipArchiveEntries(zip)) {
+            std::error_code cleanupEc;
+            fspath::remove(zip, cleanupEc);
+            failInstall("Update package archive entries are unsafe", "更新包内文件路径或链接不安全");
         }
         auto staging = app_data_dir() + L"\\update\\staging";
         std::error_code ec; fspath::remove_all(staging, ec);
@@ -13189,12 +13951,18 @@ static void reg_updater() {
         if (!fspath::exists(packagedPowerControl)) {
             failInstall("Update package missing PowerControl", "更新包缺少 PowerControl 目录");
         }
+        const auto packagedCustomSteamLibrary = staging + L"\\CustomSteamLibrary";
+        // CustomSteamLibrary is validated from update-manifest.json when it
+        // is declared. It remains optional here so the new updater can also
+        // install the legacy two-root package as a one-time bootstrap.
         const auto packagedSupport = packagedYeManCC + L"\\YeMan-Support.html";
         if (!fspath::exists(packagedSupport)) {
             failInstall("Update package missing YeMan-Support.html", "更新包缺少支持页面");
         }
         // 依赖包固定目标目录（与前端 yeman.ts 的 PC_DIR 默认一致）
         std::wstring pcDir = L"C:\\SOFT\\YeMan\\PowerControl";
+        const std::wstring installRoot = fspath::path(exedir).parent_path().wstring();
+        const std::wstring customSteamLibraryDir = installRoot + L"\\CustomSteamLibrary";
         std::wstring supportPath = exedir + L"\\YeMan-Support.html";
         auto script = app_data_dir() + L"\\update.ps1";
         auto psLiteral = [](const std::wstring& value) {
@@ -13218,8 +13986,14 @@ static void reg_updater() {
             f << "$exePath = " << psLiteral(exePath) << "\n";
             f << "$exeDir = " << psLiteral(exedir) << "\n";
             f << "$programSource = " << psLiteral(packagedYeManCC) << "\n";
-            f << "$packageExe = " << psLiteral(packagedExe) << "\n";
-            f << "$pcDir = " << psLiteral(pcDir) << "\n";
+             f << "$packageExe = " << psLiteral(packagedExe) << "\n";
+             f << "$pcDir = " << psLiteral(pcDir) << "\n";
+             f << "$fanHostSource = Join-Path (Join-Path $staging 'PowerControl') 'fan-host'\n";
+             f << "$layoutManifestPath = Join-Path $programSource 'update-manifest.json'\n";
+            f << "$installRoot = " << psLiteral(installRoot) << "\n";
+            f << "$customSteamLibrarySource = " << psLiteral(packagedCustomSteamLibrary) << "\n";
+            f << "$customSteamLibraryDir = " << psLiteral(customSteamLibraryDir) << "\n";
+            f << "$customSteamLibraryManifest = Join-Path $customSteamLibrarySource 'package-manifest.json'\n";
             f << "$supportPath = " << psLiteral(supportPath) << "\n";
             f << "$backup = $exePath + '.old'\n";
             f << "$newExe = $exePath + '.new'\n";
@@ -13271,17 +14045,283 @@ static void reg_updater() {
             f << "$tdpCommitted = $false\n";
             f << "$updateCommitted = $false\n";
              f << "$rollbackSucceeded = $false\n";
-             f << "$recoveryError = $null\n";
+            f << "$recoveryError = $null\n";
             f << "$newProcess = $null\n";
+            f << "$customHealthHandshakePath = Join-Path (Split-Path -Parent $staging) ('custom-health-' + [guid]::NewGuid().ToString('N') + '.json')\n";
+            f << "$customHealthTimeoutSeconds = 60\n";
+            f << "$customHealthChildExitTimeoutSeconds = 30\n";
             f << "$handshakeToken = [guid]::NewGuid().ToString('N')\n";
-            f << "$handshakePath = Join-Path (Split-Path -Parent $staging) ('update-handshake-' + $handshakeToken + '.json')\n";
+             f << "$handshakePath = Join-Path (Split-Path -Parent $staging) ('update-handshake-' + $handshakeToken + '.json')\n";
              f << "$handshakeTimeoutSeconds = 180\n";
              f << "$parentExitTimeoutSeconds = 180\n";
-            f << "function Copy-TreeChecked([string]$source, [string]$destination, [string[]]$extraArgs) {\n";
-            f << "  & robocopy $source $destination /E /COPY:DAT /DCOPY:DAT /R:$copyRetries /W:$copyWaitSeconds /XJ @extraArgs /NFL /NDL /NJH /NJS /NP\n";
-            f << "  if ($LASTEXITCODE -ge 8) { throw ('copy failed: ' + $source + ' -> ' + $destination + ' (robocopy=' + $LASTEXITCODE + ')') }\n";
-            f << "}\n";
-            f << "function Rename-DirectoryChecked([string]$source, [string]$destination, [string]$label) {\n";
+             f << "$childExitTimeoutSeconds = 180\n";
+             f << "function Copy-TreeChecked([string]$source, [string]$destination, [string[]]$extraArgs) {\n";
+             f << "  & robocopy $source $destination /E /COPY:DAT /DCOPY:DAT /R:$copyRetries /W:$copyWaitSeconds /XJ @extraArgs /NFL /NDL /NJH /NJS /NP\n";
+             f << "  if ($LASTEXITCODE -ge 8) { throw ('copy failed: ' + $source + ' -> ' + $destination + ' (robocopy=' + $LASTEXITCODE + ')') }\n";
+             f << "}\n";
+             f << "function Normalize-ManifestRelativePath([string]$path) {\n";
+             f << "  $normalized = $path.Replace('/', [IO.Path]::DirectorySeparatorChar)\n";
+             f << "  if ([string]::IsNullOrWhiteSpace($normalized) -or [IO.Path]::IsPathRooted($normalized) -or $normalized.Contains(':') -or @($normalized -split '\\\\' | Where-Object { $_ -eq '..' -or $_ -eq '' }).Count -gt 0) { throw ('invalid green-child managed path: ' + $path) }\n";
+             f << "  return $normalized\n";
+             f << "}\n";
+             f << "function Get-UpdateLayoutRoots {\n";
+             f << "  if (!(Test-Path -LiteralPath $layoutManifestPath -PathType Leaf)) {\n";
+             f << "    $legacyActual = @(Get-ChildItem -LiteralPath $staging -Directory -Force | ForEach-Object Name | Sort-Object -Unique)\n";
+             f << "    if (Compare-Object @('YeManCC','PowerControl') $legacyActual) { throw 'legacy update package must contain exactly YeManCC and PowerControl' }\n";
+             f << "    return @([pscustomobject]@{ source = 'YeManCC'; target = 'YeManCC'; mode = 'program' }, [pscustomobject]@{ source = 'PowerControl'; target = 'PowerControl'; mode = 'power-control' })\n";
+             f << "  }\n";
+              f << "  $manifest = (Get-Content -LiteralPath $layoutManifestPath -Raw -ErrorAction Stop).TrimStart([char]0xFEFF) | ConvertFrom-Json\n";
+              f << "  if ([int]$manifest.schemaVersion -ne 1 -or [string]$manifest.packageId -ne 'yemancc-update' -or [string]$manifest.packageVersion -ne $version) { throw 'update-manifest.json has an invalid schema, packageId or version' }\n";
+              f << "  $fanHostPolicy = if ($null -eq $manifest.rules -or $null -eq $manifest.rules.fanHost) { '' } else { [string]$manifest.rules.fanHost }\n";
+              f << "  if ($fanHostPolicy -notin @('', 'preserve-existing', 'replace')) { throw ('unsupported Fan Host update policy: ' + $fanHostPolicy) }\n";
+              f << "  if ($fanHostPolicy -eq 'preserve-existing' -and (Test-Path -LiteralPath $fanHostSource -PathType Container)) { throw 'update package violates preserve-existing Fan Host policy' }\n";
+              f << "  $requiredRoots = @($manifest.requiredRoots | ForEach-Object { [string]$_ } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Sort-Object -Unique)\n";
+             f << "  if ($requiredRoots.Count -eq 0) { throw 'update-manifest must declare at least one required root' }\n";
+             f << "  $definitions = New-Object System.Collections.Generic.List[object]\n";
+             f << "  foreach ($item in @($manifest.roots)) {\n";
+             f << "    $source = Normalize-ManifestRelativePath ([string]$item.source)\n";
+             f << "    $target = Normalize-ManifestRelativePath ([string]$item.target)\n";
+             f << "    if ($source.IndexOf([IO.Path]::DirectorySeparatorChar) -ge 0 -or $source.IndexOf([IO.Path]::AltDirectorySeparatorChar) -ge 0) { throw ('update-manifest source must be one top-level directory: ' + $source) }\n";
+             f << "    if ($definitions | Where-Object { $_.source -ieq $source -or $_.target -ieq $target }) { throw ('duplicate update-manifest root or target: ' + $source) }\n";
+             f << "    $sourcePath = Join-Path $staging $source\n";
+             f << "    if (!(Test-Path -LiteralPath $sourcePath -PathType Container)) { throw ('declared update root is missing: ' + $source) }\n";
+             f << "    $installFull = [IO.Path]::GetFullPath($installRoot).TrimEnd([IO.Path]::DirectorySeparatorChar)\n";
+             f << "    $targetFull = [IO.Path]::GetFullPath((Join-Path $installRoot $target))\n";
+             f << "    $installPrefix = $installFull + [IO.Path]::DirectorySeparatorChar\n";
+             f << "    if (!$targetFull.StartsWith($installPrefix, [StringComparison]::OrdinalIgnoreCase)) { throw ('update-manifest target escapes install root: ' + $target) }\n";
+              f << "    $mode = [string]$item.mode\n";
+              f << "    if ([string]::IsNullOrWhiteSpace($mode)) { $mode = 'managed-tree' }\n";
+              f << "    if ($mode -notin @('program','power-control','green-child','managed-tree')) { throw ('unsupported update root mode: ' + $mode) }\n";
+              f << "    $packageManifest = ''\n";
+              f << "    if ($null -ne $item.packageManifest -and -not [string]::IsNullOrWhiteSpace([string]$item.packageManifest)) { $packageManifest = Normalize-ManifestRelativePath ([string]$item.packageManifest); if (!(Test-Path -LiteralPath (Join-Path $sourcePath $packageManifest) -PathType Leaf)) { throw ('declared package manifest is missing: ' + $source + '/' + $packageManifest) } }\n";
+              f << "    if ($mode -eq 'green-child' -and [string]::IsNullOrWhiteSpace($packageManifest)) { throw ('green-child root requires packageManifest: ' + $source) }\n";
+              f << "    $stopProcesses = @($item.stopProcesses | ForEach-Object { [string]$_ } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })\n";
+              f << "    foreach ($processName in $stopProcesses) { if ([IO.Path]::GetFileName($processName) -ne $processName -or [IO.Path]::GetExtension($processName) -ine '.exe' -or $processName.IndexOfAny([char[]]'*?[]') -ge 0) { throw ('invalid stopProcesses entry: ' + $processName) } }\n";
+              f << "    if ($source -ieq 'YeManCC' -and $target -ine 'YeManCC') { throw 'YeManCC target is fixed' }\n";
+              f << "    if ($source -ieq 'PowerControl' -and $target -ine 'PowerControl') { throw 'PowerControl target is fixed' }\n";
+              f << "    if ($source -ieq 'CustomSteamLibrary' -and $target -ine 'CustomSteamLibrary') { throw 'CustomSteamLibrary target is fixed' }\n";
+              f << "    $definitions.Add([pscustomobject]@{ source = $source; target = $target; mode = $mode; packageManifest = $packageManifest; stopProcesses = $stopProcesses; managedPaths = @() })\n";
+              f << "  }\n";
+              f << "  $declared = @($definitions | ForEach-Object source | Sort-Object -Unique)\n";
+              f << "  foreach ($required in $requiredRoots) { if ($required -notin $declared) { throw ('required root has no definition: ' + $required) } }\n";
+             f << "  $actual = @(Get-ChildItem -LiteralPath $staging -Directory -Force | ForEach-Object Name | Sort-Object -Unique)\n";
+             f << "  if (Compare-Object $declared $actual) { throw 'update-manifest roots do not match extracted package roots' }\n";
+             f << "  return @($definitions)\n";
+             f << "}\n";
+             f << "function Get-CustomManagedPaths {\n";
+             f << "  if (!(Test-Path -LiteralPath $customSteamLibraryManifest -PathType Leaf)) { throw 'CustomSteamLibrary package-manifest.json missing' }\n";
+             f << "  $manifest = (Get-Content -LiteralPath $customSteamLibraryManifest -Raw -ErrorAction Stop).TrimStart([char]0xFEFF) | ConvertFrom-Json\n";
+             f << "  if ([string]$manifest.packageId -ne 'custom-steam-library' -or [string]$manifest.packageType -ne 'green-child') { throw 'CustomSteamLibrary package identity is invalid' }\n";
+             f << "  if ([string]$manifest.entryPoint -ne 'CustomSteamLibrary.exe' -or [string]$manifest.worker -ne 'SteamArtworkLab.exe') { throw 'CustomSteamLibrary entry points are invalid' }\n";
+             f << "  if ([string]$manifest.updater.unknownPaths -ne 'preserve') { throw 'CustomSteamLibrary unknown-path policy is not preserve' }\n";
+             f << "  if ([int]$manifest.updater.healthHandshake.protocol -ne 1 -or [bool]$manifest.updater.healthHandshake.requiredBeforeCommit -ne $true) { throw 'CustomSteamLibrary health handshake policy is missing' }\n";
+              f << "  $managedRaw = @($manifest.managedPaths | ForEach-Object { Normalize-ManifestRelativePath ([string]$_) })\n";
+              f << "  $managedPaths = @($managedRaw | Sort-Object -Unique)\n";
+              f << "  $manifestFilesRaw = @($manifest.files | ForEach-Object { Normalize-ManifestRelativePath ([string]$_) })\n";
+              f << "  $manifestFiles = @($manifestFilesRaw | Sort-Object -Unique)\n";
+              f << "  if ($managedPaths.Count -ne $managedRaw.Count -or $manifestFiles.Count -ne $manifestFilesRaw.Count -or (Compare-Object $manifestFiles $managedPaths)) { throw 'CustomSteamLibrary files and managedPaths are inconsistent' }\n";
+              f << "  $paths = @($managedPaths + 'package-manifest.json' | Sort-Object -Unique)\n";
+             f << "  foreach ($relative in $paths) { if (!(Test-Path -LiteralPath (Join-Path $customSteamLibrarySource $relative) -PathType Leaf)) { throw ('CustomSteamLibrary managed file missing: ' + $relative) } }\n";
+             f << "  $actual = @(Get-ChildItem -LiteralPath $customSteamLibrarySource -Recurse -File -Force | ForEach-Object { $_.FullName.Substring($customSteamLibrarySource.Length).TrimStart('\\') } | Sort-Object -Unique)\n";
+             f << "  if (Compare-Object $paths $actual) { throw 'CustomSteamLibrary package contains an unlisted file or misses a managed file' }\n";
+              f << "  $indexed = @($manifest.fileIndex)\n";
+              f << "  if ($indexed.Count -ne $manifestFiles.Count) { throw 'CustomSteamLibrary fileIndex is incomplete' }\n";
+              f << "  $indexedPathsRaw = @($indexed | ForEach-Object { Normalize-ManifestRelativePath ([string]$_.path) })\n";
+              f << "  $indexedPaths = @($indexedPathsRaw | Sort-Object -Unique)\n";
+              f << "  if ($indexedPaths.Count -ne $indexedPathsRaw.Count -or (Compare-Object $manifestFiles $indexedPaths)) { throw 'CustomSteamLibrary fileIndex does not exactly cover files' }\n";
+              f << "  foreach ($entry in $indexed) {\n";
+             f << "    $relative = Normalize-ManifestRelativePath ([string]$entry.path)\n";
+             f << "    if ($relative -notin $paths) { throw ('CustomSteamLibrary fileIndex contains an unmanaged path: ' + $relative) }\n";
+             f << "    $file = Join-Path $customSteamLibrarySource $relative\n";
+             f << "    $item = Get-Item -LiteralPath $file -ErrorAction Stop\n";
+             f << "    if ($item.Length -ne [int64]$entry.bytes) { throw ('CustomSteamLibrary fileIndex byte mismatch: ' + $relative) }\n";
+             f << "    $actualHash = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()\n";
+             f << "    if ($actualHash -ne ([string]$entry.sha256).ToLowerInvariant()) { throw ('CustomSteamLibrary fileIndex SHA256 mismatch: ' + $relative) }\n";
+             f << "  }\n";
+             f << "  return $paths\n";
+             f << "}\n";
+             f << "function Register-CustomManagedFilesForRollback([string[]]$paths) {\n";
+             f << "  foreach ($relative in $paths) { Register-FileForRollback (Join-Path $customSteamLibrarySource $relative) $customSteamLibrarySource $customSteamLibraryDir 'CustomSteamLibrary' }\n";
+             f << "}\n";
+             f << "function Copy-CustomManagedFilesChecked([string[]]$paths) {\n";
+             f << "  if (!(Test-Path -LiteralPath $customSteamLibraryDir -PathType Container)) { New-Item -ItemType Directory -Path $customSteamLibraryDir -Force | Out-Null }\n";
+             f << "  foreach ($relative in $paths) {\n";
+             f << "    $source = Join-Path $customSteamLibrarySource $relative\n";
+             f << "    $target = Join-Path $customSteamLibraryDir $relative\n";
+             f << "    if (Test-Path -LiteralPath $target -PathType Container) { throw ('CustomSteamLibrary target is a directory but package entry is a file: ' + $relative) }\n";
+             f << "    New-Item -ItemType Directory -Path (Split-Path -Parent $target) -Force | Out-Null\n";
+             f << "    Copy-Item -LiteralPath $source -Destination $target -Force -ErrorAction Stop\n";
+             f << "    Assert-FileMatch $source $target ('CustomSteamLibrary managed file ' + $relative)\n";
+             f << "  }\n";
+             f << "}\n";
+             f << "function Get-GreenChildManagedPaths([object]$root) {\n";
+             f << "  $sourceRoot = Join-Path $staging ([string]$root.source)\n";
+             f << "  $manifestPath = Join-Path $sourceRoot ([string]$root.packageManifest)\n";
+             f << "  if (!(Test-Path -LiteralPath $manifestPath -PathType Leaf)) { throw ('green-child package manifest missing: ' + $root.source) }\n";
+             f << "  $manifest = (Get-Content -LiteralPath $manifestPath -Raw -ErrorAction Stop).TrimStart([char]0xFEFF) | ConvertFrom-Json\n";
+             f << "  if ([string]::IsNullOrWhiteSpace([string]$manifest.packageId) -or [string]$manifest.packageType -ne 'green-child') { throw ('green-child package identity is invalid: ' + $root.source) }\n";
+             f << "  if ([string]$manifest.updater.unknownPaths -ne 'preserve') { throw ('green-child unknown-path policy is not preserve: ' + $root.source) }\n";
+             f << "  $managedRaw = @($manifest.managedPaths | ForEach-Object { Normalize-ManifestRelativePath ([string]$_) })\n";
+             f << "  $managedPaths = @($managedRaw | Sort-Object -Unique)\n";
+             f << "  $manifestFilesRaw = @($manifest.files | ForEach-Object { Normalize-ManifestRelativePath ([string]$_) })\n";
+             f << "  $manifestFiles = @($manifestFilesRaw | Sort-Object -Unique)\n";
+             f << "  if ($managedPaths.Count -ne $managedRaw.Count -or $manifestFiles.Count -ne $manifestFilesRaw.Count -or (Compare-Object $manifestFiles $managedPaths)) { throw ('green-child files and managedPaths are inconsistent: ' + $root.source) }\n";
+             f << "  $packageManifest = Normalize-ManifestRelativePath ([string]$root.packageManifest)\n";
+             f << "  if ($managedPaths -contains $packageManifest -or $manifestFiles -contains $packageManifest) { throw ('green-child package manifest must not be listed as a managed payload file: ' + $root.source) }\n";
+             f << "  $entryPoint = [string]$manifest.entryPoint\n";
+             f << "  if (-not [string]::IsNullOrWhiteSpace($entryPoint) -and (Normalize-ManifestRelativePath $entryPoint) -notin $managedPaths) { throw ('green-child entryPoint is not managed: ' + $root.source) }\n";
+             f << "  $worker = [string]$manifest.worker\n";
+             f << "  if (-not [string]::IsNullOrWhiteSpace($worker) -and (Normalize-ManifestRelativePath $worker) -notin $managedPaths) { throw ('green-child worker is not managed: ' + $root.source) }\n";
+             f << "  $paths = @($managedPaths + $packageManifest | Sort-Object -Unique)\n";
+             f << "  foreach ($relative in $paths) { if (!(Test-Path -LiteralPath (Join-Path $sourceRoot $relative) -PathType Leaf)) { throw ('green-child managed file missing: ' + $root.source + '/' + $relative) } }\n";
+             f << "  $actual = @(Get-ChildItem -LiteralPath $sourceRoot -Recurse -File -Force | ForEach-Object { $_.FullName.Substring($sourceRoot.Length).TrimStart('\\') } | Sort-Object -Unique)\n";
+             f << "  if (Compare-Object $paths $actual) { throw ('green-child package contains an unlisted file or misses a managed file: ' + $root.source) }\n";
+             f << "  $indexed = @($manifest.fileIndex)\n";
+             f << "  if ($indexed.Count -ne $manifestFiles.Count) { throw ('green-child fileIndex is incomplete: ' + $root.source) }\n";
+             f << "  $indexedPathsRaw = @($indexed | ForEach-Object { Normalize-ManifestRelativePath ([string]$_.path) })\n";
+             f << "  $indexedPaths = @($indexedPathsRaw | Sort-Object -Unique)\n";
+             f << "  if ($indexedPaths.Count -ne $indexedPathsRaw.Count -or (Compare-Object $manifestFiles $indexedPaths)) { throw ('green-child fileIndex does not exactly cover files: ' + $root.source) }\n";
+             f << "  foreach ($entry in $indexed) {\n";
+             f << "    $relative = Normalize-ManifestRelativePath ([string]$entry.path)\n";
+             f << "    $file = Join-Path $sourceRoot $relative\n";
+             f << "    $item = Get-Item -LiteralPath $file -ErrorAction Stop\n";
+             f << "    if ($item.Length -ne [int64]$entry.bytes) { throw ('green-child fileIndex byte mismatch: ' + $root.source + '/' + $relative) }\n";
+             f << "    $actualHash = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()\n";
+             f << "    if ($actualHash -ne ([string]$entry.sha256).ToLowerInvariant()) { throw ('green-child fileIndex SHA256 mismatch: ' + $root.source + '/' + $relative) }\n";
+             f << "  }\n";
+             f << "  return $paths\n";
+             f << "}\n";
+             f << "function Register-GreenChildManagedFiles([object]$root, [string[]]$paths) {\n";
+             f << "  $sourceRoot = Join-Path $staging ([string]$root.source)\n";
+             f << "  $targetRoot = Join-Path $installRoot ([string]$root.target)\n";
+             f << "  foreach ($relative in $paths) { Register-FileForRollback (Join-Path $sourceRoot $relative) $sourceRoot $targetRoot ([string]$root.source) }\n";
+             f << "}\n";
+             f << "function Copy-GreenChildManagedFilesChecked([object]$root, [string[]]$paths) {\n";
+             f << "  $sourceRoot = Join-Path $staging ([string]$root.source)\n";
+             f << "  $targetRoot = Join-Path $installRoot ([string]$root.target)\n";
+             f << "  if (!(Test-Path -LiteralPath $targetRoot -PathType Container)) { New-Item -ItemType Directory -Path $targetRoot -Force | Out-Null }\n";
+             f << "  foreach ($relative in $paths) {\n";
+             f << "    $source = Join-Path $sourceRoot $relative\n";
+             f << "    $target = Join-Path $targetRoot $relative\n";
+             f << "    if (Test-Path -LiteralPath $target -PathType Container) { throw ('green-child target is a directory but package entry is a file: ' + $root.source + '/' + $relative) }\n";
+             f << "    New-Item -ItemType Directory -Path (Split-Path -Parent $target) -Force | Out-Null\n";
+             f << "    Copy-Item -LiteralPath $source -Destination $target -Force -ErrorAction Stop\n";
+             f << "    Assert-FileMatch $source $target (([string]$root.source) + ' managed file ' + $relative)\n";
+             f << "  }\n";
+             f << "}\n";
+             f << "function Register-AdditionalLayoutRootsForRollback {\n";
+             f << "  foreach ($root in @($layoutRoots | Where-Object { $_.source -notin @('YeManCC','PowerControl','CustomSteamLibrary') })) {\n";
+             f << "    if ([string]$root.mode -eq 'green-child') { $root.managedPaths = @(Get-GreenChildManagedPaths $root); Register-GreenChildManagedFiles $root $root.managedPaths }\n";
+             f << "    else { Register-TreeForRollback (Join-Path $staging $root.source) (Join-Path $installRoot $root.target) $root.source @() }\n";
+             f << "  }\n";
+             f << "}\n";
+             f << "function Copy-AdditionalLayoutRootsChecked {\n";
+             f << "  foreach ($root in @($layoutRoots | Where-Object { $_.source -notin @('YeManCC','PowerControl','CustomSteamLibrary') })) {\n";
+             f << "    if ([string]$root.mode -eq 'green-child') { Copy-GreenChildManagedFilesChecked $root $root.managedPaths }\n";
+             f << "    else {\n";
+             f << "      $source = Join-Path $staging $root.source\n";
+             f << "      $target = Join-Path $installRoot $root.target\n";
+             f << "      if (!(Test-Path -LiteralPath $target -PathType Container)) { New-Item -ItemType Directory -Path $target -Force | Out-Null }\n";
+             f << "      Copy-TreeChecked $source $target @()\n";
+             f << "    }\n";
+             f << "  }\n";
+             f << "}\n";
+             f << "$customSteamLibraryRootPrefix = ([IO.Path]::GetFullPath($customSteamLibraryDir)).TrimEnd('\\') + '\\'\n";
+             f << "function Test-CustomSteamLibraryProcess([System.Diagnostics.Process]$process) {\n";
+             f << "  try { return ([IO.Path]::GetFullPath($process.Path)).StartsWith($customSteamLibraryRootPrefix, [StringComparison]::OrdinalIgnoreCase) } catch { throw 'unable to verify the CustomSteamLibrary process executable path' }\n";
+             f << "}\n";
+             f << "function Test-CustomSteamLibraryDataRoot([string]$path) {\n";
+             f << "  if ([string]::IsNullOrWhiteSpace($path)) { return $false }\n";
+             f << "  try { $full = [IO.Path]::GetFullPath($path).TrimEnd('\\'); $allowed = @([IO.Path]::GetFullPath('D:\\YeMan\\CustomSteamLibrary\\data').TrimEnd('\\'), [IO.Path]::GetFullPath((Join-Path $customSteamLibraryDir 'data')).TrimEnd('\\')); $configured = [Environment]::GetEnvironmentVariable('YEMAN_STEAM_BIG_PICTURE_DATA_ROOT', 'Process'); if (-not [string]::IsNullOrWhiteSpace($configured)) { $allowed += [IO.Path]::GetFullPath($configured).TrimEnd('\\') }; return @($allowed | Where-Object { $_ -ieq $full }).Count -gt 0 } catch { return $false }\n";
+             f << "}\n";
+             f << "function Close-CustomSteamLibraryHealthProcess([System.Diagnostics.Process]$process) {\n";
+             f << "  if (!$process) { return }\n";
+             f << "  try { if (!$process.HasExited) { $process.CloseMainWindow() | Out-Null } } catch { }\n";
+             f << "  $deadline = (Get-Date).AddSeconds($customHealthChildExitTimeoutSeconds)\n";
+             f << "  while ($true) { try { if ($process.HasExited) { return } } catch { return }; if ((Get-Date) -ge $deadline) { break }; Start-Sleep -Milliseconds 100 }\n";
+             f << "  try { if (!$process.HasExited) { Stop-Process -Id $process.Id -Force -ErrorAction Stop; $process.WaitForExit(30000) } } catch { throw ('CustomSteamLibrary health process did not exit: ' + $_.Exception.Message) }\n";
+             f << "}\n";
+             f << "function Invoke-CustomSteamLibraryHealthCheck {\n";
+             f << "  if (!$customRootPresent) { return }\n";
+             f << "  $childExe = Join-Path $customSteamLibraryDir 'CustomSteamLibrary.exe'\n";
+             f << "  $childManifestPath = Join-Path $customSteamLibraryDir 'package-manifest.json'\n";
+             f << "  if (!(Test-Path -LiteralPath $childExe -PathType Leaf)) { throw 'CustomSteamLibrary entry point is missing after update' }\n";
+             f << "  if (!(Test-Path -LiteralPath $childManifestPath -PathType Leaf)) { throw 'CustomSteamLibrary package manifest is missing after update' }\n";
+             f << "  $childManifest = (Get-Content -LiteralPath $childManifestPath -Raw -ErrorAction Stop).TrimStart([char]0xFEFF) | ConvertFrom-Json\n";
+             f << "  $expectedChildPackageVersion = [string]$childManifest.packageVersion\n";
+             f << "  if ([string]$childManifest.packageId -ne 'custom-steam-library' -or [string]$childManifest.packageType -ne 'green-child' -or [string]::IsNullOrWhiteSpace($expectedChildPackageVersion)) { throw 'CustomSteamLibrary package identity or version is invalid after update' }\n";
+             f << "  $healthToken = [guid]::NewGuid().ToString('N')\n";
+             f << "  Remove-Item -LiteralPath $customHealthHandshakePath -Force -ErrorAction SilentlyContinue\n";
+             f << "  $healthProcess = $null\n";
+             f << "  try {\n";
+             f << "    $healthArguments = @('--input-owner=host', '--update-health-only', '--update-health-handshake', ('\"' + $customHealthHandshakePath + '\"'), '--update-health-handshake-token', $healthToken, '--update-health-package-version', $expectedChildPackageVersion)\n";
+             f << "    $healthProcess = Start-Process -FilePath $childExe -WorkingDirectory $customSteamLibraryDir -ArgumentList $healthArguments -PassThru -WindowStyle Hidden\n";
+             f << "    if (!$healthProcess) { throw 'failed to launch CustomSteamLibrary health process' }\n";
+             f << "    $deadline = (Get-Date).AddSeconds($customHealthTimeoutSeconds)\n";
+             f << "    $ready = $false\n";
+             f << "    while ((Get-Date) -lt $deadline) {\n";
+             f << "      if (Test-Path -LiteralPath $customHealthHandshakePath -PathType Leaf) {\n";
+             f << "        try {\n";
+             f << "          $marker = Get-Content -LiteralPath $customHealthHandshakePath -Raw -ErrorAction Stop | ConvertFrom-Json\n";
+             f << "          if ([string]$marker.phase -eq 'failed') { throw ('CustomSteamLibrary startup health failed: ' + [string]$marker.error) }\n";
+             f << "          if ([string]$marker.phase -eq 'ready') {\n";
+             f << "            $markerPid = [int]$marker.pid\n";
+             f << "            $markerProcess = Get-Process -Id $markerPid -ErrorAction SilentlyContinue\n";
+             f << "            if (!$markerProcess -or $markerPid -ne $healthProcess.Id) { throw 'CustomSteamLibrary health marker PID is invalid' }\n";
+             f << "            if (!(Test-CustomSteamLibraryProcess $markerProcess)) { throw 'CustomSteamLibrary health marker process path is invalid' }\n";
+             f << "            if ([string]$marker.token -ne $healthToken) { throw 'CustomSteamLibrary health marker token mismatch' }\n";
+             f << "            if ([string]$marker.packageId -ne 'custom-steam-library' -or [string]$marker.packageType -ne 'green-child' -or [string]$marker.packageVersion -ne $expectedChildPackageVersion) { throw 'CustomSteamLibrary health marker package identity mismatch' }\n";
+             f << "            if ([string]$marker.expectedPackageVersion -ne $expectedChildPackageVersion -or [string]$marker.inputOwner -ne 'host' -or [bool]$marker.healthOnly -ne $true -or [int]$marker.protocol -ne 1) { throw 'CustomSteamLibrary health marker startup mode mismatch' }\n";
+             f << "            if ([bool]$marker.window -ne $true -or [bool]$marker.worker -ne $true -or [bool]$marker.workspaceUi -ne $true -or [bool]$marker.webview2 -ne $true) { throw 'CustomSteamLibrary health marker runtime readiness is incomplete' }\n";
+             f << "            if ([bool]$marker.dataRootWritable -ne $true -or !(Test-CustomSteamLibraryDataRoot ([string]$marker.dataRoot))) { throw 'CustomSteamLibrary health marker data root is invalid' }\n";
+             f << "            $ready = $true\n";
+             f << "            break\n";
+             f << "          }\n";
+             f << "        } catch { throw $_ }\n";
+             f << "      }\n";
+             f << "      try { if ($healthProcess.HasExited) { throw ('CustomSteamLibrary health process exited before ready: ' + $healthProcess.ExitCode) } } catch { throw $_ }\n";
+             f << "      Start-Sleep -Milliseconds 200\n";
+             f << "    }\n";
+             f << "    if (!$ready) { throw ('CustomSteamLibrary startup health handshake timed out after ' + $customHealthTimeoutSeconds + ' seconds') }\n";
+             f << "  } finally {\n";
+             f << "    Close-CustomSteamLibraryHealthProcess $healthProcess\n";
+             f << "  }\n";
+             f << "}\n";
+             f << "function Stop-CustomSteamLibraryProcesses {\n";
+             f << "  $deadline = (Get-Date).AddSeconds($childExitTimeoutSeconds)\n";
+             f << "  foreach ($process in @(Get-Process -Name 'CustomSteamLibrary','SteamArtworkLab' -ErrorAction SilentlyContinue | Where-Object { Test-CustomSteamLibraryProcess $_ })) { try { if (!$process.HasExited) { $process.CloseMainWindow() | Out-Null } } catch { } }\n";
+             f << "  while ($true) {\n";
+             f << "    $active = @(Get-Process -Name 'CustomSteamLibrary','SteamArtworkLab' -ErrorAction SilentlyContinue | Where-Object { Test-CustomSteamLibraryProcess $_ })\n";
+             f << "    if ($active.Count -eq 0) { return }\n";
+             f << "    if ((Get-Date) -ge $deadline) { throw 'CustomSteamLibrary or SteamArtworkLab did not exit before update' }\n";
+             f << "    Start-Sleep -Milliseconds 250\n";
+             f << "  }\n";
+             f << "}\n";
+             f << "function Test-LayoutRootProcess([System.Diagnostics.Process]$process, [string]$rootPath) { try { $prefix = ([IO.Path]::GetFullPath($rootPath)).TrimEnd('\\') + '\\'; return ([IO.Path]::GetFullPath($process.Path)).StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase) } catch { throw ('unable to verify a declared update root process path: ' + $process.ProcessName) } }\n";
+             f << "function Get-AdditionalLayoutRootProcesses {\n";
+             f << "  $active = @()\n";
+             f << "  foreach ($root in @($layoutRoots | Where-Object { $_.source -notin @('YeManCC','PowerControl','CustomSteamLibrary') })) {\n";
+             f << "    $rootPath = Join-Path $installRoot $root.target\n";
+             f << "    foreach ($processName in @($root.stopProcesses)) { $name = [IO.Path]::GetFileNameWithoutExtension([string]$processName); $active += @(Get-Process -Name $name -ErrorAction SilentlyContinue | Where-Object { Test-LayoutRootProcess $_ $rootPath }) }\n";
+             f << "  }\n";
+             f << "  return @($active | Sort-Object Id -Unique)\n";
+             f << "}\n";
+             f << "function Stop-AdditionalLayoutRootProcesses {\n";
+             f << "  $deadline = (Get-Date).AddSeconds($childExitTimeoutSeconds)\n";
+             f << "  foreach ($process in @(Get-AdditionalLayoutRootProcesses)) { try { if (!$process.HasExited) { $process.CloseMainWindow() | Out-Null } } catch { } }\n";
+             f << "  while ($true) { $active = @(Get-AdditionalLayoutRootProcesses); if ($active.Count -eq 0) { return }; if ((Get-Date) -ge $deadline) { throw ('declared update root process did not exit before update: ' + (($active | ForEach-Object ProcessName | Sort-Object -Unique) -join ', ')) }; Start-Sleep -Milliseconds 250 }\n";
+             f << "}\n";
+             f << "function Get-ResidentFanHostProcesses {\n";
+             f << "  $target = [IO.Path]::GetFullPath((Join-Path $pcDir 'fan-host\\YeManFanHost.exe'))\n";
+             f << "  $active = @()\n";
+             f << "  foreach ($process in @(Get-Process -Name 'YeManFanHost' -ErrorAction SilentlyContinue)) { try { if ([IO.Path]::GetFullPath($process.Path) -ieq $target) { $active += $process } } catch { throw 'unable to verify the resident Fan Host executable path' } }\n";
+             f << "  return @($active | Sort-Object Id -Unique)\n";
+             f << "}\n";
+             f << "function Wait-FanHostExit {\n";
+             f << "  $deadline = (Get-Date).AddSeconds($childExitTimeoutSeconds)\n";
+             f << "  while ($true) { $active = @(Get-ResidentFanHostProcesses); if ($active.Count -eq 0) { return }; if ((Get-Date) -ge $deadline) { throw 'YeManFanHost.exe did not exit before update' }; Start-Sleep -Milliseconds 250 }\n";
+             f << "}\n";
+             f << "function Rename-DirectoryChecked([string]$source, [string]$destination, [string]$label) {\n";
             f << "  if ((Split-Path -Parent $source) -ne (Split-Path -Parent $destination)) { throw ($label + ' must stay in one parent directory') }\n";
             f << "  $destinationName = Split-Path -Leaf $destination\n";
             f << "  $lastError = ''\n";
@@ -13353,16 +14393,29 @@ static void reg_updater() {
             f << "  }\n";
             f << "  $programBackup = Join-Path $rollbackFiles 'YeManCC'\n";
             f << "  if (Test-Path -LiteralPath $programBackup -PathType Container) { Copy-TreeChecked $programBackup $exeDir @() }\n";
-            f << "  $powerControlBackup = Join-Path $rollbackFiles 'PowerControl'\n";
-            f << "  if (Test-Path -LiteralPath $powerControlBackup -PathType Container) { Copy-TreeChecked $powerControlBackup $pcDir @() }\n";
-            f << "  $supportBackup = Join-Path $rollbackFiles 'Support'\n";
+             f << "  $powerControlBackup = Join-Path $rollbackFiles 'PowerControl'\n";
+             f << "  if (Test-Path -LiteralPath $powerControlBackup -PathType Container) { Copy-TreeChecked $powerControlBackup $pcDir @() }\n";
+              f << "  $customSteamLibraryBackup = Join-Path $rollbackFiles 'CustomSteamLibrary'\n";
+              f << "  if (Test-Path -LiteralPath $customSteamLibraryBackup -PathType Container) { Copy-TreeChecked $customSteamLibraryBackup $customSteamLibraryDir @() }\n";
+             f << "  foreach ($root in @($layoutRoots | Where-Object { $_.source -notin @('YeManCC','PowerControl','CustomSteamLibrary') })) {\n";
+             f << "    $rootBackup = Join-Path $rollbackFiles $root.source\n";
+             f << "    $rootTarget = Join-Path $installRoot $root.target\n";
+             f << "    if (Test-Path -LiteralPath $rootBackup -PathType Container) { Copy-TreeChecked $rootBackup $rootTarget @() }\n";
+             f << "  }\n";
+              f << "  $supportBackup = Join-Path $rollbackFiles 'Support'\n";
             f << "  if (Test-Path -LiteralPath $supportBackup -PathType Leaf) { Copy-Item -LiteralPath $supportBackup -Destination $supportPath -Force -ErrorAction Stop }\n";
             f << "  foreach ($backupFile in Get-ChildItem -LiteralPath $rollbackFiles -Recurse -File) {\n";
             f << "    $relative = $backupFile.FullName.Substring($rollbackFiles.Length).TrimStart('\\')\n";
             f << "    if ($relative -eq 'Support') { $target = $supportPath }\n";
-            f << "    elseif ($relative.StartsWith('YeManCC\\')) { $target = Join-Path $exeDir $relative.Substring('YeManCC\\'.Length) }\n";
-            f << "    elseif ($relative.StartsWith('PowerControl\\')) { $target = Join-Path $pcDir $relative.Substring('PowerControl\\'.Length) }\n";
-            f << "    else { throw ('unknown rollback bucket: ' + $relative) }\n";
+             f << "    elseif ($relative.StartsWith('YeManCC\\')) { $target = Join-Path $exeDir $relative.Substring('YeManCC\\'.Length) }\n";
+              f << "    elseif ($relative.StartsWith('PowerControl\\')) { $target = Join-Path $pcDir $relative.Substring('PowerControl\\'.Length) }\n";
+              f << "    elseif ($relative.StartsWith('CustomSteamLibrary\\')) { $target = Join-Path $customSteamLibraryDir $relative.Substring('CustomSteamLibrary\\'.Length) }\n";
+             f << "    else {\n";
+             f << "      $bucket = ($relative -split '\\\\', 2)[0]\n";
+             f << "      $root = @($layoutRoots | Where-Object { $_.source -ieq $bucket } | Select-Object -First 1)\n";
+             f << "      if (!$root) { throw ('unknown rollback bucket: ' + $relative) }\n";
+             f << "      $target = Join-Path (Join-Path $installRoot $root.target) $relative.Substring($bucket.Length + 1)\n";
+             f << "    }\n";
             f << "    Assert-FileMatch $backupFile.FullName $target ('rollback restored ' + $relative)\n";
             f << "  }\n";
             f << "}\n";
@@ -13370,16 +14423,25 @@ static void reg_updater() {
             f << "  $parentExitDeadline = (Get-Date).AddSeconds($parentExitTimeoutSeconds)\n";
             f << "  while (Get-Process -Id $parentPid -ErrorAction SilentlyContinue) {\n";
             f << "    if ((Get-Date) -ge $parentExitDeadline) { throw ('parent YeManCC process did not exit within ' + $parentExitTimeoutSeconds + ' seconds') }\n";
-            f << "    Start-Sleep -Milliseconds 100\n";
-            f << "  }\n";
-            f << "  if (!(Test-Path -LiteralPath $packageExe)) { throw 'staged executable missing' }\n";
-            f << "  if (!(Test-Path -LiteralPath (Join-Path $tdpSource 'YeManTdpCtl.exe'))) { throw 'staged YeManTdpCtl.exe missing' }\n";
-            f << "  if (!(Test-Path -LiteralPath (Join-Path $tdpSource '_internal') -PathType Container)) { throw 'staged YeManTdpCtl _internal missing' }\n";
-            f << "  Set-UpdateProgress 'installing' '正在复制更新文件'\n";
-            f << "  New-Item -ItemType Directory -Path $rollbackFiles -Force | Out-Null\n";
-            f << "  Register-TreeForRollback $programSource $exeDir 'YeManCC' @('YeManCC.exe','YeMan-Support.html')\n";
-            f << "  Register-FileForRollback $packageExe $programSource $exeDir 'YeManCC'\n";
-            f << "  Register-TreeForRollback $powerControlSource $pcDir 'PowerControl' @('pawnio')\n";
+              f << "    Start-Sleep -Milliseconds 100\n";
+              f << "  }\n";
+              f << "  $layoutRoots = @(Get-UpdateLayoutRoots)\n";
+              f << "  $fanHostPackagePresent = Test-Path -LiteralPath $fanHostSource -PathType Container\n";
+              f << "  $customRootPresent = @($layoutRoots | Where-Object { $_.source -ieq 'CustomSteamLibrary' }).Count -gt 0\n";
+              f << "  if ($customRootPresent) { Stop-CustomSteamLibraryProcesses }\n";
+              f << "  Stop-AdditionalLayoutRootProcesses\n";
+              f << "  if ($fanHostPackagePresent -and (Test-Path -LiteralPath (Join-Path $pcDir 'fan-host') -PathType Container)) { Wait-FanHostExit }\n";
+             f << "  if (!(Test-Path -LiteralPath $packageExe)) { throw 'staged executable missing' }\n";
+             f << "  if (!(Test-Path -LiteralPath (Join-Path $tdpSource 'YeManTdpCtl.exe'))) { throw 'staged YeManTdpCtl.exe missing' }\n";
+             f << "  if (!(Test-Path -LiteralPath (Join-Path $tdpSource '_internal') -PathType Container)) { throw 'staged YeManTdpCtl _internal missing' }\n";
+              f << "  Set-UpdateProgress 'installing' '正在复制更新文件'\n";
+              f << "  New-Item -ItemType Directory -Path $rollbackFiles -Force | Out-Null\n";
+              f << "  if ($customRootPresent) { $customManagedPaths = @(Get-CustomManagedPaths) }\n";
+              f << "  Register-TreeForRollback $programSource $exeDir 'YeManCC' @('YeManCC.exe','YeMan-Support.html')\n";
+              f << "  Register-FileForRollback $packageExe $programSource $exeDir 'YeManCC'\n";
+              f << "  Register-TreeForRollback $powerControlSource $pcDir 'PowerControl' @('pawnio')\n";
+              f << "  if ($customRootPresent) { Register-CustomManagedFilesForRollback $customManagedPaths }\n";
+              f << "  Register-AdditionalLayoutRootsForRollback\n";
             f << "  if (Test-Path -LiteralPath $supportPath -PathType Leaf) {\n";
             f << "    Copy-Item -LiteralPath $supportPath -Destination (Join-Path $rollbackFiles 'Support') -Force -ErrorAction Stop\n";
             f << "    Assert-FileMatch $supportPath (Join-Path $rollbackFiles 'Support') 'rollback backup support page'\n";
@@ -13387,11 +14449,24 @@ static void reg_updater() {
             f << "    $rollbackAddedFiles.Add($supportPath) | Out-Null\n";
             f << "  }\n";
             f << "  $ordinaryRollbackPrepared = $true\n";
-             f << "  Write-Utf8Atomic $state '{\"phase\":\"copying\"}'\n";
+              f << "  Write-Utf8Atomic $state ('{\"phase\":\"copying\",\"version\":' + (ConvertTo-Json $version -Compress) + '}')\n";
              // Copy non-PawnIO PowerControl assets first. PawnIO is staged and
              // committed as one directory transaction below.
+              f << "  if ($customRootPresent) { Copy-CustomManagedFilesChecked $customManagedPaths }\n";
+              f << "  Copy-AdditionalLayoutRootsChecked\n";
              f << "  if (!(Test-Path -LiteralPath $pcDir -PathType Container)) { New-Item -ItemType Directory -Path $pcDir -Force | Out-Null }\n";
              f << "  Copy-TreeChecked $powerControlSource $pcDir @('/XD', $tdpSource)\n";
+             // fan-host is an immutable, manifest-bound executable payload.
+             // Ordinary /E updates intentionally retain user PowerControl
+             // state, but the Host installer quarantines its own stale files
+             // and recursively repairs the ACL of every shipped dependency.
+               f << "  if ($fanHostPackagePresent) {\n";
+              f << "    $fanHostTarget = Join-Path $pcDir 'fan-host'\n";
+              f << "    $fanHostAclScript = Join-Path $fanHostTarget 'install-fan-host-payload.ps1'\n";
+              f << "    if (!(Test-Path -LiteralPath $fanHostAclScript -PathType Leaf)) { throw 'Fan Host payload installer missing after update copy' }\n";
+              f << "    & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File $fanHostAclScript -PayloadDirectory $fanHostTarget\n";
+              f << "    if ($LASTEXITCODE -ne 0) { throw ('Fan Host payload ACL installation failed: ' + $LASTEXITCODE) }\n";
+              f << "  }\n";
              // system-blacklist.txt is a shipped rule and is updated with the
              // package. player-blacklist.txt is user-owned and must survive a
              // successful upgrade byte-for-byte when it already exists.
@@ -13412,14 +14487,15 @@ static void reg_updater() {
             f << "  $tdpCommitted = $true\n";
             f << "  Assert-TreeMatch $tdpSource $tdpTarget 'YeManTdpCtl.runtime.committed'\n";
             f << "  Set-UpdateProgress 'installing' 'TDP 运行时校验通过'\n";
-             f << "  Write-Utf8Atomic $state '{\"phase\":\"tdp-verified\"}'\n";
+            f << "  Write-Utf8Atomic $state ('{\"phase\":\"tdp-verified\",\"version\":' + (ConvertTo-Json $version -Compress) + '}')\n";
             f << "  if (Test-Path -LiteralPath $exePath -PathType Leaf) { Copy-Item -LiteralPath $exePath -Destination $backup -Force }\n";
             f << "  Copy-Item -LiteralPath $packageExe -Destination $newExe -Force\n";
             f << "  Move-Item -LiteralPath $newExe -Destination $exePath -Force\n";
             f << "  Copy-TreeChecked $programSource $exeDir @('/XF','YeManCC.exe','YeMan-Support.html')\n";
             f << "  Copy-Item -LiteralPath (Join-Path $programSource 'YeMan-Support.html') -Destination $supportPath -Force\n";
+            f << "  if ($customRootPresent) { Set-UpdateProgress 'installing' '正在验证 CustomSteamLibrary 独立启动健康'; Invoke-CustomSteamLibraryHealthCheck }\n";
             f << "  Set-UpdateProgress 'installing' '正在启动新版本'\n";
-             f << "  Write-Utf8Atomic $state '{\"phase\":\"launching\"}'\n";
+              f << "  Write-Utf8Atomic $state ('{\"phase\":\"launching\",\"version\":' + (ConvertTo-Json $version -Compress) + '}')\n";
              f << "  $newProcess = Start-Process -FilePath $exePath -WorkingDirectory $exeDir -ArgumentList @('--update-handshake', ('\"' + $handshakePath + '\"'), '--update-handshake-token', $handshakeToken) -PassThru\n";
             f << "  $handshakeDeadline = (Get-Date).AddSeconds($handshakeTimeoutSeconds)\n";
             f << "  $handshakeOk = $false\n";
@@ -13436,8 +14512,8 @@ static void reg_updater() {
             f << "    Start-Sleep -Milliseconds 250\n";
             f << "  }\n";
             f << "  if (!$handshakeOk) { throw 'new YeManCC process did not complete startup handshake' }\n";
+             f << "  Write-Utf8Atomic $state ('{\"phase\":\"committed\",\"version\":' + (ConvertTo-Json $version -Compress) + ',\"pid\":' + $newProcess.Id + '}')\n";
             f << "  $updateCommitted = $true\n";
-             f << "  Write-Utf8Atomic $state ('{\"phase\":\"started\",\"pid\":' + $newProcess.Id + '}')\n";
             f << "  Set-UpdateProgress 'completed' '更新已完成'\n";
             f << "} catch {\n";
             f << "  $installError = $_.Exception.Message\n";
@@ -13460,7 +14536,7 @@ static void reg_updater() {
              f << "  if ($rollbackError) { $errorMessage += '; rollback: ' + $rollbackError }\n";
              f << "  try { Set-UpdateProgress 'failed' ('更新失败：' + $errorMessage) $errorMessage } catch { }\n";
              f << "  $failurePhase = if ($rollbackAttempted) { 'rolled-back' } else { 'failed' }\n";
-             f << "  try { Write-Utf8Atomic $state ('{\"phase\":\"' + $failurePhase + '\",\"error\":' + (ConvertTo-Json $errorMessage -Compress) + '}') } catch { }\n";
+             f << "  try { Write-Utf8Atomic $state ('{\"phase\":\"' + $failurePhase + '\",\"version\":' + (ConvertTo-Json $version -Compress) + ',\"error\":' + (ConvertTo-Json $errorMessage -Compress) + '}') } catch { }\n";
              f << "  if ($rollbackSucceeded -and !(Get-Process -Id $parentPid -ErrorAction SilentlyContinue)) {\n";
              f << "    try {\n";
              f << "      if (!(Test-Path -LiteralPath $exePath -PathType Leaf)) { throw 'rolled-back executable is missing' }\n";
@@ -13471,7 +14547,7 @@ static void reg_updater() {
              f << "  if ($recoveryError) {\n";
              f << "    $errorMessage += '; recovery launch: ' + $recoveryError\n";
              f << "    try { Set-UpdateProgress 'failed' ('更新失败：' + $errorMessage) $errorMessage } catch { }\n";
-             f << "    try { Write-Utf8Atomic $state ('{\"phase\":\"' + $failurePhase + '\",\"error\":' + (ConvertTo-Json $errorMessage -Compress) + '}') } catch { }\n";
+             f << "    try { Write-Utf8Atomic $state ('{\"phase\":\"' + $failurePhase + '\",\"version\":' + (ConvertTo-Json $version -Compress) + ',\"error\":' + (ConvertTo-Json $errorMessage -Compress) + '}') } catch { }\n";
              f << "  }\n";
             f << "} finally {\n";
             f << "  Remove-Item -LiteralPath $newExe -Force -ErrorAction SilentlyContinue\n";
@@ -13486,6 +14562,7 @@ static void reg_updater() {
             f << "    Remove-Item -LiteralPath $rollbackRoot -Recurse -Force -ErrorAction SilentlyContinue\n";
             f << "  }\n";
              f << "  Remove-Item -LiteralPath $handshakePath -Force -ErrorAction SilentlyContinue\n";
+             f << "  Remove-Item -LiteralPath $customHealthHandshakePath -Force -ErrorAction SilentlyContinue\n";
              f << "  Remove-Item -LiteralPath $staging -Recurse -Force -ErrorAction SilentlyContinue\n";
              f << "  Remove-Item -LiteralPath $scriptPath -Force -ErrorAction SilentlyContinue\n";
              f << "}\n";
@@ -13649,6 +14726,12 @@ static void reg_multiwindow() {
 // ================================================================
 
 static void reg_extras() {
+    // 触摸屏/鼠标聚焦进程名输入框时，使用可见路径启动 Windows TabTip。
+    ipc_on("keyboard.open", [](const json&) -> json {
+        openTouchKeyboard();
+        return true;
+    });
+
     // System theme detection
     ipc_on("os.isDarkMode", [](const json&) -> json {
         return systemUsesDarkMode();
@@ -13989,6 +15072,39 @@ static void reg_extras() {
         }
         CloseHandle(snap);
         return out;
+    });
+
+    // Exact executable lookup used by Fan Host startup recovery. A process
+    // can retain HC/EC ownership even while its loopback listener is
+    // temporarily unavailable; the frontend must block a second Host in
+    // that case instead of assuming the port/health probe is enough.
+    ipc_on("proc.findExact", [](const json& a) -> json {
+        const auto expected = U2W(a.value("path", std::string{}));
+        if (expected.empty()) return json{{"found", false}, {"pid", 0}};
+        HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if (snap == INVALID_HANDLE_VALUE) return json{{"found", false}, {"pid", 0}};
+        PROCESSENTRY32W pe{ sizeof(pe) };
+        if (Process32FirstW(snap, &pe)) {
+            do {
+                const auto image = processImagePath(pe.th32ProcessID);
+                if (!image.empty() && sameFinalPath(image, expected)) {
+                    const auto pid = static_cast<int>(pe.th32ProcessID);
+                    CloseHandle(snap);
+                    return json{{"found", true}, {"pid", pid}};
+                }
+            } while (Process32NextW(snap, &pe));
+        }
+        CloseHandle(snap);
+        return json{{"found", false}, {"pid", 0}};
+    });
+
+    // RTSS profile API bridge.  The frontend resolves the installation path;
+    // the native shell performs the ABI-correct x64 DLL call here.
+    ipc_on("rtss.reloadProfiles", [](const json& a) -> json {
+        const auto dllPath = U2W(a.value("dllPath", std::string{}));
+        if (dllPath.empty())
+            return json{{"ok", false}, {"error", "RTSSHooks DLL 路径为空"}};
+        return nativeRtssReloadProfiles(dllPath);
     });
 
     // ── cpu.topology：检测 L3 缓存域（CCD）拓扑，决定 CPU 核心控制卡片是否显示。
@@ -15433,6 +16549,9 @@ static void recoverWebViewProcess(const WebViewFailureInfo& info) {
     }
 
     if (info.kind == COREWEBVIEW2_PROCESS_FAILED_KIND_BROWSER_PROCESS_EXITED) {
+        appendNativeLifecycleLog("webview-browser-process-failed", {
+            {"attempt", attempt}, {"exitCode", info.exitCode}
+        });
         if (attempt > 2) {
             appendWebViewDiagnostic({{"event", "recovery-exhausted"}, {"kind", kind}, {"attempt", attempt}});
             beginAsyncExit(g_hwnd, 1);
@@ -15485,6 +16604,9 @@ static void completeWebViewRecovery() {
         {"action", g_webviewRecoveryAction},
         {"generation", g_webviewGeneration.load(std::memory_order_acquire)}
     });
+    appendNativeLifecycleLog("webview-recovery-complete", {
+        {"generation", g_webviewGeneration.load(std::memory_order_acquire)}
+    });
     g_webviewRecoveryInProgress = false;
     g_webviewRecoveryAction.clear();
     if (powerResumeRecovery)
@@ -15492,54 +16614,31 @@ static void completeWebViewRecovery() {
 }
 
 static void handlePowerResumeNotification(SgWork work, const char* reason) {
+    appendNativeLifecycleLog("power-resume-notification", {
+        {"reason", reason ? reason : "unknown"}, {"work", static_cast<int>(work)}
+    });
     const ULONGLONG now = GetTickCount64();
     g_sgSleepQueryGateClosed = false;
     g_sgSleepQueryOwnsGeneration = false;
     g_sgSleepQueryGeneration = 0;
     auto generation = currentPowerGeneration();
     const auto phase = g_powerLifecycle.load(std::memory_order_acquire);
-    // Once PBT_APMSUSPEND confirmed this task, an automatic wake is an
-    // external-wake candidate, never an entry failure. Query failure has its
-    // own explicit PBT_APMQUERYSUSPENDFAILED path below.
-    const bool fastEntryFailure = work == SgWork::WakeAutomatic &&
-        phase == PowerLifecycle::Suspending && !g_sgTask.suspendConfirmed &&
-        g_sgTask.mode == SgSleepMode::S3 && g_sgRepairEligible && g_sgSleepTriggerTick != 0 &&
-        now >= g_sgSleepTriggerTick &&
-        now - g_sgSleepTriggerTick <= sgEntryFailureWindowMs();
-
-    // Both retry kinds are exclusive transactions. Signals remain observable
-    // so the next attempt can be scheduled, but normal recovery/focus work is
-    // not allowed to consume the pause lease until success or exhaustion.
-    if (sgRetryIsExclusive()) {
-        if (g_sgTask.retryKind == SgRetryKind::EntryFailure) {
-            if (fastEntryFailure) {
-                g_sgEntryFailureObserved = true;
-                traceLog("sleep retry attempt failed generation=%llu", generation);
-                sgAdvanceRetry("retry-fast-entry-failure");
-            } else {
-                stopPowerResumeWatchdog();
-                traceLog("sleep retry signal queued reason=%s generation=%llu",
-                         reason ? reason : "unknown", generation);
-            }
-        } else {
-            // A wake during the non-user retry window is itself a failed
-            // attempt, including a user-looking broadcast. Do not restore or
-            // focus the game until all scheduled attempts are exhausted.
+    // Any repair retry owns the one PID lease. Automatic signals may not
+    // resume it; an explicit user wake cancels the retry and restores it.
+    if (sgSleepRetryActive()) {
+        if (work != SgWork::WakeSuspend) {
             stopPowerResumeWatchdog();
-            sgAdvanceRetry("retry-non-user-wake-signal");
+            traceLog("sleep retry signal queued reason=%s generation=%llu",
+                     reason ? reason : "unknown", generation);
+            return;
         }
-        return;
-    }
-
-    // An immediate automatic wake before a confirmed suspend is an entry
-    // failure, not a real resume.  Schedule its retry before changing the
-    // lifecycle or queueing wake work: otherwise a worker can race the timer
-    // and recover/focus the game during the exclusive retry window.
-    if (fastEntryFailure && g_sgRetryEntryFailure) {
-        g_sgEntryFailureObserved = true;
-        traceLog("sleep entry failure inferred from fast automatic resume generation=%llu", generation);
-        sgRequestSleepRetry(SgRetryKind::EntryFailure, "fast-entry-failure");
-        return;
+        // RESUMESUSPEND is explicit user-visible wake evidence on the S3 path.
+        // It cancels retries and proceeds to exact PID recovery.
+        g_sgRetryInProgress = false;
+        g_sgRetryDueTick = 0;
+        g_sgTask.retryKind = SgRetryKind::None;
+        sgClearInternalSleepRequest("pbt-resume-suspend-user");
+        if (g_hwnd) KillTimer(g_hwnd, SG_RETRY_TIMER_ID);
     }
 
     // Windows commonly sends RESUMEAUTOMATIC followed by RESUMESUSPEND for
@@ -15586,11 +16685,11 @@ static void sgBeginModernStandbyIntent() {
     }
     const ULONGLONG now = GetTickCount64();
     if (g_sgModernStandbyActive ||
-        sgRetryIsExclusive() ||
+        sgSleepRetryActive() ||
         (g_sgLastModernStandbyIntentTick != 0 && now - g_sgLastModernStandbyIntentTick < 2000ULL)) {
         sgRecordFact("s0-intent-ignored", {
             {"reason", g_sgModernStandbyActive ? "active-transaction" :
-                (sgRetryIsExclusive() ? "entry-retry-active" : "duplicate-506")},
+                (sgSleepRetryActive() ? "sleep-retry-active" : "duplicate-506")},
             {"lifecycle", powerLifecycleName(g_powerLifecycle.load(std::memory_order_acquire))},
             {"generation", currentPowerGeneration()}
         });
@@ -15607,7 +16706,7 @@ static void sgBeginModernStandbyIntent() {
             {"generation", currentPowerGeneration()},
             {"gameSuspended", g_sgGameActuallySuspended.load(std::memory_order_acquire)}
         });
-        sgAbortSleepIntent("kernel-power-506-stale-lifecycle", false);
+        sgAbortSleepIntent("kernel-power-506-stale-lifecycle");
         if (g_powerLifecycle.load(std::memory_order_acquire) != PowerLifecycle::Ready) {
             sgRecordFact("s0-intent-ignored", {
                 {"reason", "stale-lifecycle-not-reset"},
@@ -15615,6 +16714,21 @@ static void sgBeginModernStandbyIntent() {
             });
             return;
         }
+    }
+    SgSleepTarget previousLease;
+    if (sgReadSleepTarget(previousLease)) {
+        if (previousLease.markerOwned)
+            (void)sgResumeSleepTarget(previousLease.powerGeneration, false);
+        SgSleepTarget remainingLease;
+        if (sgReadSleepTarget(remainingLease) && remainingLease.markerOwned) {
+            sgRecordFact("s0-intent-ignored", {
+                {"reason", "previous-sleep-lease-not-recovered"},
+                {"leaseGeneration", remainingLease.powerGeneration},
+                {"pid", static_cast<unsigned long long>(remainingLease.pid)}
+            });
+            return;
+        }
+        sgClearSleepTarget();
     }
     g_sgLastModernStandbyIntentTick = now;
     // Power-button policy is diagnostic only. Kernel-Power 506 already proves
@@ -15624,6 +16738,7 @@ static void sgBeginModernStandbyIntent() {
     g_sgTask.mode = SgSleepMode::S3;
     g_sgSleepIntentArmed = true;
     const auto generation = g_powerGeneration.fetch_add(1, std::memory_order_acq_rel) + 1;
+    g_sgPauseWorkCompletedGeneration.store(0, std::memory_order_release);
     g_powerLifecycle.store(PowerLifecycle::Suspending, std::memory_order_release);
     g_resumeReadyGeneration.store(0, std::memory_order_release);
     g_lastResumeNotifyTick = 0;
@@ -15632,14 +16747,12 @@ static void sgBeginModernStandbyIntent() {
     gamepadResetNativeState(true);
     g_sgModernStandbyActive = true;
     g_sgModernStandbyGeneration = generation;
-    g_sgAcDcManualSleepDetected = false;
-    g_sgS0SystemResumeObserved = false;
-    g_sgS0StateLastWallFileTime = sgNowFileTime();
-    g_sgS0StateLastUnbiasedTime = sgUnbiasedInterruptTime();
-    SetTimer(g_hwnd, SG_S0_STATE_TIMER_ID, SG_S0_STATE_POLL_MS, nullptr);
     g_sgModernWakeClassified = false;
     g_sgModernWakeClassifiedTick = 0;
     sgMarkSleepTrigger();
+    // Best-effort reinforcement only; never perform the HTTP/HC operation in
+    // this event callback.  The Host's own power observer is authoritative.
+    fanHostScheduleEmergencySuspend("kernel-power-506", generation);
     ipc_emit("power.suspending", {
         {"generation", generation}, {"modernStandby", true},
         {"intentSource", "kernel-power-506"},
@@ -15659,22 +16772,23 @@ static void sgBeginModernStandbyIntent() {
 // an entry-failure signal inside this short, correlated window.
 static bool sgS0EntryFailureEligible(int wakeReason, ULONGLONG nowTick) {
     if (wakeReason != 7 && wakeReason != 8) return false;
-    const int sleepReason = g_sgLastKernel506Reason.load(std::memory_order_acquire);
-    if (sleepReason != 1 && sleepReason != 3) return false;
-    // sgMarkSleepTrigger deliberately consumes g_sgSleepIntentArmed after it
-    // has transferred the intent into g_sgRepairEligible. Do not require the
-    // one-shot arm flag here: doing so makes every valid immediate 507 fail
-    // classification after the 506 transaction was accepted.
-    if (!g_sgRepairEligible ||
-        g_sgTask.mode != SgSleepMode::S3 ||
-        g_sgTask.generation != currentPowerGeneration() ||
-        g_sgSleepTriggerTick == 0 ||
-        nowTick < g_sgSleepTriggerTick ||
+    if (g_sgSleepTriggerTick == 0 || nowTick < g_sgSleepTriggerTick ||
         nowTick - g_sgSleepTriggerTick > SG_S0_REASON7_FAILURE_WINDOW_MS)
         return false;
-    const auto phase = g_powerLifecycle.load(std::memory_order_acquire);
-    return phase == PowerLifecycle::Suspending ||
-        phase == PowerLifecycle::Suspended || phase == PowerLifecycle::Resuming;
+
+    // A retry request owns the same direct 507 Reason=7/8 failure evidence,
+    // regardless of whether it was started by EntryFailure or USB4 wake.
+    if (sgSleepRetryActive() &&
+        g_sgInternalSleepRequest.kind == g_sgTask.retryKind)
+        return true;
+
+    const int sleepReason = g_sgLastKernel506Reason.load(std::memory_order_acquire);
+    const bool userIntent506 = sleepReason == 1 || sleepReason == 3;
+    if (!userIntent506 || !g_sgRepairEligible ||
+        g_sgTask.mode != SgSleepMode::S3 ||
+        g_sgTask.generation != currentPowerGeneration())
+        return false;
+    return true;
 }
 
 static bool sgS0Reason7FailureEligible(ULONGLONG nowTick) {
@@ -15686,59 +16800,44 @@ static void sgHandleModernStandbyWake(bool userWake) {
     g_sgSleepQueryGateClosed = false;
     g_sgSleepQueryOwnsGeneration = false;
     g_sgSleepQueryGeneration = 0;
-    if (g_sgModernWakeClassified &&
+    if (!userWake && g_sgModernWakeClassified &&
         now - g_sgModernWakeClassifiedTick < 5000ULL) {
         traceLog("s0 wake duplicate ignored user=%d", userWake ? 1 : 0);
         return;
     }
     const auto phase = g_powerLifecycle.load(std::memory_order_acquire);
-    if (!g_sgModernStandbyActive && !g_sgModernWakePending &&
+    if (!g_sgModernStandbyActive &&
         !g_sgInSuspend.load(std::memory_order_acquire) &&
         phase != PowerLifecycle::Suspended && phase != PowerLifecycle::Suspending)
         return;
     const auto generation = currentPowerGeneration();
     g_sgModernStandbyActive = false;
-    g_sgModernWakePending = false;
-    g_sgModernWakeCandidateTick = 0;
-    g_sgModernWakeCandidateFileTime = 0;
     g_sgModernWakeClassified = true;
     g_sgModernWakeClassifiedTick = now;
-    if (g_hwnd) KillTimer(g_hwnd, SG_S0_WAKE_CLASSIFY_TIMER_ID);
-    if (g_hwnd) KillTimer(g_hwnd, SG_S0_STATE_TIMER_ID);
     // A Reason=7/8 exit within the confirmed two-second intent window is an
     // entry failure even if the pause worker already completed. Keep the pause
     // lease while the exclusive retry transaction attempts to enter sleep again.
-    const bool fastEntryFailure = !userWake &&
+    const bool entryFailure = !userWake &&
         sgS0EntryFailureEligible(g_sgLastS0WakeReason, now);
     sgRecordFact("s0-wake-classified", {
-        {"userWake", userWake}, {"fastEntryFailure", fastEntryFailure},
+        {"userWake", userWake}, {"entryFailure", entryFailure},
         {"generation", generation}, {"phase", powerLifecycleName(phase)}
     });
 
-    // Keep the S0 path subject to the same retry transaction as classic S3.
-    // Kernel-Power 507 is useful evidence while retrying, but it must not
-    // start wake classification, recovery, focus, or a second re-sleep flow.
-    if (sgRetryIsExclusive()) {
-        if (g_sgTask.retryKind == SgRetryKind::EntryFailure) {
-            if (fastEntryFailure) {
-                g_sgEntryFailureObserved = true;
-                traceLog("s0 retry attempt failed generation=%llu", generation);
-                sgAdvanceRetry("s0-retry-fast-entry-failure");
-            } else {
-                stopPowerResumeWatchdog();
-                traceLog("s0 retry signal recorded user=%d generation=%llu",
-                         userWake ? 1 : 0, generation);
-            }
+    if (sgSleepRetryActive()) {
+        if (entryFailure) {
+            traceLog("s0 retry attempt failed generation=%llu", generation);
+            sgAdvanceSleepRetry("s0-retry-entry-failure");
         } else {
             stopPowerResumeWatchdog();
-            sgAdvanceRetry("s0-retry-non-user-wake-signal");
+            traceLog("s0 retry signal recorded user=%d generation=%llu",
+                     userWake ? 1 : 0, generation);
         }
         return;
     }
-    if (fastEntryFailure && g_sgRetryEntryFailure) {
-        g_sgEntryFailureObserved = true;
-        traceLog("s0 entry failure inferred from fast kernel-power wake generation=%llu", generation);
-        sgRequestSleepRetry(SgRetryKind::EntryFailure, "s0-fast-entry-failure");
+    if (entryFailure && g_sgRetryEntryFailure) {
+        traceLog("s0 entry failure confirmed by kernel-power generation=%llu", generation);
+        sgStartSleepRetry(SgRetryKind::EntryFailure, "s0-kernel-entry-failure");
         return;
     }
     if (phase != PowerLifecycle::Resuming) {
@@ -15754,147 +16853,6 @@ static void sgHandleModernStandbyWake(bool userWake) {
         });
     }
     sgQueueWork(userWake ? SgWork::WakeSuspend : SgWork::WakeAutomatic, generation);
-}
-
-static void sgArmModernWakeCandidate(const char* source) {
-    if (sgRetryIsExclusive()) {
-        // The PBT resume broadcast can precede Kernel-Power 507. Record it,
-        // but do not launch the normal S0 classifier during entry retries.
-        traceLog("s0 retry resume signal recorded source=%s generation=%llu",
-                 source ? source : "unknown", currentPowerGeneration());
-        return;
-    }
-    if (!g_sgModernStandbyActive || g_sgModernWakePending) return;
-    const auto generation = currentPowerGeneration();
-    const ULONGLONG now = GetTickCount64();
-    g_sgModernWakePending = true;
-    g_sgModernWakeCandidateTick = now;
-    g_sgModernWakeCandidateFileTime = sgNowFileTime();
-    if (g_powerLifecycle.load(std::memory_order_acquire) != PowerLifecycle::Resuming) {
-        g_powerLifecycle.store(PowerLifecycle::Resuming, std::memory_order_release);
-        closeHardwareWriteGate(source ? source : "s0-resume-candidate");
-        g_inputReady.store(false, std::memory_order_release);
-        gamepadResetNativeState(true);
-        g_lastResumeNotifyTick = now;
-        armPowerResumeWatchdog(generation);
-        ipc_emit("power.resuming", {
-            {"generation", generation}, {"modernStandby", true},
-            {"userWake", false}, {"wakeClassification", "pending"}
-        });
-    }
-    SetTimer(g_hwnd, SG_S0_WAKE_CLASSIFY_TIMER_ID,
-             SG_S0_WAKE_CLASSIFY_TIMEOUT_MS, nullptr);
-    traceLog("s0 wake candidate pending source=%s generation=%llu",
-             source ? source : "unknown", generation);
-}
-
-static void sgObserveAcDcForManualSleep() {
-    const ULONGLONG nowTick = GetTickCount64();
-    const ULONGLONG intentFileTime =
-        g_sgLastPowerButtonSleepIntentFileTime.load(std::memory_order_acquire);
-    const ULONGLONG nowFileTime = sgNowFileTime();
-    const bool acdcWithinWindow = g_sgLastAcDcBroadcastTick != 0 &&
-        nowTick >= g_sgLastAcDcBroadcastTick &&
-        nowTick - g_sgLastAcDcBroadcastTick <= SG_ACDC_MANUAL_DETECT_WINDOW_MS;
-    const bool buttonWithin120Seconds = intentFileTime != 0 &&
-        nowFileTime >= intentFileTime &&
-        nowFileTime - intentFileTime <= SG_POWER_BUTTON_SLEEP_RECENCY_100NS;
-    if (!acdcWithinWindow || !buttonWithin120Seconds ||
-        g_sgAcDcManualSleepDetected || !g_guardEnabled ||
-        (!g_sgModernStandbyActive && !g_sgModernWakePending))
-        return;
-
-    g_sgAcDcManualSleepDetected = true;
-    traceLog("s0 manual sleep inferred source=acdc-window buttonAge100ns=%llu acdcAgeMs=%llu",
-             nowFileTime - intentFileTime, nowTick - g_sgLastAcDcBroadcastTick);
-    // AC/DC is evidence only.  The system-state sampler must still observe
-    // that the machine actually resumed before the wake transaction starts.
-}
-
-static ULONGLONG sgUnbiasedInterruptTime() {
-    ULONGLONG value = 0;
-    QueryUnbiasedInterruptTime(&value);
-    return value;
-}
-
-static void sgSampleModernStandbySystemState() {
-    if (!g_sgModernStandbyActive || g_sgModernWakePending ||
-        g_sgModernWakeClassified || g_sgS0ReentryActive ||
-        !g_sgRepairEligible || !g_sgSleepCycleActive.load(std::memory_order_acquire) ||
-        g_sgTask.mode != SgSleepMode::S3 || g_sgRetryInProgress)
-        return;
-
-    const ULONGLONG wallNow = sgNowFileTime();
-    const ULONGLONG unbiasedNow = sgUnbiasedInterruptTime();
-    if (g_sgS0StateLastWallFileTime == 0 || g_sgS0StateLastUnbiasedTime == 0) {
-        g_sgS0StateLastWallFileTime = wallNow;
-        g_sgS0StateLastUnbiasedTime = unbiasedNow;
-        return;
-    }
-    const ULONGLONG wallElapsed = wallNow - g_sgS0StateLastWallFileTime;
-    const ULONGLONG unbiasedElapsed = unbiasedNow - g_sgS0StateLastUnbiasedTime;
-    g_sgS0StateLastWallFileTime = wallNow;
-    g_sgS0StateLastUnbiasedTime = unbiasedNow;
-    // Unbiased interrupt time excludes sleep.  A material wall-clock gap is
-    // therefore a system-state resume even if every device/resume event was lost.
-    // The AC/DC evidence is intentionally evaluated before the resume gap.
-    // A valid power-button intent plus a real AC/DC change opens this cycle's
-    // detector; neither event alone is permitted to do so.
-    sgObserveAcDcForManualSleep();
-    if (wallElapsed > unbiasedElapsed + 5'000'000ULL) {
-        g_sgS0SystemResumeObserved = true;
-        traceLog("s0 system-state resume detected sleepGap100ns=%llu",
-                 wallElapsed - unbiasedElapsed);
-        if (!g_sgAcDcManualSleepDetected)
-            traceLog("s0 system-state resume held reason=no-acdc-manual-sleep-evidence");
-    }
-    if (g_sgS0SystemResumeObserved && g_sgAcDcManualSleepDetected)
-        sgArmModernWakeCandidate("system-state-after-manual-sleep");
-}
-
-static void sgFinalizeModernWakeTimeout() {
-    if (!g_sgModernWakePending) return;
-    const auto generation = currentPowerGeneration();
-    const ULONGLONG now = GetTickCount64();
-    const ULONGLONG candidateFileTime = g_sgModernWakeCandidateFileTime;
-    const ULONGLONG buttonEventFileTime =
-        g_sgLastPowerButtonWakeEventFileTime.load(std::memory_order_acquire);
-    // The event log timestamp is second-granular on some systems.  Allow
-    // two seconds of ordering skew, but never accept a prior sleep cycle.
-    const bool powerButtonRecorded = candidateFileTime != 0 &&
-        buttonEventFileTime != 0 &&
-        buttonEventFileTime + 20'000'000ULL >= candidateFileTime;
-    g_sgModernWakePending = false;
-    g_sgModernWakeCandidateTick = 0;
-    g_sgModernWakeCandidateFileTime = 0;
-    KillTimer(g_hwnd, SG_S0_WAKE_CLASSIFY_TIMER_ID);
-    KillTimer(g_hwnd, SG_S0_STATE_TIMER_ID);
-    const auto phase = g_powerLifecycle.load(std::memory_order_acquire);
-    const bool normalRunning = g_sgRepairEligible &&
-        g_sgSleepCycleActive.load(std::memory_order_acquire) &&
-        g_sgTask.mode == SgSleepMode::S3 && !g_sgS0ReentryActive &&
-        !g_sgRetryInProgress &&
-        (phase == PowerLifecycle::Resuming || phase == PowerLifecycle::Ready);
-    if (!powerButtonRecorded && normalRunning) {
-        g_sgModernStandbyActive = false;
-        g_sgModernWakeClassified = true;
-        g_sgModernWakeClassifiedTick = now;
-        g_sgResleepPending = false;
-        traceLog("s0 strict state window elapsed generation=%llu result=no-power-button-record",
-                 generation);
-        sgRequestSleepRetry(SgRetryKind::NonUserWake, "s0-no-power-button-10s");
-        ipc_emit("power.wake-classified", {
-            {"generation", generation}, {"modernStandby", true},
-            {"classification", g_sgRetryInProgress ? "no-power-button-10s" : "strict-hold"}
-        });
-        return;
-    }
-    traceLog("s0 strict state window closed generation=%llu powerButton=%d normal=%d",
-             generation, powerButtonRecorded ? 1 : 0, normalRunning ? 1 : 0);
-    ipc_emit("power.wake-classified", {
-        {"generation", generation}, {"modernStandby", true},
-        {"classification", powerButtonRecorded ? "power-button-recorded" : "state-not-runnable"}
-    });
 }
 
 static DWORD WINAPI suspendResumeSubscriptionCallback(PVOID, ULONG type, PVOID) {
@@ -16047,18 +17005,6 @@ static DWORD WINAPI sgKernelPowerEventCallback(EVT_SUBSCRIBE_NOTIFY_ACTION actio
             {"targetState", sgKernelPowerEventDataInt(xml, "TargetState")}
         });
     }
-    if (entering && userInitiatedSleep) {
-        g_sgLastPowerButtonSleepIntentFileTime.store(
-            recordedFileTime, std::memory_order_release);
-        sgClearExternalDeviceWake("kernel-power-506-user-initiated", false);
-        sgMarkUserStandby("kernel-power-506-user-initiated", reason, recordedFileTime);
-        sgRecordFact("user-initiated-sleep", {
-            {"label", "主动按键睡眠"},
-            {"evidence", "Kernel-Power EventID=506 Reason=1 or Reason=3"},
-            {"reason", reason},
-            {"fileTime", sgFormatFactFileTime(recordedFileTime)}
-        });
-    }
     if (leaving && reason1) {
         g_sgLastPowerButtonWakeEventFileTime.store(
             recordedFileTime, std::memory_order_release);
@@ -16073,13 +17019,13 @@ static DWORD WINAPI sgKernelPowerEventCallback(EVT_SUBSCRIBE_NOTIFY_ACTION actio
                 (reason1 ? "power-button" : "other"),
              sgKernelPowerEventDataInt(xml, "TargetState"));
     if (entering && reason1)
-        PostMessageW(g_hwnd, WM_SG_S0_INTENT, 0, 0);
+        PostMessageW(g_hwnd, WM_SG_S0_INTENT, static_cast<WPARAM>(reason),
+                     static_cast<LPARAM>(recordedFileTime));
     else if (entering && reason == 3)
         // Start-menu sleep is reported as Kernel-Power 506 Reason=3 on the
         // affected Windows builds, rather than as the power-button reason.
-        PostMessageW(g_hwnd, WM_SG_S0_INTENT, 0, 0);
-    else if (entering && reason == 28)
-        PostMessageW(g_hwnd, WM_SG_S0_REENTER, static_cast<WPARAM>(reason), 0);
+        PostMessageW(g_hwnd, WM_SG_S0_INTENT, static_cast<WPARAM>(reason),
+                     static_cast<LPARAM>(recordedFileTime));
     else if (leaving)
         PostMessageW(g_hwnd, WM_SG_S0_WAKE, reason1 ? 1 : 2,
                      static_cast<LPARAM>(reason));
@@ -16090,16 +17036,14 @@ static DWORD WINAPI sgKernelPowerEventCallback(EVT_SUBSCRIBE_NOTIFY_ACTION actio
 
 static void sgStartKernelPowerSubscription() {
     if (g_sgKernelPowerSubscription) return;
+    g_sgInternalSleepRequest = {};
     g_sgLastPowerButtonSleepIntentFileTime.store(0, std::memory_order_release);
     g_sgLastPowerButtonWakeEventFileTime.store(0, std::memory_order_release);
     g_sgLastKernel506Reason.store(-1, std::memory_order_release);
     g_sgLastKernel507Reason.store(-1, std::memory_order_release);
     g_sgLastKernel506EventFileTime.store(0, std::memory_order_release);
     g_sgLastKernel507EventFileTime.store(0, std::memory_order_release);
-    g_sgLastAcDcBroadcastTick = 0;
-    g_sgAcDcManualSleepDetected = false;
-    g_sgS0SystemResumeObserved = false;
-    traceLog("s0 manual sleep evidence reset source=process-start");
+    traceLog("kernel power sleep evidence reset source=process-start");
     const wchar_t* query =
         L"*[System[(Provider[@Name='Microsoft-Windows-Kernel-Power']) and "
         L"(EventID=107 or EventID=506 or EventID=507)]]";
@@ -16285,12 +17229,12 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         ipc_emit("window.blur");
         return 0;
     case WM_TIMER:
-        if (w == SG_S0_WAKE_CLASSIFY_TIMER_ID) {
-            sgFinalizeModernWakeTimeout();
-            return 0;
-        }
-        if (w == SG_S0_STATE_TIMER_ID) {
-            sgSampleModernStandbySystemState();
+        if (w == EXIT_CLEANUP_WATCHDOG_TIMER_ID) {
+            KillTimer(h, EXIT_CLEANUP_WATCHDOG_TIMER_ID);
+            appendNativeLifecycleLog("exit-cleanup-deadline", {
+                {"deadlineMs", EXIT_CLEANUP_WATCHDOG_MS}
+            });
+            postExitReadyOnce(h, g_exitCode.load(std::memory_order_relaxed));
             return 0;
         }
         if (w == POWER_RESUME_NUDGE_TIMER_ID) {
@@ -16424,16 +17368,9 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         if (w == MEM_TRAY_TIMER_ID) {
             refreshMemTrayIcon();
         }
-        if (w == SG_RESLEEP_TIMER_ID) {
-            sgTryResleep();
-        }
         if (w == SG_RETRY_TIMER_ID) {
             KillTimer(g_hwnd, SG_RETRY_TIMER_ID);
             sgDispatchSameModeRetry();
-        }
-        if (w == SG_EXTERNAL_DEVICE_RETRY_TIMER_ID) {
-            sgDispatchExternalDeviceWakeRetry();
-            return 0;
         }
         if (w == GP_HOLD_TIMER_ID) {
             gamepadEval();
@@ -16471,8 +17408,11 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         return 0;
     case WM_APP_EXIT_READY:
         if (!g_exitRequested.load()) return 0;
+        KillTimer(h, EXIT_CLEANUP_WATCHDOG_TIMER_ID);
         if (g_exitCleanupThread) {
-            WaitForSingleObject(g_exitCleanupThread, 0);
+            const DWORD cleanupWait = WaitForSingleObject(g_exitCleanupThread, 0);
+            if (cleanupWait != WAIT_OBJECT_0)
+                appendNativeLifecycleLog("exit-cleanup-worker-detached");
             CloseHandle(g_exitCleanupThread);
             g_exitCleanupThread = nullptr;
         }
@@ -16486,18 +17426,14 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         KillTimer(h, RETURN_GAME_FOCUS_TIMER_ID);
         KillTimer(h, FOCUS_DISPLAY_TIMER_ID);
         KillTimer(h, MEM_TRAY_TIMER_ID);
-        KillTimer(h, SG_RESLEEP_TIMER_ID);
         KillTimer(h, SG_RETRY_TIMER_ID);
-        KillTimer(h, SG_EXTERNAL_DEVICE_RETRY_TIMER_ID);
-        KillTimer(h, SG_S0_WAKE_CLASSIFY_TIMER_ID);
-        KillTimer(h, SG_S0_STATE_TIMER_ID);
         KillTimer(h, GP_HOLD_TIMER_ID);
         stopPowerResumeWatchdog();
         KillTimer(h, WEBVIEW_RECOVERY_TIMER_ID);
         KillTimer(h, WEBVIEW_RECOVERY_ACTION_TIMER_ID);
         if (g_memTrayIcon) { DestroyIcon(g_memTrayIcon); g_memTrayIcon = nullptr; }
         if (g_tdpDaemonJob) { CloseHandle(g_tdpDaemonJob); g_tdpDaemonJob = nullptr; }
-        gamepadSerialStop();
+        gamepadSerialStop(500);
         closeWebViewsForExit();
         DestroyWindow(h);
         return 0;
@@ -16532,10 +17468,10 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         return 0;
     case WM_QUERYENDSESSION:
         // 系统注销/关机前先恢复被冻结游戏；返回 TRUE 允许会话结束继续。
-        sgCleanupBeforeExit();
+        (void)sgCleanupBeforeExit(true);
         return TRUE;
     case WM_ENDSESSION:
-        if (w) sgCleanupBeforeExit();
+        if (w) (void)sgCleanupBeforeExit(true);
         else g_sgCleanupDone = false; // 会话结束被取消，允许后续真正退出再次执行恢复
         return 0;
     case WM_CLOSE:
@@ -16546,6 +17482,7 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         beginAsyncExit(h, 0);
         return 0;
     case WM_DESTROY:
+            appendNativeLifecycleLog("window-destroy", {{"exitRequested", g_exitRequested.load()}});
         if (g_exitRequested.load()) {
             g_summonQuit = true;
             PostQuitMessage((int)g_exitCode.load(std::memory_order_relaxed));
@@ -16553,32 +17490,28 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         }
         // CCD worker 退出（收尾清理）
         g_ccdStop.store(true);
-        gamepadSerialStop();
-        poolStop();
+        gamepadSerialStop(500);
+        poolStop(1000);
         // 取消电源通知订阅 + 清防抖定时器
         if (g_acdcNotify) { UnregisterPowerSettingNotification(g_acdcNotify); g_acdcNotify = nullptr; }
         if (g_monitorNotify) { UnregisterPowerSettingNotification(g_monitorNotify); g_monitorNotify = nullptr; }
         if (g_schemeNotify) { UnregisterPowerSettingNotification(g_schemeNotify); g_schemeNotify = nullptr; }
         sgStopKernelPowerSubscription();
         if (g_suspendResumeNotify) { PowerUnregisterSuspendResumeNotification(g_suspendResumeNotify); g_suspendResumeNotify = nullptr; }
-        sgStopWorkThread();
-        sgStopResleepObservation();
+        sgStopWorkThread(1000);
+        sgStopSleepRetry();
         KillTimer(h, TIMER_ID_ACDC);
         KillTimer(h, SUMMON_FOCUS_TIMER_ID);
         KillTimer(h, RETURN_GAME_FOCUS_TIMER_ID);
         KillTimer(h, FOCUS_DISPLAY_TIMER_ID);
         KillTimer(h, MEM_TRAY_TIMER_ID);
-        KillTimer(h, SG_RESLEEP_TIMER_ID);
-        KillTimer(h, SG_EXTERNAL_DEVICE_RETRY_TIMER_ID);
-        KillTimer(h, SG_S0_WAKE_CLASSIFY_TIMER_ID);
-        KillTimer(h, SG_S0_STATE_TIMER_ID);
         KillTimer(h, GP_HOLD_TIMER_ID);
         stopPowerResumeWatchdog();
         if (g_memTrayIcon) { DestroyIcon(g_memTrayIcon); g_memTrayIcon = nullptr; }
         // 退出前恢复被冻结的进程；统一清理函数保证 app.exit/会话结束/窗口销毁只执行一次。
         stopTdpDaemonForExit();
-        stopTopMonitorForExit();
-        sgCleanupBeforeExit();
+        stopTopMonitorForExit(1000);
+        (void)sgCleanupBeforeExit(true);
         closeWebViewsForExit();
         // Cleanup watchers
         for (auto& [id, w] : g_watchers) {
@@ -16681,10 +17614,7 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
             if (GetRawInputData((HRAWINPUT)l, RID_INPUT, g_riBuf, &dwSize, sizeof(RAWINPUTHEADER)) == dwSize) {
                 RAWINPUT* raw = (RAWINPUT*)g_riBuf;
                 if (raw->header.dwType == RIM_TYPEHID) {
-                    sgMarkInputActivity();
                     gamepadEval();
-                } else if (raw->header.dwType == RIM_TYPEKEYBOARD || raw->header.dwType == RIM_TYPEMOUSE) {
-                    sgMarkInputActivity();
                 }
             }
         }
@@ -16696,16 +17626,15 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         return 0;
     case WM_DEVICECHANGE:
         {
-            const ULONGLONG nowTick = GetTickCount64();
             ULONGLONG standbyAgeMs = 0;
             const bool standbyAgeEligible =
-                sgUserStandbyDeviceEligible(nowTick, standbyAgeMs);
+                sgExternalDeviceWakeIntentAge(standbyAgeMs);
             const bool deviceNodeChange =
                 static_cast<unsigned long>(w) == DBT_DEVNODES_CHANGED;
             const bool retryCandidate = deviceNodeChange;
             sgRecordFact("device-change", {
                 {"code", static_cast<unsigned long long>(w)},
-                {"userStandby", g_sgUserStandbyTick.load(std::memory_order_acquire) != 0},
+                {"userStandby", g_sgLastPowerButtonSleepIntentFileTime.load(std::memory_order_acquire) != 0},
                 {"standbyAgeMs", standbyAgeMs},
                 {"standbyAgeEligible", standbyAgeEligible},
                 {"guardEnabled", g_guardEnabled},
@@ -16715,11 +17644,6 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
             if (retryCandidate) {
                 sgNoteExternalDeviceNodeChange();
             }
-        }
-        if (g_sgRepairEligible) {
-            g_sgWakeSourceEvidence = true;
-            g_sgWakeSourceTick = GetTickCount64();
-            traceLog("sleep wake source evidence=device-change");
         }
         return TRUE;
     case WM_KEYDOWN:
@@ -16784,13 +17708,41 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         }
         break;
 
-    case WM_SG_S0_INTENT:
+    case WM_SG_S0_INTENT: {
+        const int reason = static_cast<int>(w);
+        const ULONGLONG eventFileTime = static_cast<ULONGLONG>(l);
+        const bool internalRequest506 =
+            sgInternalSleepRequestMatches506(reason, eventFileTime);
+        if (internalRequest506 || sgSleepRetryActive()) {
+            // SetSuspendState can emit the same 506 Reason=1/3 shape as an
+            // interactive request. Preserve the original user intent and the
+            // active retry transaction; this 506 only confirms the internal
+            // request reached the platform.
+            sgRecordFact("internal-sleep-506", {
+                {"reason", reason},
+                {"fileTime", sgFormatFactFileTime(eventFileTime)},
+                {"requestKind", sgRetryKindName(g_sgInternalSleepRequest.kind)},
+                {"requestMarkerMatched", internalRequest506},
+                {"retryKind", sgRetryKindName(g_sgTask.retryKind)}
+            });
+            g_sgModernStandbyActive = true;
+            g_sgModernStandbyGeneration = currentPowerGeneration();
+            return 0;
+        }
+        sgClearInternalSleepRequest("new-user-506");
+        g_sgLastPowerButtonSleepIntentFileTime.store(
+            eventFileTime, std::memory_order_release);
+        sgClearUnexpectedWake("kernel-power-506-user-initiated", false);
+        sgMarkUserStandby("kernel-power-506-user-initiated", reason, eventFileTime);
+        sgRecordFact("user-initiated-sleep", {
+            {"label", "主动按键睡眠"},
+            {"evidence", "Kernel-Power EventID=506 Reason=1 or Reason=3"},
+            {"reason", reason},
+            {"fileTime", sgFormatFactFileTime(eventFileTime)}
+        });
         sgBeginModernStandbyIntent();
         return 0;
-    case WM_SG_S0_REENTER:
-        if (static_cast<int>(w) == 28)
-            sgMarkModernStandbyReentry("kernel-power-506");
-        return 0;
+    }
     case WM_SG_S0_WAKE: {
         g_sgLastS0WakeReason = static_cast<int>(l);
         g_sgLastS0WakeTick = GetTickCount64();
@@ -16807,21 +17759,21 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         if (w == 1) {
             // 507 Reason=1 is a confirmed user wake. Consume the prior
             // 506 Reason=1/3 marker so later USB4 activity cannot re-sleep it.
-            sgClearExternalDeviceWake("kernel-power-507-reason-1", true);
+            sgClearInternalSleepRequest("kernel-power-507-reason-1");
+            sgClearUnexpectedWake("kernel-power-507-reason-1", true);
             g_sgLastPowerButtonWakeTick = g_sgLastS0WakeTick;
             traceLog("s0 wake gate opened source=kernel-power-507-reason-1 reason=%d",
                      g_sgLastS0WakeReason);
-            if (sgEntryRetryIsExclusive()) {
+            if (sgSleepRetryActive()) {
                 // This is the only signal that accepts a user abort during
                 // Reason=7 entry retries. Resume only the marker owned by the
                 // current transaction; no automatic/non-user signal may do it.
-                sgRecordFact("s0-entry-retry-canceled-user-wake", {
+                sgRecordFact("s0-sleep-retry-canceled-user-wake", {
                     {"generation", currentPowerGeneration()}
                 });
-                sgAbortSleepIntent("s0-user-power-button-wake", false);
+                sgAbortSleepIntent("s0-user-power-button-wake");
                 return 0;
             }
-            g_sgS0ReentryActive = false;
             sgHandleModernStandbyWake(true);
             return 0;
         }
@@ -16829,7 +17781,6 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
             // A rapid Reason=7/8 is a rejected sleep entry, not a user wake.
             // sgHandleModernStandbyWake(false) schedules EntryFailure retry
             // before any wake worker can resume the owned game PID.
-            g_sgS0ReentryActive = false;
             traceLog("s0 reason=%d confirmed entry failure generation=%llu",
                      g_sgLastS0WakeReason, currentPowerGeneration());
             sgHandleModernStandbyWake(false);
@@ -16837,8 +17788,8 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         }
         if (g_sgLastS0WakeReason == 5)
             sgNoteExternalDeviceKernel507Reason5();
-        // Reason=5 remains USB4 evidence only. Other non-user reasons remain
-        // observational; neither can consume the Reason=7 entry-retry lease.
+        // Reason=5 is direct unexpected-wake evidence. Other non-user reasons remain
+        // observational; neither can consume the active sleep retry lease.
         traceLog("s0 wake ignored source=non-power-button reason=%d class=%s",
                  g_sgLastS0WakeReason,
                  sgKernelPowerReasonName(g_sgLastS0WakeReason));
@@ -16846,16 +17797,18 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     }
     case WM_SG_S4_WAKE:
         sgRecordFact("s4-wake-message", {
-            {"entryRetryActive", sgEntryRetryIsExclusive()}
+            {"sleepRetryActive", sgSleepRetryActive()}
         });
+        sgClearInternalSleepRequest("kernel-s4-wake");
+        sgClearUnexpectedWake("kernel-s4-wake", true);
         // Kernel-Power 107 with TargetState=5 is the reliable post-hiberfile
         // signal. It is a final user-visible wake: it overrides a pending
-        // Reason=7 entry retry so the owned game PID cannot remain paused.
-        if (sgEntryRetryIsExclusive()) {
-            sgRecordFact("s4-wake-canceled-entry-retry", {
+        // sleep retry so the owned game PID cannot remain paused.
+        if (sgSleepRetryActive()) {
+            sgRecordFact("s4-wake-canceled-sleep-retry", {
                 {"generation", currentPowerGeneration()}
             });
-            sgAbortSleepIntent("kernel-s4-wake", false);
+            sgAbortSleepIntent("kernel-s4-wake");
         }
         handlePowerResumeNotification(SgWork::WakeHibernate, "kernel-s4-wake");
         return 0;
@@ -16872,8 +17825,6 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         return 0;
     }
     case WM_POWERBROADCAST:
-        // 订阅式（非轮询）电源插拔通知。注册 GUID_ACDC_POWER_SOURCE 后，
-        // 仅当系统电源来源变化时 OS 才推送本消息 → 零后台损耗。
         if (w == PBT_APMQUERYSUSPEND || w == PBT_APMSUSPEND ||
             w == PBT_APMQUERYSUSPENDFAILED || w == PBT_APMQUERYSTANDBYFAILED ||
             w == PBT_APMRESUMEAUTOMATIC || w == PBT_APMRESUMESUSPEND ||
@@ -16882,9 +17833,8 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
                 {"code", static_cast<unsigned long long>(w)},
                 {"lifecycle", powerLifecycleName(g_powerLifecycle.load(std::memory_order_acquire))},
                 {"generation", currentPowerGeneration()},
-                {"externalRetryActive", g_sgExternalDeviceWake.retryActive},
                 {"taskMode", sgSleepModeName(g_sgTask.mode)},
-                {"taskPhase", sgSleepTaskPhaseName(g_sgTask.phase)}
+                {"retryKind", sgRetryKindName(g_sgTask.retryKind)}
             });
         }
         if (w == PBT_POWERSETTINGCHANGE && l) {
@@ -16899,14 +17849,7 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
                 } else if (ac != g_lastAcState) {
                     g_lastAcState = ac;
                     sgRecordFact("acdc-change", {{"ac", ac == 1}});
-                    g_sgLastAcDcBroadcastTick = GetTickCount64();
                     sgNoteExternalDeviceAcDcChange();
-                    sgObserveAcDcForManualSleep();
-                    if (g_sgRepairEligible) {
-                        g_sgWakeSourceEvidence = true;
-                        g_sgWakeSourceTick = GetTickCount64();
-                        traceLog("sleep wake source evidence=acdc");
-                    }
                     // 视频背景专用轻量事件：即时暂停/恢复；不触发 CPU/TDP 等重型链路。
                     ipc_emit("power.sourceChanged", {{"ac", ac == 1}});
                     // ── 熔断：5s 滑动窗口内真实切换 >10 次 → 请求完整退出，避免系统卡死且不绕过 Sleep Guard 恢复。──
@@ -16943,11 +17886,8 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         }
         // ── 睡眠守护：PBT_APM* 同样走 WM_POWERBROADCAST（窗口程序自动送达，无需额外注册）──
         else if (w == PBT_APMQUERYSUSPEND) {
-            if (g_sgExternalDeviceWake.retryActive) {
-                closeHardwareWriteGate("external-device-retry-query");
-                sgRecordFact("external-device-wake-retry-query", {
-                    {"attempt", g_sgExternalDeviceWake.retryAttempt}
-                });
+            if (sgSleepRetryActive()) {
+                closeHardwareWriteGate("sleep-retry-query");
                 return TRUE;
             }
             // Windows 8+ sends this pre-suspend query for the interactive
@@ -16987,6 +17927,7 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
                 focusClearSession();
                 KillTimer(g_hwnd, FOCUS_DISPLAY_TIMER_ID);
                 const auto generation = g_powerGeneration.fetch_add(1, std::memory_order_acq_rel) + 1;
+                g_sgPauseWorkCompletedGeneration.store(0, std::memory_order_release);
                 g_sgSleepQueryGeneration = generation;
                 g_sgSleepQueryOwnsGeneration = true;
                 g_powerLifecycle.store(PowerLifecycle::Suspending, std::memory_order_release);
@@ -16996,6 +17937,9 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
                 g_inputReady.store(false, std::memory_order_release);
                 gamepadResetNativeState(true);
                 sgMarkSleepTrigger();
+                // A query may be cancelled.  Do not release or close the Fan
+                // Host at this stage; only the confirmed suspend boundary
+                // below may enqueue the best-effort cleanup worker.
                 ipc_emit("power.suspending", {
                     {"generation", generation},
                     {"queryBoundary", true},
@@ -17008,56 +17952,23 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         }
         else if (w == PBT_APMSUSPEND) {
             {
-                if (g_sgExternalDeviceWake.retryActive) {
-                    KillTimer(g_hwnd, SG_EXTERNAL_DEVICE_RETRY_TIMER_ID);
-                    g_sgExternalDeviceWake.retryActive = false;
+                if (sgSleepRetryActive()) {
+                    const SgRetryKind completedKind = g_sgTask.retryKind;
+                    const unsigned int attempt = g_sgTask.retryAttempt;
+                    KillTimer(g_hwnd, SG_RETRY_TIMER_ID);
+                    sgClearInternalSleepRequest("sleep-retry-suspend-confirmed");
+                    g_sgRetryInProgress = false;
+                    g_sgRetryDueTick = 0;
+                    g_sgTask.retryKind = SgRetryKind::None;
+                    g_sgTask.retryAttempt = 0;
                     g_powerLifecycle.store(PowerLifecycle::Suspended, std::memory_order_release);
-                    sgRecordFact("external-device-wake-retry-succeeded", {
-                        {"attempt", g_sgExternalDeviceWake.retryAttempt}
+                    sgRecordFact("sleep-retry-suspend-confirmed", {
+                        {"kind", sgRetryKindName(completedKind)},
+                        {"attempt", attempt}
                     });
-                    return TRUE;
-                }
-                const bool internalRetry = g_sgRetryInProgress &&
-                    g_sgTask.retryKind != SgRetryKind::None;
-                if (sgMarkModernStandbyReentry("pbt-apmsuspend-506"))
-                    return TRUE;
-                if (g_sgRetryInProgress && g_sgTask.retryKind == SgRetryKind::NonUserWake) {
-                    g_sgRetryInProgress = false;
-                    g_sgRetryDueTick = 0;
-                    g_sgTask.retryKind = SgRetryKind::None;
-                    g_sgResleepPending = false;
-                    KillTimer(g_hwnd, SG_RETRY_TIMER_ID);
                     g_sgSleepQueryGateClosed = false;
                     g_sgSleepQueryOwnsGeneration = false;
                     g_sgSleepQueryGeneration = 0;
-                    g_sgTask.phase = SgSleepTaskPhase::SleepConfirmed;
-                    g_sgTask.suspendConfirmed = true;
-                    g_powerLifecycle.store(PowerLifecycle::Suspended, std::memory_order_release);
-                    traceLog("sleep non-user retry reached suspend boundary generation=%llu",
-                             currentPowerGeneration());
-                    return TRUE;
-                }
-                if (sgEntryRetryIsExclusive()) {
-                    // The retry has reached a real suspend boundary. Release
-                    // the exclusive retry gate; the held game lease now waits
-                    // for a later, genuine wake instead of another attempt.
-                    g_sgRetryInProgress = false;
-                    g_sgRetryDueTick = 0;
-                    g_sgTask.retryKind = SgRetryKind::None;
-                    g_sgResleepPending = false;
-                    KillTimer(g_hwnd, SG_RETRY_TIMER_ID);
-                    traceLog("sleep entry retry succeeded attempts=%u generation=%llu",
-                             g_sgTask.entryFailureAttempts, currentPowerGeneration());
-                    // This callback belongs to the retry request itself. It
-                    // must not fall through to the generic bare-suspend path,
-                    // which would create a second transaction and queue a new
-                    // pause for the already-held lease.
-                    g_sgSleepQueryGateClosed = false;
-                    g_sgSleepQueryOwnsGeneration = false;
-                    g_sgSleepQueryGeneration = 0;
-                    g_sgTask.phase = SgSleepTaskPhase::SleepConfirmed;
-                    g_sgTask.suspendConfirmed = true;
-                    g_powerLifecycle.store(PowerLifecycle::Suspended, std::memory_order_release);
                     return TRUE;
                 }
                 // Some firmware emits a legacy suspend broadcast in addition
@@ -17085,8 +17996,11 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
                     g_sgSleepQueryGeneration = 0;
                     if (g_powerLifecycle.load(std::memory_order_acquire) == PowerLifecycle::Suspending)
                         g_powerLifecycle.store(PowerLifecycle::Suspended, std::memory_order_release);
-                    g_sgTask.phase = SgSleepTaskPhase::SleepConfirmed;
-                    g_sgTask.suspendConfirmed = true;
+                    // The query was only an intent marker and deliberately
+                    // did not touch Fan Host because it could be cancelled.
+                    // This is the first confirmed suspend boundary, so queue
+                    // the non-blocking native fallback now before returning.
+                    fanHostScheduleEmergencySuspend("suspend-confirmed", currentPowerGeneration());
                     traceLog("sleep suspend confirmed generation=%llu",
                              currentPowerGeneration());
                     return TRUE;
@@ -17099,6 +18013,7 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
                 focusClearSession();
                 KillTimer(g_hwnd, FOCUS_DISPLAY_TIMER_ID);
                 const auto generation = g_powerGeneration.fetch_add(1, std::memory_order_acq_rel) + 1;
+                g_sgPauseWorkCompletedGeneration.store(0, std::memory_order_release);
                 g_powerLifecycle.store(PowerLifecycle::Suspending, std::memory_order_release);
                 g_resumeReadyGeneration.store(0, std::memory_order_release);
                 g_lastResumeNotifyTick = 0;
@@ -17106,6 +18021,7 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
                 stopPowerResumeWatchdog();
                 g_inputReady.store(false, std::memory_order_release);
                 gamepadResetNativeState(true);
+                fanHostScheduleEmergencySuspend("suspend-broadcast", generation);
                 ipc_emit("power.suspending", {
                     {"generation", generation},
                     {"hibernateAvailable", sgHibernateAvailable()}
@@ -17133,8 +18049,6 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
                     return TRUE;
                 }
                 sgMarkSleepTrigger();
-                g_sgTask.phase = SgSleepTaskPhase::SleepConfirmed;
-                g_sgTask.suspendConfirmed = true;
                 sgQueueWork(SgWork::Suspend, generation);
             }
         }
@@ -17146,9 +18060,9 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
                 cancelledPhase == PowerLifecycle::Suspending;
             const bool retryWasPending = g_sgRetryInProgress;
             const bool retryEligible = g_sgRetryEntryFailure && g_sgTask.mode == SgSleepMode::S3 &&
-                g_sgRepairEligible && g_sgTask.entryFailureAttempts < SG_MAX_ENTRY_RETRIES &&
+                g_sgRepairEligible &&
                 g_sgSleepTriggerTick != 0;
-            if (sgRetryIsExclusive()) {
+            if (sgSleepRetryActive()) {
                 // A retry query can be rejected before Windows emits any
                 // resume broadcast.  Advance the exclusive transaction
                 // directly; falling through would release the held game lease
@@ -17156,8 +18070,7 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
                 g_sgSleepQueryGateClosed = false;
                 g_sgSleepQueryOwnsGeneration = false;
                 g_sgSleepQueryGeneration = 0;
-                g_sgEntryFailureObserved = true;
-                sgAdvanceRetry("retry-query-rejected");
+                sgAdvanceSleepRetry("retry-query-rejected");
                 return TRUE;
             }
             if (retryEligible) {
@@ -17167,13 +18080,13 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
                 g_sgSleepQueryGateClosed = false;
                 g_sgSleepQueryOwnsGeneration = false;
                 g_sgSleepQueryGeneration = 0;
-                g_sgEntryFailureObserved = true;
-                sgRequestSleepRetry(SgRetryKind::EntryFailure, "query-rejected");
+                sgStartSleepRetry(SgRetryKind::EntryFailure, "query-rejected");
                 return TRUE;
             }
             if (queryOwnedGeneration || modernIntentPending) {
                 const auto generation = currentPowerGeneration();
-                sgAbortSleepIntent("query-canceled", retryEligible);
+                sgClearUnexpectedWake("query-canceled", true);
+                sgAbortSleepIntent("query-canceled");
                 ipc_emit("power.resuming", {
                     {"generation", generation},
                     {"modernStandby", modernIntentPending},
@@ -17194,26 +18107,31 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         }
         else if (w == PBT_APMRESUMEAUTOMATIC) {
             if (g_sgModernWakeClassified) return TRUE;
-            if (g_sgModernStandbyActive || g_sgModernWakePending) {
-                traceLog("s0 resume broadcast observed; system-state sampler remains authoritative");
+            if (g_sgModernStandbyActive) {
+                traceLog("s0 automatic resume observed; waiting for kernel-power classification");
                 return TRUE;
             }
-            // 自动唤醒候选：恢复本周期资源，并进入最多30秒的输入静默观察。
+            // S3 automatic resume is not a confirmed user wake. The worker
+            // keeps the owned game PID paused until RESUMESUSPEND arrives.
             handlePowerResumeNotification(SgWork::WakeAutomatic, "resume_auto");
         }
         else if (w == PBT_APMRESUMESUSPEND) {
             if (g_sgModernWakeClassified) return TRUE;
-            if (g_sgModernStandbyActive || g_sgModernWakePending) {
-                traceLog("s0 suspend-resume broadcast observed; system-state sampler remains authoritative");
+            if (g_sgModernStandbyActive) {
+                traceLog("s0 suspend-resume broadcast observed; waiting for kernel-power classification");
                 return TRUE;
             }
             // S3 确定性用户唤醒：直接恢复并取消重睡观察。
+            sgClearInternalSleepRequest("pbt-resume-suspend-user");
+            sgClearUnexpectedWake("pbt-resume-suspend-user", true);
             handlePowerResumeNotification(SgWork::WakeSuspend, "resume_suspend");
         }
         else if (w == PBT_APMRESUMECRITICAL) {
             // Hibernate can return through RESUMECRITICAL without a later
             // RESUMESUSPEND notification.  Treat it as a final user-visible
             // wake so the unified pause lease is never stranded in S4.
+            sgClearInternalSleepRequest("pbt-resume-critical");
+            sgClearUnexpectedWake("pbt-resume-critical", true);
             handlePowerResumeNotification(SgWork::WakeSuspend, "resume_critical");
         }
         return TRUE;
@@ -17355,17 +18273,29 @@ int WINAPI wWinMain(HINSTANCE hi, HINSTANCE, LPWSTR, int ns) {
     auto winCfg    = g_cfg.value("window", json::object());
     auto title     = U2W(winCfg.value("title", std::string{"\xe5\xbc\xba\xe5\xbc\xba"}));
 
-    // Single instance lock
+    // T0 sleep-hang repair: normal single-instance behavior remains unchanged,
+    // but a stale YeManCC process with no main window must not silently block
+    // every later launch forever. We wait briefly for a just-starting instance
+    // to create its window, then require explicit user confirmation before
+    // ending only same-session, same-image, still-windowless candidates.
     bool singleInstance = winCfg.value("singleInstance", true);
     HANDLE hMutex = nullptr;
     if (singleInstance) {
-        auto mutexName = U2W("QQ_" + winCfg.value("title", std::string{"app"}));
+        const auto mutexName = U2W("QQ_" + winCfg.value("title", std::string{"app"}));
         hMutex = CreateMutexW(nullptr, FALSE, mutexName.c_str());
-        if (GetLastError() == ERROR_ALREADY_EXISTS) {
-            HWND existing = FindWindowW(L"QQ", title.c_str());
-            if (existing) {
+        if (!hMutex) {
+            appendNativeLifecycleLog("single-instance-mutex-create-failed", {
+                {"error", GetLastError()}
+            });
+        } else if (GetLastError() == ERROR_ALREADY_EXISTS) {
+            appendNativeLifecycleLog("single-instance-mutex-existing");
+            HWND existing = nullptr;
+            if (waitForExistingInstanceWindow(title, 1500, existing)) {
                 DWORD existingPid = 0;
                 GetWindowThreadProcessId(existing, &existingPid);
+                appendNativeLifecycleLog("single-instance-existing-window", {
+                    {"existingPid", existingPid}
+                });
                 if (existingPid) AllowSetForegroundWindow(existingPid);
                 if (!g_showExistingInstanceMsg ||
                     !PostMessageW(existing, g_showExistingInstanceMsg, 0, 0)) {
@@ -17373,13 +18303,82 @@ int WINAPI wWinMain(HINSTANCE hi, HINSTANCE, LPWSTR, int ns) {
                     ShowWindow(existing, IsIconic(existing) ? SW_RESTORE : SW_SHOW);
                     SetForegroundWindow(existing);
                 }
+                CloseHandle(hMutex);
+                shutdownSplashGraphics();
+                CoUninitialize();
+                return 0;
             }
-            if (hMutex) CloseHandle(hMutex);
-            shutdownSplashGraphics();
-            CoUninitialize();
-            return 0;
+
+            const auto currentImage = currentExecutablePath();
+            const auto candidates = findWindowlessSameImageInstances(currentImage, title);
+            appendNativeLifecycleLog("single-instance-windowless-candidates", {
+                {"count", candidates.size()}
+            });
+            bool recovered = false;
+            if (candidates.size() == 1) {
+                const DWORD candidatePid = candidates.front();
+                const int answer = MessageBoxW(
+                    nullptr,
+                    L"检测到一个 YeManCC 残留进程：它仍占用单实例锁，但未找到主窗口。\n\n"
+                    L"是否结束该残留进程并重新启动 YeManCC？\n\n"
+                    L"仅会处理当前用户会话中、路径与本程序完全一致且仍无主窗口的一个进程。",
+                    L"YeManCC — T0 睡眠卡死恢复",
+                    MB_ICONWARNING | MB_YESNO | MB_DEFBUTTON2);
+                if (answer == IDYES) {
+                    const bool stopped = terminateConfirmedWindowlessInstance(
+                        candidatePid, currentImage, title, 3000);
+                    appendNativeLifecycleLog(stopped
+                        ? "single-instance-windowless-terminated"
+                        : "single-instance-windowless-terminate-failed", {
+                        {"existingPid", candidatePid}
+                    });
+                    if (stopped) {
+                        CloseHandle(hMutex);
+                        hMutex = nullptr;
+                        const ULONGLONG deadline = GetTickCount64() + 3000;
+                        do {
+                            hMutex = CreateMutexW(nullptr, FALSE, mutexName.c_str());
+                            if (hMutex && GetLastError() != ERROR_ALREADY_EXISTS) {
+                                recovered = true;
+                                break;
+                            }
+                            if (hMutex) {
+                                CloseHandle(hMutex);
+                                hMutex = nullptr;
+                            }
+                            Sleep(100);
+                        } while (GetTickCount64() < deadline);
+                        appendNativeLifecycleLog(recovered
+                            ? "single-instance-windowless-takeover-succeeded"
+                            : "single-instance-windowless-takeover-failed", {
+                            {"existingPid", candidatePid}, {"stopped", stopped}
+                        });
+                    }
+                } else {
+                    appendNativeLifecycleLog("single-instance-windowless-takeover-declined", {
+                        {"existingPid", candidatePid}
+                    });
+                }
+            } else if (candidates.size() > 1) {
+                appendNativeLifecycleLog("single-instance-windowless-ambiguous", {
+                    {"count", candidates.size()}
+                });
+                MessageBoxW(
+                    nullptr,
+                    L"检测到多个无主窗口的同路径 YeManCC 进程。为避免错误结束进程，本次不会自动处理。\n\n"
+                    L"请在任务管理器中确认后结束残留 YeManCC 进程，再重新启动。",
+                    L"YeManCC — T0 睡眠卡死恢复",
+                    MB_ICONWARNING | MB_OK);
+            }
+            if (!recovered) {
+                if (hMutex) CloseHandle(hMutex);
+                shutdownSplashGraphics();
+                CoUninitialize();
+                return 0;
+            }
         }
     }
+    appendNativeLifecycleLog("boot-single-instance-acquired");
     // Recoverable runtime markers can outlive a forced process termination.
     // Clear them after acquiring the single-instance lock so the frontend
     // cannot treat stale monitor/float files as a live session.
@@ -17458,6 +18457,7 @@ int WINAPI wWinMain(HINSTANCE hi, HINSTANCE, LPWSTR, int ns) {
         CW_USEDEFAULT, CW_USEDEFAULT, windowWidth, windowHeight,
         nullptr, nullptr, hi, nullptr);
     traceLog("BOOT window-created ok=%d", g_hwnd != nullptr ? 1 : 0);
+    appendNativeLifecycleLog("window-created", {{"created", g_hwnd != nullptr}});
     if (g_hwnd) {
         if (g_appIconLarge) SendMessageW(g_hwnd, WM_SETICON, ICON_BIG, (LPARAM)g_appIconLarge);
         if (g_appIconSmall) SendMessageW(g_hwnd, WM_SETICON, ICON_SMALL, (LPARAM)g_appIconSmall);
@@ -17564,7 +18564,6 @@ int WINAPI wWinMain(HINSTANCE hi, HINSTANCE, LPWSTR, int ns) {
     sgInitNt();
     sgStartWorkThread();
     sgLoadConfig();
-    sgLoadResleepCooldown();
     {
         DWORD sessionId = 0;
         g_sgSessionValid = ProcessIdToSessionId(GetCurrentProcessId(), &sessionId) != FALSE;
@@ -17704,9 +18703,9 @@ int WINAPI wWinMain(HINSTANCE hi, HINSTANCE, LPWSTR, int ns) {
 
     // 兜底：即使通过 WM_QUIT 直接离开消息循环，也确保冻结进程被解除。
     shutdownSplashGraphics();
-    joinStartupResumeThread();
-    sgStopWorkThread();
-    poolStop();
+    joinStartupResumeThread(1000);
+    sgStopWorkThread(1000);
+    poolStop(1000);
     g_summonQuit = true;
     if (g_autoCloseThread) {
         WaitForSingleObject(g_autoCloseThread, 3000);
@@ -17714,8 +18713,8 @@ int WINAPI wWinMain(HINSTANCE hi, HINSTANCE, LPWSTR, int ns) {
         g_autoCloseThread = nullptr;
     }
             stopTdpDaemonForExit();
-            stopTopMonitorForExit();
-            sgCleanupBeforeExit();
+            stopTopMonitorForExit(1000);
+            (void)sgCleanupBeforeExit(true);
     closeWebViewsForExit();
     if (hMutex) CloseHandle(hMutex);
     CoUninitialize();

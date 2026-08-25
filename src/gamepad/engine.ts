@@ -20,6 +20,8 @@ import { summonGet, type GamepadSettings } from '@/bridge/yeman';
 import { isUiVisible, onUiVisibilityChange } from '@/bridge/uiLifecycle';
 import { focusGamepadElement, setGamepadFocused } from '@/gamepad/focus';
 import { enqueueGamepadTaskDetached } from '@/gamepad/serial';
+import { fanFeatureEnabled } from '@/bridge/fanFeature';
+import { spatialNavigationTarget } from '@/gamepad/spatial';
 
 export interface GamepadEngineOptions {
   router: Router;
@@ -29,7 +31,7 @@ export interface GamepadEngineOptions {
 // 可聚焦元素选择器（需与各 View 的 tabindex 配合）。
 // 带 data-gp-ignore 的元素被排除——用于左侧 NavRail 的页面图标/刷新/退出，避免上下左右误切页/退出。
 const FOCUSABLE =
-  'button:not([data-gp-ignore]), [tabindex]:not([tabindex="-"]):not([data-gp-ignore]), input:not([disabled]):not([data-gp-ignore]), select:not([disabled]):not([data-gp-ignore])';
+  'button:not([disabled]):not([tabindex="-1"]):not([data-gp-ignore]), [tabindex]:not([tabindex="-"]):not([tabindex="-1"]):not([data-gp-ignore]), input:not([disabled]):not([tabindex="-1"]):not([data-gp-ignore]), select:not([disabled]):not([tabindex="-1"]):not([data-gp-ignore])';
 
 let rafId = 0;
 let prevButtons: boolean[] = [];
@@ -39,6 +41,8 @@ let prevAxes: number[] = [];
 let lastNav = 0;
 let lastPageSwitch = -Infinity; // 切页冷却（防止连按卡顿）
 const PAGE_SWITCH_COOLDOWN = 100; // ms，原 400ms 过严致连按 LB/RB 丢按；降到 100ms 使快速切页（含切到 TDP）每次都生效
+const NAV_REPEAT_BASE = 220; // ms：普通空间导航重复间隔
+const INLINE_EDIT_REPEAT = Math.round(NAV_REPEAT_BASE / 3); // 节点编辑专用：约为普通导航的 1/3
 // 滑块线性加速：按住越久步长越大、间隔越短
 // ⚠️ 速度参数需与 native 手柄 Start+方向 自动连发保持一致（见 main.cpp 注释），修改时两边同步。
 let sliderAccelStart = 0;  // 本次按住起始时间（用于线性加速）
@@ -60,10 +64,10 @@ let gpSettings: GamepadSettings = {
   bDoubleMinimize: true,
   tdpShortcut: true,
   fpsShortcut: true,
-  killGame: false,
-  openKeyboard: false,
-  returnDesktop: false,
-  mouseToggle: false,
+  killGame: true,
+  openKeyboard: true,
+  returnDesktop: true,
+  mouseToggle: true,
   mouseBackend: 'joyxoff',
 };
 // 快捷应用「模拟鼠标」开启时：屏蔽内页按键选择/功能（上下导航、A/X），
@@ -94,6 +98,10 @@ let noPadStreak = 0;       // 连续无手柄帧计数（Grace 防瞬时断连�
 const NO_PAD_GRACE = 30;   // 约 0.5s@60fps：连续这么多帧无手柄才停止循环
 let summonActive = false;  // 呼出后置 true：强制视为可见，直到窗口再次隐藏（绕开 WebView2 可见态未及时刷新）
 let nativeUiInputActive = false;
+// This is a native decision mirror, not a second gate. While true the
+// renderer only advances its browser snapshot and never dispatches actions;
+// YeManCC native has already forwarded the semantic action to the child.
+let nativeChildInputOwned = false;
 type NativeUiAction =
   | 'page-prev' | 'page-next' | 'confirm' | 'back' | 'dropdown' | 'edit-game'
   | 'debug' | 'nav-left' | 'nav-right' | 'nav-up' | 'nav-down'
@@ -155,6 +163,13 @@ if (typeof window !== 'undefined') {
     if (!engineOpts || !action || testMode) return;
     nativeUiInputActive = true;
     enqueueGamepadTaskDetached(() => dispatchNativeUiAction(engineOpts!, action));
+  }) as EventListener);
+  window.addEventListener('ipc:gamepad.input-owner', ((e: CustomEvent<{ owner?: string }>) => {
+    nativeChildInputOwned = e.detail?.owner === 'custom-steam-library';
+    if (nativeChildInputOwned) {
+      prevButtons = [];
+      prevAxes = [];
+    }
   }) as EventListener);
   onUiVisibilityChange(({ visible }) => {
     if (visible && engineOpts && hasConnectedPad()) {
@@ -246,12 +261,17 @@ function getPad(): Gamepad | null {
   return null;
 }
 
-let visibleRoutePaths: string[] = ROUTES.map((r) => r.path);
-let visibleRouteTitles: string[] = ROUTES.map((r) => r.title);
+function routeAvailable(route: (typeof ROUTES)[number]): boolean {
+  if (route.hidden) return false;
+  return route.feature !== 'fan' || fanFeatureEnabled.value;
+}
+
+let visibleRoutePaths: string[] = ROUTES.filter(routeAvailable).map((r) => r.path);
+let visibleRouteTitles: string[] = ROUTES.filter(routeAvailable).map((r) => r.title);
 
 function setVisibleRoutes(enabled: boolean) {
   const hidden = enabled ? new Set(['/tdp', '/cpu']) : new Set<string>();
-  const visible = ROUTES.filter((r) => !hidden.has(r.path));
+  const visible = ROUTES.filter((r) => !hidden.has(r.path) && routeAvailable(r));
   visibleRoutePaths = visible.map((r) => r.path);
   visibleRouteTitles = visible.map((r) => r.title);
 }
@@ -336,13 +356,30 @@ function focusables(): HTMLElement[] {
       return style.display !== 'none' && style.visibility !== 'hidden' && r.width > 0 && r.height > 0;
     });
   const modal = modals[modals.length - 1] ?? null;
-  const root: ParentNode = modal || document;
-  return Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE)).filter(
+  // Dropdown options are teleported to body. Keep them in the same focus
+  // scope as the open top-menu modal so A can activate the option after D-pad
+  // navigation instead of treating the option as an out-of-scope element.
+  const roots: ParentNode[] = [modal || document];
+  const openDropdowns = Array.from(document.querySelectorAll<HTMLElement>('[role="listbox"]'))
+    .filter((el) => {
+      const style = getComputedStyle(el);
+      const r = el.getBoundingClientRect();
+      return style.display !== 'none' && style.visibility !== 'hidden' && r.width > 0 && r.height > 0;
+    });
+  roots.push(...openDropdowns);
+  const candidates = roots.flatMap((root) => Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE)));
+  return Array.from(new Set(candidates)).filter(
     (el) => {
       if (el.hasAttribute('disabled')) return false;
       if (el.getAttribute('aria-hidden') === 'true') return false;
       if (el.closest('[aria-hidden="true"]')) return false;
       if (el.closest('[hidden], [inert]')) return false;
+      if (el.getAttribute('aria-disabled') === 'true') return false;
+      // Vue Transition 会在离场动画期间保留二级菜单 DOM。父气泡状态
+      // 已经折叠时，即使旧按钮仍有尺寸，也绝不能进入手柄候选列表。
+      const submenuBody = el.closest<HTMLElement>('[data-gp-game-rules-body], [data-gp-custom-body]');
+      const submenuPanel = submenuBody?.closest<HTMLElement>('[data-gp-expanded]');
+      if (submenuBody && submenuPanel?.dataset.gpExpanded !== 'true') return false;
       const style = getComputedStyle(el);
       if (style.display === 'none' || style.visibility === 'hidden') return false;
       const r = el.getBoundingClientRect();
@@ -356,19 +393,146 @@ function focusables(): HTMLElement[] {
 //    因为 Chromium 对程序化 .focus() 不触发 :focus-visible，
 //    而 tokens.css 的 .focused 提供 accent 发光环 ──
 // ── 空间方向导航（对齐 HTA 的方向键焦点切换） ──
+function isInsideCustomPanel(el: HTMLElement): boolean {
+  return !!el.closest('[data-gp-custom-body]');
+}
+
+function firstGameMenuControl(root: ParentNode | null): HTMLElement | null {
+  if (!root) return null;
+  const selector = 'button:not(:disabled):not([tabindex="-1"]):not([data-gp-ignore]), input:not(:disabled):not([tabindex="-1"]):not([data-gp-ignore]), select:not(:disabled):not([tabindex="-1"]):not([data-gp-ignore]), [tabindex]:not([tabindex="-1"]):not([data-gp-ignore])';
+  const direct = root instanceof HTMLElement && root.matches(selector) ? root : null;
+  return direct || root.querySelector<HTMLElement>(selector);
+}
+
+function gameMenuControlForRow(menu: HTMLElement, rowKey: string): HTMLElement | null {
+  if (!rowKey) return null;
+  const row = menu.querySelector<HTMLElement>(`[data-gp-game-row="${rowKey}"]`);
+  if (!row) return null;
+  const target = firstGameMenuControl(row);
+  if (!target) return null;
+  if (target.hasAttribute('disabled') || target.getAttribute('aria-disabled') === 'true') return null;
+  if (target.closest('[hidden], [inert], [aria-hidden="true"]')) return null;
+  const body = target.closest<HTMLElement>('[data-gp-game-rules-body], [data-gp-custom-body]');
+  const panel = body?.closest<HTMLElement>('[data-gp-expanded]');
+  if (body && panel?.dataset.gpExpanded !== 'true') return null;
+  const style = getComputedStyle(target);
+  const rect = target.getBoundingClientRect();
+  return style.display === 'none' || style.visibility === 'hidden' || rect.width <= 0 || rect.height <= 0
+    ? null
+    : target;
+}
+
+function moveGameMenuFocus(menu: HTMLElement, base: HTMLElement, dy: number): HTMLElement | null {
+  const currentRow = base.closest<HTMLElement>('[data-gp-game-row]')?.dataset.gpGameRow || '';
+  const rows = [
+    'controls',
+    'actions-1',
+    'actions-2',
+    'rules-entry',
+    'custom-entry',
+    'footer',
+  ];
+  const rulesPanel = menu.querySelector<HTMLElement>('[data-gp-game-rules][data-gp-expanded="true"]');
+  if (rulesPanel) {
+    const entryIndex = rows.indexOf('custom-entry');
+    rows.splice(entryIndex, 0, 'rules-current', 'rules-editor');
+    if (rulesPanel.querySelector('[data-gp-game-row="rules-dropdown"]')) rows.splice(entryIndex + 2, 0, 'rules-dropdown');
+    rows.splice(entryIndex + (rows.includes('rules-dropdown') ? 3 : 2), 0, 'rules-footer');
+  }
+  const customPanel = menu.querySelector<HTMLElement>('[data-gp-custom-panel][data-gp-expanded="true"]');
+  if (customPanel) {
+    const footerIndex = rows.indexOf('footer');
+    rows.splice(footerIndex, 0, 'custom-ac', 'custom-dc');
+    if (customPanel.querySelector('[data-gp-game-row="custom-actions"]')) rows.splice(footerIndex + 2, 0, 'custom-actions');
+  }
+  const index = rows.indexOf(currentRow);
+  if (index < 0) return null;
+  for (let i = index + (dy > 0 ? 1 : -1); i >= 0 && i < rows.length; i += dy > 0 ? 1 : -1) {
+    const target = gameMenuControlForRow(menu, rows[i]);
+    if (target && target !== base) return target;
+  }
+  return null;
+}
+
 function moveFocus(dx: number, dy: number) {
   const els = focusables();
   if (els.length === 0) return;
+  const activeGameMenu = document.querySelector<HTMLElement>('[data-gp-game-quick-menu]');
+  const customPanel = activeGameMenu?.querySelector<HTMLElement>('[data-gp-custom-body]');
+  const customExpanded = !!customPanel;
+  // The dedicated-profile editor is a self-contained controller region. Once
+  // expanded, do not let spatial navigation land on its hidden/colliding
+  // header or its action row. From the profile's last visible control, Up
+  // exits directly to the blacklist/whitelist entry as requested.
+  // The collapsed/expanded header is a visual container, not a second
+  // controller stop. The action buttons remain in the list when expanded so A
+  // can still activate them, but the header itself is excluded to prevent the
+  // first profile row from becoming a duplicate/overlapping focus target.
+  const rulesExpanded = !!activeGameMenu?.querySelector<HTMLElement>('[data-gp-game-rules-body]');
+  // 可见的入口和可见的独立气泡内容都是真实焦点目标；只有 v-if 已移除、
+  // inert/aria-hidden 或不可见的内容才由 focusables() 排除。
+  const navEls = els;
   const cur = document.activeElement as HTMLElement | null;
   // 当前焦点元素必须在列表中，否则从第一个开始
-  const baseIdx = cur ? els.indexOf(cur) : -1;
-  const base = baseIdx >= 0 ? els[baseIdx] : els[0];
+  const baseIdx = cur ? navEls.indexOf(cur) : -1;
+  const base = baseIdx >= 0 ? navEls[baseIdx] : navEls[0];
+
+  // A graph point may opt into in-place editing while focused (for example,
+  // Fan temperature with left/right and duty with up/down). The page handles
+  // the cancellable event; when it does not consume it, normal row/column
+  // focus navigation continues unchanged.
+  const inlineEditor = base.closest<HTMLElement>('[data-gp-inline-edit]');
+  if (inlineEditor && (dx !== 0 || dy !== 0)) {
+    const editEvent = new CustomEvent('gp:spatial-edit', {
+      bubbles: true,
+      cancelable: true,
+      detail: { dx: dx > 0 ? 1 : dx < 0 ? -1 : 0, dy: dy > 0 ? 1 : dy < 0 ? -1 : 0 },
+    });
+    if (!inlineEditor.dispatchEvent(editEvent)) return;
+  }
+
+  // Feature pages may declare an exact row/column map. This is intentionally
+  // checked before the geometry heuristic so Fan's four node columns cannot
+  // jump into a neighbouring row or wrap from node 4 back to node 1. Pages
+  // without data-gp-row/data-gp-col retain the existing shared geometry path.
+  const explicitTarget = spatialNavigationTarget(navEls, base, {
+    dx: dx === 0 ? 0 : dx > 0 ? 1 : -1,
+    dy: dy === 0 ? 0 : dy > 0 ? 1 : -1,
+  });
+  if (explicitTarget !== undefined) {
+    if (explicitTarget) {
+      try {
+        if (!focusGamepadElement(explicitTarget, dy < 0)) {
+          explicitTarget.focus({ preventScroll: false });
+          setGamepadFocused(explicitTarget);
+        }
+      } catch {
+        // Ignore transient DOM changes during route transitions.
+      }
+    }
+    return;
+  }
+  if (activeGameMenu && dy !== 0 && activeGameMenu.contains(base)) {
+    const currentGameRow = base.closest<HTMLElement>('[data-gp-game-row]')?.dataset.gpGameRow || '';
+    const target = moveGameMenuFocus(activeGameMenu, base, dy);
+    if (target) {
+      try {
+        focusGamepadElement(target, dy < 0);
+      } catch {
+        // Ignore transient DOM changes during Vue transitions.
+      }
+      return;
+    }
+    // 顶部游戏菜单任何已声明行都由上面的专用导航负责；没有目标时
+    // 停在当前行，禁止旧的全页空间算法把焦点穿到其它控件。
+    if (currentGameRow) return;
+  }
   const br = base.getBoundingClientRect();
   const bx = br.left + br.width / 2;
   const by = br.top + br.height / 2;
   let best: HTMLElement | null = null;
   type FocusBox = { el: HTMLElement; r: DOMRect; x: number; y: number };
-  const boxes: FocusBox[] = els
+  const boxes: FocusBox[] = navEls
     .filter((el) => el !== base)
     .map((el) => {
       const r = el.getBoundingClientRect();
@@ -376,13 +540,103 @@ function moveFocus(dx: number, dy: number) {
     });
 
   if (dy !== 0) {
+    const rulesEntry = activeGameMenu?.querySelector<HTMLElement>('[data-gp-game-rules-entry]');
+    const customEntry = activeGameMenu?.querySelector<HTMLElement>('[data-gp-custom-entry]');
+    const customBody = activeGameMenu?.querySelector<HTMLElement>('[data-gp-custom-body]');
+    const customExpanded = !!customBody;
+    const gameRowKey = (el: HTMLElement | null): string => {
+      if (!activeGameMenu || !el || !activeGameMenu.contains(el)) return '';
+      return el.closest<HTMLElement>('[data-gp-game-row]')?.dataset.gpGameRow || '';
+    };
+    const nearestGameRow = (rowKey: string): HTMLElement | null => {
+      if (!rowKey) return null;
+      const candidates = navEls.filter((el) => el !== base && gameRowKey(el) === rowKey);
+      if (!candidates.length) return null;
+      candidates.sort((a, b) => {
+        const ar = a.getBoundingClientRect();
+        const br = b.getBoundingClientRect();
+        const ax = ar.left + ar.width / 2;
+        const bx2 = br.left + br.width / 2;
+        return Math.abs(ax - bx) - Math.abs(bx2 - bx);
+      });
+      return candidates[0];
+    };
+    // 一级入口必须是“可直接聚焦”的目标。不要只依赖空间导航的候选数组：
+    // Vue 在切换气泡/动画的中间帧可能会让入口暂时不在 navEls 中，导致
+    // 手柄上下时把它跳过，但鼠标仍然可以点击。这里按菜单行语义直接
+    // 抓取入口，作为顶部游戏菜单的硬兜底。
+    const directGameMenuTarget = (rowKey: string): HTMLElement | null => {
+      if (!activeGameMenu || !rowKey) return null;
+      const row = activeGameMenu.querySelector<HTMLElement>(
+        `[data-gp-game-row="${rowKey}"]`,
+      );
+      if (!row) return null;
+      const target = row.matches(FOCUSABLE)
+        ? row
+        : row.querySelector<HTMLElement>(FOCUSABLE);
+      if (!target || target === base) return null;
+      if (target.hasAttribute('disabled') || target.getAttribute('aria-disabled') === 'true') return null;
+      if (target.closest('[data-gp-ignore]')) return null;
+      const style = getComputedStyle(target);
+      const rect = target.getBoundingClientRect();
+      if (style.display === 'none' || style.visibility === 'hidden' || rect.width <= 0 || rect.height <= 0) return null;
+      return target;
+    };
+    // 专属配置展开后，标题本身会主动从焦点列表移除，避免标题和第一
+    // 个 AC 下拉重叠。因此跨气泡导航必须把目标改成展开内容的第一个
+    // 可用控件，而不是硬跳到被 data-gp-ignore 排除的标题。
+    const customBodyTarget = customBody?.querySelector<HTMLElement>(
+      // Dropdown 的外层只是事件容器，不能接收 DOM focus；必须命中真正
+      // 可聚焦的 trigger button。此前命中外层 div 后 focus 失败，因此
+      // 手柄看起来会“穿过”专属配置。
+      'button:not(:disabled):not([tabindex="-1"]):not([data-gp-ignore]), [tabindex]:not([tabindex="-"]):not([tabindex="-1"]):not([data-gp-ignore]), select:not([disabled]):not([tabindex="-1"]), input:not([disabled]):not([tabindex="-1"])',
+    ) || null;
+    const customTarget = customExpanded ? customBodyTarget : customEntry;
+    const customTargetAvailable = !!customTarget &&
+      !customTarget.matches('[data-gp-ignore]') &&
+      customTarget.getAttribute('aria-disabled') !== 'true';
+    const insideRules = !!base.closest('[data-gp-game-rules-body]');
+    // 黑/白名单入口与其二级气泡都属于同一条菜单路径：按下时明确
+    // 跳到专属配置入口/内容，不能让空间距离算法把焦点穿到页脚或其它控件。
+    if (dy > 0 && customTarget && customTargetAvailable &&
+      (base === rulesEntry || insideRules)) {
+      best = customTarget;
+    }
+    // 从专属配置内部按上，永远直接返回“游戏黑 / 白名单”这一排；
+    // 不再经过专属配置标题或第一条 AC 气泡，避免焦点重叠。
+    if (dy < 0 && rulesEntry && navEls.includes(rulesEntry) &&
+      (isInsideCustomPanel(base) || base === customEntry)) {
+      best = rulesEntry;
+    }
+
+    // 顶部游戏菜单是固定的菜单序列，不让浮动布局/动画参与“下一个气泡”
+    // 的判断。尤其 FSR4.1 / 游戏加速按下必须先到黑白名单入口，再到专属配置。
+    if (!best && activeGameMenu) {
+      const currentRow = gameRowKey(base);
+      const targetRow = dy > 0
+        ? ({
+            controls: 'actions-1',
+            'actions-1': 'actions-2',
+            'actions-2': 'rules-entry',
+            'rules-entry': 'custom-entry',
+            'custom-entry': 'footer',
+          } as Record<string, string>)[currentRow]
+        : ({
+            footer: 'custom-entry',
+            'custom-entry': 'rules-entry',
+            'rules-entry': 'actions-2',
+            'actions-2': 'actions-1',
+            'actions-1': 'controls',
+          } as Record<string, string>)[currentRow];
+      best = directGameMenuTarget(targetRow) || nearestGameRow(targetRow);
+    }
     // ── 上下导航：行优先 ──
     // 用户希望方向键按“内容行”移动。例如从“帧数目标 30”按上，应跳到
     // 同一卡片内上一行的“使用电池”下拉，而不是跳到更靠左的“野蛮系统电源”。
     const ROW_BAND = 28; // 同一行内 center-y 容差（px）
     type Cand = { el: HTMLElement; y: number; x: number; dyAbs: number };
     const cands: Cand[] = [];
-    for (const el of els) {
+    for (const el of navEls) {
       if (el === base) continue;
       const r = el.getBoundingClientRect();
       const ey = r.top + r.height / 2;
@@ -391,7 +645,12 @@ function moveFocus(dx: number, dy: number) {
       if (dy < 0 && ddy >= 0) continue;
       cands.push({ el, y: ey, x: r.left + r.width / 2, dyAbs: Math.abs(ddy) });
     }
-    if (cands.length === 0) return;
+    if (cands.length === 0) {
+      if (!best) return;
+    }
+    if (best) {
+      // 已命中专属配置 → 黑 / 白名单的专用返回路径，不再让空间导航覆盖它。
+    } else {
     // 先找垂直最近的元素，再用它的 y 定义“目标行”
     cands.sort((a, b) => a.dyAbs - b.dyAbs);
     const targetY = cands[0].y;
@@ -405,16 +664,33 @@ function moveFocus(dx: number, dy: number) {
         best = c.el;
       }
     }
+    }
   } else {
-    // 左右导航严格锁定当前视觉行。不要用空间导航的垂直偏离评分，
-    // 因为那会在同行没有目标时把下方/上方的按钮当成左右目标。
-    // 以实际控件矩形的纵向重叠定义同行，天然适配 CSS zoom 和不同控件高度。
-    const sameRow = boxes.filter((box) => {
-      const distance = box.x - bx;
-      const inDirection = dx > 0 ? distance > 0 : distance < 0;
-      const overlapsVertically = Math.min(br.bottom, box.r.bottom) > Math.max(br.top, box.r.top);
-      return inDirection && overlapsVertically;
-    });
+    // 左右导航严格锁定当前视觉行。游戏菜单的控件高度、过渡动画和
+    // 2x2 快捷功能网格不能再交给全页空间算法猜测，否则会从左右串到
+    // 上下行。data-gp-game-row 是页面声明的视觉行边界；其它页面继续
+    // 使用下面的矩形重叠兜底规则。
+    const gameMenu = activeGameMenu;
+    const baseGameRow = gameMenu?.contains(base)
+      ? base.closest<HTMLElement>('[data-gp-game-row]')
+      : null;
+    const baseGameRowKey = baseGameRow?.dataset.gpGameRow || '';
+    const sameRow = baseGameRowKey
+      ? navEls
+        // Some rows mark the individual button (FSR), while others mark the
+        // wrapping container (游戏加速). Compare row keys, never DOM identity.
+        .filter((el) => el !== base && el.closest<HTMLElement>('[data-gp-game-row]')?.dataset.gpGameRow === baseGameRowKey)
+        .map((el) => {
+          const r = el.getBoundingClientRect();
+          return { el, r, x: r.left + r.width / 2, y: r.top + r.height / 2 };
+        })
+        .filter((box) => dx > 0 ? box.x > bx : box.x < bx)
+      : boxes.filter((box) => {
+        const distance = box.x - bx;
+        const inDirection = dx > 0 ? distance > 0 : distance < 0;
+        const overlapsVertically = Math.min(br.bottom, box.r.bottom) > Math.max(br.top, box.r.top);
+        return inDirection && overlapsVertically;
+      });
     if (sameRow.length === 0) return;
 
     // 同一行内只按横向距离选择，垂直误差仅用于稳定相同距离时的结果。
@@ -428,7 +704,7 @@ function moveFocus(dx: number, dy: number) {
 
   if (best) {
     try {
-      if (!focusGamepadElement(best)) {
+      if (!focusGamepadElement(best, dy < 0)) {
         best.focus({ preventScroll: false });
         setGamepadFocused(best);
       }
@@ -446,6 +722,20 @@ function isRangeInput(el: HTMLElement | null): el is HTMLInputElement {
 function activate(opts: GamepadEngineOptions) {
   const el = document.activeElement as HTMLElement | null;
   if (!el) return;
+  // Vue 的离场动画会短暂保留已经折叠的二级菜单 DOM。即使组件已经
+  // 把焦点恢复到入口，WebView2 仍可能在同一帧报告旧 activeElement。
+  // A 只能激活“当前焦点列表”中的节点，禁止程序化 click 穿透到已折叠
+  // 的黑白名单按钮或专属配置 AC/DC 下拉。
+  if (!focusables().includes(el)) {
+    const gameMenu = document.querySelector<HTMLElement>('[data-gp-game-quick-menu]');
+    const recovery = el.closest('[data-gp-custom-body]')
+      ? gameMenu?.querySelector<HTMLElement>('[data-gp-custom-entry]')
+      : el.closest('[data-gp-game-rules-body]')
+        ? gameMenu?.querySelector<HTMLElement>('[data-gp-game-rules-entry]')
+        : null;
+    if (!recovery || !focusGamepadElement(recovery)) focusFirst();
+    return;
+  }
   // 滑块：A 进入/退出编辑模式
   if (isRangeInput(el)) {
     if (sliderEditMode) {
@@ -461,6 +751,13 @@ function activate(opts: GamepadEngineOptions) {
   // 自定义下拉 → 打开菜单（与鼠标点击一致；不再顺序轮转档位）
   if (el.dataset && el.dataset.gpDropdown !== undefined) {
     el.dispatchEvent(new CustomEvent('gp:dropdown-open', { bubbles: true }));
+    return;
+  }
+  // Fan node selectors opt into the native WebView picker. A on these
+  // controls must open the same dropdown the mouse opens, rather than silently
+  // cycling a value with no visible menu.
+  if (el.dataset && el.dataset.gpNativeDropdown !== undefined) {
+    (el as HTMLSelectElement).click();
     return;
   }
   // 原生下拉框 → 循环 option
@@ -566,7 +863,9 @@ function dispatchNativeUiAction(opts: GamepadEngineOptions, action: NativeUiActi
     handleGamepadEditGame(opts);
     return;
   }
-  if (mouseModeSuppress) return;
+  const gameMenuOpen = !!document.querySelector('[data-gp-game-quick-menu]');
+  const gameQuickDialogOpen = !!document.querySelector('[data-gp-game-quick-dialog]');
+  if (mouseModeSuppress && !gameMenuOpen) return;
   if (action === 'debug') {
     window.dispatchEvent(new CustomEvent('ipc:gamepad-start'));
     log(opts, 'Start -> debug');
@@ -578,6 +877,7 @@ function dispatchNativeUiAction(opts: GamepadEngineOptions, action: NativeUiActi
     return;
   }
   if (action === 'dropdown') {
+    if (gameQuickDialogOpen) return;
     const el = document.activeElement as HTMLElement | null;
     if (el?.dataset?.gpDropdown !== undefined) {
       el.dispatchEvent(new CustomEvent('gp:dropdown-open', { bubbles: true }));
@@ -677,7 +977,7 @@ function tick(opts: GamepadEngineOptions) {
 
     // Native Raw Input is the primary path after it has delivered one UI
     // action. Keep the browser API as a fallback for non-XInput devices.
-    if (nativeUiInputActive) {
+    if (nativeChildInputOwned || nativeUiInputActive) {
       prevButtons = b;
       prevAxes = a;
       rafId = requestAnimationFrame(() => tick(opts));
@@ -721,6 +1021,10 @@ function tick(opts: GamepadEngineOptions) {
     // LR、B、Y are deliberately handled outside this suppression boundary:
     // LR changes pages, B exits/backs out, and Y edits the current game rule.
     if (mouseModeSuppress) {
+      const gameMenuOpen = !!document.querySelector('[data-gp-game-quick-menu]');
+      if (gameMenuOpen) {
+        if (pressed(0)) enqueueGamepadTaskDetached(() => activate(opts));
+      }
       if (pressed(1)) enqueueGamepadTaskDetached(() => handleGamepadBack(opts));
       if (pressed(3)) enqueueGamepadTaskDetached(() => handleGamepadEditGame(opts));
       prevButtons = b;
@@ -784,7 +1088,10 @@ function tick(opts: GamepadEngineOptions) {
         // （见上方 sliderEditMode 分支）。这修复了“焦点一上滑块、左右就被吃掉、无法选后续元素”。
         const dirX = heldRight ? 1 : heldLeft ? -1 : 0;
         const dirY = heldDown ? 1 : heldUp ? -1 : 0;
-        if ((dirX !== 0 || dirY !== 0) && now - lastNav > 220) {
+        const inlineEditActive = !!(document.activeElement as HTMLElement | null)
+          ?.closest<HTMLElement>('[data-gp-inline-edit-active="true"]');
+        const repeatInterval = inlineEditActive ? INLINE_EDIT_REPEAT : NAV_REPEAT_BASE;
+        if ((dirX !== 0 || dirY !== 0) && now - lastNav > repeatInterval) {
           // ── 下拉菜单打开（teleport 到 body）时：只上下在菜单项内移动高亮，
           //    焦点严格限制在菜单内，不穿透到下层页面（修复手柄上下选出菜单外内容）；
           //    左右方向键不做事（与鼠标菜单一致，不再循环档位）──

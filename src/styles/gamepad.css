@@ -28,3 +28,21 @@ input[type='range'].focused::-webkit-slider-thumb {
   position: relative;
   z-index: 6;
 }
+
+/* 实心强调按钮：手柄聚焦时保留原有蓝色外发光，并增加白色内描边，
+ * 与「已开启」开关的选中表现保持一致；普通深色按钮仍使用原蓝色焦点环。 */
+button.seg-btn.focused.active,
+button.focused.primary,
+button.focused.action-btn:not(.ghost),
+button.focused.smt-btn-ok,
+button.focused.profile-button.active,
+.db-row button.focused,
+.steam-launch-popup-actions button:first-child.focused,
+.quick-dialog-actions button:first-child.focused {
+  box-shadow: inset 0 0 0 2px #fff, var(--focus-ring);
+}
+
+/* 设置页的蓝色状态气泡由外层容器承载手柄焦点，描边落在气泡本体上。 */
+.gp-toggle.focused .gp-toggle-state {
+  box-shadow: inset 0 0 0 2px #fff;
+}

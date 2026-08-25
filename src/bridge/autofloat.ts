@@ -906,6 +906,13 @@ async function syncRtssLimit(target: number): Promise<void> {
 // 目标切换采用短尾随防抖：UI 立即更新，连续切档只重载最后一个 RTSS 目标。
 const RTSS_SYNC_SETTLE_MS = 120;
 let rtssSyncTimer: number | null = null;
+export function cancelPendingRtssSync(): void {
+  if (rtssSyncTimer !== null) {
+    window.clearTimeout(rtssSyncTimer);
+    rtssSyncTimer = null;
+  }
+}
+
 function scheduleRtssSync(target: number): void {
   if (rtssSyncTimer !== null) window.clearTimeout(rtssSyncTimer);
   rtssSyncTimer = window.setTimeout(() => {

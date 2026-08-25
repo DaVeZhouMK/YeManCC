@@ -4,10 +4,16 @@ import { useRouter, useRoute } from 'vue-router';
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { app, shell, windowApi } from '@/bridge/api';
 import AppIcon from '@/components/AppIcon.vue';
+import { fanHostLifecycle } from '@/bridge/fanHost';
 import {
   loadPerformanceSchedule,
   onPerformanceScheduleChanged,
 } from '@/bridge/performanceSchedule';
+import {
+  fanFeatureEnabled,
+  fanNavigationMotion,
+  fanNavigationSpinDuration,
+} from '@/bridge/fanFeature';
 
 const router = useRouter();
 const route = useRoute();
@@ -15,6 +21,8 @@ const quickModeEnabled = ref(false);
 let stopScheduleWatch: (() => void) | null = null;
 
 const visibleRoutes = computed(() => ROUTES.filter((item) => {
+  if (item.hidden) return false;
+  if (item.feature === 'fan' && !fanFeatureEnabled.value) return false;
   if (!quickModeEnabled.value) return true;
   return item.path !== '/tdp' && item.path !== '/cpu';
 }));
@@ -57,11 +65,13 @@ async function minimize() {
   }
 }
 async function quit() {
-  try {
-    await app.exit(0);
-  } catch {
-    /* ignore */
-  }
+  // Start the normal lifecycle close, but never make the UI wait behind an
+  // ACPI/HID call.  Native app exit immediately sends the authenticated
+  // /api/parent-exit handoff; the Host's closeBoundaryClaimed gate serializes
+  // whichever owner reaches CurrentDevice.Close first.  A failed renderer
+  // close therefore cannot leave the Exit button dead or bypass recovery.
+  void fanHostLifecycle.close().catch(() => {});
+  try { await app.exit(0); } catch { /* native shell may already be exiting */ }
 }
 </script>
 
@@ -83,7 +93,7 @@ async function quit() {
         :class="{ active: route.path === r.path }"
         @click="go(r.path)"
       >
-        <span class="nav-icon"><AppIcon :name="r.icon" /></span>
+        <span class="nav-icon"><AppIcon :name="r.icon" :class="{ spinning: r.path === '/fan' && fanNavigationMotion }" :style="r.path === '/fan' ? { '--fan-spin-duration': fanNavigationSpinDuration } : undefined" /></span>
         <span class="nav-label">{{ r.title }}</span>
       </button>
     </div>
@@ -182,6 +192,12 @@ async function quit() {
 .nav-icon {
   font-size: 17px;
   line-height: 1;
+}
+.nav-icon .spinning {
+  animation: nav-fan-spin var(--fan-spin-duration, 1.1s) linear infinite;
+}
+@keyframes nav-fan-spin {
+  to { transform: rotate(360deg); }
 }
 .nav-label {
   font-size: 10px;

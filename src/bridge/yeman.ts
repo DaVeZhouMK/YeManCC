@@ -5,7 +5,7 @@
 //
 // 程序控制配置由本桥统一记录，TDP/FPS 的用户值不再依赖 PowerControl 下的 txt。
 // 任务计划只识别状态、不解析内容（schtasks 创建，/Query 判断存在即=开关状态）。
-import { fs, shell, registry, tdpDaemon, powerLifecycle, systemHibernate, type RunResult, type HibernateState } from './api';
+import { fs, shell, registry, rtss, tdpDaemon, powerLifecycle, systemHibernate, type RunResult, type HibernateState } from './api';
 import { invoke } from './ipc';
 import { readSettingsSection, saveSettingsSection, setSettingsDirectory } from './settingsRepository';
 
@@ -497,10 +497,10 @@ const DEFAULT_GAMEPAD_SETTINGS: GamepadSettings = {
   bDoubleMinimize: true,
   tdpShortcut: true,
   fpsShortcut: true,
-  killGame: false,
-  openKeyboard: false,
-  returnDesktop: false,
-  mouseToggle: false,
+  killGame: true,
+  openKeyboard: true,
+  returnDesktop: true,
+  mouseToggle: true,
   mouseBackend: 'joyxoff',
 };
 export async function summonGet(): Promise<GamepadSettings> {
@@ -1061,6 +1061,17 @@ export const PW = {
   G_MAXCORE: 'ea062031-0e34-4ff1-9b6d-eb1059334028', // 处理器性能核心暂停最大核心数 %
 } as const;
 
+// Windows 11“屏幕、睡眠和休眠超时”页面使用的标准电源设置 GUID。
+// 页面文案和交互可以跟随 Windows 11，但这些值始终写入固定的野蛮系统电源方案，
+// 不读取/修改当前活动方案，避免用户切换到其它方案后页面设置失去归属。
+export const SLEEP_TIMEOUT_POWER = {
+  VIDEO_SUBGROUP: '7516b95f-f776-4464-8c53-06167f40cc99',
+  VIDEO_IDLE: '3c0bc021-c8a8-4e07-a973-6b14cbcb2b7e',
+  SLEEP_SUBGROUP: '238c9fa8-0aad-41ed-83f4-97be242c8f20',
+  STANDBY_IDLE: '29f6c1db-86da-48c5-9fdb-f2b67b1f44da',
+  HIBERNATE_IDLE: '9d7815a6-7ee4-497e-8888-515a05f02364',
+} as const;
+
 export const SCHEMES = [
   { key: 'yeman', guid: PW.YEMAN, name: '野蛮系统电源' },
   { key: 'besteff', guid: PW.WIN_SAVER, name: '最佳能效' },
@@ -1247,6 +1258,98 @@ async function applyPowerValueBatch(ac: boolean, entries: Array<[string, number]
   } catch {
     // CPU、电源写入类参数遵循强制逐条执行规则：IPC 或单项失败不冒泡。
   }
+}
+
+// 自动性能组合应用用户保存的 CPU 挡位时必须是严格事务：主类 CPU 参数失败、
+// 睡眠/唤醒写入门禁拒绝或回读不一致都要向上抛出，让性能调度队列重试或报告失败。
+// 第 1/2 类处理器与节流设置在部分旧平台上不存在，仍按可选能力处理。
+const OPTIONAL_CPU_PROFILE_SETTINGS = new Set<string>([
+  PW.G_SCHED2,
+  PW.G_SCHED3,
+  PW.G_FREQ2,
+  PW.G_FREQ3,
+  PW.G_MIN2,
+  PW.G_MIN3,
+  PW.G_THROT,
+]);
+
+async function applyPowerValueBatchStrict(ac: boolean, entries: Array<[string, number]>): Promise<void> {
+  if (entries.length === 0) return;
+  const result = await registry.writePowerBatch(
+    PW.YEMAN,
+    PW.SUB,
+    ac ? 'ACSettingIndex' : 'DCSettingIndex',
+    entries.map(([setting, value]) => ({ setting, value: Math.trunc(value) })),
+  );
+  const requiredFailures = (result.failed || []).filter(
+    (failure) => !OPTIONAL_CPU_PROFILE_SETTINGS.has(failure.setting),
+  );
+  if (!result.ok && (result.failed || []).length === 0) {
+    throw new Error(`CPU 挡位参数写入失败（${ac ? 'AC' : 'DC'}）：native 未返回失败项`);
+  }
+  if (requiredFailures.length > 0) {
+    const detail = requiredFailures
+      .map((failure) => `${failure.setting}:${failure.code}`)
+      .join(', ');
+    throw new Error(`CPU 挡位参数写入失败（${ac ? 'AC' : 'DC'}）：${detail}`);
+  }
+}
+
+function cpuProfileSideValues(p: PowerParams, side: 'ac' | 'dc') {
+  return side === 'ac'
+    ? { freq: p.acFreq, turbo: p.acTurbo, aggr: p.acAggr }
+    : { freq: p.dcFreq, turbo: p.dcTurbo, aggr: p.dcAggr };
+}
+
+async function verifyCpuProfilePowerParams(p: PowerParams, side: 'ac' | 'dc'): Promise<void> {
+  const expected = cpuProfileSideValues(p, side);
+  const ac = side === 'ac';
+  const actual = await readPowerParams();
+  if (!actual) throw new Error(`CPU 挡位回读失败（${side.toUpperCase()}）`);
+  const actualSide = cpuProfileSideValues(actual, side);
+  const mismatches: string[] = [];
+  if (actualSide.freq !== expected.freq) mismatches.push(`主频 ${actualSide.freq}/${expected.freq}`);
+  if (actualSide.turbo !== expected.turbo) mismatches.push(`睿频 ${actualSide.turbo}/${expected.turbo}`);
+  if (actualSide.aggr !== expected.aggr) mismatches.push(`积极性 ${actualSide.aggr}/${expected.aggr}`);
+
+  const expectedMinState = Math.max(0, Math.min(100, Math.round(expected.aggr)));
+  const minState = await readSchemeIndex(PW.G_MIN1, '', ac);
+  if (minState !== expectedMinState) mismatches.push(`最小状态 ${minState}/${expectedMinState}`);
+  const maxState = await readSchemeIndex(PW.G_MAXSTATE, '', ac);
+  if (maxState !== 100) mismatches.push(`最大状态 ${maxState}/100`);
+  const throttle = await readSchemeIndex(PW.G_THROT, '', ac);
+  const expectedThrottle = throttleForFrequency(expected.freq);
+  if (throttle != null && throttle !== expectedThrottle) {
+    mismatches.push(`节流 ${throttle}/${expectedThrottle}`);
+  }
+  if (mismatches.length > 0) {
+    throw new Error(`CPU 挡位回读不一致（${side.toUpperCase()}）：${mismatches.join('，')}`);
+  }
+}
+
+// 自动模式的固定 CPU 挡位必须与 CPU 页面保存值完全一致。这里只写当前供电侧，
+// 避免 AC 档位覆盖尚未激活的 DC 组合（反之亦然）；模板脚本仅由“重置挡位”调用。
+export async function applyCpuProfilePowerParams(p: PowerParams, side: 'ac' | 'dc'): Promise<void> {
+  const values = cpuProfileSideValues(p, side);
+  const scheduler = sliderAggrToWindowsValue(values.aggr);
+  const minState = Math.max(0, Math.min(100, Math.round(values.aggr)));
+  const entries: Array<[string, number]> = [
+    [PW.G_MAXSTATE, 100],
+    [PW.G_SCHED1, scheduler],
+    [PW.G_SCHED2, scheduler],
+    [PW.G_SCHED3, scheduler],
+    [PW.G_TURBO, values.turbo ? 2 : 0],
+    [PW.G_FREQ1, values.freq],
+    [PW.G_FREQ2, values.freq],
+    [PW.G_FREQ3, values.freq],
+    [PW.G_THROT, throttleForFrequency(values.freq)],
+    [PW.G_MIN1, minState],
+    [PW.G_MIN2, minState],
+    [PW.G_MIN3, minState],
+  ];
+  await applyPowerValueBatchStrict(side === 'ac', entries);
+  await setActiveScheme(PW.YEMAN);
+  await verifyCpuProfilePowerParams(p, side);
 }
 
 // 应用 CPU 调度参数（对齐 HTA pw_applyNow：setac/dcvalueindex 全量下发）
@@ -1676,6 +1779,15 @@ export async function readRtssLimit(): Promise<number> {
   return 0;
 }
 let rtssConfigWriteQueue: Promise<void> = Promise.resolve();
+
+async function reloadRtssProfiles(dir: string): Promise<void> {
+  const result = await rtss.reloadProfiles(`${dir}\\RTSSHooks64.dll`);
+  if (!result?.ok) {
+    const detail = result?.error || (result?.win32Error ? `Win32 ${result.win32Error}` : '未知错误');
+    throw new Error(`RTSS 配置重载失败：${detail}`);
+  }
+}
+
 export function setRtssLimit(fps: number): Promise<void> {
   const run = rtssConfigWriteQueue.then(async () => {
     const dir = await resolveRtssDir();
@@ -1684,16 +1796,26 @@ export function setRtssLimit(fps: number): Promise<void> {
   // NaN/Infinity 防护：非法输入写入 0（不锁帧），绝不写坏 RTSS 配置（2026-08-05 修复）
   const v = Number.isFinite(fps) ? Math.max(0, Math.round(fps)) : 0;
   const txt = await fs.readTextFile(global);
-  const out = txt
-    .split(/\r?\n/)
-    .map((l) => (l.match(/^Limit=\d+/) ? `Limit=${v}` : l))
-    .join('\r\n');
-  await fs.writeTextFileAtomic(global, out);
+  const lines = txt.split(/\r?\n/);
+  let found = false;
+  const outLines = lines.map((line) => {
+    if (/^Limit=\d+/i.test(line)) {
+      found = true;
+      return `Limit=${v}`;
+    }
+    return line;
+  });
+  if (!found) {
+    // RTSS Global profiles normally contain Limit=. If a damaged/older file
+    // lacks it, insert it at the top rather than silently reporting success.
+    outLines.unshift(`Limit=${v}`);
+  }
+  await fs.writeTextFileAtomic(global, outLines.join('\r\n'));
   // 重载配置：外部改完文件后只 LoadProfile(重新载入磁盘) + UpdateProfiles(套用到运行中的游戏)。
   // ⚠ 不要 SaveProfile —— 它会把 RTSS 内存里的旧状态写回磁盘，覆盖刚改的内容甚至写坏（损坏根因）。
-  await shell.run('rundll32', [`${dir}\\RTSSHooks64.dll`, 'LoadProfile']);
-  await new Promise<void>((r) => setTimeout(r, 200)); // 等 RTSS 异步载入刚写的文件
-    await shell.run('rundll32', [`${dir}\\RTSSHooks64.dll`, 'UpdateProfiles']);
+  // ⚠ 不能用 rundll32：RTSS SDK 的 LoadProfile 是 void(LPCSTR)，与 rundll32
+  // 的 DllEntry(HWND,HINSTANCE,LPSTR,int) ABI 不兼容，会把 HWND 当成字符串指针。
+  await reloadRtssProfiles(dir);
   });
   rtssConfigWriteQueue = run.catch(() => {});
   return run;
@@ -1777,9 +1899,7 @@ export function setRtssZoom(ratio: number): Promise<void> {
   }
   await fs.writeTextFileAtomic(global, lines.join('\r\n'));
   // 强制 RTSS 重载配置：LoadProfile(重新载入磁盘) + UpdateProfiles(套用)。同样不要 SaveProfile（会把内存旧状态写回磁盘）。
-  await shell.run('rundll32', [`${dir}\\RTSSHooks64.dll`, 'LoadProfile']);
-  await new Promise<void>((r) => setTimeout(r, 200));
-    await shell.run('rundll32', [`${dir}\\RTSSHooks64.dll`, 'UpdateProfiles']);
+  await reloadRtssProfiles(dir);
   });
   rtssConfigWriteQueue = run.catch(() => {});
   return run;
@@ -2003,6 +2123,78 @@ async function readPlanPowerIndex(
     return Number.isFinite(number) ? number : null;
   } catch {
     return null;
+  }
+}
+
+export interface SleepTimeoutSettings {
+  acScreen: number | null;
+  dcScreen: number | null;
+  acSleep: number | null;
+  dcSleep: number | null;
+  acHibernate: number | null;
+  dcHibernate: number | null;
+}
+
+type SleepTimeoutField = 'screen' | 'sleep' | 'hibernate';
+
+const SLEEP_TIMEOUT_FIELDS: Record<SleepTimeoutField, { subGroup: string; setting: string }> = {
+  screen: {
+    subGroup: SLEEP_TIMEOUT_POWER.VIDEO_SUBGROUP,
+    setting: SLEEP_TIMEOUT_POWER.VIDEO_IDLE,
+  },
+  sleep: {
+    subGroup: SLEEP_TIMEOUT_POWER.SLEEP_SUBGROUP,
+    setting: SLEEP_TIMEOUT_POWER.STANDBY_IDLE,
+  },
+  hibernate: {
+    subGroup: SLEEP_TIMEOUT_POWER.SLEEP_SUBGROUP,
+    setting: SLEEP_TIMEOUT_POWER.HIBERNATE_IDLE,
+  },
+};
+
+function timeoutSecondsToMinutes(value: number | null): number | null {
+  if (value === null || !Number.isFinite(value)) return null;
+  return Math.max(0, Math.round(value / 60));
+}
+
+/** 读取固定野蛮电源方案中的 Windows 11 屏幕/睡眠/休眠超时（单位：分钟）。 */
+export async function readSleepTimeouts(): Promise<SleepTimeoutSettings> {
+  const entries = await Promise.all(
+    (Object.keys(SLEEP_TIMEOUT_FIELDS) as SleepTimeoutField[]).flatMap((field) => {
+      const spec = SLEEP_TIMEOUT_FIELDS[field];
+      return [
+        readPlanPowerIndex(PW.YEMAN, spec.subGroup, spec.setting, true),
+        readPlanPowerIndex(PW.YEMAN, spec.subGroup, spec.setting, false),
+      ];
+    }),
+  );
+  return {
+    acScreen: timeoutSecondsToMinutes(entries[0]),
+    dcScreen: timeoutSecondsToMinutes(entries[1]),
+    acSleep: timeoutSecondsToMinutes(entries[2]),
+    dcSleep: timeoutSecondsToMinutes(entries[3]),
+    acHibernate: timeoutSecondsToMinutes(entries[4]),
+    dcHibernate: timeoutSecondsToMinutes(entries[5]),
+  };
+}
+
+/** 写入固定野蛮电源方案中的单个 Windows 11 超时（单位：分钟）。 */
+export async function setSleepTimeout(field: SleepTimeoutField, ac: boolean, minutes: number): Promise<void> {
+  const spec = SLEEP_TIMEOUT_FIELDS[field];
+  const safeMinutes = Math.max(0, Math.min(10080, Math.round(Number(minutes))));
+  const seconds = safeMinutes * 60;
+  const verb = ac ? '/setacvalueindex' : '/setdcvalueindex';
+  const result = await shell.run(
+    'powercfg',
+    [verb, PW.YEMAN, spec.subGroup, spec.setting, String(seconds)],
+    5000,
+  );
+  if (result.exitCode !== 0) {
+    throw new Error(`电源超时写入失败：${(result.stderr || result.stdout).trim() || `exit ${result.exitCode}`}`);
+  }
+  const after = await readPlanPowerIndex(PW.YEMAN, spec.subGroup, spec.setting, ac);
+  if (after !== seconds) {
+    throw new Error(`电源超时回读不一致：期望 ${seconds} 秒，实际 ${after === null ? '无法读取' : `${after} 秒`}`);
   }
 }
 

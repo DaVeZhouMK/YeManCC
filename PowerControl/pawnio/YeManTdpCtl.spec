@@ -5,7 +5,7 @@ a = Analysis(
     ['YeManTdpCtl.py'],
     pathex=[],
     binaries=[],
-    datas=[('_internal/RyzenSMU.bin', '.'), ('_internal/AMDFamily17.bin', '.'), ('_internal/IntelMSR.bin', '.'), ('_internal/LpcIO.bin', '.'), ('_internal/COPYING', '.'), ('PawnIO_setup.exe', '.')],
+    datas=[('_internal/RyzenSMU.bin', '.'), ('_internal/AMDFamily17.bin', '.'), ('_internal/IntelMSR.bin', '.'), ('_internal/COPYING', '.'), ('PawnIO_setup.exe', '.')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},

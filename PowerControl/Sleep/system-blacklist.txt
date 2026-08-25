@@ -1,15 +1,36 @@
 # ============================================================
 # YeManCC 游戏识别 - 系统黑名单 (system-blacklist.txt)
 # 位置: C:\SOFT\YeMan\PowerControl\Sleep\system-blacklist.txt
-# 每行一个 exe 基名（不含路径）。# 开头为注释，空行忽略。
-# 运行时与代码内置的系统黑名单合并后，跳过这些进程，再选"剩余最大工作集"作为目标游戏。
-# 可自行增删（加一行 = 让该程序永不被冻结）。
+# 每行一个 exe 基名（不含路径）；名称不区分大小写，支持 * / ? 通配符。
+# 运行时与代码内置黑名单合并后先排除这些进程，再从剩余候选中选择游戏。
+# 本文件随版本更新；个人规则请写入 player-blacklist.txt，避免升级时被覆盖。
+# 规则应保持产品专属，禁止使用 launcher* / client* / helper* / app* 等宽泛模式。
 # ============================================================
 
-# ---- 游戏启动器 / 平台（体积大但不是要冻的游戏本体）----
+# ---- Windows 外壳 / 内置应用（可能占用较大工作集，但不是游戏）----
+Taskmgr.exe
+Notepad.exe
+TextInputHost.exe
+ShellExperienceHost.exe
+CrossDeviceResume.exe
+TabTip.exe
+ctfmon.exe
+Widgets.exe
+WidgetService.exe
+PhoneExperienceHost.exe
+SecurityHealthSystray.exe
+smartscreen.exe
+WmiPrvSE.exe
+dllhost.exe
+WUDFHost.exe
+Start11_64.exe
+Start11Srv.exe
+
+# ---- 游戏启动器 / 商店 / 平台 ----
 Steam.exe
 steamwebhelper.exe
 steamerrorreporter.exe
+steamservice.exe
 Playnite.exe
 PlayniteUI.exe
 EpicGamesLauncher.exe
@@ -18,30 +39,70 @@ GalaxyClient.exe
 Battle.net.exe
 Origin.exe
 EADesktop.exe
+EALauncher.exe
 UbisoftConnect.exe
+upc.exe
 XboxApp.exe
+XboxPcAppFT.exe
+WeGame.exe
+tgp_daemon.exe
+HoYoPlay.exe
+HYP.exe
+BsgLauncher.exe
+RiotClientServices.exe
+RockstarGamesLauncher.exe
+SocialClubHelper.exe
+Heroic.exe
+wgc.exe
+wgc_api.exe
+Steamcommunity_302.exe
+steamcommunity_302.caddy
+steamcommunity_302.cli
 
-# ---- 即时通讯 / 社交 ----
+# ---- 游戏加速 / 串流 / 远程游戏工具 ----
+uu.exe
+uu_ball.exe
+uu_cloudsyn.exe
+uu_launcher.exe
+uu_neths_helper.exe
+GameViewer*.exe
+Sunshine.exe
+Moonlight.exe
+Parsec.exe
+
+# ---- 即时通讯 / 社交 / 会议 ----
 QQ.exe
 QQExternal.exe
 WeChat.exe
 Weixin.exe
+WeChatAppEx.exe
+WeChatBrowser.exe
 TIM.exe
 WXWork.exe
 Discord.exe
 Telegram.exe
 Slack.exe
-WorkBuddy.exe
+DingTalk.exe
+Feishu.exe
+FeishuMeeting.exe
+wemeetapp.exe
 
-# ---- 浏览器（常驻、体量大但不应被冻结）----
+# ---- 浏览器 ----
 msedge.exe
 msedgewebview2.exe
 edge.exe
 chrome.exe
 brave.exe
 firefox.exe
+opera.exe
+vivaldi.exe
+360se.exe
+360chrome*.exe
+QQBrowser.exe
+SogouExplorer.exe
+Quark.exe
 
-# ---- 主流办公软件 ----
+# ---- 主流办公 / PDF / 笔记 ----
 # Microsoft Office
 WINWORD.EXE
 EXCEL.EXE
@@ -53,6 +114,7 @@ MSPUB.EXE
 # WPS Office
 wps.exe
 wpscenter.exe
+wpscloudsvr.exe
 et.exe
 wpp.exe
 wpspdf.exe
@@ -61,12 +123,69 @@ Acrobat.exe
 AcroRd32.exe
 FoxitReader.exe
 FoxitPhantomPDF.exe
+PDFXEdit.exe
+SumatraPDF.exe
 # 笔记 / 协作文档
 Notion.exe
-DingTalk.exe
-Feishu.exe
 
-# ---- 图像 / 设计（Adobe 全家桶 + 常见设计工具）----
+# ---- AI 对话 / 本地模型 / 智能体客户端 ----
+ChatGPT.exe
+codex.exe
+codex-*.exe
+Claude.exe
+Gemini.exe
+DeepSeek.exe
+Doubao.exe
+Yuanbao.exe
+Kimi.exe
+Perplexity.exe
+WorkBuddy.exe
+TRAE*.exe
+CodeBuddy*.exe
+Qoder*.exe
+Lingma*.exe
+Cursor.exe
+Windsurf*.exe
+Ollama.exe
+Ollama app.exe
+LM Studio.exe
+CherryStudio.exe
+Chatbox.exe
+AingDesk.exe
+GPT4All.exe
+Msty.exe
+Jan.exe
+ChatALL.exe
+HyperChat.exe
+mscopilot.exe
+mscopilot_proxy.exe
+copilotapp.exe
+cc-switch.exe
+
+# ---- 开发 IDE / 编辑器 / 终端 ----
+Code.exe
+Code - Insiders.exe
+devenv.exe
+idea64.exe
+pycharm64.exe
+webstorm64.exe
+clion64.exe
+rider64.exe
+datagrip64.exe
+goland64.exe
+rubymine64.exe
+phpstorm64.exe
+studio64.exe
+devecostudio64.exe
+HBuilderX.exe
+wechatdevtools.exe
+notepad++.exe
+sublime_text.exe
+WindowsTerminal.exe
+git-bash.exe
+vctip.exe
+
+# ---- 图像 / 设计 / 三维 ----
 photoshop.exe
 illustrator.exe
 PremierePro.exe
@@ -78,44 +197,123 @@ CorelDRW.exe
 Krita.exe
 Blender.exe
 3dsmax.exe
+maya.exe
+acad.exe
+Figma.exe
 Meitu.exe
 
-# ---- 视频剪辑 / 录制 ----
+# ---- 视频 / 直播 / 影音 ----
 JianyingPro.exe
 CapCut.exe
 Resolve.exe
 obs64.exe
-
-# ---- AI 类软件（桌面客户端）----
-ChatGPT.exe
-Claude.exe
-Gemini.exe
-DeepSeek.exe
-Doubao.exe
-Yuanbao.exe
-Kimi.exe
-Perplexity.exe
-Cursor.exe
-Ollama.exe
-LM Studio.exe
-
-# ---- 抖音系 / 短视频创作 ----
 Douyin.exe
-
-# ---- 常用工具 / 多媒体 ----
-wemeetapp.exe
-BaiduNetdisk.exe
-AliyDrive.exe
-Quark.exe
+bilibili.exe
+Livehime.exe
+QQLive.exe
+QyClient.exe
+Youku.exe
+PotPlayerMini.exe
+PotPlayerMini64.exe
+vlc.exe
+mpv.exe
 cloudmusic.exe
 qqmusic.exe
-Thunder.exe
 
-# ---- 自身与工具（代码已硬编码排除，列此双保险）----
+# ---- 网盘 / 下载 ----
+BaiduNetdisk.exe
+BaiduNetdiskUnite.exe
+baidunetdiskhost.exe
+AliyDrive.exe
+aDrive.exe
+AliyunDrive.exe
+QuarkCloudDrive.exe
+115chrome.exe
+Thunder.exe
+ThunderStart.exe
+
+# ---- Windows 镜像 / 磁盘 / 压缩 / 诊断工具 ----
+NTLite.exe
+Dism++*.exe
+DiskGenius.exe
+DGFileViewer.exe
+Ventoy2Disk.exe
+rufus.exe
+WinRAR.exe
+7zFM.exe
+UltraISO.exe
+PowerISO.exe
+Everything.exe
+Everything64.exe
+WizTree64.exe
+SpaceSniffer.exe
+ProcessHacker.exe
+SystemInformer.exe
+Autoruns.exe
+Autoruns64.exe
+Procmon.exe
+Procmon64.exe
+procexp.exe
+procexp64.exe
+QuickCPU.exe
+AutoHotkeyUX.exe
+
+# ---- 硬件控制 / 性能监控 / 叠加层 / 游戏辅助 ----
+RTSS.exe
+RTSSHooksLoader*.exe
+HWiNFO64.exe
+LosslessScaling.exe
+Magpie.exe
+OpenSpeedy.exe
+Game Cheats Manager.exe
+JoyXoff.exe
+JoyxSvc.exe
+lghub*.exe
+NVIDIA App.exe
+NVIDIA Overlay.exe
+NVIDIA Share.exe
+RadeonSoftware.exe
+iCUE.exe
+ArmouryCrate.UserSessionHelper.exe
+SignalRgb.exe
+OpenRGB.exe
+CapFrameX.exe
+PresentMon.exe
+PresentMon_x64.exe
+CssLoader-Standalone-Headless.exe
+枫织梦境助手客户端.exe
+NVDisplay.Container.exe
+
+# ---- VPN / 代理 / 网络工具 ----
+Astar.exe
+v2rayN.exe
+Hiddify.exe
+FlClash.exe
+Clash for Windows.exe
+Clash Verge.exe
+Clash Verge Rev.exe
+Mihomo Party.exe
+Netch.exe
+
+# ---- 远程控制 / 虚拟化管理界面 ----
+SunloginClient.exe
+TeamViewer.exe
+AnyDesk.exe
+ToDesk.exe
+vmware.exe
+vmware-vmx.exe
+VirtualBox.exe
+VirtualBoxVM.exe
+VBoxSVC.exe
+VBoxHeadless.exe
+
+# ---- YeManCC 自身与配套工具 ----
 YeManCC.exe
 YeManTdpCtl.exe
+SteamArtworkLab.exe
+SteamLibraryWorkspace.exe
 
 # ---- 备注 ----
-# 系统进程（csrss/winlogon/lsass/services/smss/System/Idle/dwm/explorer/WebView2 等）
-# 由代码硬编码黑名单处理，无需写在这里。
-# 浏览器、录屏等若也想排除，直接加一行 exe 基名即可。
+# csrss / winlogon / lsass / services / smss / System / Idle / dwm / explorer、
+# WebView2、通用运行时以及部分远程控制/虚拟化进程仍由 native 硬编码保护。
+# 用户白名单优先于系统黑名单；确有同名游戏时可通过白名单显式恢复识别。

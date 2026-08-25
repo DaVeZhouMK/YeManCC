@@ -8,10 +8,11 @@
 //   4 电池   : 充电 xxW / 放电 xxW（仅电池设备显示）
 // 台式机判断为无电池时，不渲染电池格，剩余三格自然等宽。
 import GameRecognitionControl from '@/components/GameRecognitionControl.vue';
-import { computed, onMounted, onUnmounted } from 'vue';
+import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { registerScheduledTask } from '@/scheduler';
 import { startTopMonitor, stopTopMonitor, readTopMonitor, setTopMonitorData, topMonitorData } from '@/bridge/topmon';
-import { playing, hasFolder, togglePlay, currentName } from '@/bridge/music';
+import InlineIcon from '@/components/InlineIcon.vue';
+import { chooseFolder, currentName, hasFolder, initMusic, playing, togglePlay } from '@/bridge/music';
 
 const POLL_MS = 1000; // 前台每 1 秒读取一次；后台由 pauseWhenHidden 暂停
 let stopTask: (() => void) | null = null;
@@ -66,16 +67,53 @@ onUnmounted(() => {
 
 // ── 顶部旋转 CD：仅鼠标/触摸可触发，手柄完全无法点击 ──
 const discTitle = computed(() => {
-  if (!hasFolder.value) return '选择音乐文件夹';
+  if (!hasFolder.value) return '指定音乐地址';
   return playing.value ? '暂停：' + currentName.value : '播放：' + currentName.value;
 });
 
-function onDiscPointer(event: PointerEvent): void {
+const folderNoticeOpen = ref(false);
+
+function closeFolderNotice(): void {
+  folderNoticeOpen.value = false;
+}
+
+function openFolderNotice(): void {
+  folderNoticeOpen.value = true;
+}
+
+async function chooseFolderFromNotice(): Promise<void> {
+  closeFolderNotice();
+  await chooseFolder();
+}
+
+function onFolderNoticeKeydown(event: KeyboardEvent): void {
+  if (event.key === 'Escape' && folderNoticeOpen.value) {
+    event.preventDefault();
+    closeFolderNotice();
+  }
+}
+
+async function onDiscPointer(event: PointerEvent): Promise<void> {
   // 仅接受鼠标/触摸；手柄产生的 click 没有绑定业务处理函数，因此不会被触发。
   if (event.pointerType !== 'mouse' && event.pointerType !== 'touch') return;
   (event.currentTarget as HTMLElement | null)?.blur();
+
+  // 等待 native 完成默认 QQ/网易云目录探测，避免程序刚启动时误弹提示。
+  await initMusic();
+  if (!hasFolder.value) {
+    openFolderNotice();
+    return;
+  }
   togglePlay();
 }
+
+onMounted(() => {
+  document.addEventListener('keydown', onFolderNoticeKeydown);
+});
+
+onUnmounted(() => {
+  document.removeEventListener('keydown', onFolderNoticeKeydown);
+});
 </script>
 
 <template>
@@ -117,6 +155,33 @@ function onDiscPointer(event: PointerEvent): void {
     >
       <span class="cd-shape"></span>
     </button>
+
+    <Teleport to="body">
+      <Transition name="music-notice">
+        <div
+          v-if="folderNoticeOpen"
+          class="music-notice-mask"
+          @pointerdown.self="closeFolderNotice"
+        >
+          <div
+            class="music-folder-notice"
+            role="alertdialog"
+            aria-modal="true"
+            aria-label="音乐播放提示"
+            data-gp-modal
+            @pointerdown.stop
+            @keydown.esc.prevent="closeFolderNotice"
+          >
+            <div class="music-notice-title"><InlineIcon name="warning" />需要指定音乐地址</div>
+            <p class="music-notice-desc">未检测到 QQ 音乐或网易云音乐的默认音乐目录，请先指定音乐文件夹地址后才能播放音乐。</p>
+            <div class="music-notice-actions">
+              <button type="button" data-gp-group="music-notice" @click="chooseFolderFromNotice"><InlineIcon name="folder" />选择音乐文件夹</button>
+              <button type="button" data-gp-group="music-notice" @click="closeFolderNotice">知道了</button>
+            </div>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
   </div>
 </template>
 
@@ -200,6 +265,79 @@ function onDiscPointer(event: PointerEvent): void {
 }
 .music-disc.untuned .cd-shape {
   filter: grayscale(0.7) brightness(0.7);
+}
+.music-notice-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 1199;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.24);
+}
+.music-folder-notice {
+  position: relative;
+  z-index: 1200;
+  width: min(380px, calc(100vw - 32px));
+  background: #161d29;
+  border: 1px solid #2a3342;
+  border-radius: 12px;
+  padding: 18px 20px 17px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  overflow: visible;
+}
+.music-notice-title {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text);
+}
+.music-notice-title :deep(svg) {
+  width: 20px;
+  height: 20px;
+  color: var(--accent-2);
+}
+.music-notice-desc {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 14px;
+  line-height: 1.6;
+  white-space: pre-line;
+}
+.music-notice-actions {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+  margin-top: 3px;
+}
+.music-notice-actions button {
+  min-height: 44px;
+  border: 1px solid rgba(255, 255, 255, .08);
+  border-radius: 9px;
+  background: var(--bg-input);
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.music-notice-actions button:hover {
+  background: rgba(46, 166, 255, 0.14);
+  border-color: var(--accent);
+}
+.music-notice-enter-active,
+.music-notice-leave-active {
+  transition: opacity 0.14s ease, transform 0.14s ease;
+}
+.music-notice-enter-from,
+.music-notice-leave-to {
+  opacity: 0;
+  transform: scale(0.96);
 }
 @keyframes music-disc-spin {
   to {

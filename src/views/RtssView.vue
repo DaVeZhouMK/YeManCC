@@ -58,12 +58,12 @@ const zoomHint = ref('');
 
 // ── 游戏运行中拦截：关闭 RTSS / 切换布局（RTSS 重启）/ 复位 都会让游戏闪退。
 // 检测到游戏时延迟执行该操作，顶部条幅提示并轮询；游戏关闭后自动继续，用户可取消。
-type PendingRtssAction = 'stopRtss' | 'changeOverlay' | 'reset';
-const gameRunningWarn = ref<{ game: DetectedGame; pending: PendingRtssAction; pendingArg?: 'W' | 'L' | 'J' } | null>(null);
+type PendingRtssAction = 'stopRtss' | 'changeOverlay' | 'toggleMonitor' | 'reset';
+const gameRunningWarn = ref<{ game: DetectedGame; pending: PendingRtssAction; pendingArg?: 'W' | 'L' | 'J' | 'off' } | null>(null);
 let gameWatchTimer: number | null = null;
 let stopUiVisibility: (() => void) | null = null;
 
-async function guardGameRunning(action: PendingRtssAction, arg?: 'W' | 'L' | 'J'): Promise<boolean> {
+async function guardGameRunning(action: PendingRtssAction, arg?: 'W' | 'L' | 'J' | 'off'): Promise<boolean> {
   // 游戏运行中 → true（已挂起，调用方应直接 return）；未运行 → false（调用方继续）
   const game = await detectGame();
   if (!game) { clearGameCache(); return false; }
@@ -85,7 +85,11 @@ function startGameWatch() {
       gameRunningWarn.value = null;
       stopGameWatch();
       if (pending === 'stopRtss') await doToggleRtssOff();
-      else if (pending === 'changeOverlay' && arg) await doSetOverlay(arg);
+      else if (pending === 'changeOverlay' && arg && arg !== 'off') await doSetOverlay(arg);
+      else if (pending === 'toggleMonitor' && arg) {
+        await setOverlayLayout(arg);
+        monOn.value = arg !== 'off';
+      }
       else if (pending === 'reset') { confirmingReset.value = true; await doReset(); }
     } else {
       // 仍在跑：刷新当前游戏信息
@@ -256,9 +260,12 @@ async function doSetOverlay(v: 'W' | 'L' | 'J') {
 
 async function toggleMonitor() {
   errMsg.value = '';
+  // 开关监控也会重启 RTSS，运行中的游戏无法安全承受钩子卸载/重载。
+  const target = monOn.value ? 'off' : 'W';
+  if (await guardGameRunning('toggleMonitor', target)) return;
   const wasOff = !monOn.value;
   try {
-    await setOverlayLayout(monOn.value ? 'off' : 'W');
+    await setOverlayLayout(target);
     monOn.value = !monOn.value;
     if (wasOff && monOn.value) {
       monitorHint.value = '监控数据已开启，需重启已开启的游戏才能显示监控';

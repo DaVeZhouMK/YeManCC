@@ -1,7 +1,7 @@
-﻿{
-    "version":  "0.0.19",
-    "notes":  "修复游戏专属配置返回、下拉菜单焦点与手柄导航边界。",
-    "sha256":  "FA3ED119EA7804AED4971A1C89916654FACEF18429E74FD80B668EABDE34F7D0",
-    "publishedAt":  "2026-08-21",
-    "package":  "Packages/YeManCC.zip"
+{
+  "version": "0.0.20",
+  "notes": "升级器适配三目录结构，冻结风扇模块并保留既有 fan-host，强化 CustomSteamLibrary 独立健康握手。",
+  "sha256": "",
+  "publishedAt": "",
+  "package": "Packages/YeManCC.zip"
 }

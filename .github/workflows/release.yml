@@ -76,8 +76,8 @@ jobs:
             'Release\YeManCC\YeManCC.exe',
             'Release\YeManCC\index.html',
             'Release\PowerControl\pawnio\YeManTdpCtl.exe',
-            'Release\PowerControl\pawnio\LpcIO.bin',
             'Release\PowerControl\pawnio\_internal\python313.dll',
+            'Release\YeManCC\update-manifest.json',
             'Release\Packages\YeManCC.zip',
             'Release\version.json'
           )
@@ -86,7 +86,23 @@ jobs:
               throw "Release output missing: $relative"
             }
           }
-          $releaseManifest = Get-Content -LiteralPath (Join-Path $root 'Release\version.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+          $releaseManifest = (Get-Content -LiteralPath (Join-Path $root 'Release\version.json') -Raw -Encoding UTF8).TrimStart([char]0xFEFF) | ConvertFrom-Json
+          $layoutManifestText = Get-Content -LiteralPath (Join-Path $root 'Release\YeManCC\update-manifest.json') -Raw -Encoding UTF8
+          $layoutManifest = $layoutManifestText.TrimStart([char]0xFEFF) | ConvertFrom-Json
+          if ([int]$layoutManifest.schemaVersion -ne 1 -or [string]$layoutManifest.packageVersion -ne [string]$releaseManifest.version) {
+            throw 'Release update-manifest.json has an invalid schema or package version.'
+          }
+          $declaredRoots = @($layoutManifest.roots | ForEach-Object { [string]$_.source } | Sort-Object -Unique)
+          $requiredRoots = @($layoutManifest.requiredRoots | ForEach-Object { [string]$_ } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Sort-Object -Unique)
+          $missingRoots = @($requiredRoots | Where-Object { $_ -notin $declaredRoots })
+          if ($missingRoots.Count -gt 0) { throw "update-manifest.json misses required roots: $($missingRoots -join ', ')" }
+          foreach ($definition in @($layoutManifest.roots)) {
+            $rootPath = Join-Path $root (Join-Path 'Release' ([string]$definition.source))
+            if (-not (Test-Path -LiteralPath $rootPath -PathType Container)) { throw "Release root missing: $($definition.source)" }
+            if ($definition.packageManifest -and -not (Test-Path -LiteralPath (Join-Path $rootPath ([string]$definition.packageManifest)) -PathType Leaf)) {
+              throw "Release package manifest missing: $($definition.source)/$($definition.packageManifest)"
+            }
+          }
           $localHash = (Get-FileHash -LiteralPath (Join-Path $root 'Release\Packages\YeManCC.zip') -Algorithm SHA256).Hash
           if ($localHash -ne [string]$releaseManifest.sha256) {
             throw "Release manifest SHA-256 mismatch: expected $($releaseManifest.sha256), got $localHash"
@@ -98,12 +114,17 @@ jobs:
               $normalized = $_.FullName.Replace('\', '/').TrimStart('/')
               if ($normalized) { ($normalized -split '/')[0] }
             } | Sort-Object -Unique)
-            if ($roots.Count -ne 2 -or $roots[0] -ne 'PowerControl' -or $roots[1] -ne 'YeManCC') {
-              throw "YeManCC.zip root must contain exactly PowerControl and YeManCC; got: $($roots -join ', ')"
+            $missingZipRoots = @($requiredRoots | Where-Object { $_ -notin $roots })
+            $unexpectedZipRoots = @($roots | Where-Object { $_ -notin $declaredRoots })
+            if ($missingZipRoots.Count -gt 0 -or $unexpectedZipRoots.Count -gt 0) {
+              throw "YeManCC.zip roots do not match update-manifest.json; missing: $($missingZipRoots -join ', '); unexpected: $($unexpectedZipRoots -join ', '); got: $($roots -join ', ')"
+            }
+            if (@($zip.Entries | Where-Object { $_.FullName.Replace('\', '/') -eq 'YeManCC/update-manifest.json' }).Count -ne 1) {
+              throw 'YeManCC.zip must contain exactly one YeManCC/update-manifest.json'
             }
             $flat = @($zip.Entries | Where-Object {
               $normalized = $_.FullName.Replace('\', '/').TrimStart('/')
-              $normalized -match '^(YeManCC\.exe|YeMan-Support\.html|assets/)'
+              $normalized -and ($normalized -split '/').Count -eq 1 -and -not $normalized.EndsWith('/')
             })
             if ($flat.Count -gt 0) { throw 'YeManCC.zip contains flattened YeManCC entries.' }
           } finally {
@@ -129,7 +150,7 @@ jobs:
           if ($asset.Count -ne 1) {
             throw 'GitHub Release does not contain exactly one YeManCC.zip asset.'
           }
-          $manifest = Get-Content -LiteralPath Release\version.json -Raw -Encoding UTF8 | ConvertFrom-Json
+          $manifest = (Get-Content -LiteralPath Release\version.json -Raw -Encoding UTF8).TrimStart([char]0xFEFF) | ConvertFrom-Json
           $downloadRoot = Join-Path $env:RUNNER_TEMP 'published-yemancc'
           New-Item -ItemType Directory -Path $downloadRoot -Force | Out-Null
           gh release download "${{ github.ref_name }}" --repo "${{ github.repository }}" --pattern 'YeManCC.zip' --dir $downloadRoot --clobber
@@ -147,7 +168,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          $generated = Get-Content -LiteralPath Release\version.json -Raw -Encoding UTF8 | ConvertFrom-Json
+          $generated = (Get-Content -LiteralPath Release\version.json -Raw -Encoding UTF8).TrimStart([char]0xFEFF) | ConvertFrom-Json
           $currentText = gh api "repos/${{ github.repository }}/contents/version.json?ref=main" --jq .content
           $currentText = ($currentText -replace '\s', '')
           $currentJsonText = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($currentText))

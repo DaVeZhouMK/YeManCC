@@ -36,8 +36,17 @@ import { getUiSetting, loadUiSettings } from '@/bridge/uiSettings';
 import { topMonitorData, type TopMonData } from '@/bridge/topmon';
 import { nextLowBatteryStatic, shouldSkipVideoReconcile } from '@/bridge/backgroundPolicy';
 import { runPowerResumeTransaction } from '@/bridge/powerResume';
-import { readSettingsSection } from '@/bridge/settingsRepository';
+import { readSettingsSection, saveSettingsSection } from '@/bridge/settingsRepository';
 import { isUiVisible, onUiVisibilityChange, setNativeWindowVisible } from '@/bridge/uiLifecycle';
+import {
+  getFanFeatureSettings,
+  FAN_FORCE_PREVIEW,
+  initializeFanFeature,
+  recordFanHandshake,
+  rememberFanDevice,
+  setFanControlActive,
+} from '@/bridge/fanFeature';
+import { FAN_REAL_HOST_ENABLED, fanHostLifecycle, resolveFanHostConfig } from '@/bridge/fanHost';
 
 applyTheme(
   document.documentElement.dataset.theme === 'cyberpunk'
@@ -606,6 +615,12 @@ function notePowerTransitionGeneration(e: Event): number {
 }
 function onPowerSuspending(e: Event): void {
   notePowerTransitionGeneration(e);
+  // No-op while the real Fan Host gate is false. When separately enabled,
+  // lifecycle ordering restores OEM before the backend is suspended.
+  // FanView can be evicted from KeepAlive, so the root owns the navigation
+  // indicator at the power boundary as well.
+  setFanControlActive(false);
+  void fanHostLifecycle.suspend().catch(() => {});
   if (resumeVideoTimer !== null) {
     window.clearTimeout(resumeVideoTimer);
     resumeVideoTimer = null;
@@ -624,6 +639,13 @@ function onPowerResuming(e: Event): void {
 }
 function onPowerResumed(e: Event): void {
   const generation = powerEventGeneration(e);
+  // The global lifecycle owns the remembered, already-acknowledged curve.
+  // This stays alive when KeepAlive evicts FanView during suspend. The
+  // lifecycle itself re-handshakes, reopens HC and gets a fresh lease before
+  // it can replay anything; a failure leaves OEM ownership in place.
+  void fanHostLifecycle.resume()
+    .then(() => setFanControlActive(fanHostLifecycle.state === 'ready'))
+    .catch(() => setFanControlActive(false));
   if (generation > committedResumeGeneration) scheduleResumeTransaction(generation);
   scheduleSleepPowerPlanOptimization();
   if (resumeVideoTimer !== null) window.clearTimeout(resumeVideoTimer);
@@ -1098,13 +1120,37 @@ onMounted(async () => {
   // independently from exeDir can split the frontend/native settings contract
   // on machines where the executable and sidecar directory are laid out
   // differently (notably Intel test systems).
+  let nativePowerControlDir: string | null = null;
   try {
     const dir = await app.powerControlDir();
+    nativePowerControlDir = dir || null;
     if (dir) {
       setPowerControlDir(dir);
       setAutofloatPowerControlDir(dir);
     }
   } catch { /* fixed formal path remains the compatibility fallback */ }
+  // Fan settings must load only after the native-resolved PowerControl path is
+  // installed; otherwise a child NavRail mount could write defaults to the
+  // compatibility path before native startup finishes resolving directories.
+  await initializeFanFeature();
+  // Configure and start the resident Fan Host against the same
+  // native-resolved PowerControl directory used by the rest of the app. The
+  // Host itself performs a read-only handshake first; HC Open/lease/write is
+  // still deferred until the user enables a curve or preset in FanView.
+  try {
+    const configuredFan = getFanFeatureSettings();
+    if (nativePowerControlDir) fanHostLifecycle.setConfig(resolveFanHostConfig(nativePowerControlDir));
+    fanHostLifecycle.setSavedIdentity(configuredFan.deviceIdentity ?? null);
+    let handshakeIdentity = configuredFan.deviceIdentity ?? null;
+    fanHostLifecycle.setDeviceIdentitySink((identity) => {
+      handshakeIdentity = identity;
+      void rememberFanDevice(identity).catch(() => {});
+    });
+    if (FAN_REAL_HOST_ENABLED && !FAN_FORCE_PREVIEW) {
+      const gate = await fanHostLifecycle.start();
+      await recordFanHandshake(gate.allowed, handshakeIdentity);
+    }
+  } catch { /* unavailable/unsupported devices remain fail-closed */ }
   await loadUiSettings();
   backgroundOpacity.value = getBackgroundOpacity();
   backgroundBlur.value = getBackgroundBlur();
@@ -1297,6 +1343,12 @@ onUnmounted(() => {
   stopPowerSourceWatch?.();
   stopResumeWatch?.();
   stopSchemeWatch?.();
+  // Fan Host shutdown has one canonical owner: the native app-exit boundary
+  // (or NavRail.quit, which awaits the same lifecycle before app.exit).  A
+  // second close from root unmount races that HC gate and can turn one
+  // firmware timeout into duplicate /api/close requests.  HC itself has only
+  // one Window_Closed -> CurrentDevice.Close() path, so root unmount must not
+  // invent a second device-session close.
 });
 
 // ── UI 缩放：监听窗口尺寸 / 原生 resize 事件，保持设计比例填满窗口 ──
@@ -1418,6 +1470,6 @@ onUnmounted(() => {
   overflow-y: auto;
   /* Leave room for the gamepad focus ring and the final control itself. */
   padding: 12px 12px calc(var(--gamepad-safe-bottom, 24px) + var(--gamepad-clip-bottom, 0px));
-  scroll-padding: 8px 0 var(--gamepad-safe-bottom, 24px);
+  scroll-padding: 24px 0 var(--gamepad-safe-bottom, 24px);
 }
 </style>

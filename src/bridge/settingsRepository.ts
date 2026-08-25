@@ -34,7 +34,8 @@ export type SettingsSection =
   | 'startupDesired'
   | 'power'
   | 'tray'
-  | 'autoclose';
+  | 'autoclose'
+  | 'fan';
 
 export interface UnifiedSettings extends JsonObject {
   schemaVersion: number;
@@ -54,6 +55,7 @@ export interface UnifiedSettings extends JsonObject {
   power: JsonObject;
   tray: JsonObject;
   autoclose: JsonObject;
+  fan: JsonObject;
   extensions: JsonObject;
 }
 
@@ -125,6 +127,16 @@ const DEFAULTS: UnifiedSettings = {
   power: { scheme: {} },
   tray: { resident: false },
   autoclose: { enabled: false, procs: [] },
+  fan: {
+    // Formal fan integration is eligible by default; the UI remains hidden
+    // until a successful handshake or remembered supported device identity.
+    featureEnabled: true,
+    configured: false,
+    deviceIdentity: null,
+    preset: 'balanced',
+    motionEnabled: true,
+    diagnosticLoggingEnabled: false,
+  },
   extensions: {},
 };
 
@@ -271,7 +283,7 @@ export async function loadSettings(): Promise<UnifiedSettings> {
         const requiredSections: SettingsSection[] = [
           'ui', 'background', 'music', 'gamepad', 'performanceSchedule',
           'gameCustom', 'tdp', 'cpu', 'sleep', 'quickApps', 'startupDesired',
-          'power', 'tray', 'autoclose',
+          'power', 'tray', 'autoclose', 'fan',
         ];
         if (Number(main.schemaVersion) !== cache.schemaVersion ||
             requiredSections.some((section) => !Object.prototype.hasOwnProperty.call(main, section))) {

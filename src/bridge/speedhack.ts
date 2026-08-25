@@ -5,7 +5,7 @@ import { fs, shell } from './api';
 import { detectGame, type DetectedGame } from './gamedetect';
 
 export const OPENSPEEDY_DIR = 'C:\\SOFT\\YeMan\\PowerControl\\OpenSpeedy';
-export const SPEED_PRESETS = [0.5, 1, 2, 4, 8];
+export const SPEED_PRESETS = [0.5, 0.8, 1, 1.2, 1.5, 2, 4, 8];
 const LOG_PATH = 'C:\\SOFT\\YeMan\\PowerControl\\speedhack.log';
 const BLOCKLIST_PATH = 'C:\\SOFT\\YeMan\\PowerControl\\speedhack-blocklist.txt';
 const LOG_KEEP_BYTES = 350_000;
@@ -265,6 +265,22 @@ type SpeedSession = {
 let speedSession: SpeedSession | null = null;
 let speedOperationSequence = 0;
 let speedIntentEpoch = 0;
+export interface GameSpeedState {
+  pid: number;
+  processCreated: string;
+  factor: number;
+  enabled: boolean;
+}
+
+export function getGameSpeedState(): GameSpeedState | null {
+  if (!speedSession) return null;
+  return {
+    pid: speedSession.target.pid,
+    processCreated: speedSession.target.processCreated || '',
+    factor: speedSession.factor,
+    enabled: speedSession.enabled,
+  };
+}
 
 function diagnosticNumber(lines: string[], prefix: string): number {
   const line = lines.find((entry) => entry.startsWith(prefix));

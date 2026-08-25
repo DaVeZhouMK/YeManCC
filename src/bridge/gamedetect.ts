@@ -139,6 +139,18 @@ function emitGame(game: DetectedGame | null): void {
   for (const cb of [...listeners]) cb(game);
 }
 
+/**
+ * Strict, user-requested refresh. Unlike the background-friendly refresh
+ * above, an IPC/transport failure is propagated instead of returning the
+ * previous cached game as if the refresh had succeeded.
+ */
+export async function refreshGameStatusStrict(preferredPid = 0): Promise<DetectedGame | null> {
+  const pid = Number.isInteger(preferredPid) && preferredPid > 0 ? preferredPid : 0;
+  const game = await detectGame(true, pid);
+  emitGame(game);
+  return game;
+}
+
 export async function refreshGameStatus(preferredPid = 0): Promise<DetectedGame | null> {
   const pid = Number.isInteger(preferredPid) && preferredPid > 0 ? preferredPid : 0;
   if (!pid && preferredRefreshInFlight) return preferredRefreshInFlight;

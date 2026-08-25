@@ -1,13 +1,40 @@
 param([int]$Limit = 0)
 
-$GlobalPath = "C:\Program Files (x86)\RivaTuner Statistics Server\Profiles\Global"
-$DllPath    = "C:\Program Files (x86)\RivaTuner Statistics Server\RTSSHooks64.dll"
-$Rundll     = "C:\Windows\System32\rundll32.exe"
+function Resolve-RTSS {
+    $candidates = @()
+    try {
+        $p = @(Get-Process -Name RTSS -ErrorAction SilentlyContinue | Select-Object -First 1)
+        if ($p -and $p.Path) { $candidates += $p.Path }
+    } catch { }
+    $candidates += @(
+        (Join-Path ${env:ProgramFiles(x86)} 'RivaTuner Statistics Server\RTSS.exe'),
+        (Join-Path ${env:ProgramFiles} 'RivaTuner Statistics Server\RTSS.exe'),
+        (Join-Path ${env:LOCALAPPDATA} 'RivaTuner Statistics Server\RTSS.exe')
+    )
+    foreach ($k in @('HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*', 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*', 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*')) {
+        Get-ItemProperty $k -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -match 'RivaTuner Statistics Server|RTSS' } | ForEach-Object {
+            if ($_.InstallLocation) { $candidates += (Join-Path $_.InstallLocation 'RTSS.exe') }
+            elseif ($_.DisplayIcon) { $candidates += ($_.DisplayIcon -replace ',.*$', '').Trim('"') }
+        }
+    }
+    foreach ($candidate in ($candidates | Where-Object { $_ } | Select-Object -Unique)) {
+        if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+            $dir = Split-Path -Parent (Resolve-Path -LiteralPath $candidate).Path
+            if (Test-Path -LiteralPath (Join-Path $dir 'RTSSHooks64.dll') -PathType Leaf) {
+                return @{ Exe=(Join-Path $dir 'RTSS.exe'); Dir=$dir }
+            }
+        }
+    }
+    throw 'RTSS.exe was not found; install RivaTuner Statistics Server'
+}
+
+$rtss = Resolve-RTSS
+$GlobalPath = Join-Path $rtss.Dir 'Profiles\Global'
+$DllPath    = Join-Path $rtss.Dir 'RTSSHooks64.dll'
 
 # ensure RTSS is running so the profile reload takes effect
-$rtssExe = "C:\Program Files (x86)\RivaTuner Statistics Server\RTSS.exe"
 if (-not (Get-Process -Name "RTSS" -ErrorAction SilentlyContinue)) {
-    try { Start-Process -FilePath $rtssExe -WindowStyle Hidden; Start-Sleep -Milliseconds 800 } catch {}
+    try { Start-Process -FilePath $rtss.Exe -WorkingDirectory $rtss.Dir -WindowStyle Hidden; Start-Sleep -Milliseconds 800 } catch {}
 }
 
 # 1) write the new Limit into the Global profile file (regex match ^Limit=, same as working HTA)
@@ -44,13 +71,29 @@ try {
     # file write failed (e.g. not elevated) - silently let RTSS continue
 }
 
-# 2) rundll32 calls into RTSSHooks64.dll: LoadProfile / UpdateProfiles
+# 2) Call the RTSS SDK exports with their real signatures.
+# LoadProfile is void(LPCSTR) and UpdateProfiles is void().  They are not
+# rundll32 entry points; rundll32 would pass HWND/HINSTANCE/LPSTR/int and can
+# make LoadProfile treat a window handle as a string pointer.
 # ⚠ 不要 SaveProfile：那会让 RTSS 把"内存里的旧状态"写回磁盘，覆盖刚改的内容甚至写坏（损坏根因）。
-foreach ($entry in @("LoadProfile","UpdateProfiles")) {
-    $dllArg = '"{0}",{1}' -f $DllPath, $entry
-    try {
-        Start-Process -FilePath $Rundll -ArgumentList $dllArg -WindowStyle Hidden -Wait -ErrorAction Stop
-    } catch {}
+try {
+    if (-not [Environment]::Is64BitProcess) { throw '需要 64 位 PowerShell 才能调用 RTSSHooks64.dll' }
+    $dllLiteral = $DllPath.Replace('\', '\\').Replace('"', '\"')
+    $source = @"
+using System;
+using System.Runtime.InteropServices;
+public static class YeManRtssProfileApi {
+    [DllImport("$dllLiteral", EntryPoint="LoadProfile", CallingConvention=CallingConvention.Cdecl, CharSet=CharSet.Ansi)]
+    public static extern void LoadProfile([MarshalAs(UnmanagedType.LPStr)] string profile);
+    [DllImport("$dllLiteral", EntryPoint="UpdateProfiles", CallingConvention=CallingConvention.Cdecl)]
+    public static extern void UpdateProfiles();
+}
+"@
+    Add-Type -TypeDefinition $source -ErrorAction Stop
+    [YeManRtssProfileApi]::LoadProfile('')
+    [YeManRtssProfileApi]::UpdateProfiles()
+} catch {
+    Write-Error "RTSS profile reload failed: $($_.Exception.Message)"
 }
 
 if ($Limit -eq 0) { Write-Output "RTSS framerate limit DISABLED (no cap)" } else { Write-Output "RTSS framerate limit -> $Limit FPS" }

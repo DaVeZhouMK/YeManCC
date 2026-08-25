@@ -11,7 +11,7 @@ export interface DropdownOption {
 
 const props = defineProps<{
   modelValue: string | number;
-  options: DropdownOption[];
+  options: readonly DropdownOption[];
   disabled?: boolean;
   color?: 'ac' | 'dc' | 'accent';
   ariaLabel?: string;
@@ -22,6 +22,11 @@ const props = defineProps<{
   selectedSubText?: string;
   /** 可选固定宽度（如 '120px'）；不传则填满父容器 */
   width?: string;
+  /** Optional class for the teleported popup (the menu is rendered under body). */
+  popupClass?: string;
+  /** Optional unified gamepad spatial-navigation coordinates for the trigger. */
+  gpRow?: number | string;
+  gpCol?: number | string;
 }>();
 
 const emit = defineEmits<{
@@ -290,6 +295,8 @@ function onGpNav(e: Event) {
       :disabled="disabled"
       :aria-expanded="open"
       aria-haspopup="listbox"
+      :data-gp-row="gpRow"
+      :data-gp-col="gpCol"
       @click="toggle"
       @keydown="onTriggerKey"
     >
@@ -307,7 +314,7 @@ function onGpNav(e: Event) {
         <div
           v-if="open"
           ref="menuEl"
-          class="dd-menu"
+          :class="['dd-menu', popupClass]"
           :style="menuStyle"
           role="listbox"
           tabindex="-1"

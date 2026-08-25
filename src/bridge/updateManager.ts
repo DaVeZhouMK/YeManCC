@@ -96,9 +96,7 @@ export async function ensureUpdateManager(): Promise<void> {
   try {
     const saved = await readNativeUpdateState();
     restoreSavedUpdateInfo(saved);
-    if (saved.phase === 'installing' && saved.version && compareVersions(APP_VERSION, saved.version) >= 0) {
-      merge({ ...saved, phase: 'completed', percent: 100, message: '更新已完成' });
-    } else if (
+    if (
       (saved.phase === 'downloaded' || saved.phase === 'installing' || saved.phase === 'interrupted') &&
       saved.stage === 'install'
     ) {

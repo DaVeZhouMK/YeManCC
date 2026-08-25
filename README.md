@@ -40,12 +40,18 @@
    ├─ YeManCC\
    │  ├─ YeManCC.exe
    │  └─ ...
-   └─ PowerControl\
+   ├─ PowerControl\
       ├─ pawnio\
       └─ ...
+   └─ CustomSteamLibrary\
+      ├─ CustomSteamLibrary.exe
+      ├─ SteamArtworkLab.exe
+      ├─ package-manifest.json
+      └─ ...
+
+   `YeManCC.zip` 的升级包根目录必须与 `YeManCC\update-manifest.json` 声明一致；当前包含以上三个根目录。`CustomSteamLibrary` 只更新清单声明的程序文件，用户数据和未知文件保留。
 
 
       双击运行：
 双击执行程序
 C:\SOFT\YeMan\YeManCC\YeManCC.exe
-

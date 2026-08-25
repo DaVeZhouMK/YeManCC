@@ -25,6 +25,18 @@ export interface GcmSearchResult {
   error?: string;
 }
 
+export class GameTrainerCancelledError extends Error {
+  constructor() {
+    super('游戏修改器搜索已取消');
+    this.name = 'GameTrainerCancelledError';
+  }
+}
+
+export interface GameTrainerTaskOptions {
+  isCancelled?: () => boolean;
+  onWorkerStarted?: (pid: number) => void;
+}
+
 const GCM_TRAINER_ROOT = 'C:\\Users\\DaVe\\AppData\\Roaming\\GCM Trainers';
 const GCM_SEARCH_SCRIPT = 'C:\\SOFT\\YeMan\\PowerControl\\YeManGcmSearch.ps1';
 const GCM_RESULT_FILE = 'C:\\SOFT\\YeMan\\PowerControl\\yeman-gcm-search-result.json';
@@ -112,13 +124,18 @@ export async function openOrSearchGameTrainer(
   gameName: string,
   onProgress?: (progress: GcmSearchResult) => void,
   processPath = '',
+  options: GameTrainerTaskOptions = {},
 ): Promise<{
   action: 'opened' | 'searched';
   trainer?: InstalledGameTrainer;
   search?: GcmSearchResult;
 }> {
+  const throwIfCancelled = (): void => {
+    if (options.isCancelled?.()) throw new GameTrainerCancelledError();
+  };
   const title = cleanGameTitle(gameName).trim();
   if (!title) throw new Error('未识别到真实游戏名');
+  throwIfCancelled();
   if (isEmulatorProcess(processPath)) {
     await shell.execute(CHEAT_ENGINE_PATH, []);
     return {
@@ -133,19 +150,23 @@ export async function openOrSearchGameTrainer(
     };
   }
   const installed = await findInstalledGameTrainer(title);
+  throwIfCancelled();
   if (installed) {
     await shell.execute(installed.path, []);
     return { action: 'opened', trainer: installed };
   }
   await fs.writeTextFile(GCM_RESULT_FILE, JSON.stringify({ ok: false, gameName: title, error: 'pending' })).catch(() => {});
-  await shell.hidden('powershell.exe', [
+  const worker = await shell.hidden('powershell.exe', [
     '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', GCM_SEARCH_SCRIPT,
     '-GameName', title, '-ResultPath', GCM_RESULT_FILE, '-DownloadTimeoutSeconds', '120',
   ]);
+  options.onWorkerStarted?.(Number(worker.pid) || 0);
+  throwIfCancelled();
   const deadline = Date.now() + 135000;
   let search: GcmSearchResult | null = null;
   let lastProgressKey = '';
   while (Date.now() < deadline) {
+    throwIfCancelled();
     if (await fs.exists(GCM_RESULT_FILE).catch(() => false)) {
       try {
         const parsed = JSON.parse(await fs.readTextFile(GCM_RESULT_FILE)) as GcmSearchResult;
@@ -164,6 +185,7 @@ export async function openOrSearchGameTrainer(
     }
     await new Promise((resolve) => window.setTimeout(resolve, 250));
   }
+  throwIfCancelled();
   if (!search) {
     const recovered = await findInstalledGameTrainer(title);
     if (recovered) {

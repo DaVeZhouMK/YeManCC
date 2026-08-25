@@ -33,6 +33,12 @@ import { cleanGameTitle, detectGame } from '@/bridge/gamedetect';
 import { getUiSetting, loadUiSettings, setUiSettings } from '@/bridge/uiSettings';
 import { setMouseBackend, type MouseBackend } from '@/bridge/gameproc';
 import {
+  getFanFeatureSettings,
+  initializeFanFeature,
+  setFanDiagnosticLoggingEnabled,
+} from '@/bridge/fanFeature';
+import { clearFanDiagnosticLogs, exportFanDiagnosticLogs, fanDiagnosticLog } from '@/bridge/fanDiagnostics';
+import {
   ensureUpdateManager,
   checkForUpdate,
   downloadAndInstall,
@@ -45,10 +51,10 @@ const gp = ref<GamepadSettings>({
   bDoubleMinimize: true,
   tdpShortcut: true,
   fpsShortcut: true,
-  killGame: false,
-  openKeyboard: false,
-  returnDesktop: false,
-  mouseToggle: false,
+  killGame: true,
+  openKeyboard: true,
+  returnDesktop: true,
+  mouseToggle: true,
   mouseBackend: 'joyxoff',
 });
 const errMsg = ref('');
@@ -208,6 +214,9 @@ const updateAccel = ref<UpdateAccelState>({
   running: false,
 });
 const uaBusy = ref(false);
+const fanDiagnosticLoggingEnabled = ref(getFanFeatureSettings().diagnosticLoggingEnabled === true);
+const fanLogBusy = ref(false);
+const fanLogStatus = ref('');
 
 // 版本号：构建期由 version.json 注入（scripts/write-version.mjs → src/version.ts）
 const appVersion = APP_VERSION;
@@ -383,6 +392,52 @@ async function onUpdateAccelToggle() {
   }
 }
 
+async function toggleFanDiagnosticLogging(): Promise<void> {
+  if (fanLogBusy.value) return;
+  const next = !fanDiagnosticLoggingEnabled.value;
+  fanLogBusy.value = true;
+  fanLogStatus.value = '';
+  try {
+    await setFanDiagnosticLoggingEnabled(next);
+    fanDiagnosticLoggingEnabled.value = next;
+    fanDiagnosticLog('ui.diagnostic-logging-changed', { enabled: next, surface: 'settings' });
+    fanLogStatus.value = next ? '风扇日志已开启' : '风扇日志已关闭';
+  } catch (error) {
+    fanLogStatus.value = `风扇日志设置失败：${error instanceof Error ? error.message : String(error)}`;
+  } finally {
+    fanLogBusy.value = false;
+  }
+}
+
+async function clearFanLogs(): Promise<void> {
+  if (fanLogBusy.value) return;
+  fanLogBusy.value = true;
+  fanLogStatus.value = '';
+  try {
+    fanLogStatus.value = (await clearFanDiagnosticLogs()) ? '风扇日志已清空' : '风扇日志清空失败';
+  } catch (error) {
+    fanLogStatus.value = `风扇日志清空失败：${error instanceof Error ? error.message : String(error)}`;
+  } finally {
+    fanLogBusy.value = false;
+  }
+}
+
+async function exportFanLogs(): Promise<void> {
+  if (fanLogBusy.value) return;
+  fanLogBusy.value = true;
+  fanLogStatus.value = '';
+  try {
+    const result = await exportFanDiagnosticLogs();
+    fanLogStatus.value = result.ok && result.path
+      ? `风扇日志已导出到桌面：${result.path}`
+      : (result.reason || '暂无风扇日志可导出');
+  } catch (error) {
+    fanLogStatus.value = `风扇日志导出失败：${error instanceof Error ? error.message : String(error)}`;
+  } finally {
+    fanLogBusy.value = false;
+  }
+}
+
 async function onGpSetting<K extends keyof GamepadSettings>(key: K, v: GamepadSettings[K]) {
   errMsg.value = '';
   const prev = gp.value[key];
@@ -450,6 +505,8 @@ async function openGithub() {
 }
 
 onMounted(async () => {
+  const fanSettings = await initializeFanFeature();
+  fanDiagnosticLoggingEnabled.value = fanSettings.diagnosticLoggingEnabled === true;
   await ensureUpdateManager();
   await loadUiSettings();
   videoBatteryPause.value = getUiSetting('videoBatteryPause');
@@ -637,6 +694,16 @@ onBeforeUnmount(() => {
       </template>
     </section>
 
+    <section class="card fan-log-card" aria-label="风扇日志操作">
+      <h3 class="card-title">风扇日志</h3>
+      <div class="fan-log-actions">
+        <button class="fan-log-action" :class="{ enabled: fanDiagnosticLoggingEnabled }" type="button" :disabled="fanLogBusy" :aria-pressed="fanDiagnosticLoggingEnabled" @click="toggleFanDiagnosticLogging">{{ fanDiagnosticLoggingEnabled ? '日志已开启' : '日志已关闭' }}</button>
+        <button class="fan-log-action" type="button" :disabled="fanLogBusy" @click="clearFanLogs">清空日志</button>
+        <button class="fan-log-action" type="button" :disabled="fanLogBusy" @click="exportFanLogs">导出日志到桌面</button>
+      </div>
+      <p v-if="fanLogStatus" class="muted body fan-log-status" role="status">{{ fanLogStatus }}</p>
+    </section>
+
     <section class="card">
       <h3 class="card-title"><InlineIcon name="globe" /> 野蛮系统支持</h3>
       <p class="muted body">此控制台处于早期测试阶段</p>
@@ -751,6 +818,50 @@ onBeforeUnmount(() => {
 }
 .action-btn:focus-visible {
   box-shadow: var(--focus-ring);
+}
+.fan-log-card {
+  border-color: color-mix(in srgb, var(--accent) 28%, var(--border));
+}
+.fan-log-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+}
+.fan-log-action {
+  min-width: 0;
+  min-height: var(--btn-min-h);
+  padding: 0 8px;
+  border: 1px solid #29384a;
+  border-radius: var(--radius-ctrl);
+  background: var(--bg-input);
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.fan-log-action.enabled {
+  border-color: #2ea6ff;
+  background: #1269a3;
+  color: #fff;
+}
+.fan-log-action:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--text);
+}
+.fan-log-action:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.fan-log-action:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.fan-log-status {
+  margin-top: 8px;
+  margin-bottom: 0;
 }
 .bg-actions {
   display: grid;
