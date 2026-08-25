@@ -1,7 +1,7 @@
-{
-  "version": "0.0.20",
-  "notes": "升级器适配三目录结构，冻结风扇模块并保留既有 fan-host，强化 CustomSteamLibrary 独立健康握手。",
-  "sha256": "",
-  "publishedAt": "",
-  "package": "Packages/YeManCC.zip"
+﻿{
+    "version":  "0.0.20",
+    "notes":  "升级器适配三目录结构，冻结风扇模块并保留既有 fan-host，强化 CustomSteamLibrary 独立健康握手。",
+    "sha256":  "DED331BE70F50EA5362B01B1E96329FB2160718B14A5EC84F2E2730B4B06179F",
+    "publishedAt":  "2026-08-25",
+    "package":  "Packages/YeManCC.zip"
 }
