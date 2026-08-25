@@ -43,6 +43,37 @@ for (const token of [
   'sha256File(zip)',
   'Update package version does not match requested version',
   'updatePackageLayoutIsSafe(staging)',
+  'update-manifest.json',
+  'Get-UpdateLayoutRoots',
+  'Register-AdditionalLayoutRootsForRollback',
+  'Copy-AdditionalLayoutRootsChecked',
+  'CustomSteamLibrary',
+  '$customSteamLibrarySource',
+  'Get-CustomManagedPaths',
+  'Register-CustomManagedFilesForRollback',
+  'Copy-CustomManagedFilesChecked',
+  'Get-GreenChildManagedPaths',
+  'Register-GreenChildManagedFiles',
+  'Copy-GreenChildManagedFilesChecked',
+  'Invoke-CustomSteamLibraryHealthCheck',
+  'Close-CustomSteamLibraryHealthProcess',
+  'customHealthTimeoutSeconds = 60',
+  '--update-health-only',
+  'CustomSteamLibrary startup health handshake timed out',
+  'dataRootWritable',
+  'Test-CustomSteamLibraryDataRoot',
+  'required root has no definition',
+  'validateZipArchiveEntries',
+  'g_updateOperationMtx',
+  'Wait-FanHostExit',
+  '$fanHostPackagePresent',
+  'preserve-existing',
+  'unable to verify the CustomSteamLibrary process executable path',
+  'declared update root process path',
+  'phase\\":\\"committed',
+  '$indexed = @($manifest.fileIndex)',
+  'CustomSteamLibrary fileIndex SHA256 mismatch',
+  'Stop-CustomSteamLibraryProcesses',
   "$parentExitDeadline = (Get-Date).AddSeconds($parentExitTimeoutSeconds)",
   "throw ('parent YeManCC process did not exit within '",
   'Register-TreeForRollback',
@@ -113,9 +144,20 @@ assert.ok(
   updater.includes('{"phase", "downloading"}') && updater.includes('{"message", retryMessage}'),
   'retry wait must remain in the downloading phase and report every retry',
 );
+assert.ok(
+  native.indexOf('Invoke-CustomSteamLibraryHealthCheck') < native.indexOf("Start-Process -FilePath $exePath"),
+  'CustomSteamLibrary health must be verified before YeManCC commit launch',
+);
 
 assert.ok(release.includes('Version mismatch: version.json=$version, package.json=$packageVersion'));
+assert.ok(release.includes('CustomSteamLibrary') && release.includes('Update ZIP roots do not match update-manifest.json'));
+assert.ok(release.includes('updateLayoutManifest') && release.includes('requiredUpdateRoots'));
+assert.ok(release.includes('reject-unless-declared'));
+assert.ok(release.includes("fanHostUpdatePolicy = 'preserve-existing'"));
+assert.ok(release.includes('Fan Host must be excluded from this release staging area'));
 assert.ok(workflow.includes("$expectedTag = \"v$version\""));
+assert.ok(workflow.includes('$requiredRoots = @($layoutManifest.requiredRoots'));
+assert.ok(workflow.includes('foreach ($definition in @($layoutManifest.roots))'));
 assert.ok(workflow.includes('Published asset SHA-256 mismatch'));
 assert.ok(workflow.includes('Refusing to replace main/version.json'));
 assert.ok(workflow.includes("shell: pwsh\n        run: |\n          git fetch origin main"));

@@ -67,6 +67,16 @@ New-Item -ItemType Directory -Force -Path $WebBuild, $NativeBuild | Out-Null
 $env:YEMAN_WORKSPACE_ROOT = $WorkspaceRoot
 $env:YEMAN_BUILD_WEB_DIR = $WebBuild
 
+# Fan Host is intentionally frozen for the current release. Keep an explicit
+# opt-in for later fan releases, but do not make the unfinished module a build
+# or package prerequisite for the main application and CustomSteamLibrary.
+if ($env:YEMAN_BUILD_FAN_HOST -eq '1') {
+  & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File (Join-Path $ProjectRoot 'tools\build-fan-host-payload.ps1') -WorkspaceRoot $WorkspaceRoot
+  if ($LASTEXITCODE -ne 0) { throw "Fan Host payload build failed: exit=$LASTEXITCODE" }
+} else {
+  Write-Output 'FAN_HOST_BUILD=SKIPPED (release policy: preserve-existing)'
+}
+
 Push-Location $ProjectRoot
 try {
   & node (Join-Path $ProjectRoot 'scripts\write-version.mjs')

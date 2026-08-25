@@ -35,6 +35,7 @@ export const hasFolder = computed(() => folder.value !== '' && baseUrl.value !==
 
 let brokenStreak = 0;
 let initialized = false;
+let initialization: Promise<void> | null = null;
 
 function extOf(name: string): string {
   const i = name.lastIndexOf('.');
@@ -66,25 +67,33 @@ audio.addEventListener('error', () => {
   skipBroken();
 });
 
-export async function initMusic(): Promise<void> {
-  if (initialized) return;
-  initialized = true;
-  try {
-    const st = await musicApi.get();
-    if (st.enabled && st.folder && st.baseUrl) {
-      folder.value = st.folder;
-      baseUrl.value = st.baseUrl;
-      await scanFolder();
+export function initMusic(): Promise<void> {
+  if (initialization) return initialization;
+  if (initialized) return Promise.resolve();
+
+  initialization = (async () => {
+    initialized = true;
+    try {
+      const st = await musicApi.get();
+      if (st.enabled && st.folder && st.baseUrl) {
+        folder.value = st.folder;
+        baseUrl.value = st.baseUrl;
+        await scanFolder();
+      }
+      // 恢复音量和播放顺序（与文件夹一样持久化在 native 配置）
+      if (typeof st.volume === 'number' && st.volume >= 0 && st.volume <= 1) {
+        volume.value = st.volume;
+        audio.volume = st.volume;
+      }
+      if (st.mode === 'random' || st.mode === 'sequential') mode.value = st.mode;
+    } catch {
+      /* 启动期读取失败不阻塞界面 */
     }
-    // 恢复音量和播放顺序（与文件夹一样持久化在 native 配置）
-    if (typeof st.volume === 'number' && st.volume >= 0 && st.volume <= 1) {
-      volume.value = st.volume;
-      audio.volume = st.volume;
-    }
-    if (st.mode === 'random' || st.mode === 'sequential') mode.value = st.mode;
-  } catch {
-    /* 启动期读取失败不阻塞界面 */
-  }
+  })().finally(() => {
+    initialization = null;
+  });
+
+  return initialization;
 }
 
 export async function chooseFolder(): Promise<void> {

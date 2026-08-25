@@ -84,12 +84,14 @@
 
 #include <psapi.h>      // GetProcessMemoryInfo（进程工作集）
 #include <tlhelp32.h>   // CreateToolhelp32Snapshot / Process32*W（进程枚举）
+#include <iphlpapi.h>   // GetExtendedTcpTable（loopback listener 所有权核对）
 #include <powrprof.h>   // SetSuspendState / GetPwrCapabilities（升级 S4/关机）
 #include <winternl.h>
 #include <winevt.h>
 #pragma comment(lib, "psapi.lib")
 #pragma comment(lib, "PowrProf.lib")
 #pragma comment(lib, "wevtapi.lib")
+#pragma comment(lib, "iphlpapi.lib")
 #pragma comment(lib, "xinput9_1_0.lib")  // 后台手柄呼出：LB+RB 2 秒呼出程序（系统自带，无需重分发）
 
 #include "json.hpp"
@@ -148,6 +150,15 @@ static bool isSteamHostName(const wchar_t* host) {
            value == "steamusercontent.com" || value.ends_with(".steamusercontent.com") ||
            value == "akamaihd.net" || value.ends_with(".akamaihd.net") ||
            value == "eccdnx.com" || value.ends_with(".eccdnx.com");
+}
+
+// Fan Host is deliberately loopback-only.  A system WinHTTP proxy must never
+// receive these requests: on machines with a configured proxy the old default
+// session could fail before reaching 127.0.0.1:8765, leaving the UI with no
+// handshake result and hiding the capability-gated Fan route.
+static bool isLoopbackHost(const wchar_t* host) {
+    const auto value = ascii_lower(W2U(host));
+    return value == "127.0.0.1" || value == "localhost" || value == "::1";
 }
 
 static constexpr DWORD DEFAULT_HTTP_TIMEOUT_MS = 30000;
@@ -340,6 +351,13 @@ static const std::wstring POWER_CONTROL_DIR = resolve_power_control_dir();
 // ================================================================
 
 static HWND                              g_hwnd;
+// YeManCC is the only raw XInput owner in parent mode.  The native gamepad
+// loop identifies the parent-owned Custom Steam Library window and makes the
+// single arbitration decision: block parent-global shortcuts and forward one
+// semantic action to the child.  The renderer does not own this gate.
+enum class CustomSteamLibraryInputPhase : int { disabled = 0, launching = 1, active = 2, returning = 3 };
+static std::atomic<int>                  g_customSteamLibraryInputPhase{static_cast<int>(CustomSteamLibraryInputPhase::disabled)};
+static std::atomic<ULONGLONG>            g_customSteamLibraryInputDeadline{0};
 static ComPtr<ICoreWebView2Environment>  g_env;
 static ComPtr<ICoreWebView2Controller>   g_ctrl;
 static ComPtr<ICoreWebView2>             g_view;
@@ -358,6 +376,10 @@ static bool                              g_webviewNeedsShowNudge = false;
 static std::wstring                      g_updateHandshakePath;
 static std::string                       g_updateHandshakeToken;
 static std::mutex                        g_updateProgressMtx;
+// Download and install both use the same package/state files.  The UI normally
+// serializes them, but IPC callers and a second renderer must not be able to
+// race two operations against one partial package or two helper scripts.
+static std::mutex                        g_updateOperationMtx;
 static json                               g_updateProgress = json::object();
 
 static void updateProgressPost(const json& data);
@@ -435,10 +457,10 @@ static ULONGLONG g_bClosePendingSince = 0;
 static ULONGLONG g_bCloseReadyAt = 0;
 static bool g_tdpShortcut = true;    // Start + 上/下 快捷调节 TDP 最大值（前端处理，持久化在 native）
 static bool g_fpsShortcut = true;    // Start + 左/右 快捷调节 RTSS 锁帧（前端处理，持久化在 native）
-static bool g_killGame = false;       // 选择(Back) + B 长按 0.5s → 结束当前游戏（执行 KiLL-EXE.bat）
-static bool g_openKeyboard = false;   // 选择(Back) + X 长按 0.5s → 打开 Windows 触摸键盘
-static bool g_returnDesktop = false;  // 选择(Back) + A 组合按下瞬间 → 返回桌面
-static bool g_mouseToggle = false;    // 选择(Back) + Y 长按 0.5s → 模拟鼠标开/关
+static bool g_killGame = true;        // 选择(Back) + B 长按 0.5s → 结束当前游戏（执行 KiLL-EXE.bat）
+static bool g_openKeyboard = true;    // 选择(Back) + X 长按 0.5s → 打开 Windows 触摸键盘
+static bool g_returnDesktop = true;   // 选择(Back) + A 组合按下瞬间 → 返回桌面
+static bool g_mouseToggle = true;     // 选择(Back) + Y 长按 0.5s → 模拟鼠标开/关
 static std::string g_mouseBackend = "joyxoff"; // 模拟鼠标方案：joyxoff / gamebar
 static std::atomic<bool> g_summonQuit{false};  // 退出信号（跨线程原子；手柄已改 Raw Input，掌机自动关闭线程仍复用）
 
@@ -448,6 +470,7 @@ static std::vector<std::string> g_autoCloseProcs;     // 目标进程名列表�
 static std::mutex g_autoCloseMx;                       // 保护 procs 列表（前端 set 与后台线程读）
 static HANDLE g_autoCloseThread = nullptr;
 static std::atomic<bool> g_exitRequested{false};
+static std::atomic<bool> g_exitReadyPosted{false};
 static std::atomic<bool> g_joyXoffCloseInFlight{false};
 static std::mutex g_gamepadSettingsMx;
 static std::atomic<WPARAM> g_exitCode{0};
@@ -633,7 +656,9 @@ static bool gamepadSerialSubmit(std::function<void()> job) {
     return true;
 }
 
-static void gamepadSerialStop() {
+static bool joinThreadBoundedForExit(std::thread& thread, DWORD timeoutMs, const char* name);
+
+static void gamepadSerialStop(DWORD timeoutMs = INFINITE) {
     {
         std::lock_guard<std::mutex> lock(g_gamepadSerialMx);
         if (!g_gamepadSerialStarted) return;
@@ -641,7 +666,7 @@ static void gamepadSerialStop() {
         g_gamepadSerialQ.clear();
     }
     g_gamepadSerialCv.notify_all();
-    if (g_gamepadSerialThread.joinable()) g_gamepadSerialThread.join();
+    (void)joinThreadBoundedForExit(g_gamepadSerialThread, timeoutMs, "gamepad-serial");
     std::lock_guard<std::mutex> lock(g_gamepadSerialMx);
     g_gamepadSerialStarted = false;
 }
@@ -693,6 +718,8 @@ static std::vector<DWORD> g_acSwitchTicks;          // 5 秒滑动窗口内的�
 #define ACDC_BURST_LIMIT  10      // 5s 内 >10 次切换 → 直接退出，防止系统卡死
 #define MEM_TRAY_TIMER_ID 0xA201  // 内存变色托盘图标刷新（30 s）
 #define SG_RETRY_TIMER_ID 0xA20C // 入睡失败与意外唤醒共用的唯一重睡计时器
+#define EXIT_CLEANUP_WATCHDOG_TIMER_ID 0xA20D // 退出收尾硬上限，不能由后台任务无限延长
+#define EXIT_CLEANUP_WATCHDOG_MS 8000
 // Kernel-Power 507 Reason=7 is the platform's immediate S0 flow exit. It is
 // an entry failure only when it follows the current 506 Reason=1/3 intent
 // within this short monotonic window; USB4's 120-second marker is unrelated.
@@ -765,16 +792,16 @@ static std::mutex g_sgOpMtx;         // 串行化冻结/恢复/退出清理，�
 static DWORD g_sgSessionId = 0;      // 当前会话 ID（仅冻结同会话进程，避开系统/其他用户会话）
 static bool g_sgSessionValid = false; // 会话获取失败时 fail-closed，禁止跨会话冻结/击杀
 
-static void stopNativeMonitorForExit();
+static void stopNativeMonitorForExit(DWORD timeoutMs = INFINITE);
 static void cleanupExitArtifacts();
-static void sgCleanupBeforeExit();
-static void sgStopWorkThread();
-static void poolStop();
+static bool sgCleanupBeforeExit(bool nonBlocking = false);
+static void sgStopWorkThread(DWORD timeoutMs = INFINITE);
+static void poolStop(DWORD timeoutMs = INFINITE);
 static bool stopWatcher(FileWatcher* w, DWORD timeoutMs);
 static void beginAsyncExit(HWND hwnd, WPARAM code);
 
-static void stopTopMonitorForExit() {
-    stopNativeMonitorForExit();
+static void stopTopMonitorForExit(DWORD monitorTimeoutMs = INFINITE) {
+    stopNativeMonitorForExit(monitorTimeoutMs);
     cleanupExitArtifacts();
 }
 
@@ -862,6 +889,11 @@ static std::atomic<bool> g_hardwareWriteGate{true};
 static std::atomic<unsigned int> g_hardwareWriteInFlight{0};
 static std::atomic<bool> g_inputReady{true};
 static std::atomic<bool> g_inputReleaseRequired{false};
+// At most one detached fallback cleanup may be in flight.  This flag is only
+// touched by the tiny scheduler in the power callback and by its worker; the
+// callback never waits for the worker or for the Host response.
+static std::atomic<bool> g_fanSleepCleanupInFlight{false};
+static std::atomic<unsigned long long> g_fanSleepCleanupGeneration{0};
 static ULONGLONG g_resumeReadyTick = 0;
 static std::atomic<unsigned long long> g_resumeReadyGeneration{0};
 static unsigned long long g_resumeWatchdogGeneration = 0;
@@ -871,8 +903,38 @@ static unsigned int g_resumeProbeAttempts = 0;
 static bool g_resumeProbeInFlight = false;
 static bool g_resumeProbeForcedReset = false;
 static void traceLog(const char* fmt, ...);
+// Sleep is a hard safety boundary, but the Windows power callback is an
+// equally hard non-blocking boundary.  The native side may only enqueue a
+// best-effort Host cleanup; it must never perform HTTP, HC, Sleep, Wait or
+// any other potentially blocking operation inline in a power callback.
+static void fanHostScheduleEmergencySuspend(const char* reason,
+                                            unsigned long long generation);
+static bool fanHostCleanupForAppExit();
 static void traceInit();
 static void appendNativeLifecycleLog(const char* event, json detail = json::object());
+
+// A process exit cannot wait forever for a worker that is already inside an
+// external API. The normal stop signal is always sent first. When the bounded
+// wait expires, detach only while the whole application is terminating; the
+// OS tears down that remaining worker with the process, and independent Host
+// recovery remains alive outside this process.
+static bool joinThreadBoundedForExit(std::thread& thread, DWORD timeoutMs, const char* name) {
+    if (!thread.joinable()) return true;
+    if (timeoutMs == INFINITE) {
+        thread.join();
+        return true;
+    }
+    const HANDLE handle = reinterpret_cast<HANDLE>(thread.native_handle());
+    const DWORD wait = handle ? WaitForSingleObject(handle, timeoutMs) : WAIT_FAILED;
+    if (wait == WAIT_OBJECT_0) {
+        thread.join();
+        return true;
+    }
+    traceLog("exit worker detached name=%s wait=%lu", name ? name : "unknown",
+             static_cast<unsigned long>(wait));
+    thread.detach();
+    return false;
+}
 
 static const char* powerLifecycleName(PowerLifecycle state) {
     switch (state) {
@@ -2713,7 +2775,7 @@ static void nativeMonitorSetMode(bool top, bool fps, bool enabled) {
     g_nativeMonitorCv.notify_all();
 }
 
-static void stopNativeMonitorForExit() {
+static void stopNativeMonitorForExit(DWORD timeoutMs) {
     {
         std::lock_guard<std::mutex> lock(g_nativeMonitorMx);
         g_nativeMonitorTop = false;
@@ -2721,7 +2783,7 @@ static void stopNativeMonitorForExit() {
         g_nativeMonitorStop = true;
         g_nativeMonitorCv.notify_all();
     }
-    if (g_nativeMonitorThread.joinable()) g_nativeMonitorThread.join();
+    (void)joinThreadBoundedForExit(g_nativeMonitorThread, timeoutMs, "native-monitor");
     nativeMonitorDeleteOutputs();
 }
 
@@ -3278,24 +3340,38 @@ static void stopTdpDaemonForExit() {
     cleanupExitArtifacts();
 }
 
+static void postExitReadyOnce(HWND hwnd, WPARAM code = 0) {
+    bool expected = false;
+    if (!g_exitReadyPosted.compare_exchange_strong(expected, true)) return;
+    if (hwnd && IsWindow(hwnd)) PostMessageW(hwnd, WM_APP_EXIT_READY, code, 0);
+}
+
 static DWORD WINAPI exitCleanupThreadProc(LPVOID param) {
     HWND hwnd = reinterpret_cast<HWND>(param);
     g_summonQuit = true;
-    sgStopWorkThread();
-    poolStop();
+    // The WebView can be destroyed before Vue finishes an async unmount hook.
+    // A confirmed restore is ideal; otherwise the resident Host accepts the
+    // recovery handoff and keeps retrying after YeManCC exits. Never trap the
+    // main application behind a wedged ACPI call.
+    const bool oemRestoreConfirmed = fanHostCleanupForAppExit();
+    appendNativeLifecycleLog(oemRestoreConfirmed
+        ? "fan-exit-cleanup-confirmed"
+        : "fan-exit-recovery-handed-off");
+    sgStopWorkThread(1000);
+    poolStop(1000);
     for (auto& [id, w] : g_watchers) {
         if (stopWatcher(w, 1000)) delete w;
     }
     g_watchers.clear();
     stopTdpDaemonForExit();
-    stopTopMonitorForExit();
-    sgCleanupBeforeExit();
+    stopTopMonitorForExit(1000);
+    (void)sgCleanupBeforeExit(true);
     if (g_autoCloseThread) {
         WaitForSingleObject(g_autoCloseThread, 3000);
         CloseHandle(g_autoCloseThread);
         g_autoCloseThread = nullptr;
     }
-    PostMessageW(hwnd, WM_APP_EXIT_READY, 0, 0);
+    postExitReadyOnce(hwnd, 0);
     return 0;
 }
 
@@ -3320,12 +3396,21 @@ static void beginAsyncExit(HWND hwnd, WPARAM code) {
         g_exitCleanupThread = CreateThread(nullptr, 0, exitCleanupThreadProc,
                                            reinterpret_cast<LPVOID>(hwnd), 0, nullptr);
         if (!g_exitCleanupThread) {
-            // The fallback remains synchronous only if the OS refuses to
-            // create the cleanup worker; correctness is more important here.
-            stopTdpDaemonForExit();
-            stopTopMonitorForExit();
-            sgCleanupBeforeExit();
-            PostMessageW(hwnd, WM_APP_EXIT_READY, g_exitCode.load(std::memory_order_relaxed), 0);
+            // The Host has an independent parent watchdog. If Windows cannot
+            // create the cleanup worker, exit rather than running any HTTP or
+            // EC-adjacent operation synchronously on the UI thread.
+            appendNativeLifecycleLog("fan-exit-worker-unavailable");
+            // The TDP lifetime Job has KILL_ON_JOB_CLOSE. Closing it is
+            // non-blocking; the remaining process-local cleanup is handled by
+            // the final bounded fallback after the message loop exits.
+            if (g_tdpDaemonJob) {
+                CloseHandle(g_tdpDaemonJob);
+                g_tdpDaemonJob = nullptr;
+            }
+            postExitReadyOnce(hwnd, g_exitCode.load(std::memory_order_relaxed));
+        } else {
+            SetTimer(hwnd, EXIT_CLEANUP_WATCHDOG_TIMER_ID,
+                     EXIT_CLEANUP_WATCHDOG_MS, nullptr);
         }
     }
 }
@@ -3520,10 +3605,10 @@ static void summonLoad() {
             loadBool("bDoubleMinimize", g_bDoubleMinimize, true);
             loadBool("tdpShortcut", g_tdpShortcut, true);
             loadBool("fpsShortcut", g_fpsShortcut, true);
-            loadBool("killGame", g_killGame, false);
-            loadBool("openKeyboard", g_openKeyboard, false);
-            loadBool("returnDesktop", g_returnDesktop, false);
-            loadBool("mouseToggle", g_mouseToggle, false);
+            loadBool("killGame", g_killGame, true);
+            loadBool("openKeyboard", g_openKeyboard, true);
+            loadBool("returnDesktop", g_returnDesktop, true);
+            loadBool("mouseToggle", g_mouseToggle, true);
             const std::string backend = j.value("mouseBackend", std::string("joyxoff"));
             if (backend == "joyxoff" || backend == "gamebar") g_mouseBackend = backend;
             else {
@@ -4622,13 +4707,170 @@ static bool gpAnyShortcutHeld() {
         g_curPad.bRightTrigger >= XINPUT_GAMEPAD_TRIGGER_THRESHOLD;
 }
 
+static HWND customSteamLibraryWindow() {
+    return FindWindowW(L"YeManSteamLibraryWorkspace", nullptr);
+}
+
+static constexpr wchar_t kCustomSteamLibraryInputOwnerProperty[] =
+    L"YeManSteamLibrary.InputOwner";
+static constexpr wchar_t kCustomSteamLibraryParentPidProperty[] =
+    L"YeManSteamLibrary.ParentPid";
+static constexpr ULONG_PTR kCustomSteamLibraryHostInputOwnerMarker = 1;
+static constexpr ULONG_PTR kCustomSteamLibraryParentInputOwnerMarker = 2;
+static constexpr ULONGLONG kCustomSteamLibraryLaunchTimeoutMs = 10000;
+
+static ULONG_PTR customSteamLibraryWindowProperty(HWND window, const wchar_t* name) {
+    return reinterpret_cast<ULONG_PTR>(GetPropW(window, name));
+}
+
+static bool customSteamLibraryProcessMatches(HWND window) {
+    if (!window || !IsWindow(window)) return false;
+    DWORD pid = 0;
+    GetWindowThreadProcessId(window, &pid);
+    if (!pid) return false;
+    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    if (!process) return false;
+    wchar_t imagePath[32768]{};
+    DWORD length = static_cast<DWORD>(std::size(imagePath));
+    const bool queried = QueryFullProcessImageNameW(process, 0, imagePath, &length) != FALSE;
+    CloseHandle(process);
+    if (!queried || length == 0) return false;
+    const std::wstring path(imagePath, length);
+    const auto slash = path.find_last_of(L"\\/");
+    const std::wstring name = slash == std::wstring::npos ? path : path.substr(slash + 1);
+    return _wcsicmp(name.c_str(), L"CustomSteamLibrary.exe") == 0 ||
+        _wcsicmp(name.c_str(), L"SteamLibraryWorkspace.exe") == 0;
+}
+
+static bool customSteamLibraryParentOwned(HWND window) {
+    if (!window || !IsWindow(window)) return false;
+    if (customSteamLibraryWindowProperty(window, kCustomSteamLibraryInputOwnerProperty) !=
+        kCustomSteamLibraryParentInputOwnerMarker) return false;
+    const auto parentPid = customSteamLibraryWindowProperty(window, kCustomSteamLibraryParentPidProperty);
+    if (parentPid != static_cast<ULONG_PTR>(GetCurrentProcessId())) return false;
+    return customSteamLibraryProcessMatches(window);
+}
+
+static HWND customSteamLibraryParentWindow() {
+    HWND window = customSteamLibraryWindow();
+    return customSteamLibraryParentOwned(window) ? window : nullptr;
+}
+
+static bool customSteamLibraryInputSuppressed() {
+    const auto phase = static_cast<CustomSteamLibraryInputPhase>(
+        g_customSteamLibraryInputPhase.load(std::memory_order_acquire));
+    const HWND parentWindow = customSteamLibraryParentWindow();
+    if (phase == CustomSteamLibraryInputPhase::disabled) {
+        // The child window is the authoritative integration signal. The
+        // bridge may arm launch suppression before creation, but once a
+        // correctly identified parent-owned EXE exists, native input control
+        // is recovered even if the renderer missed a lifecycle callback.
+        if (!parentWindow) return false;
+        g_customSteamLibraryInputPhase.store(
+            static_cast<int>(CustomSteamLibraryInputPhase::active), std::memory_order_release);
+        return true;
+    }
+    if (parentWindow) {
+        // The native controller owns the transition to active as soon as it
+        // sees the correctly identified child. No renderer state is needed.
+        g_customSteamLibraryInputPhase.store(
+            static_cast<int>(CustomSteamLibraryInputPhase::active), std::memory_order_release);
+        return true;
+    }
+
+    if (phase == CustomSteamLibraryInputPhase::active) {
+        // Child disappeared or changed ownership. Keep the parent blocked for
+        // the return boundary; gamepadEval releases it only after neutral.
+        g_customSteamLibraryInputPhase.store(
+            static_cast<int>(CustomSteamLibraryInputPhase::returning), std::memory_order_release);
+        return true;
+    }
+    if (phase == CustomSteamLibraryInputPhase::launching &&
+        GetTickCount64() >= g_customSteamLibraryInputDeadline.load(std::memory_order_acquire)) {
+        g_customSteamLibraryInputPhase.store(
+            static_cast<int>(CustomSteamLibraryInputPhase::returning), std::memory_order_release);
+    }
+    return true;
+}
+
+static bool customSteamLibraryChildForeground() {
+    if (!customSteamLibraryInputSuppressed()) return false;
+    HWND child = customSteamLibraryParentWindow();
+    return child && IsWindow(child) && IsWindowVisible(child) && !IsIconic(child) &&
+        GetForegroundWindow() == child;
+}
+
+// Clear only parent-owned hold/double-click state. Keep g_curW/g_prevW intact
+// so the same physical button cannot become a fresh edge when the child
+// session starts or ends.
+static void resetParentShortcutStateForCustomSteamLibrary() {
+    gpArmed = true;
+    gpPrevB = (g_curW & XINPUT_GAMEPAD_B) != 0;
+    gpHoldStart = 0;
+    gpLastBPress = 0;
+    g_bClosePending = false;
+    g_bClosePendingSince = 0;
+    g_bCloseReadyAt = 0;
+    g_pendingSummonTarget = {};
+    gpKbArmed = gpKxArmed = gpKyArmed = true;
+    gpKbHoldStart = gpKxHoldStart = gpKyHoldStart = 0;
+    s_dpHeldStart = s_dpLastEmit = 0;
+    s_brightnessHeldStart = s_brightnessLastEmit = 0;
+}
+
+static const char* customSteamLibrarySemanticAction(const char* action) {
+    if (!action) return nullptr;
+    if (strcmp(action, "page-prev") == 0) return "tab-previous";
+    if (strcmp(action, "page-next") == 0) return "tab-next";
+    if (strcmp(action, "confirm") == 0 || strcmp(action, "dropdown") == 0) return "accept";
+    if (strcmp(action, "back") == 0) return "back";
+    if (strcmp(action, "edit-game") == 0) return "edit";
+    if (strcmp(action, "navigate-left") == 0 || strcmp(action, "navigate-right") == 0 ||
+        strcmp(action, "navigate-up") == 0 || strcmp(action, "navigate-down") == 0 ||
+        strcmp(action, "accept") == 0 || strcmp(action, "tab-previous") == 0 ||
+        strcmp(action, "tab-next") == 0 || strcmp(action, "edit") == 0) return action;
+    if (strcmp(action, "nav-left") == 0) return "navigate-left";
+    if (strcmp(action, "nav-right") == 0) return "navigate-right";
+    if (strcmp(action, "nav-up") == 0) return "navigate-up";
+    if (strcmp(action, "nav-down") == 0) return "navigate-down";
+    return nullptr;
+}
+
+static bool customSteamLibrarySendSemanticAction(const char* action) {
+    const char* semantic = customSteamLibrarySemanticAction(action);
+    if (!semantic) return false;
+    HWND child = customSteamLibraryParentWindow();
+    if (!child || !IsWindow(child)) return false;
+    const auto payload = U2W(semantic);
+    COPYDATASTRUCT data{};
+    data.dwData = 0x594D4343; // Y M C C: versioned semantic-action channel marker
+    data.cbData = static_cast<DWORD>((payload.size() + 1) * sizeof(wchar_t));
+    data.lpData = const_cast<wchar_t*>(payload.c_str());
+    DWORD_PTR result = 0;
+    const auto delivered = SendMessageTimeoutW(
+        child, WM_COPYDATA, reinterpret_cast<WPARAM>(g_hwnd),
+        reinterpret_cast<LPARAM>(&data), SMTO_ABORTIFHUNG | SMTO_BLOCK, 200, &result);
+    return delivered != FALSE && result != 0;
+}
+
 static bool gamepadUiInputEligible() {
-    return g_hwnd && IsWindow(g_hwnd) && IsWindowVisible(g_hwnd) &&
-        !IsIconic(g_hwnd) && focusMainWindowIsForeground();
+    // Once the bridge is armed, the parent must not receive any controller
+    // action while the child is launching/returning. This is the hard gate
+    // that prevents one physical press from becoming a parent+child double.
+    if (customSteamLibraryInputSuppressed()) return customSteamLibraryChildForeground();
+    if (!g_hwnd || !IsWindow(g_hwnd) || !IsWindowVisible(g_hwnd) || IsIconic(g_hwnd)) return false;
+    return focusMainWindowIsForeground();
 }
 
 static void gamepadEmitUiAction(const char* action) {
     if (!action || !*action || !gamepadUiInputEligible()) return;
+    // The native YeManCC gamepad loop is the sole owner in parent mode. Do
+    // not emit a renderer event and ask TypeScript to arbitrate again: send
+    // the already-normalized semantic action directly to the child window.
+    if (customSteamLibraryChildForeground()) {
+        (void)customSteamLibrarySendSemanticAction(action);
+        return;
+    }
     ipc_emit("gamepad.ui-input", {{"action", action}});
 }
 
@@ -4767,6 +5009,51 @@ static void gamepadEval() {
     bool dpLeft = (w & XINPUT_GAMEPAD_DPAD_LEFT) != 0;
     bool dpRight= (w & XINPUT_GAMEPAD_DPAD_RIGHT) != 0;
     ULONGLONG now = GetTickCount64();
+
+    // Returning is a native boundary. Once every physical control is
+    // neutral, ownership can be released; a later press then belongs to the
+    // parent again. This is deliberately decided beside the XInput snapshot,
+    // not by the renderer lifecycle.
+    if (static_cast<CustomSteamLibraryInputPhase>(
+            g_customSteamLibraryInputPhase.load(std::memory_order_acquire)) ==
+            CustomSteamLibraryInputPhase::returning && !gpAnyShortcutHeld()) {
+        g_customSteamLibraryInputPhase.store(
+            static_cast<int>(CustomSteamLibraryInputPhase::disabled), std::memory_order_release);
+        g_customSteamLibraryInputDeadline.store(0, std::memory_order_release);
+    }
+
+    // Custom Steam Library owns the foreground controller session after its
+    // hidden bridge is armed. Do this before every parent-global shortcut:
+    // B double-minimize, LB+RB summon, Start+direction tuning, Select+face
+    // combos, and page navigation must not run in parallel with the child.
+    // The child still receives one semantic action through gamepadProcessUiInput.
+    static bool customSessionWasSuppressed = false;
+    const bool customSessionSuppressed = customSteamLibraryInputSuppressed();
+    if (customSessionSuppressed != customSessionWasSuppressed) {
+        resetParentShortcutStateForCustomSteamLibrary();
+        customSessionWasSuppressed = customSessionSuppressed;
+        // Renderer receives only an ownership notification. It never makes
+        // the arbitration decision; this prevents its browser fallback poll
+        // from observing the same physical controller while the child owns it.
+        ipc_emit("gamepad.input-owner", {
+            {"owner", customSessionSuppressed ? "custom-steam-library" : "yemancc"}
+        });
+    }
+    if (customSessionSuppressed) {
+        gamepadProcessUiInput(w, now);
+        if (gpAnyShortcutHeld()) {
+            if (!g_gpHoldTimerOn) {
+                SetTimer(g_hwnd, GP_HOLD_TIMER_ID, 50, nullptr);
+                g_gpHoldTimerOn = true;
+            }
+        } else if (g_gpHoldTimerOn) {
+            KillTimer(g_hwnd, GP_HOLD_TIMER_ID);
+            g_gpHoldTimerOn = false;
+        }
+        g_prevW = w;
+        g_prevPad = g_curPad;
+        return;
+    }
 
     const bool shoulderDown = (w & (XINPUT_GAMEPAD_LEFT_SHOULDER | XINPUT_GAMEPAD_RIGHT_SHOULDER)) != 0;
     const bool shoulderWasDown = (g_prevW & (XINPUT_GAMEPAD_LEFT_SHOULDER | XINPUT_GAMEPAD_RIGHT_SHOULDER)) != 0;
@@ -5026,6 +5313,67 @@ static bool sgRunExeSync(const std::wstring& exe, const std::wstring& args, DWOR
     bool ok = wait == WAIT_OBJECT_0 && GetExitCodeProcess(pi.hProcess, &exitCode) && exitCode == 0;
     CloseHandle(pi.hThread); CloseHandle(pi.hProcess); CloseHandle(job);
     return ok;
+}
+
+// RTSSHooks exports use their own SDK signatures.  They are not rundll32
+// entry points: LoadProfile takes LPCSTR and UpdateProfiles takes no args.
+// Calling them through rundll32 passes HWND/HINSTANCE/LPSTR/int instead and
+// can make LoadProfile treat a window handle as a string pointer.
+using RtssLoadProfileFn = void (*)(LPCSTR);
+using RtssUpdateProfilesFn = void (*)();
+
+// Keep the SEH boundary in a function with no C++ objects that need
+// destruction; MSVC otherwise rejects __try in the surrounding function.
+static DWORD nativeRtssInvokeProfiles(RtssLoadProfileFn loadProfile,
+                                       RtssUpdateProfilesFn updateProfiles) {
+    __try {
+        loadProfile("");
+        updateProfiles();
+        return ERROR_SUCCESS;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return GetExceptionCode();
+    }
+}
+
+static json nativeRtssReloadProfiles(const std::wstring& dllPath) {
+    const auto fileName = ascii_lower(W2U(fspath::path(dllPath).filename().wstring()));
+    const auto path = fspath::path(dllPath);
+    if (fileName != "rtsshooks64.dll")
+        return json{{"ok", false}, {"error", "YeManCC 只支持 64 位 RTSSHooks64.dll"}};
+    if (!fspath::is_regular_file(path))
+        return json{{"ok", false}, {"error", "RTSSHooks DLL 不存在"}};
+    if (!fspath::is_regular_file(path.parent_path() / L"RTSS.exe"))
+        return json{{"ok", false}, {"error", "RTSSHooks64.dll 未与同目录 RTSS.exe 配套"}};
+
+    HMODULE hooks = LoadLibraryExW(
+        dllPath.c_str(), nullptr,
+        LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
+    if (!hooks) {
+        return json{{"ok", false}, {"error", "加载 RTSSHooks DLL 失败"},
+                    {"win32Error", static_cast<int>(GetLastError())}};
+    }
+
+    auto loadProfile = reinterpret_cast<RtssLoadProfileFn>(
+        GetProcAddress(hooks, "LoadProfile"));
+    auto updateProfiles = reinterpret_cast<RtssUpdateProfilesFn>(
+        GetProcAddress(hooks, "UpdateProfiles"));
+    if (!loadProfile || !updateProfiles) {
+        const DWORD error = GetLastError();
+        FreeLibrary(hooks);
+        return json{{"ok", false}, {"error", "RTSSHooks DLL 缺少 RTSS SDK 导出函数"},
+                    {"win32Error", static_cast<int>(error)}};
+    }
+
+    // Empty profile name means the RTSS Global profile, per the RTSS SDK.
+    // Keep a faulty/incompatible third-party DLL from taking down YeManCC.
+    const DWORD exceptionCode = nativeRtssInvokeProfiles(loadProfile, updateProfiles);
+    if (exceptionCode != ERROR_SUCCESS) {
+        FreeLibrary(hooks);
+        return json{{"ok", false}, {"error", "RTSSHooks SDK 调用异常"},
+                    {"win32Error", static_cast<int>(exceptionCode)}};
+    }
+    FreeLibrary(hooks);
+    return json{{"ok", true}};
 }
 
 // 同步运行命令并捕获 stdout（CREATE_NO_WINDOW），stderr 合并到 stdout 避免管道死锁。
@@ -5577,7 +5925,7 @@ static void nativeApplyBrightness(int dir, bool enabled) {
     gamepadSerialPostEvent("gamepad.brightness", json{{"ok", rc == ERROR_SUCCESS}, {"value", (int)next},
         {"mode", dc ? "dc" : "ac"}, {"reason", rc == ERROR_SUCCESS ? "" : "write-failed"}});
 }
-// RTSS 锁帧：读/改写 Profiles\Global 的 Limit=，rundll32 重载配置（对齐前端 setRtssLimit）。
+// RTSS 锁帧：读/改写 Profiles\Global 的 Limit=，再通过 RTSS SDK 重载配置。
 static void nativeAdjustRtss(int delta) {
     if (!g_fpsShortcut) return;
     std::wstring g = L"C:\\Program Files (x86)\\RivaTuner Statistics Server\\Profiles\\Global";
@@ -5609,12 +5957,10 @@ static void nativeAdjustRtss(int delta) {
         out += "Limit=" + std::to_string(next) + "\r\n";
     }
     sgWriteFileAtomic(g, out); // 原子写，避免 RTSS 在游戏内读 Global 时读到半截
-    std::wstring dll = L"\"C:\\Program Files (x86)\\RivaTuner Statistics Server\\RTSSHooks64.dll\"";
-    std::wstring ru  = L"C:\\Windows\\System32\\rundll32.exe";
+    const std::wstring dll = L"C:\\Program Files (x86)\\RivaTuner Statistics Server\\RTSSHooks64.dll";
     // 外部改完文件后：LoadProfile 重新载入磁盘 → UpdateProfiles 套用到运行中的游戏。
-    // ⚠ 不要 SaveProfile：那会让 RTSS 把"内存里的旧状态"写回磁盘，覆盖刚改的内容甚至写坏（损坏根因）。
-    sgRunExeSync(ru, dll + L" LoadProfile");
-    sgRunExeSync(ru, dll + L" UpdateProfiles");
+    // 直接按 RTSS SDK 签名调用，不能再经由 rundll32 传参。
+    nativeRtssReloadProfiles(dll);
     ipc_emit("gamepad.refresh", {});
 }
 
@@ -6621,10 +6967,9 @@ static void sgClearSleepTargetIfMatches(const SgSleepTarget& expected) {
 // markers and the currently detected game are deliberately outside this path.
 // Transient failures are bounded; the exact marker is retained for a later
 // wake, exit, or startup retry without blocking the application lifecycle.
-static SgResumeResult sgResumeSleepTarget(
+static SgResumeResult sgResumeSleepTargetUnlocked(
     unsigned long long expectedGeneration, bool focusResumedGame) {
     SgResumeResult rr;
-    std::lock_guard<std::mutex> opLock(g_sgOpMtx);
     SgSleepTarget target;
     if (!sgReadSleepTarget(target) || !target.markerOwned || !target.pid ||
         !target.processCreated || target.powerGeneration != expectedGeneration)
@@ -6675,6 +7020,12 @@ static SgResumeResult sgResumeSleepTarget(
                  expectedGeneration, static_cast<unsigned long>(target.pid));
     if (focusResumedGame) focusSingleResumedGame(rr.pids);
     return rr;
+}
+
+static SgResumeResult sgResumeSleepTarget(
+    unsigned long long expectedGeneration, bool focusResumedGame) {
+    std::lock_guard<std::mutex> opLock(g_sgOpMtx);
+    return sgResumeSleepTargetUnlocked(expectedGeneration, focusResumedGame);
 }
 
 // Capture and freeze the current valve lease synchronously.  The operation is
@@ -6800,18 +7151,22 @@ static SgResumeResult sgResumeAll(bool allowEligibleFallback = false) {
 // two directories remain independent during normal sleep/manual operations.
 // 启动和正常退出需要同时处理睡眠、手动两套 PID 标记。只有两套记录都没有
 // 恢复成功时才执行一次高内存游戏兜底，避免分别扫描两次并重复 Resume 同一 PID。
-static SgResumeResult sgResumeTrackedAll() {
-    std::lock_guard<std::mutex> opLock(g_sgOpMtx);
+static SgResumeResult sgResumeTrackedAllUnlocked() {
     SgResumeResult result = sgResumeMarkedDirectoryUnlocked(SG_SLEEP_LEASE_DIR, false);
     const SgResumeResult manual = sgResumeMarkedDirectoryUnlocked(SG_MANUAL_DIR);
     sgAppendResumeResult(result, manual);
     return result;
 }
 
+static SgResumeResult sgResumeTrackedAll() {
+    std::lock_guard<std::mutex> opLock(g_sgOpMtx);
+    return sgResumeTrackedAllUnlocked();
+}
+
 static std::thread g_startupResumeThread;
 
-static void joinStartupResumeThread() {
-    if (g_startupResumeThread.joinable()) g_startupResumeThread.join();
+static void joinStartupResumeThread(DWORD timeoutMs = INFINITE) {
+    (void)joinThreadBoundedForExit(g_startupResumeThread, timeoutMs, "startup-resume");
 }
 
 static void startStartupResumeThread() {
@@ -6835,15 +7190,26 @@ static bool sgHasMarkerFiles(const std::wstring& dir) {
     return false;
 }
 
-static void sgCleanupBeforeExit() {
-    if (g_sgCleanupDone) return;
+static bool sgCleanupBeforeExit(bool nonBlocking) {
+    if (g_sgCleanupDone) return true;
+    std::unique_lock<std::mutex> opLock(g_sgOpMtx, std::defer_lock);
+    if (nonBlocking) {
+        if (!opLock.try_lock()) {
+            appendNativeLifecycleLog("sleep-exit-cleanup-deferred", {
+                {"reason", "sleep-worker-busy"}
+            });
+            return false;
+        }
+    } else {
+        opLock.lock();
+    }
     g_sgCleanupDone = true;
     appendNativeLifecycleLog("sleep-exit-cleanup-start");
     // 正常退出必须解除所有由本程序挂起的进程。
     SgSleepTarget currentTarget;
     if (sgReadSleepTarget(currentTarget) && currentTarget.markerOwned)
-        (void)sgResumeSleepTarget(currentTarget.powerGeneration, false);
-    SgResumeResult rr = sgResumeTrackedAll();
+        (void)sgResumeSleepTargetUnlocked(currentTarget.powerGeneration, false);
+    SgResumeResult rr = sgResumeTrackedAllUnlocked();
     (void)rr;
     // 若仍有标记，说明恢复失败；允许 WM_DESTROY/消息循环退出再重试一次。
     const bool pending = sgHasMarkerFiles(SG_SLEEP_LEASE_DIR) ||
@@ -6853,6 +7219,7 @@ static void sgCleanupBeforeExit() {
         {"pendingMarkers", pending}, {"resumed", rr.count}
     });
     g_sgInSuspend = false;
+    return !pending;
 }
 
 // ── 唤醒处置：恢复本周期资源；仅自动/代理唤醒进入重睡观察 ──
@@ -7187,14 +7554,14 @@ static void sgStartWorkThread() {
     g_sgWorkThread = std::thread(sgWorkLoop);
 }
 
-static void sgStopWorkThread() {
+static void sgStopWorkThread(DWORD timeoutMs) {
     {
         std::lock_guard<std::mutex> lock(g_sgWorkMx);
         g_sgWorkStop = true;
         g_sgWorkQ.clear();
     }
     g_sgWorkCv.notify_all();
-    if (g_sgWorkThread.joinable()) g_sgWorkThread.join();
+    (void)joinThreadBoundedForExit(g_sgWorkThread, timeoutMs, "sleep-guard");
 }
 
 // Child windows
@@ -7257,6 +7624,9 @@ static int g_splashSurfaceH = 0;
 // Logging
 static std::wstring g_logFile;
 static std::mutex   g_logMtx;
+static std::atomic<bool> g_fanLogEnabled{false};
+static std::wstring g_fanLogFile;
+static std::mutex   g_fanLogMtx;
 
 // Background brush for frameless border area
 static HBRUSH   g_bgBrush = nullptr;
@@ -7314,6 +7684,29 @@ static std::wstring app_data_dir() {
     }
     fspath::create_directories(g_appDataDir);
     return g_appDataDir;
+}
+
+// Fan Host recovery also runs from native sleep/exit callbacks, when the
+// renderer may already be gone.  Keep its mutable session capability in a
+// stable product path rather than app_data_dir(), whose parent name follows a
+// user-configurable window title.  Renderer, native cleanup and the emergency
+// script must resolve the same directory across title/configuration changes.
+static std::wstring g_fanHostStateDir;
+static std::wstring fan_host_state_dir() {
+    if (!g_fanHostStateDir.empty()) return g_fanHostStateDir;
+    PWSTR p = nullptr;
+    if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, nullptr, &p))) {
+        g_fanHostStateDir = std::wstring(p) + L"\\YeManCC\\fan-host";
+        CoTaskMemFree(p);
+    } else {
+        // Keep the existing application-data fallback only when Windows cannot
+        // provide LocalAppData.  Both native and renderer still use this same
+        // helper through app.fanStateDir, so the session path remains shared.
+        g_fanHostStateDir = app_data_dir() + L"\\fan-host";
+    }
+    std::error_code ec;
+    fspath::create_directories(g_fanHostStateDir, ec);
+    return g_fanHostStateDir;
 }
 
 // T0 sleep-hang repair: this log is intentionally independent of the optional
@@ -7932,7 +8325,7 @@ static bool poolSubmit(std::function<void()> job) {
     return true;
 }
 
-static void poolStop() {
+static void poolStop(DWORD timeoutMs) {
     g_poolCancel.store(true, std::memory_order_release);
     {
         std::lock_guard<std::mutex> lk(g_poolMx);
@@ -7942,8 +8335,12 @@ static void poolStop() {
         g_poolQ.clear();
     }
     g_poolCv.notify_all();
+    const ULONGLONG deadline = timeoutMs == INFINITE
+        ? 0 : GetTickCount64() + timeoutMs;
     for (auto& thread : g_poolThreads) {
-        if (thread.joinable()) thread.join();
+        const DWORD remaining = timeoutMs == INFINITE ? INFINITE :
+            (GetTickCount64() >= deadline ? 0 : static_cast<DWORD>(deadline - GetTickCount64()));
+        (void)joinThreadBoundedForExit(thread, remaining, "ipc-pool");
     }
     g_poolThreads.clear();
     std::lock_guard<std::mutex> lk(g_poolMx);
@@ -8849,6 +9246,10 @@ static std::wstring updateProgressPath() {
     return app_data_dir() + L"\\update\\update-progress.json";
 }
 
+static std::wstring updateTransactionStatePath() {
+    return app_data_dir() + L"\\update\\update-state.json";
+}
+
 static void updateProgressPost(const json& data) {
     {
         std::lock_guard<std::mutex> lock(g_updateProgressMtx);
@@ -8874,6 +9275,47 @@ static json updateProgressRead() {
     } catch (...) {
         return json::object();
     }
+}
+
+static json updateTransactionStateRead() {
+    auto raw = sgReadFile(updateTransactionStatePath());
+    if (raw.size() >= 3 && static_cast<unsigned char>(raw[0]) == 0xEF &&
+        static_cast<unsigned char>(raw[1]) == 0xBB &&
+        static_cast<unsigned char>(raw[2]) == 0xBF) {
+        raw.erase(0, 3);
+    }
+    if (raw.empty()) return json::object();
+    try {
+        auto parsed = json::parse(raw);
+        return parsed.is_object() ? parsed : json::object();
+    } catch (...) {
+        return json::object();
+    }
+}
+
+static json updateStateReadWithTransaction() {
+    auto progress = updateProgressRead();
+    const auto state = updateTransactionStateRead();
+    const auto statePhase = state.value("phase", std::string{});
+    const auto stateVersion = state.value("version", std::string{});
+    const auto progressVersion = progress.value("version", std::string{});
+    const bool legacyStartedState = statePhase == "started" && stateVersion.empty() &&
+        progress.value("phase", std::string{}) == "installing";
+    if ((!stateVersion.empty() && stateVersion == progressVersion && statePhase == "committed") ||
+        legacyStartedState) {
+        progress["phase"] = "completed";
+        progress["percent"] = 100;
+        progress["message"] = "更新已完成";
+        progress["error"] = "";
+    } else if (stateVersion.empty() || stateVersion == progressVersion) {
+        if (progress.value("phase", std::string{}) == "installing" &&
+            (statePhase == "copying" || statePhase == "tdp-verified" ||
+             statePhase == "launching")) {
+            progress["phase"] = "interrupted";
+            progress["message"] = "上次安装在提交前中断，可重试安装";
+        }
+    }
+    return progress;
 }
 
 static void ipc_dispatch(LPCWSTR raw) {
@@ -10559,6 +11001,63 @@ static void reg_shell_app() {
         CloseHandle(pi.hProcess);
         return json{{"ok", true}, {"pid", pid}};
     });
+    ipc_on("customSteamLibrary.setIntegrationSession", [](const json& a) -> json {
+        const bool enabled = a.value("enabled", false);
+        if (enabled) {
+            // Enabling arms the native gamepad owner. Native code itself
+            // discovers the child window and promotes launching -> active.
+            g_customSteamLibraryInputDeadline.store(
+                GetTickCount64() + kCustomSteamLibraryLaunchTimeoutMs, std::memory_order_release);
+            g_customSteamLibraryInputPhase.store(
+                static_cast<int>(CustomSteamLibraryInputPhase::launching), std::memory_order_release);
+        } else {
+            // Do not let the final close/return press become a YeManCC action.
+            // The normal gamepad loop clears this release barrier after the
+            // physical controls are neutral again.
+            g_customSteamLibraryInputDeadline.store(0, std::memory_order_release);
+            g_customSteamLibraryInputPhase.store(
+                static_cast<int>(CustomSteamLibraryInputPhase::disabled), std::memory_order_release);
+            g_inputReleaseRequired.store(true, std::memory_order_release);
+        }
+        return true;
+    });
+    ipc_on("customSteamLibrary.status", [](const json&) -> json {
+        (void)customSteamLibraryInputSuppressed();
+        const auto phase = g_customSteamLibraryInputPhase.load(std::memory_order_acquire);
+        HWND child = customSteamLibraryWindow();
+        DWORD pid = 0;
+        if (child) GetWindowThreadProcessId(child, &pid);
+        const bool present = child && IsWindow(child);
+        const bool foreground = present && GetForegroundWindow() == child;
+        const ULONG_PTR ownerMarker = child
+            ? customSteamLibraryWindowProperty(child, kCustomSteamLibraryInputOwnerProperty) : 0;
+        const bool parentOwned = customSteamLibraryParentOwned(child);
+        const bool compatible = !present || parentOwned;
+        const char* inputOwner = ownerMarker == kCustomSteamLibraryParentInputOwnerMarker ? "parent" :
+            ownerMarker == kCustomSteamLibraryHostInputOwnerMarker ? "host" : "unknown";
+        return json{
+            {"configured", phase != static_cast<int>(CustomSteamLibraryInputPhase::disabled)},
+            {"present", present},
+            {"foreground", foreground},
+            {"pid", pid},
+            {"inputOwner", inputOwner},
+            {"compatible", compatible},
+            {"phase", phase == static_cast<int>(CustomSteamLibraryInputPhase::launching) ? "launching" :
+                       phase == static_cast<int>(CustomSteamLibraryInputPhase::active) ? "active" :
+                       phase == static_cast<int>(CustomSteamLibraryInputPhase::returning) ? "returning" : "disabled"},
+        };
+    });
+    ipc_on("customSteamLibrary.sendAction", [](const json& a) -> json {
+        const auto action = a.value("action", std::string{});
+        static const std::unordered_set<std::string> allowed = {
+            "navigate-left", "navigate-right", "navigate-up", "navigate-down",
+            "accept", "back", "tab-previous", "tab-next", "edit",
+        };
+        if (!allowed.contains(action)) throw std::runtime_error("unsupported Custom Steam Library action");
+        if (!customSteamLibraryInputSuppressed()) return json{{"ok", false}, {"reason", "bridge-disabled"}};
+        if (!customSteamLibraryParentWindow()) return json{{"ok", false}, {"reason", "window-not-running-or-not-parent-owned"}};
+        return json{{"ok", customSteamLibrarySendSemanticAction(action.c_str())}};
+    });
     ipc_on("app.exit", [](const json& a) -> json {
         // IPC 可能运行在工作线程；窗口销毁和退出清理必须切回 UI 线程。
         if (g_hwnd && IsWindow(g_hwnd)) PostMessageW(g_hwnd, WM_APP_EXIT, (WPARAM)a.value("code", 0), 0);
@@ -10568,8 +11067,14 @@ static void reg_shell_app() {
     ipc_on("app.dataDir", [](const json&) -> json {
         return W2U(app_data_dir());
     });
+    ipc_on("app.fanStateDir", [](const json&) -> json {
+        return W2U(fan_host_state_dir());
+    });
     ipc_on("app.exeDir", [](const json&) -> json {
         return W2U(exe_dir());
+    });
+    ipc_on("app.pid", [](const json&) -> json {
+        return GetCurrentProcessId();
     });
     ipc_on("app.powerControlDir", [](const json&) -> json {
         return W2U(POWER_CONTROL_DIR);
@@ -10888,6 +11393,9 @@ static void reg_http() {
         auto method = a.value("method", std::string{"GET"});
         auto body   = a.value("body", std::string{});
         auto hdrs   = a.value("headers", json::object());
+        const DWORD requestTimeoutMs = (std::max)(
+            static_cast<DWORD>(250),
+            (std::min)(static_cast<DWORD>(120000), a.value("timeoutMs", DEFAULT_HTTP_TIMEOUT_MS)));
 
         if (url.empty()) throw std::runtime_error("url is required");
 
@@ -10913,12 +11421,13 @@ static void reg_http() {
             }
         }
         const bool steamHost = isSteamHostName(host) || steamHostHeader;
+        const bool loopbackHost = isLoopbackHost(host);
         HINTERNET hSession = WinHttpOpen(L"QQ/1.0",
-                                          steamHost ? WINHTTP_ACCESS_TYPE_NO_PROXY
+                                          (steamHost || loopbackHost) ? WINHTTP_ACCESS_TYPE_NO_PROXY
                                                     : WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
                                           WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
         if (!hSession) throw std::runtime_error("WinHttpOpen failed");
-        setHttpTimeouts(hSession);
+        setHttpTimeouts(hSession, requestTimeoutMs);
         DWORD redirectPolicy = WINHTTP_OPTION_REDIRECT_POLICY_ALWAYS;
         WinHttpSetOption(hSession, WINHTTP_OPTION_REDIRECT_POLICY, &redirectPolicy, sizeof(redirectPolicy));
 
@@ -10955,12 +11464,18 @@ static void reg_http() {
         // Send
         LPVOID bodyPtr = body.empty() ? WINHTTP_NO_REQUEST_DATA : (LPVOID)body.data();
         DWORD bodyLen  = body.empty() ? 0 : (DWORD)body.size();
-        if (!WinHttpSendRequest(hRequest, WINHTTP_NO_ADDITIONAL_HEADERS, 0, bodyPtr, bodyLen, bodyLen, 0) ||
-            !WinHttpReceiveResponse(hRequest, nullptr)) {
+        const bool sent = WinHttpSendRequest(hRequest, WINHTTP_NO_ADDITIONAL_HEADERS, 0, bodyPtr, bodyLen, bodyLen, 0) != FALSE;
+        const DWORD sendError = sent ? ERROR_SUCCESS : GetLastError();
+        const bool received = sent && WinHttpReceiveResponse(hRequest, nullptr) != FALSE;
+        const DWORD receiveError = received ? ERROR_SUCCESS : GetLastError();
+        if (!received) {
             WinHttpCloseHandle(hRequest);
             WinHttpCloseHandle(hConnect);
             WinHttpCloseHandle(hSession);
-            throw std::runtime_error("HTTP request failed");
+            const DWORD errorCode = sent ? receiveError : sendError;
+            throw std::runtime_error("HTTP request failed (WinHTTP " +
+                                     std::to_string(static_cast<unsigned long>(errorCode)) +
+                                     ", path=" + W2U(objectPath) + ")");
         }
 
         // Status code
@@ -10979,7 +11494,7 @@ static void reg_http() {
         // Response body
         std::string respBody;
         constexpr size_t MAX_HTTP_RESPONSE_BYTES = 8u << 20;
-        const ULONGLONG responseDeadline = GetTickCount64() + 120000;
+        const ULONGLONG responseDeadline = GetTickCount64() + requestTimeoutMs + 5000;
         std::string responseError;
         DWORD available, read;
         for (;;) {
@@ -11013,10 +11528,341 @@ static void reg_http() {
         WinHttpCloseHandle(hConnect);
         WinHttpCloseHandle(hSession);
 
-        if (!responseError.empty()) throw std::runtime_error(responseError);
+        if (!responseError.empty())
+            throw std::runtime_error(responseError + " (path=" + W2U(objectPath) + ")");
 
         return json{{"status", statusCode}, {"headers", W2U(respHdrs)}, {"body", respBody}};
     });
+}
+
+/**
+ * Bounded Host cleanup operation.  This function is deliberately called only
+ * by the detached fallback worker below.  It must never be called from a
+ * WM_POWERBROADCAST or Kernel-Power callback: WinHTTP and its retry delays are
+ * allowed to take hundreds of milliseconds and therefore cannot be part of a
+ * sleep/veto path.
+ */
+static bool fanHostOwnsLoopbackPort(DWORD pid, unsigned short port = 8765) {
+    // Verify the owner PID of the actual LISTENING socket. An exact Host
+    // image elsewhere in the process list is not sufficient while its
+    // listener is restarting or another process occupies the loopback port.
+    ULONG bytes = 0;
+    constexpr ULONG kIpv4Family = 2; // AF_INET; keep native shell free of Winsock ABI headers
+    if (GetExtendedTcpTable(nullptr, &bytes, FALSE, kIpv4Family,
+                            TCP_TABLE_OWNER_PID_LISTENER, 0) != ERROR_INSUFFICIENT_BUFFER ||
+        bytes == 0) return false;
+    std::vector<unsigned char> buffer(bytes);
+    auto* table = reinterpret_cast<PMIB_TCPTABLE_OWNER_PID>(buffer.data());
+    if (GetExtendedTcpTable(table, &bytes, FALSE, kIpv4Family,
+                            TCP_TABLE_OWNER_PID_LISTENER, 0) != NO_ERROR) return false;
+    const auto decodeNetworkU16 = [](DWORD value) -> unsigned short {
+        return static_cast<unsigned short>(((value & 0xffu) << 8) | ((value >> 8) & 0xffu));
+    };
+    for (DWORD i = 0; i < table->dwNumEntries; ++i) {
+        const auto& row = table->table[i];
+        if (row.dwLocalAddr == 0x0100007Fu &&
+            decodeNetworkU16(row.dwLocalPort) == port && row.dwOwningPid == pid)
+            return true;
+    }
+    return false;
+}
+
+static bool fanHostExactProcessRunning() {
+    const auto expected = POWER_CONTROL_DIR + L"\\fan-host\\YeManFanHost.exe";
+    HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snapshot == INVALID_HANDLE_VALUE) return false;
+    PROCESSENTRY32W entry{};
+    entry.dwSize = sizeof(entry);
+    bool found = false;
+    if (Process32FirstW(snapshot, &entry)) {
+        do {
+            if (_wcsicmp(entry.szExeFile, L"YeManFanHost.exe") != 0) continue;
+            const auto image = processImagePath(entry.th32ProcessID);
+            if (!image.empty() && sameFinalPath(image, expected) &&
+                fanHostOwnsLoopbackPort(entry.th32ProcessID)) {
+                found = true;
+                break;
+            }
+        } while (Process32NextW(snapshot, &entry));
+    }
+    CloseHandle(snapshot);
+    return found;
+}
+
+static std::string fanHostReadSessionToken() {
+    // The Host executable is an immutable release payload. The loopback
+    // capability belongs in per-user app data so an update cannot replace it
+    // while the native sleep/exit fallback still needs to close the Host.
+    const auto path = fan_host_state_dir() + L"\\YeManFanHost.session";
+    std::ifstream input(path, std::ios::binary);
+    if (!input) return {};
+    std::string token((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
+    token = trim_ascii(std::move(token));
+    // The application creates a 32-byte hexadecimal token. Reject malformed
+    // sidecars rather than sending arbitrary local-file content as a header.
+    if (token.size() != 64 || !std::all_of(token.begin(), token.end(), [](unsigned char value) {
+        return std::isxdigit(value) != 0;
+    })) return {};
+    return token;
+}
+
+static bool fanHostEmergencyPost(const wchar_t* endpoint, const char* reason,
+                                 int maxAttempts = 2,
+                                 bool requireSafeState = true,
+                                 DWORD* lastResponseStatus = nullptr) {
+    maxAttempts = (std::max)(1, maxAttempts);
+    if (lastResponseStatus) *lastResponseStatus = 0;
+    const auto sessionToken = fanHostReadSessionToken();
+    if (sessionToken.empty()) {
+        traceLog("fan Host boundary skipped endpoint=%ls reason=%s missing-session-token",
+                 endpoint, reason ? reason : "unknown");
+        return false;
+    }
+    for (int attempt = 0; attempt < maxAttempts; ++attempt) {
+        // Never send the session token merely because something happens to
+        // listen on 8765. The executable identity is checked for every retry.
+        if (!fanHostExactProcessRunning()) return false;
+        HINTERNET session = WinHttpOpen(
+            L"YeManCC-FanSleep/1.0", WINHTTP_ACCESS_TYPE_NO_PROXY,
+            WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
+        if (!session) {
+            if (attempt + 1 < maxAttempts) Sleep(40);
+            continue;
+        }
+        // Keep the detached worker bounded; the Host's own power observer
+        // remains a parallel fallback if this local request stalls.
+        setHttpTimeouts(session, 650);
+        HINTERNET connect = WinHttpConnect(session, L"127.0.0.1", 8765, 0);
+        HINTERNET request = connect
+            ? WinHttpOpenRequest(connect, L"POST", endpoint, nullptr,
+                                 WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES,
+                                 WINHTTP_FLAG_BYPASS_PROXY_CACHE)
+            : nullptr;
+        bool safe = false;
+        DWORD status = 0;
+        std::string body;
+        if (request) {
+            const auto headers = std::wstring(L"Content-Type: application/json\r\n") +
+                L"X-YeMan-Fan-Session: " + U2W(sessionToken) + L"\r\n";
+            const char payload[] = "{}";
+            if (WinHttpAddRequestHeaders(request, headers.c_str(), (DWORD)-1,
+                                         WINHTTP_ADDREQ_FLAG_ADD) &&
+                WinHttpSendRequest(request, WINHTTP_NO_ADDITIONAL_HEADERS, 0,
+                                   (LPVOID)payload, 2, 2, 0) &&
+                WinHttpReceiveResponse(request, nullptr)) {
+                DWORD size = sizeof(status);
+                WinHttpQueryHeaders(request,
+                    WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
+                    WINHTTP_HEADER_NAME_BY_INDEX, &status, &size,
+                    WINHTTP_NO_HEADER_INDEX);
+                if (lastResponseStatus) *lastResponseStatus = status;
+                DWORD available = 0;
+                while (WinHttpQueryDataAvailable(request, &available) && available > 0) {
+                    if (body.size() + static_cast<size_t>(available) > 256u * 1024u) {
+                        body.clear();
+                        break;
+                    }
+                    std::string chunk(available, '\0');
+                    DWORD read = 0;
+                    if (!WinHttpReadData(request, chunk.data(), available, &read)) {
+                        body.clear();
+                        break;
+                    }
+                    chunk.resize(read);
+                    body += chunk;
+                }
+                if (!requireSafeState && status >= 200 && status < 300) {
+                    safe = true;
+                } else if (status >= 200 && status < 300 && !body.empty()) {
+                    try {
+                        const auto response = json::parse(body);
+                        const auto state = response.value("state", json::object());
+                        const auto stateName = state.value("state", std::string{});
+                        const auto powerState = state.value("powerState", std::string{});
+                        // YeManFanHost's canonical state field is
+                        // `hardwareWritesEnabled`.  Older safe/mock hosts
+                        // used `hardwareWrites`; accept that alias only when
+                        // the canonical field is absent.  Reading the old
+                        // name alone here made the native exit/sleep gate
+                        // believe an active real curve was idle.
+                        const bool hasCanonicalLiveWrites = state.contains("hardwareWritesEnabled");
+                        const bool hasLegacyLiveWrites = state.contains("hardwareWrites");
+                        const bool hasHcVirtualCloseEvidence =
+                            state.contains("hcVirtualCloseReturned");
+                        const bool hasHcDeviceManagerStopEvidence =
+                            state.contains("hcDeviceManagerStopCompleted");
+                        const bool hasAnyHcCloseEvidence =
+                            hasHcVirtualCloseEvidence || hasHcDeviceManagerStopEvidence;
+                        const bool hasCompleteHcCloseEvidence =
+                            hasHcVirtualCloseEvidence && hasHcDeviceManagerStopEvidence;
+                        const bool suspendBoundary = _wcsicmp(endpoint, L"/api/suspend") == 0;
+                        // A 2xx response with an incomplete/old state object is
+                        // not an OEM handoff acknowledgement. Do not let
+                        // json::value(..., false) turn missing safety bits into
+                        // a false success; the resident Host's own watchdog is
+                        // the fallback when telemetry cannot be proved.
+                        const bool telemetryComplete =
+                            state.contains("state") &&
+                            (hasCanonicalLiveWrites || hasLegacyLiveWrites) &&
+                            state.contains("hardwareWritesObserved") &&
+                            state.contains("oemRestoreConfirmed") &&
+                            state.contains("unknownState") &&
+                            state.contains("hcCloseCleanupPending") &&
+                            state.contains("openCalled") &&
+                            state.contains("openEventsCalled");
+                        const bool liveWrites = hasCanonicalLiveWrites
+                            ? state.value("hardwareWritesEnabled", false)
+                            : state.value("hardwareWrites", false);
+                        const bool historicalWrites = state.value("hardwareWritesObserved", false);
+                        const bool restoreConfirmed = state.value("oemRestoreConfirmed", false);
+                        const bool unknownState = state.value("unknownState", false);
+                        const bool closeCleanupPending = state.value("hcCloseCleanupPending", false);
+                        const bool openCalled = state.value("openCalled", false);
+                        const bool openEventsCalled = state.value("openEventsCalled", false);
+                        // HC has two distinct terminal paths. SystemPending
+                        // returns after CurrentDevice.Close() while retaining
+                        // DeviceManager; Window_Closed returns after virtual
+                        // Close plus manager Stop. Neither path has a generic
+                        // physical OEM acknowledgement. A Hardware callback
+                        // remains required only while the session stays open.
+                        const bool virtualCloseReturned = state.value("hcVirtualCloseReturned", false);
+                        const bool deviceManagerStopCompleted = state.value("hcDeviceManagerStopCompleted", false);
+                        const bool hcTerminalBoundary = suspendBoundary
+                            ? (stateName == "Suspended" && virtualCloseReturned)
+                            : (stateName == "Stopped" && virtualCloseReturned && deviceManagerStopCompleted);
+                        const bool hcCloseEvidenceSafe = !hasAnyHcCloseEvidence ||
+                            (virtualCloseReturned && (suspendBoundary || deviceManagerStopCompleted));
+                        const bool releaseEvidence = !historicalWrites || restoreConfirmed || hcTerminalBoundary;
+                        const bool expectedTerminalState = suspendBoundary
+                            ? stateName == "Suspended"
+                            : stateName == "Stopped";
+                        safe = telemetryComplete && expectedTerminalState &&
+                            (!hasAnyHcCloseEvidence || (suspendBoundary
+                                ? hasHcVirtualCloseEvidence
+                                : hasCompleteHcCloseEvidence)) &&
+                            hcCloseEvidenceSafe && !unknownState &&
+                            !closeCleanupPending && !liveWrites && !openCalled &&
+                            !openEventsCalled && releaseEvidence;
+                    } catch (...) {
+                        safe = false;
+                    }
+                }
+            }
+        }
+        if (request) WinHttpCloseHandle(request);
+        if (connect) WinHttpCloseHandle(connect);
+        WinHttpCloseHandle(session);
+        if (safe) {
+            traceLog("fan Host sleep boundary endpoint=%ls reason=%s attempt=%d status=%lu safe=1",
+                     endpoint, reason ? reason : "unknown", attempt + 1,
+                     static_cast<unsigned long>(status));
+            return true;
+        }
+        if (attempt + 1 < maxAttempts) Sleep(40);
+    }
+    traceLog("fan Host sleep boundary endpoint=%ls reason=%s safe=0",
+             endpoint, reason ? reason : "unknown");
+    return false;
+}
+
+static bool fanHostEmergencySuspend(const char* reason) {
+    DWORD suspendStatus = 0;
+    if (fanHostEmergencyPost(L"/api/suspend", reason, 2, true, &suspendStatus)) return true;
+    // Only an explicit legacy 404/405 proves that the Host has no suspend
+    // route. A timeout/409/5xx is ambiguous: the first request may still be
+    // inside the serialized HC gate. Sending /api/close in that case creates
+    // the same concurrent lifecycle race that previously caused false OEM
+    // acknowledgements. The resident Host power observer remains the owner
+    // of recovery for an ambiguous response.
+    if (suspendStatus != 404 && suspendStatus != 405) {
+        traceLog("fan Host suspend not confirmed status=%lu; no concurrent close fallback",
+                 static_cast<unsigned long>(suspendStatus));
+        return false;
+    }
+    // Legacy Hosts without /api/suspend still get the original close safety
+    // boundary, but only after the route absence is explicit.
+    return fanHostEmergencyPost(L"/api/close", reason, 1);
+}
+
+/**
+ * Main-process exit must never wait indefinitely for firmware. First ask the
+ * verified resident Host to block new writes and take recovery ownership.
+ * Its parent watchdog remains a second independent trigger after YeManCC
+ * exits. A successful close is still preferred, but is not a prerequisite for
+ * terminating the UI process.
+ */
+static bool fanHostCleanupForAppExit() {
+    if (!fanHostExactProcessRunning()) {
+        traceLog("fan Host app-exit cleanup: no verified resident Host");
+        return true;
+    }
+    DWORD handoffStatus = 0;
+    const bool handoffAccepted = fanHostEmergencyPost(
+        L"/api/parent-exit", "app-exit", 1, false, &handoffStatus);
+    if (handoffAccepted) {
+        // /api/parent-exit owns the recovery worker. Do not immediately send
+        // /api/close: that races the worker for the same HC gate and was the
+        // source of false close success/transport failures. The resident Host
+        // remains available to finish restore and the parent watchdog will
+        // close its listener afterwards.
+        traceLog("fan Host app-exit cleanup: recovery handed off=1; OEM restore not yet confirmed; no concurrent close; UI exit continues");
+        // The endpoint acknowledgement proves only that the resident Host
+        // accepted ownership of the recovery task. It is deliberately not a
+        // physical OEM-restore acknowledgement; callers must record this as
+        // recovery-handed-off rather than cleanup-confirmed.
+        return false;
+    }
+    // A transport failure is ambiguous: the request may have reached the Host
+    // even though its response was lost. Never issue a second close in that
+    // case. Only an explicit legacy 404/405 proves that parent-exit is absent.
+    if (handoffStatus != 404 && handoffStatus != 405) {
+        traceLog("fan Host app-exit cleanup: parent-exit not confirmed status=%lu; no concurrent close; recovery remains delegated",
+                 static_cast<unsigned long>(handoffStatus));
+        return false;
+    }
+    if (!fanHostEmergencyPost(L"/api/close", "app-exit", 1)) {
+        traceLog("fan Host app-exit cleanup: legacy close not confirmed; UI exit continues");
+        return false;
+    }
+    // Shutdown only follows a confirmed close. It is a process-lifetime
+    // optimization, never a prerequisite for declaring hardware safe.
+    if (!fanHostEmergencyPost(L"/api/shutdown", "app-exit", 1, false)) {
+        traceLog("fan Host app-exit cleanup: close confirmed; shutdown deferred");
+    }
+    return true;
+}
+
+// Fire-and-forget reinforcement for the Host's own SystemEvents listener.
+// The power callback performs only an atomic de-duplication and thread
+// creation, then returns immediately.  If the machine suspends before this
+// worker runs, the Host observer/lease expiry remains the authoritative
+// recovery path; this worker is never required for the OS transition itself.
+static void fanHostScheduleEmergencySuspend(const char* reason,
+                                            unsigned long long generation) {
+    if (g_fanSleepCleanupInFlight.exchange(true, std::memory_order_acq_rel)) {
+        traceLog("fan Host sleep cleanup already queued generation=%llu",
+                 generation);
+        return;
+    }
+    g_fanSleepCleanupGeneration.store(generation, std::memory_order_release);
+    try {
+        std::thread([reasonText = std::string(reason ? reason : "unknown"), generation] {
+            bool safe = false;
+            if (!g_exitRequested.load(std::memory_order_acquire)) {
+                safe = fanHostEmergencySuspend(reasonText.c_str());
+            }
+            traceLog("fan Host async sleep cleanup generation=%llu safe=%d",
+                     generation, safe ? 1 : 0);
+            g_fanSleepCleanupInFlight.store(false, std::memory_order_release);
+        }).detach();
+    } catch (...) {
+        // Scheduling failure cannot be allowed to surface through the power
+        // callback.  The Host observer and lease/parent watchdog still own
+        // the recovery path.
+        g_fanSleepCleanupInFlight.store(false, std::memory_order_release);
+        traceLog("fan Host async sleep cleanup scheduling failed generation=%llu",
+                 generation);
+    }
 }
 
 // ================================================================
@@ -11718,6 +12564,24 @@ static void writeLog(const std::string& level, const std::string& msg) {
     f << "[" << ts << "] [" << level << "] " << msg << "\n";
 }
 
+static void writeFanDiagnosticLog(const std::string& event, const json& details) {
+    if (!g_fanLogEnabled || g_fanLogFile.empty()) return;
+    std::lock_guard<std::mutex> lock(g_fanLogMtx);
+    auto parent = fspath::path(g_fanLogFile).parent_path();
+    fspath::create_directories(parent);
+    SYSTEMTIME st; GetLocalTime(&st);
+    char ts[32];
+    snprintf(ts, sizeof(ts), "%04d-%02d-%02dT%02d:%02d:%02d.%03d",
+             st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond, st.wMilliseconds);
+    json line = {
+        {"time", ts},
+        {"event", event},
+        {"details", details.is_object() ? details : json::object()},
+    };
+    std::ofstream f(g_fanLogFile, std::ios::app);
+    if (f) f << line.dump() << "\n";
+}
+
 static void reg_log() {
     ipc_on("log.setFile", [](const json& a) -> json {
         auto path = a.value("path", std::string{});
@@ -11745,6 +12609,79 @@ static void reg_log() {
     });
     ipc_on("log.getPath", [](const json&) -> json {
         return g_logFile.empty() ? nullptr : json(W2U(g_logFile));
+    });
+    ipc_on("fanLog.setEnabled", [](const json& a) -> json {
+        const bool enabled = a.value("enabled", false);
+        g_fanLogFile = app_data_dir() + L"\\fan-api.log";
+        auto parent = fspath::path(g_fanLogFile).parent_path();
+        fspath::create_directories(parent);
+        if (enabled) {
+            g_fanLogEnabled = true;
+            writeFanDiagnosticLog("logging-enabled", json::object());
+        } else {
+            writeFanDiagnosticLog("logging-disabled", json::object());
+            g_fanLogEnabled = false;
+        }
+        return json{{"enabled", g_fanLogEnabled.load()}, {"path", W2U(g_fanLogFile)}};
+    });
+    ipc_on("fanLog.write", [](const json& a) -> json {
+        if (!g_fanLogEnabled) return false;
+        const auto event = a.value("event", std::string{});
+        if (event.empty()) return false;
+        writeFanDiagnosticLog(event, a.value("details", json::object()));
+        return true;
+    });
+    ipc_on("fanLog.getPath", [](const json&) -> json {
+        return json(W2U(g_fanLogFile.empty() ? app_data_dir() + L"\\fan-api.log" : g_fanLogFile));
+    });
+    ipc_on("fanLog.clear", [](const json&) -> json {
+        const std::wstring uiPath = g_fanLogFile.empty() ? app_data_dir() + L"\\fan-api.log" : g_fanLogFile;
+        const std::wstring hostPath = fan_host_state_dir() + L"\\logs\\yeman-fan-host-runtime.log";
+        bool ok = true;
+        {
+            std::lock_guard<std::mutex> lock(g_fanLogMtx);
+            for (const auto& path : { uiPath, hostPath }) {
+                std::error_code existsEc;
+                if (!fspath::exists(path, existsEc)) continue;
+                std::ofstream file(path, std::ios::trunc);
+                if (!file.good()) ok = false;
+            }
+        }
+        return json{{"ok", ok}, {"uiPath", W2U(uiPath)}, {"hostPath", W2U(hostPath)}};
+    });
+    ipc_on("fanLog.export", [](const json&) -> json {
+        const std::wstring uiPath = g_fanLogFile.empty() ? app_data_dir() + L"\\fan-api.log" : g_fanLogFile;
+        const std::wstring hostPath = fan_host_state_dir() + L"\\logs\\yeman-fan-host-runtime.log";
+        std::vector<std::wstring> files;
+        for (const auto& path : { uiPath, hostPath }) {
+            std::error_code fileEc;
+            if (fspath::is_regular_file(path, fileEc)) files.push_back(path);
+        }
+        if (files.empty()) return json{{"ok", false}, {"reason", "暂无风扇日志"}};
+        const std::wstring desktop = getKnownFolder(FOLDERID_Desktop);
+        if (desktop.empty()) throw std::runtime_error("无法定位桌面目录");
+        SYSTEMTIME now{};
+        GetLocalTime(&now);
+        wchar_t stamp[64]{};
+        swprintf_s(stamp, L"%04u%02u%02u-%02u%02u%02u-%03u",
+                   now.wYear, now.wMonth, now.wDay, now.wHour, now.wMinute,
+                   now.wSecond, now.wMilliseconds);
+        const std::wstring zipPath = desktop + L"\\YeMan-fan-logs-" + stamp + L".zip";
+        auto quote = [](const std::wstring& value) { return L"\"" + value + L"\""; };
+        std::wstring command = L"\"C:\\Windows\\System32\\tar.exe\" -a -c -f " + quote(zipPath);
+        for (const auto& path : files) {
+            command += L" -C " + quote(fspath::path(path).parent_path().wstring()) + L" " +
+                       quote(fspath::path(path).filename().wstring());
+        }
+        const RunOut result = runCapture(command, 120000);
+        if (!result.ran || result.exitCode != 0) {
+            std::error_code removeEc;
+            fspath::remove(zipPath, removeEc);
+            throw std::runtime_error("风扇日志压缩失败");
+        }
+        json names = json::array();
+        for (const auto& path : files) names.push_back(W2U(fspath::path(path).filename().wstring()));
+        return json{{"ok", true}, {"path", W2U(zipPath)}, {"files", names}};
     });
 }
 
@@ -12503,12 +13440,22 @@ static std::string readPackagedUpdateVersion(const std::wstring& staging) {
 static bool updatePackageLayoutIsSafe(const std::wstring& staging) {
     std::error_code ec;
     const fspath::path root(staging);
+    std::set<std::wstring> roots;
     for (fspath::directory_iterator it(root, ec), end; it != end && !ec; it.increment(ec)) {
         const auto name = it->path().filename().wstring();
-        if (_wcsicmp(name.c_str(), L"YeManCC") != 0 && _wcsicmp(name.c_str(), L"PowerControl") != 0)
+        if (it->is_symlink(ec) || ec) return false;
+        if (!it->is_directory(ec) || ec) return false;
+        if (name.empty() || name == L"." || name == L".." || name.find_first_of(L"\\/") != std::wstring::npos)
             return false;
+        roots.insert(name);
     }
     if (ec) return false;
+    // Root names are declared and validated by YeManCC/update-manifest.json.
+    // Keep this first pass format-agnostic so adding a future product root
+    // does not require another updater release solely for a count change.
+    if (roots.size() < 2 ||
+        std::none_of(roots.begin(), roots.end(), [](const std::wstring& name) { return _wcsicmp(name.c_str(), L"YeManCC") == 0; }))
+        return false;
     for (fspath::recursive_directory_iterator it(root, fspath::directory_options::skip_permission_denied, ec), end;
          it != end && !ec; it.increment(ec)) {
         if (it->is_symlink(ec)) return false;
@@ -12518,6 +13465,59 @@ static bool updatePackageLayoutIsSafe(const std::wstring& staging) {
         return false;
     }
     return !ec;
+}
+
+static bool isSafeZipEntryName(std::string name) {
+    name = trim_ascii(std::move(name));
+    while (!name.empty() && (name.back() == '/' || name.back() == '\\')) name.pop_back();
+    if (name.empty() || name.front() == '/' || name.front() == '\\' || name.find(':') != std::string::npos)
+        return false;
+    if (name.size() >= 2 && std::isalpha(static_cast<unsigned char>(name[0])) && name[1] == '/')
+        return false;
+    for (const unsigned char ch : name) {
+        if (ch < 0x20 || ch == 0x7F || ch == '\0') return false;
+    }
+    std::replace(name.begin(), name.end(), '\\', '/');
+    size_t begin = 0;
+    while (begin < name.size()) {
+        const size_t end = name.find('/', begin);
+        const auto component = name.substr(begin, end == std::string::npos ? std::string::npos : end - begin);
+        if (component.empty() || component == "." || component == "..") return false;
+        if (end == std::string::npos) break;
+        begin = end + 1;
+    }
+    return true;
+}
+
+static bool validateZipArchiveEntries(const std::wstring& zip) {
+    const auto quotedZip = quote_windows_arg(zip);
+    const auto listing = runCapture(L"\"C:\\Windows\\System32\\tar.exe\" -tf " + quotedZip, 120000);
+    if (!listing.ran || listing.exitCode != 0 || listing.out.empty()) return false;
+
+    std::set<std::string> entries;
+    std::istringstream names(listing.out);
+    std::string line;
+    while (std::getline(names, line)) {
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        if (!isSafeZipEntryName(line)) return false;
+        std::replace(line.begin(), line.end(), '\\', '/');
+        while (!line.empty() && line.back() == '/') line.pop_back();
+        if (!entries.insert(line).second) return false;
+    }
+    if (entries.empty()) return false;
+
+    // The post-extraction walk rejects symlinks, but it is too late if an
+    // archive entry is a link that tar resolves while extracting. Inspect the
+    // archive entry type before extraction and allow only directories/files.
+    const auto detailed = runCapture(L"\"C:\\Windows\\System32\\tar.exe\" -tvf " + quotedZip, 120000);
+    if (!detailed.ran || detailed.exitCode != 0 || detailed.out.empty()) return false;
+    std::istringstream types(detailed.out);
+    while (std::getline(types, line)) {
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        if (line.empty()) continue;
+        if (line.front() != 'd' && line.front() != '-') return false;
+    }
+    return true;
 }
 
 // 用系统 tar.exe 解压 zip 到目标目录（Windows 10+ 自带，无需第三方库）
@@ -12662,7 +13662,7 @@ static void reg_updater() {
         return httpGet(url);
     });
     ipc_on("app.updateState", [](const json&) -> json {
-        return updateProgressRead();
+        return updateStateReadWithTransaction();
     });
     // 下载完整更新包（exe + index.html + assets + ...）到 %LOCALAPPDATA%\YeManCC\update\package.zip，强制 SHA-256 校验
     ipc_on("app.downloadUpdate", [](const json& a) -> json {
@@ -12684,6 +13684,8 @@ static void reg_updater() {
         if (!isStrictUpdateSha256(sha)) failBeforeDownload("A valid SHA-256 is required");
         try { requireNewerUpdateVersion(version); }
         catch (const std::exception& e) { failBeforeDownload(e.what()); }
+        std::unique_lock<std::mutex> updateLock(g_updateOperationMtx, std::try_to_lock);
+        if (!updateLock.owns_lock()) failBeforeDownload("Another update operation is already in progress");
         std::error_code ec; fspath::create_directories(app_data_dir() + L"\\update", ec);
         if (ec) throw std::runtime_error("Failed to create update directory");
         auto dest = app_data_dir() + L"\\update\\package.zip";
@@ -12796,6 +13798,7 @@ static void reg_updater() {
                     }
                     result.ok = false;
                     result.retryable = true;
+                    result.restartRequired = true;
                     result.error = "Checksum mismatch (expected " + sha + ", got " + got + ")";
                     fspath::remove(part, ec);
                     fspath::remove(partMeta, ec);
@@ -12803,6 +13806,8 @@ static void reg_updater() {
                     sgWriteFileAtomic(partMeta, resumeMeta.dump());
                     existingBytes = 0;
                 }
+                const bool retryFromZero = result.restartRequired;
+                if (retryFromZero) result.receivedBytes = 0;
                 existingBytes = fspath::exists(part) ? fspath::file_size(part, ec) : 0;
                 if (ec) existingBytes = 0;
                 lastFailure = std::move(result);
@@ -12815,7 +13820,9 @@ static void reg_updater() {
                 const uint64_t retryTotal = lastFailure.expectedBytes;
                 const double retryPercent = retryTotal > 0
                     ? (std::min)(100.0, lastFailure.receivedBytes * 100.0 / retryTotal) : 0.0;
-                const std::string retryMessage = lastFailure.receivedBytes > 0
+                const std::string retryMessage = retryFromZero
+                    ? "下载校验或续传状态无效，5秒后从0字节重新下载第 " + std::to_string(nextAttempt) + " 次尝试"
+                    : lastFailure.receivedBytes > 0
                     ? "下载中断，5秒后从 " + std::to_string(lastFailure.receivedBytes) +
                         " 字节继续第 " + std::to_string(nextAttempt) + " 次尝试"
                     : "下载失败，5秒后重新尝试第 " + std::to_string(nextAttempt) + " 次";
@@ -12860,9 +13867,9 @@ static void reg_updater() {
         }
         return W2U(dest);
     });
-    // Install the complete release payload into the sibling YeManCC and
-    // PowerControl targets while preserving player-owned files.
-    // Merge-copy only: files added by players and absent from the package remain.
+    // Install the complete release payload into sibling YeManCC, PowerControl
+    // and CustomSteamLibrary targets while preserving player-owned files.
+    // CustomSteamLibrary is manifest-scoped; unknown files and data remain.
     ipc_on("app.installUpdate", [](const json& a) -> json {
         const auto operationId = a.value("operationId", std::string{});
         const auto version = a.value("version", std::string{});
@@ -12879,6 +13886,8 @@ static void reg_updater() {
         if (!isStrictUpdateSha256(sha)) failInstall("A valid SHA-256 is required", "更新包 SHA-256 无效");
         try { requireNewerUpdateVersion(version); }
         catch (const std::exception& e) { failInstall(e.what(), "目标版本不是可安装的新版本"); }
+        std::unique_lock<std::mutex> updateLock(g_updateOperationMtx, std::try_to_lock);
+        if (!updateLock.owns_lock()) failInstall("Another update operation is already in progress", "已有更新任务正在进行");
         updateProgressPost({
             {"operationId", operationId}, {"phase", "installing"}, {"stage", "install"},
             {"version", version},
@@ -12895,6 +13904,11 @@ static void reg_updater() {
             std::error_code cleanupEc;
             fspath::remove(zip, cleanupEc);
             failInstall("Update package checksum mismatch before installation", "安装前校验更新包失败");
+        }
+        if (!validateZipArchiveEntries(zip)) {
+            std::error_code cleanupEc;
+            fspath::remove(zip, cleanupEc);
+            failInstall("Update package archive entries are unsafe", "更新包内文件路径或链接不安全");
         }
         auto staging = app_data_dir() + L"\\update\\staging";
         std::error_code ec; fspath::remove_all(staging, ec);
@@ -12937,12 +13951,18 @@ static void reg_updater() {
         if (!fspath::exists(packagedPowerControl)) {
             failInstall("Update package missing PowerControl", "更新包缺少 PowerControl 目录");
         }
+        const auto packagedCustomSteamLibrary = staging + L"\\CustomSteamLibrary";
+        // CustomSteamLibrary is validated from update-manifest.json when it
+        // is declared. It remains optional here so the new updater can also
+        // install the legacy two-root package as a one-time bootstrap.
         const auto packagedSupport = packagedYeManCC + L"\\YeMan-Support.html";
         if (!fspath::exists(packagedSupport)) {
             failInstall("Update package missing YeMan-Support.html", "更新包缺少支持页面");
         }
         // 依赖包固定目标目录（与前端 yeman.ts 的 PC_DIR 默认一致）
         std::wstring pcDir = L"C:\\SOFT\\YeMan\\PowerControl";
+        const std::wstring installRoot = fspath::path(exedir).parent_path().wstring();
+        const std::wstring customSteamLibraryDir = installRoot + L"\\CustomSteamLibrary";
         std::wstring supportPath = exedir + L"\\YeMan-Support.html";
         auto script = app_data_dir() + L"\\update.ps1";
         auto psLiteral = [](const std::wstring& value) {
@@ -12966,8 +13986,14 @@ static void reg_updater() {
             f << "$exePath = " << psLiteral(exePath) << "\n";
             f << "$exeDir = " << psLiteral(exedir) << "\n";
             f << "$programSource = " << psLiteral(packagedYeManCC) << "\n";
-            f << "$packageExe = " << psLiteral(packagedExe) << "\n";
-            f << "$pcDir = " << psLiteral(pcDir) << "\n";
+             f << "$packageExe = " << psLiteral(packagedExe) << "\n";
+             f << "$pcDir = " << psLiteral(pcDir) << "\n";
+             f << "$fanHostSource = Join-Path (Join-Path $staging 'PowerControl') 'fan-host'\n";
+             f << "$layoutManifestPath = Join-Path $programSource 'update-manifest.json'\n";
+            f << "$installRoot = " << psLiteral(installRoot) << "\n";
+            f << "$customSteamLibrarySource = " << psLiteral(packagedCustomSteamLibrary) << "\n";
+            f << "$customSteamLibraryDir = " << psLiteral(customSteamLibraryDir) << "\n";
+            f << "$customSteamLibraryManifest = Join-Path $customSteamLibrarySource 'package-manifest.json'\n";
             f << "$supportPath = " << psLiteral(supportPath) << "\n";
             f << "$backup = $exePath + '.old'\n";
             f << "$newExe = $exePath + '.new'\n";
@@ -13019,17 +14045,283 @@ static void reg_updater() {
             f << "$tdpCommitted = $false\n";
             f << "$updateCommitted = $false\n";
              f << "$rollbackSucceeded = $false\n";
-             f << "$recoveryError = $null\n";
+            f << "$recoveryError = $null\n";
             f << "$newProcess = $null\n";
+            f << "$customHealthHandshakePath = Join-Path (Split-Path -Parent $staging) ('custom-health-' + [guid]::NewGuid().ToString('N') + '.json')\n";
+            f << "$customHealthTimeoutSeconds = 60\n";
+            f << "$customHealthChildExitTimeoutSeconds = 30\n";
             f << "$handshakeToken = [guid]::NewGuid().ToString('N')\n";
-            f << "$handshakePath = Join-Path (Split-Path -Parent $staging) ('update-handshake-' + $handshakeToken + '.json')\n";
+             f << "$handshakePath = Join-Path (Split-Path -Parent $staging) ('update-handshake-' + $handshakeToken + '.json')\n";
              f << "$handshakeTimeoutSeconds = 180\n";
              f << "$parentExitTimeoutSeconds = 180\n";
-            f << "function Copy-TreeChecked([string]$source, [string]$destination, [string[]]$extraArgs) {\n";
-            f << "  & robocopy $source $destination /E /COPY:DAT /DCOPY:DAT /R:$copyRetries /W:$copyWaitSeconds /XJ @extraArgs /NFL /NDL /NJH /NJS /NP\n";
-            f << "  if ($LASTEXITCODE -ge 8) { throw ('copy failed: ' + $source + ' -> ' + $destination + ' (robocopy=' + $LASTEXITCODE + ')') }\n";
-            f << "}\n";
-            f << "function Rename-DirectoryChecked([string]$source, [string]$destination, [string]$label) {\n";
+             f << "$childExitTimeoutSeconds = 180\n";
+             f << "function Copy-TreeChecked([string]$source, [string]$destination, [string[]]$extraArgs) {\n";
+             f << "  & robocopy $source $destination /E /COPY:DAT /DCOPY:DAT /R:$copyRetries /W:$copyWaitSeconds /XJ @extraArgs /NFL /NDL /NJH /NJS /NP\n";
+             f << "  if ($LASTEXITCODE -ge 8) { throw ('copy failed: ' + $source + ' -> ' + $destination + ' (robocopy=' + $LASTEXITCODE + ')') }\n";
+             f << "}\n";
+             f << "function Normalize-ManifestRelativePath([string]$path) {\n";
+             f << "  $normalized = $path.Replace('/', [IO.Path]::DirectorySeparatorChar)\n";
+             f << "  if ([string]::IsNullOrWhiteSpace($normalized) -or [IO.Path]::IsPathRooted($normalized) -or $normalized.Contains(':') -or @($normalized -split '\\\\' | Where-Object { $_ -eq '..' -or $_ -eq '' }).Count -gt 0) { throw ('invalid green-child managed path: ' + $path) }\n";
+             f << "  return $normalized\n";
+             f << "}\n";
+             f << "function Get-UpdateLayoutRoots {\n";
+             f << "  if (!(Test-Path -LiteralPath $layoutManifestPath -PathType Leaf)) {\n";
+             f << "    $legacyActual = @(Get-ChildItem -LiteralPath $staging -Directory -Force | ForEach-Object Name | Sort-Object -Unique)\n";
+             f << "    if (Compare-Object @('YeManCC','PowerControl') $legacyActual) { throw 'legacy update package must contain exactly YeManCC and PowerControl' }\n";
+             f << "    return @([pscustomobject]@{ source = 'YeManCC'; target = 'YeManCC'; mode = 'program' }, [pscustomobject]@{ source = 'PowerControl'; target = 'PowerControl'; mode = 'power-control' })\n";
+             f << "  }\n";
+              f << "  $manifest = (Get-Content -LiteralPath $layoutManifestPath -Raw -ErrorAction Stop).TrimStart([char]0xFEFF) | ConvertFrom-Json\n";
+              f << "  if ([int]$manifest.schemaVersion -ne 1 -or [string]$manifest.packageId -ne 'yemancc-update' -or [string]$manifest.packageVersion -ne $version) { throw 'update-manifest.json has an invalid schema, packageId or version' }\n";
+              f << "  $fanHostPolicy = if ($null -eq $manifest.rules -or $null -eq $manifest.rules.fanHost) { '' } else { [string]$manifest.rules.fanHost }\n";
+              f << "  if ($fanHostPolicy -notin @('', 'preserve-existing', 'replace')) { throw ('unsupported Fan Host update policy: ' + $fanHostPolicy) }\n";
+              f << "  if ($fanHostPolicy -eq 'preserve-existing' -and (Test-Path -LiteralPath $fanHostSource -PathType Container)) { throw 'update package violates preserve-existing Fan Host policy' }\n";
+              f << "  $requiredRoots = @($manifest.requiredRoots | ForEach-Object { [string]$_ } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Sort-Object -Unique)\n";
+             f << "  if ($requiredRoots.Count -eq 0) { throw 'update-manifest must declare at least one required root' }\n";
+             f << "  $definitions = New-Object System.Collections.Generic.List[object]\n";
+             f << "  foreach ($item in @($manifest.roots)) {\n";
+             f << "    $source = Normalize-ManifestRelativePath ([string]$item.source)\n";
+             f << "    $target = Normalize-ManifestRelativePath ([string]$item.target)\n";
+             f << "    if ($source.IndexOf([IO.Path]::DirectorySeparatorChar) -ge 0 -or $source.IndexOf([IO.Path]::AltDirectorySeparatorChar) -ge 0) { throw ('update-manifest source must be one top-level directory: ' + $source) }\n";
+             f << "    if ($definitions | Where-Object { $_.source -ieq $source -or $_.target -ieq $target }) { throw ('duplicate update-manifest root or target: ' + $source) }\n";
+             f << "    $sourcePath = Join-Path $staging $source\n";
+             f << "    if (!(Test-Path -LiteralPath $sourcePath -PathType Container)) { throw ('declared update root is missing: ' + $source) }\n";
+             f << "    $installFull = [IO.Path]::GetFullPath($installRoot).TrimEnd([IO.Path]::DirectorySeparatorChar)\n";
+             f << "    $targetFull = [IO.Path]::GetFullPath((Join-Path $installRoot $target))\n";
+             f << "    $installPrefix = $installFull + [IO.Path]::DirectorySeparatorChar\n";
+             f << "    if (!$targetFull.StartsWith($installPrefix, [StringComparison]::OrdinalIgnoreCase)) { throw ('update-manifest target escapes install root: ' + $target) }\n";
+              f << "    $mode = [string]$item.mode\n";
+              f << "    if ([string]::IsNullOrWhiteSpace($mode)) { $mode = 'managed-tree' }\n";
+              f << "    if ($mode -notin @('program','power-control','green-child','managed-tree')) { throw ('unsupported update root mode: ' + $mode) }\n";
+              f << "    $packageManifest = ''\n";
+              f << "    if ($null -ne $item.packageManifest -and -not [string]::IsNullOrWhiteSpace([string]$item.packageManifest)) { $packageManifest = Normalize-ManifestRelativePath ([string]$item.packageManifest); if (!(Test-Path -LiteralPath (Join-Path $sourcePath $packageManifest) -PathType Leaf)) { throw ('declared package manifest is missing: ' + $source + '/' + $packageManifest) } }\n";
+              f << "    if ($mode -eq 'green-child' -and [string]::IsNullOrWhiteSpace($packageManifest)) { throw ('green-child root requires packageManifest: ' + $source) }\n";
+              f << "    $stopProcesses = @($item.stopProcesses | ForEach-Object { [string]$_ } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })\n";
+              f << "    foreach ($processName in $stopProcesses) { if ([IO.Path]::GetFileName($processName) -ne $processName -or [IO.Path]::GetExtension($processName) -ine '.exe' -or $processName.IndexOfAny([char[]]'*?[]') -ge 0) { throw ('invalid stopProcesses entry: ' + $processName) } }\n";
+              f << "    if ($source -ieq 'YeManCC' -and $target -ine 'YeManCC') { throw 'YeManCC target is fixed' }\n";
+              f << "    if ($source -ieq 'PowerControl' -and $target -ine 'PowerControl') { throw 'PowerControl target is fixed' }\n";
+              f << "    if ($source -ieq 'CustomSteamLibrary' -and $target -ine 'CustomSteamLibrary') { throw 'CustomSteamLibrary target is fixed' }\n";
+              f << "    $definitions.Add([pscustomobject]@{ source = $source; target = $target; mode = $mode; packageManifest = $packageManifest; stopProcesses = $stopProcesses; managedPaths = @() })\n";
+              f << "  }\n";
+              f << "  $declared = @($definitions | ForEach-Object source | Sort-Object -Unique)\n";
+              f << "  foreach ($required in $requiredRoots) { if ($required -notin $declared) { throw ('required root has no definition: ' + $required) } }\n";
+             f << "  $actual = @(Get-ChildItem -LiteralPath $staging -Directory -Force | ForEach-Object Name | Sort-Object -Unique)\n";
+             f << "  if (Compare-Object $declared $actual) { throw 'update-manifest roots do not match extracted package roots' }\n";
+             f << "  return @($definitions)\n";
+             f << "}\n";
+             f << "function Get-CustomManagedPaths {\n";
+             f << "  if (!(Test-Path -LiteralPath $customSteamLibraryManifest -PathType Leaf)) { throw 'CustomSteamLibrary package-manifest.json missing' }\n";
+             f << "  $manifest = (Get-Content -LiteralPath $customSteamLibraryManifest -Raw -ErrorAction Stop).TrimStart([char]0xFEFF) | ConvertFrom-Json\n";
+             f << "  if ([string]$manifest.packageId -ne 'custom-steam-library' -or [string]$manifest.packageType -ne 'green-child') { throw 'CustomSteamLibrary package identity is invalid' }\n";
+             f << "  if ([string]$manifest.entryPoint -ne 'CustomSteamLibrary.exe' -or [string]$manifest.worker -ne 'SteamArtworkLab.exe') { throw 'CustomSteamLibrary entry points are invalid' }\n";
+             f << "  if ([string]$manifest.updater.unknownPaths -ne 'preserve') { throw 'CustomSteamLibrary unknown-path policy is not preserve' }\n";
+             f << "  if ([int]$manifest.updater.healthHandshake.protocol -ne 1 -or [bool]$manifest.updater.healthHandshake.requiredBeforeCommit -ne $true) { throw 'CustomSteamLibrary health handshake policy is missing' }\n";
+              f << "  $managedRaw = @($manifest.managedPaths | ForEach-Object { Normalize-ManifestRelativePath ([string]$_) })\n";
+              f << "  $managedPaths = @($managedRaw | Sort-Object -Unique)\n";
+              f << "  $manifestFilesRaw = @($manifest.files | ForEach-Object { Normalize-ManifestRelativePath ([string]$_) })\n";
+              f << "  $manifestFiles = @($manifestFilesRaw | Sort-Object -Unique)\n";
+              f << "  if ($managedPaths.Count -ne $managedRaw.Count -or $manifestFiles.Count -ne $manifestFilesRaw.Count -or (Compare-Object $manifestFiles $managedPaths)) { throw 'CustomSteamLibrary files and managedPaths are inconsistent' }\n";
+              f << "  $paths = @($managedPaths + 'package-manifest.json' | Sort-Object -Unique)\n";
+             f << "  foreach ($relative in $paths) { if (!(Test-Path -LiteralPath (Join-Path $customSteamLibrarySource $relative) -PathType Leaf)) { throw ('CustomSteamLibrary managed file missing: ' + $relative) } }\n";
+             f << "  $actual = @(Get-ChildItem -LiteralPath $customSteamLibrarySource -Recurse -File -Force | ForEach-Object { $_.FullName.Substring($customSteamLibrarySource.Length).TrimStart('\\') } | Sort-Object -Unique)\n";
+             f << "  if (Compare-Object $paths $actual) { throw 'CustomSteamLibrary package contains an unlisted file or misses a managed file' }\n";
+              f << "  $indexed = @($manifest.fileIndex)\n";
+              f << "  if ($indexed.Count -ne $manifestFiles.Count) { throw 'CustomSteamLibrary fileIndex is incomplete' }\n";
+              f << "  $indexedPathsRaw = @($indexed | ForEach-Object { Normalize-ManifestRelativePath ([string]$_.path) })\n";
+              f << "  $indexedPaths = @($indexedPathsRaw | Sort-Object -Unique)\n";
+              f << "  if ($indexedPaths.Count -ne $indexedPathsRaw.Count -or (Compare-Object $manifestFiles $indexedPaths)) { throw 'CustomSteamLibrary fileIndex does not exactly cover files' }\n";
+              f << "  foreach ($entry in $indexed) {\n";
+             f << "    $relative = Normalize-ManifestRelativePath ([string]$entry.path)\n";
+             f << "    if ($relative -notin $paths) { throw ('CustomSteamLibrary fileIndex contains an unmanaged path: ' + $relative) }\n";
+             f << "    $file = Join-Path $customSteamLibrarySource $relative\n";
+             f << "    $item = Get-Item -LiteralPath $file -ErrorAction Stop\n";
+             f << "    if ($item.Length -ne [int64]$entry.bytes) { throw ('CustomSteamLibrary fileIndex byte mismatch: ' + $relative) }\n";
+             f << "    $actualHash = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()\n";
+             f << "    if ($actualHash -ne ([string]$entry.sha256).ToLowerInvariant()) { throw ('CustomSteamLibrary fileIndex SHA256 mismatch: ' + $relative) }\n";
+             f << "  }\n";
+             f << "  return $paths\n";
+             f << "}\n";
+             f << "function Register-CustomManagedFilesForRollback([string[]]$paths) {\n";
+             f << "  foreach ($relative in $paths) { Register-FileForRollback (Join-Path $customSteamLibrarySource $relative) $customSteamLibrarySource $customSteamLibraryDir 'CustomSteamLibrary' }\n";
+             f << "}\n";
+             f << "function Copy-CustomManagedFilesChecked([string[]]$paths) {\n";
+             f << "  if (!(Test-Path -LiteralPath $customSteamLibraryDir -PathType Container)) { New-Item -ItemType Directory -Path $customSteamLibraryDir -Force | Out-Null }\n";
+             f << "  foreach ($relative in $paths) {\n";
+             f << "    $source = Join-Path $customSteamLibrarySource $relative\n";
+             f << "    $target = Join-Path $customSteamLibraryDir $relative\n";
+             f << "    if (Test-Path -LiteralPath $target -PathType Container) { throw ('CustomSteamLibrary target is a directory but package entry is a file: ' + $relative) }\n";
+             f << "    New-Item -ItemType Directory -Path (Split-Path -Parent $target) -Force | Out-Null\n";
+             f << "    Copy-Item -LiteralPath $source -Destination $target -Force -ErrorAction Stop\n";
+             f << "    Assert-FileMatch $source $target ('CustomSteamLibrary managed file ' + $relative)\n";
+             f << "  }\n";
+             f << "}\n";
+             f << "function Get-GreenChildManagedPaths([object]$root) {\n";
+             f << "  $sourceRoot = Join-Path $staging ([string]$root.source)\n";
+             f << "  $manifestPath = Join-Path $sourceRoot ([string]$root.packageManifest)\n";
+             f << "  if (!(Test-Path -LiteralPath $manifestPath -PathType Leaf)) { throw ('green-child package manifest missing: ' + $root.source) }\n";
+             f << "  $manifest = (Get-Content -LiteralPath $manifestPath -Raw -ErrorAction Stop).TrimStart([char]0xFEFF) | ConvertFrom-Json\n";
+             f << "  if ([string]::IsNullOrWhiteSpace([string]$manifest.packageId) -or [string]$manifest.packageType -ne 'green-child') { throw ('green-child package identity is invalid: ' + $root.source) }\n";
+             f << "  if ([string]$manifest.updater.unknownPaths -ne 'preserve') { throw ('green-child unknown-path policy is not preserve: ' + $root.source) }\n";
+             f << "  $managedRaw = @($manifest.managedPaths | ForEach-Object { Normalize-ManifestRelativePath ([string]$_) })\n";
+             f << "  $managedPaths = @($managedRaw | Sort-Object -Unique)\n";
+             f << "  $manifestFilesRaw = @($manifest.files | ForEach-Object { Normalize-ManifestRelativePath ([string]$_) })\n";
+             f << "  $manifestFiles = @($manifestFilesRaw | Sort-Object -Unique)\n";
+             f << "  if ($managedPaths.Count -ne $managedRaw.Count -or $manifestFiles.Count -ne $manifestFilesRaw.Count -or (Compare-Object $manifestFiles $managedPaths)) { throw ('green-child files and managedPaths are inconsistent: ' + $root.source) }\n";
+             f << "  $packageManifest = Normalize-ManifestRelativePath ([string]$root.packageManifest)\n";
+             f << "  if ($managedPaths -contains $packageManifest -or $manifestFiles -contains $packageManifest) { throw ('green-child package manifest must not be listed as a managed payload file: ' + $root.source) }\n";
+             f << "  $entryPoint = [string]$manifest.entryPoint\n";
+             f << "  if (-not [string]::IsNullOrWhiteSpace($entryPoint) -and (Normalize-ManifestRelativePath $entryPoint) -notin $managedPaths) { throw ('green-child entryPoint is not managed: ' + $root.source) }\n";
+             f << "  $worker = [string]$manifest.worker\n";
+             f << "  if (-not [string]::IsNullOrWhiteSpace($worker) -and (Normalize-ManifestRelativePath $worker) -notin $managedPaths) { throw ('green-child worker is not managed: ' + $root.source) }\n";
+             f << "  $paths = @($managedPaths + $packageManifest | Sort-Object -Unique)\n";
+             f << "  foreach ($relative in $paths) { if (!(Test-Path -LiteralPath (Join-Path $sourceRoot $relative) -PathType Leaf)) { throw ('green-child managed file missing: ' + $root.source + '/' + $relative) } }\n";
+             f << "  $actual = @(Get-ChildItem -LiteralPath $sourceRoot -Recurse -File -Force | ForEach-Object { $_.FullName.Substring($sourceRoot.Length).TrimStart('\\') } | Sort-Object -Unique)\n";
+             f << "  if (Compare-Object $paths $actual) { throw ('green-child package contains an unlisted file or misses a managed file: ' + $root.source) }\n";
+             f << "  $indexed = @($manifest.fileIndex)\n";
+             f << "  if ($indexed.Count -ne $manifestFiles.Count) { throw ('green-child fileIndex is incomplete: ' + $root.source) }\n";
+             f << "  $indexedPathsRaw = @($indexed | ForEach-Object { Normalize-ManifestRelativePath ([string]$_.path) })\n";
+             f << "  $indexedPaths = @($indexedPathsRaw | Sort-Object -Unique)\n";
+             f << "  if ($indexedPaths.Count -ne $indexedPathsRaw.Count -or (Compare-Object $manifestFiles $indexedPaths)) { throw ('green-child fileIndex does not exactly cover files: ' + $root.source) }\n";
+             f << "  foreach ($entry in $indexed) {\n";
+             f << "    $relative = Normalize-ManifestRelativePath ([string]$entry.path)\n";
+             f << "    $file = Join-Path $sourceRoot $relative\n";
+             f << "    $item = Get-Item -LiteralPath $file -ErrorAction Stop\n";
+             f << "    if ($item.Length -ne [int64]$entry.bytes) { throw ('green-child fileIndex byte mismatch: ' + $root.source + '/' + $relative) }\n";
+             f << "    $actualHash = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()\n";
+             f << "    if ($actualHash -ne ([string]$entry.sha256).ToLowerInvariant()) { throw ('green-child fileIndex SHA256 mismatch: ' + $root.source + '/' + $relative) }\n";
+             f << "  }\n";
+             f << "  return $paths\n";
+             f << "}\n";
+             f << "function Register-GreenChildManagedFiles([object]$root, [string[]]$paths) {\n";
+             f << "  $sourceRoot = Join-Path $staging ([string]$root.source)\n";
+             f << "  $targetRoot = Join-Path $installRoot ([string]$root.target)\n";
+             f << "  foreach ($relative in $paths) { Register-FileForRollback (Join-Path $sourceRoot $relative) $sourceRoot $targetRoot ([string]$root.source) }\n";
+             f << "}\n";
+             f << "function Copy-GreenChildManagedFilesChecked([object]$root, [string[]]$paths) {\n";
+             f << "  $sourceRoot = Join-Path $staging ([string]$root.source)\n";
+             f << "  $targetRoot = Join-Path $installRoot ([string]$root.target)\n";
+             f << "  if (!(Test-Path -LiteralPath $targetRoot -PathType Container)) { New-Item -ItemType Directory -Path $targetRoot -Force | Out-Null }\n";
+             f << "  foreach ($relative in $paths) {\n";
+             f << "    $source = Join-Path $sourceRoot $relative\n";
+             f << "    $target = Join-Path $targetRoot $relative\n";
+             f << "    if (Test-Path -LiteralPath $target -PathType Container) { throw ('green-child target is a directory but package entry is a file: ' + $root.source + '/' + $relative) }\n";
+             f << "    New-Item -ItemType Directory -Path (Split-Path -Parent $target) -Force | Out-Null\n";
+             f << "    Copy-Item -LiteralPath $source -Destination $target -Force -ErrorAction Stop\n";
+             f << "    Assert-FileMatch $source $target (([string]$root.source) + ' managed file ' + $relative)\n";
+             f << "  }\n";
+             f << "}\n";
+             f << "function Register-AdditionalLayoutRootsForRollback {\n";
+             f << "  foreach ($root in @($layoutRoots | Where-Object { $_.source -notin @('YeManCC','PowerControl','CustomSteamLibrary') })) {\n";
+             f << "    if ([string]$root.mode -eq 'green-child') { $root.managedPaths = @(Get-GreenChildManagedPaths $root); Register-GreenChildManagedFiles $root $root.managedPaths }\n";
+             f << "    else { Register-TreeForRollback (Join-Path $staging $root.source) (Join-Path $installRoot $root.target) $root.source @() }\n";
+             f << "  }\n";
+             f << "}\n";
+             f << "function Copy-AdditionalLayoutRootsChecked {\n";
+             f << "  foreach ($root in @($layoutRoots | Where-Object { $_.source -notin @('YeManCC','PowerControl','CustomSteamLibrary') })) {\n";
+             f << "    if ([string]$root.mode -eq 'green-child') { Copy-GreenChildManagedFilesChecked $root $root.managedPaths }\n";
+             f << "    else {\n";
+             f << "      $source = Join-Path $staging $root.source\n";
+             f << "      $target = Join-Path $installRoot $root.target\n";
+             f << "      if (!(Test-Path -LiteralPath $target -PathType Container)) { New-Item -ItemType Directory -Path $target -Force | Out-Null }\n";
+             f << "      Copy-TreeChecked $source $target @()\n";
+             f << "    }\n";
+             f << "  }\n";
+             f << "}\n";
+             f << "$customSteamLibraryRootPrefix = ([IO.Path]::GetFullPath($customSteamLibraryDir)).TrimEnd('\\') + '\\'\n";
+             f << "function Test-CustomSteamLibraryProcess([System.Diagnostics.Process]$process) {\n";
+             f << "  try { return ([IO.Path]::GetFullPath($process.Path)).StartsWith($customSteamLibraryRootPrefix, [StringComparison]::OrdinalIgnoreCase) } catch { throw 'unable to verify the CustomSteamLibrary process executable path' }\n";
+             f << "}\n";
+             f << "function Test-CustomSteamLibraryDataRoot([string]$path) {\n";
+             f << "  if ([string]::IsNullOrWhiteSpace($path)) { return $false }\n";
+             f << "  try { $full = [IO.Path]::GetFullPath($path).TrimEnd('\\'); $allowed = @([IO.Path]::GetFullPath('D:\\YeMan\\CustomSteamLibrary\\data').TrimEnd('\\'), [IO.Path]::GetFullPath((Join-Path $customSteamLibraryDir 'data')).TrimEnd('\\')); $configured = [Environment]::GetEnvironmentVariable('YEMAN_STEAM_BIG_PICTURE_DATA_ROOT', 'Process'); if (-not [string]::IsNullOrWhiteSpace($configured)) { $allowed += [IO.Path]::GetFullPath($configured).TrimEnd('\\') }; return @($allowed | Where-Object { $_ -ieq $full }).Count -gt 0 } catch { return $false }\n";
+             f << "}\n";
+             f << "function Close-CustomSteamLibraryHealthProcess([System.Diagnostics.Process]$process) {\n";
+             f << "  if (!$process) { return }\n";
+             f << "  try { if (!$process.HasExited) { $process.CloseMainWindow() | Out-Null } } catch { }\n";
+             f << "  $deadline = (Get-Date).AddSeconds($customHealthChildExitTimeoutSeconds)\n";
+             f << "  while ($true) { try { if ($process.HasExited) { return } } catch { return }; if ((Get-Date) -ge $deadline) { break }; Start-Sleep -Milliseconds 100 }\n";
+             f << "  try { if (!$process.HasExited) { Stop-Process -Id $process.Id -Force -ErrorAction Stop; $process.WaitForExit(30000) } } catch { throw ('CustomSteamLibrary health process did not exit: ' + $_.Exception.Message) }\n";
+             f << "}\n";
+             f << "function Invoke-CustomSteamLibraryHealthCheck {\n";
+             f << "  if (!$customRootPresent) { return }\n";
+             f << "  $childExe = Join-Path $customSteamLibraryDir 'CustomSteamLibrary.exe'\n";
+             f << "  $childManifestPath = Join-Path $customSteamLibraryDir 'package-manifest.json'\n";
+             f << "  if (!(Test-Path -LiteralPath $childExe -PathType Leaf)) { throw 'CustomSteamLibrary entry point is missing after update' }\n";
+             f << "  if (!(Test-Path -LiteralPath $childManifestPath -PathType Leaf)) { throw 'CustomSteamLibrary package manifest is missing after update' }\n";
+             f << "  $childManifest = (Get-Content -LiteralPath $childManifestPath -Raw -ErrorAction Stop).TrimStart([char]0xFEFF) | ConvertFrom-Json\n";
+             f << "  $expectedChildPackageVersion = [string]$childManifest.packageVersion\n";
+             f << "  if ([string]$childManifest.packageId -ne 'custom-steam-library' -or [string]$childManifest.packageType -ne 'green-child' -or [string]::IsNullOrWhiteSpace($expectedChildPackageVersion)) { throw 'CustomSteamLibrary package identity or version is invalid after update' }\n";
+             f << "  $healthToken = [guid]::NewGuid().ToString('N')\n";
+             f << "  Remove-Item -LiteralPath $customHealthHandshakePath -Force -ErrorAction SilentlyContinue\n";
+             f << "  $healthProcess = $null\n";
+             f << "  try {\n";
+             f << "    $healthArguments = @('--input-owner=host', '--update-health-only', '--update-health-handshake', ('\"' + $customHealthHandshakePath + '\"'), '--update-health-handshake-token', $healthToken, '--update-health-package-version', $expectedChildPackageVersion)\n";
+             f << "    $healthProcess = Start-Process -FilePath $childExe -WorkingDirectory $customSteamLibraryDir -ArgumentList $healthArguments -PassThru -WindowStyle Hidden\n";
+             f << "    if (!$healthProcess) { throw 'failed to launch CustomSteamLibrary health process' }\n";
+             f << "    $deadline = (Get-Date).AddSeconds($customHealthTimeoutSeconds)\n";
+             f << "    $ready = $false\n";
+             f << "    while ((Get-Date) -lt $deadline) {\n";
+             f << "      if (Test-Path -LiteralPath $customHealthHandshakePath -PathType Leaf) {\n";
+             f << "        try {\n";
+             f << "          $marker = Get-Content -LiteralPath $customHealthHandshakePath -Raw -ErrorAction Stop | ConvertFrom-Json\n";
+             f << "          if ([string]$marker.phase -eq 'failed') { throw ('CustomSteamLibrary startup health failed: ' + [string]$marker.error) }\n";
+             f << "          if ([string]$marker.phase -eq 'ready') {\n";
+             f << "            $markerPid = [int]$marker.pid\n";
+             f << "            $markerProcess = Get-Process -Id $markerPid -ErrorAction SilentlyContinue\n";
+             f << "            if (!$markerProcess -or $markerPid -ne $healthProcess.Id) { throw 'CustomSteamLibrary health marker PID is invalid' }\n";
+             f << "            if (!(Test-CustomSteamLibraryProcess $markerProcess)) { throw 'CustomSteamLibrary health marker process path is invalid' }\n";
+             f << "            if ([string]$marker.token -ne $healthToken) { throw 'CustomSteamLibrary health marker token mismatch' }\n";
+             f << "            if ([string]$marker.packageId -ne 'custom-steam-library' -or [string]$marker.packageType -ne 'green-child' -or [string]$marker.packageVersion -ne $expectedChildPackageVersion) { throw 'CustomSteamLibrary health marker package identity mismatch' }\n";
+             f << "            if ([string]$marker.expectedPackageVersion -ne $expectedChildPackageVersion -or [string]$marker.inputOwner -ne 'host' -or [bool]$marker.healthOnly -ne $true -or [int]$marker.protocol -ne 1) { throw 'CustomSteamLibrary health marker startup mode mismatch' }\n";
+             f << "            if ([bool]$marker.window -ne $true -or [bool]$marker.worker -ne $true -or [bool]$marker.workspaceUi -ne $true -or [bool]$marker.webview2 -ne $true) { throw 'CustomSteamLibrary health marker runtime readiness is incomplete' }\n";
+             f << "            if ([bool]$marker.dataRootWritable -ne $true -or !(Test-CustomSteamLibraryDataRoot ([string]$marker.dataRoot))) { throw 'CustomSteamLibrary health marker data root is invalid' }\n";
+             f << "            $ready = $true\n";
+             f << "            break\n";
+             f << "          }\n";
+             f << "        } catch { throw $_ }\n";
+             f << "      }\n";
+             f << "      try { if ($healthProcess.HasExited) { throw ('CustomSteamLibrary health process exited before ready: ' + $healthProcess.ExitCode) } } catch { throw $_ }\n";
+             f << "      Start-Sleep -Milliseconds 200\n";
+             f << "    }\n";
+             f << "    if (!$ready) { throw ('CustomSteamLibrary startup health handshake timed out after ' + $customHealthTimeoutSeconds + ' seconds') }\n";
+             f << "  } finally {\n";
+             f << "    Close-CustomSteamLibraryHealthProcess $healthProcess\n";
+             f << "  }\n";
+             f << "}\n";
+             f << "function Stop-CustomSteamLibraryProcesses {\n";
+             f << "  $deadline = (Get-Date).AddSeconds($childExitTimeoutSeconds)\n";
+             f << "  foreach ($process in @(Get-Process -Name 'CustomSteamLibrary','SteamArtworkLab' -ErrorAction SilentlyContinue | Where-Object { Test-CustomSteamLibraryProcess $_ })) { try { if (!$process.HasExited) { $process.CloseMainWindow() | Out-Null } } catch { } }\n";
+             f << "  while ($true) {\n";
+             f << "    $active = @(Get-Process -Name 'CustomSteamLibrary','SteamArtworkLab' -ErrorAction SilentlyContinue | Where-Object { Test-CustomSteamLibraryProcess $_ })\n";
+             f << "    if ($active.Count -eq 0) { return }\n";
+             f << "    if ((Get-Date) -ge $deadline) { throw 'CustomSteamLibrary or SteamArtworkLab did not exit before update' }\n";
+             f << "    Start-Sleep -Milliseconds 250\n";
+             f << "  }\n";
+             f << "}\n";
+             f << "function Test-LayoutRootProcess([System.Diagnostics.Process]$process, [string]$rootPath) { try { $prefix = ([IO.Path]::GetFullPath($rootPath)).TrimEnd('\\') + '\\'; return ([IO.Path]::GetFullPath($process.Path)).StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase) } catch { throw ('unable to verify a declared update root process path: ' + $process.ProcessName) } }\n";
+             f << "function Get-AdditionalLayoutRootProcesses {\n";
+             f << "  $active = @()\n";
+             f << "  foreach ($root in @($layoutRoots | Where-Object { $_.source -notin @('YeManCC','PowerControl','CustomSteamLibrary') })) {\n";
+             f << "    $rootPath = Join-Path $installRoot $root.target\n";
+             f << "    foreach ($processName in @($root.stopProcesses)) { $name = [IO.Path]::GetFileNameWithoutExtension([string]$processName); $active += @(Get-Process -Name $name -ErrorAction SilentlyContinue | Where-Object { Test-LayoutRootProcess $_ $rootPath }) }\n";
+             f << "  }\n";
+             f << "  return @($active | Sort-Object Id -Unique)\n";
+             f << "}\n";
+             f << "function Stop-AdditionalLayoutRootProcesses {\n";
+             f << "  $deadline = (Get-Date).AddSeconds($childExitTimeoutSeconds)\n";
+             f << "  foreach ($process in @(Get-AdditionalLayoutRootProcesses)) { try { if (!$process.HasExited) { $process.CloseMainWindow() | Out-Null } } catch { } }\n";
+             f << "  while ($true) { $active = @(Get-AdditionalLayoutRootProcesses); if ($active.Count -eq 0) { return }; if ((Get-Date) -ge $deadline) { throw ('declared update root process did not exit before update: ' + (($active | ForEach-Object ProcessName | Sort-Object -Unique) -join ', ')) }; Start-Sleep -Milliseconds 250 }\n";
+             f << "}\n";
+             f << "function Get-ResidentFanHostProcesses {\n";
+             f << "  $target = [IO.Path]::GetFullPath((Join-Path $pcDir 'fan-host\\YeManFanHost.exe'))\n";
+             f << "  $active = @()\n";
+             f << "  foreach ($process in @(Get-Process -Name 'YeManFanHost' -ErrorAction SilentlyContinue)) { try { if ([IO.Path]::GetFullPath($process.Path) -ieq $target) { $active += $process } } catch { throw 'unable to verify the resident Fan Host executable path' } }\n";
+             f << "  return @($active | Sort-Object Id -Unique)\n";
+             f << "}\n";
+             f << "function Wait-FanHostExit {\n";
+             f << "  $deadline = (Get-Date).AddSeconds($childExitTimeoutSeconds)\n";
+             f << "  while ($true) { $active = @(Get-ResidentFanHostProcesses); if ($active.Count -eq 0) { return }; if ((Get-Date) -ge $deadline) { throw 'YeManFanHost.exe did not exit before update' }; Start-Sleep -Milliseconds 250 }\n";
+             f << "}\n";
+             f << "function Rename-DirectoryChecked([string]$source, [string]$destination, [string]$label) {\n";
             f << "  if ((Split-Path -Parent $source) -ne (Split-Path -Parent $destination)) { throw ($label + ' must stay in one parent directory') }\n";
             f << "  $destinationName = Split-Path -Leaf $destination\n";
             f << "  $lastError = ''\n";
@@ -13101,16 +14393,29 @@ static void reg_updater() {
             f << "  }\n";
             f << "  $programBackup = Join-Path $rollbackFiles 'YeManCC'\n";
             f << "  if (Test-Path -LiteralPath $programBackup -PathType Container) { Copy-TreeChecked $programBackup $exeDir @() }\n";
-            f << "  $powerControlBackup = Join-Path $rollbackFiles 'PowerControl'\n";
-            f << "  if (Test-Path -LiteralPath $powerControlBackup -PathType Container) { Copy-TreeChecked $powerControlBackup $pcDir @() }\n";
-            f << "  $supportBackup = Join-Path $rollbackFiles 'Support'\n";
+             f << "  $powerControlBackup = Join-Path $rollbackFiles 'PowerControl'\n";
+             f << "  if (Test-Path -LiteralPath $powerControlBackup -PathType Container) { Copy-TreeChecked $powerControlBackup $pcDir @() }\n";
+              f << "  $customSteamLibraryBackup = Join-Path $rollbackFiles 'CustomSteamLibrary'\n";
+              f << "  if (Test-Path -LiteralPath $customSteamLibraryBackup -PathType Container) { Copy-TreeChecked $customSteamLibraryBackup $customSteamLibraryDir @() }\n";
+             f << "  foreach ($root in @($layoutRoots | Where-Object { $_.source -notin @('YeManCC','PowerControl','CustomSteamLibrary') })) {\n";
+             f << "    $rootBackup = Join-Path $rollbackFiles $root.source\n";
+             f << "    $rootTarget = Join-Path $installRoot $root.target\n";
+             f << "    if (Test-Path -LiteralPath $rootBackup -PathType Container) { Copy-TreeChecked $rootBackup $rootTarget @() }\n";
+             f << "  }\n";
+              f << "  $supportBackup = Join-Path $rollbackFiles 'Support'\n";
             f << "  if (Test-Path -LiteralPath $supportBackup -PathType Leaf) { Copy-Item -LiteralPath $supportBackup -Destination $supportPath -Force -ErrorAction Stop }\n";
             f << "  foreach ($backupFile in Get-ChildItem -LiteralPath $rollbackFiles -Recurse -File) {\n";
             f << "    $relative = $backupFile.FullName.Substring($rollbackFiles.Length).TrimStart('\\')\n";
             f << "    if ($relative -eq 'Support') { $target = $supportPath }\n";
-            f << "    elseif ($relative.StartsWith('YeManCC\\')) { $target = Join-Path $exeDir $relative.Substring('YeManCC\\'.Length) }\n";
-            f << "    elseif ($relative.StartsWith('PowerControl\\')) { $target = Join-Path $pcDir $relative.Substring('PowerControl\\'.Length) }\n";
-            f << "    else { throw ('unknown rollback bucket: ' + $relative) }\n";
+             f << "    elseif ($relative.StartsWith('YeManCC\\')) { $target = Join-Path $exeDir $relative.Substring('YeManCC\\'.Length) }\n";
+              f << "    elseif ($relative.StartsWith('PowerControl\\')) { $target = Join-Path $pcDir $relative.Substring('PowerControl\\'.Length) }\n";
+              f << "    elseif ($relative.StartsWith('CustomSteamLibrary\\')) { $target = Join-Path $customSteamLibraryDir $relative.Substring('CustomSteamLibrary\\'.Length) }\n";
+             f << "    else {\n";
+             f << "      $bucket = ($relative -split '\\\\', 2)[0]\n";
+             f << "      $root = @($layoutRoots | Where-Object { $_.source -ieq $bucket } | Select-Object -First 1)\n";
+             f << "      if (!$root) { throw ('unknown rollback bucket: ' + $relative) }\n";
+             f << "      $target = Join-Path (Join-Path $installRoot $root.target) $relative.Substring($bucket.Length + 1)\n";
+             f << "    }\n";
             f << "    Assert-FileMatch $backupFile.FullName $target ('rollback restored ' + $relative)\n";
             f << "  }\n";
             f << "}\n";
@@ -13118,16 +14423,25 @@ static void reg_updater() {
             f << "  $parentExitDeadline = (Get-Date).AddSeconds($parentExitTimeoutSeconds)\n";
             f << "  while (Get-Process -Id $parentPid -ErrorAction SilentlyContinue) {\n";
             f << "    if ((Get-Date) -ge $parentExitDeadline) { throw ('parent YeManCC process did not exit within ' + $parentExitTimeoutSeconds + ' seconds') }\n";
-            f << "    Start-Sleep -Milliseconds 100\n";
-            f << "  }\n";
-            f << "  if (!(Test-Path -LiteralPath $packageExe)) { throw 'staged executable missing' }\n";
-            f << "  if (!(Test-Path -LiteralPath (Join-Path $tdpSource 'YeManTdpCtl.exe'))) { throw 'staged YeManTdpCtl.exe missing' }\n";
-            f << "  if (!(Test-Path -LiteralPath (Join-Path $tdpSource '_internal') -PathType Container)) { throw 'staged YeManTdpCtl _internal missing' }\n";
-            f << "  Set-UpdateProgress 'installing' '正在复制更新文件'\n";
-            f << "  New-Item -ItemType Directory -Path $rollbackFiles -Force | Out-Null\n";
-            f << "  Register-TreeForRollback $programSource $exeDir 'YeManCC' @('YeManCC.exe','YeMan-Support.html')\n";
-            f << "  Register-FileForRollback $packageExe $programSource $exeDir 'YeManCC'\n";
-            f << "  Register-TreeForRollback $powerControlSource $pcDir 'PowerControl' @('pawnio')\n";
+              f << "    Start-Sleep -Milliseconds 100\n";
+              f << "  }\n";
+              f << "  $layoutRoots = @(Get-UpdateLayoutRoots)\n";
+              f << "  $fanHostPackagePresent = Test-Path -LiteralPath $fanHostSource -PathType Container\n";
+              f << "  $customRootPresent = @($layoutRoots | Where-Object { $_.source -ieq 'CustomSteamLibrary' }).Count -gt 0\n";
+              f << "  if ($customRootPresent) { Stop-CustomSteamLibraryProcesses }\n";
+              f << "  Stop-AdditionalLayoutRootProcesses\n";
+              f << "  if ($fanHostPackagePresent -and (Test-Path -LiteralPath (Join-Path $pcDir 'fan-host') -PathType Container)) { Wait-FanHostExit }\n";
+             f << "  if (!(Test-Path -LiteralPath $packageExe)) { throw 'staged executable missing' }\n";
+             f << "  if (!(Test-Path -LiteralPath (Join-Path $tdpSource 'YeManTdpCtl.exe'))) { throw 'staged YeManTdpCtl.exe missing' }\n";
+             f << "  if (!(Test-Path -LiteralPath (Join-Path $tdpSource '_internal') -PathType Container)) { throw 'staged YeManTdpCtl _internal missing' }\n";
+              f << "  Set-UpdateProgress 'installing' '正在复制更新文件'\n";
+              f << "  New-Item -ItemType Directory -Path $rollbackFiles -Force | Out-Null\n";
+              f << "  if ($customRootPresent) { $customManagedPaths = @(Get-CustomManagedPaths) }\n";
+              f << "  Register-TreeForRollback $programSource $exeDir 'YeManCC' @('YeManCC.exe','YeMan-Support.html')\n";
+              f << "  Register-FileForRollback $packageExe $programSource $exeDir 'YeManCC'\n";
+              f << "  Register-TreeForRollback $powerControlSource $pcDir 'PowerControl' @('pawnio')\n";
+              f << "  if ($customRootPresent) { Register-CustomManagedFilesForRollback $customManagedPaths }\n";
+              f << "  Register-AdditionalLayoutRootsForRollback\n";
             f << "  if (Test-Path -LiteralPath $supportPath -PathType Leaf) {\n";
             f << "    Copy-Item -LiteralPath $supportPath -Destination (Join-Path $rollbackFiles 'Support') -Force -ErrorAction Stop\n";
             f << "    Assert-FileMatch $supportPath (Join-Path $rollbackFiles 'Support') 'rollback backup support page'\n";
@@ -13135,11 +14449,24 @@ static void reg_updater() {
             f << "    $rollbackAddedFiles.Add($supportPath) | Out-Null\n";
             f << "  }\n";
             f << "  $ordinaryRollbackPrepared = $true\n";
-             f << "  Write-Utf8Atomic $state '{\"phase\":\"copying\"}'\n";
+              f << "  Write-Utf8Atomic $state ('{\"phase\":\"copying\",\"version\":' + (ConvertTo-Json $version -Compress) + '}')\n";
              // Copy non-PawnIO PowerControl assets first. PawnIO is staged and
              // committed as one directory transaction below.
+              f << "  if ($customRootPresent) { Copy-CustomManagedFilesChecked $customManagedPaths }\n";
+              f << "  Copy-AdditionalLayoutRootsChecked\n";
              f << "  if (!(Test-Path -LiteralPath $pcDir -PathType Container)) { New-Item -ItemType Directory -Path $pcDir -Force | Out-Null }\n";
              f << "  Copy-TreeChecked $powerControlSource $pcDir @('/XD', $tdpSource)\n";
+             // fan-host is an immutable, manifest-bound executable payload.
+             // Ordinary /E updates intentionally retain user PowerControl
+             // state, but the Host installer quarantines its own stale files
+             // and recursively repairs the ACL of every shipped dependency.
+               f << "  if ($fanHostPackagePresent) {\n";
+              f << "    $fanHostTarget = Join-Path $pcDir 'fan-host'\n";
+              f << "    $fanHostAclScript = Join-Path $fanHostTarget 'install-fan-host-payload.ps1'\n";
+              f << "    if (!(Test-Path -LiteralPath $fanHostAclScript -PathType Leaf)) { throw 'Fan Host payload installer missing after update copy' }\n";
+              f << "    & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File $fanHostAclScript -PayloadDirectory $fanHostTarget\n";
+              f << "    if ($LASTEXITCODE -ne 0) { throw ('Fan Host payload ACL installation failed: ' + $LASTEXITCODE) }\n";
+              f << "  }\n";
              // system-blacklist.txt is a shipped rule and is updated with the
              // package. player-blacklist.txt is user-owned and must survive a
              // successful upgrade byte-for-byte when it already exists.
@@ -13160,14 +14487,15 @@ static void reg_updater() {
             f << "  $tdpCommitted = $true\n";
             f << "  Assert-TreeMatch $tdpSource $tdpTarget 'YeManTdpCtl.runtime.committed'\n";
             f << "  Set-UpdateProgress 'installing' 'TDP 运行时校验通过'\n";
-             f << "  Write-Utf8Atomic $state '{\"phase\":\"tdp-verified\"}'\n";
+            f << "  Write-Utf8Atomic $state ('{\"phase\":\"tdp-verified\",\"version\":' + (ConvertTo-Json $version -Compress) + '}')\n";
             f << "  if (Test-Path -LiteralPath $exePath -PathType Leaf) { Copy-Item -LiteralPath $exePath -Destination $backup -Force }\n";
             f << "  Copy-Item -LiteralPath $packageExe -Destination $newExe -Force\n";
             f << "  Move-Item -LiteralPath $newExe -Destination $exePath -Force\n";
             f << "  Copy-TreeChecked $programSource $exeDir @('/XF','YeManCC.exe','YeMan-Support.html')\n";
             f << "  Copy-Item -LiteralPath (Join-Path $programSource 'YeMan-Support.html') -Destination $supportPath -Force\n";
+            f << "  if ($customRootPresent) { Set-UpdateProgress 'installing' '正在验证 CustomSteamLibrary 独立启动健康'; Invoke-CustomSteamLibraryHealthCheck }\n";
             f << "  Set-UpdateProgress 'installing' '正在启动新版本'\n";
-             f << "  Write-Utf8Atomic $state '{\"phase\":\"launching\"}'\n";
+              f << "  Write-Utf8Atomic $state ('{\"phase\":\"launching\",\"version\":' + (ConvertTo-Json $version -Compress) + '}')\n";
              f << "  $newProcess = Start-Process -FilePath $exePath -WorkingDirectory $exeDir -ArgumentList @('--update-handshake', ('\"' + $handshakePath + '\"'), '--update-handshake-token', $handshakeToken) -PassThru\n";
             f << "  $handshakeDeadline = (Get-Date).AddSeconds($handshakeTimeoutSeconds)\n";
             f << "  $handshakeOk = $false\n";
@@ -13184,8 +14512,8 @@ static void reg_updater() {
             f << "    Start-Sleep -Milliseconds 250\n";
             f << "  }\n";
             f << "  if (!$handshakeOk) { throw 'new YeManCC process did not complete startup handshake' }\n";
+             f << "  Write-Utf8Atomic $state ('{\"phase\":\"committed\",\"version\":' + (ConvertTo-Json $version -Compress) + ',\"pid\":' + $newProcess.Id + '}')\n";
             f << "  $updateCommitted = $true\n";
-             f << "  Write-Utf8Atomic $state ('{\"phase\":\"started\",\"pid\":' + $newProcess.Id + '}')\n";
             f << "  Set-UpdateProgress 'completed' '更新已完成'\n";
             f << "} catch {\n";
             f << "  $installError = $_.Exception.Message\n";
@@ -13208,7 +14536,7 @@ static void reg_updater() {
              f << "  if ($rollbackError) { $errorMessage += '; rollback: ' + $rollbackError }\n";
              f << "  try { Set-UpdateProgress 'failed' ('更新失败：' + $errorMessage) $errorMessage } catch { }\n";
              f << "  $failurePhase = if ($rollbackAttempted) { 'rolled-back' } else { 'failed' }\n";
-             f << "  try { Write-Utf8Atomic $state ('{\"phase\":\"' + $failurePhase + '\",\"error\":' + (ConvertTo-Json $errorMessage -Compress) + '}') } catch { }\n";
+             f << "  try { Write-Utf8Atomic $state ('{\"phase\":\"' + $failurePhase + '\",\"version\":' + (ConvertTo-Json $version -Compress) + ',\"error\":' + (ConvertTo-Json $errorMessage -Compress) + '}') } catch { }\n";
              f << "  if ($rollbackSucceeded -and !(Get-Process -Id $parentPid -ErrorAction SilentlyContinue)) {\n";
              f << "    try {\n";
              f << "      if (!(Test-Path -LiteralPath $exePath -PathType Leaf)) { throw 'rolled-back executable is missing' }\n";
@@ -13219,7 +14547,7 @@ static void reg_updater() {
              f << "  if ($recoveryError) {\n";
              f << "    $errorMessage += '; recovery launch: ' + $recoveryError\n";
              f << "    try { Set-UpdateProgress 'failed' ('更新失败：' + $errorMessage) $errorMessage } catch { }\n";
-             f << "    try { Write-Utf8Atomic $state ('{\"phase\":\"' + $failurePhase + '\",\"error\":' + (ConvertTo-Json $errorMessage -Compress) + '}') } catch { }\n";
+             f << "    try { Write-Utf8Atomic $state ('{\"phase\":\"' + $failurePhase + '\",\"version\":' + (ConvertTo-Json $version -Compress) + ',\"error\":' + (ConvertTo-Json $errorMessage -Compress) + '}') } catch { }\n";
              f << "  }\n";
             f << "} finally {\n";
             f << "  Remove-Item -LiteralPath $newExe -Force -ErrorAction SilentlyContinue\n";
@@ -13234,6 +14562,7 @@ static void reg_updater() {
             f << "    Remove-Item -LiteralPath $rollbackRoot -Recurse -Force -ErrorAction SilentlyContinue\n";
             f << "  }\n";
              f << "  Remove-Item -LiteralPath $handshakePath -Force -ErrorAction SilentlyContinue\n";
+             f << "  Remove-Item -LiteralPath $customHealthHandshakePath -Force -ErrorAction SilentlyContinue\n";
              f << "  Remove-Item -LiteralPath $staging -Recurse -Force -ErrorAction SilentlyContinue\n";
              f << "  Remove-Item -LiteralPath $scriptPath -Force -ErrorAction SilentlyContinue\n";
              f << "}\n";
@@ -13743,6 +15072,39 @@ static void reg_extras() {
         }
         CloseHandle(snap);
         return out;
+    });
+
+    // Exact executable lookup used by Fan Host startup recovery. A process
+    // can retain HC/EC ownership even while its loopback listener is
+    // temporarily unavailable; the frontend must block a second Host in
+    // that case instead of assuming the port/health probe is enough.
+    ipc_on("proc.findExact", [](const json& a) -> json {
+        const auto expected = U2W(a.value("path", std::string{}));
+        if (expected.empty()) return json{{"found", false}, {"pid", 0}};
+        HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if (snap == INVALID_HANDLE_VALUE) return json{{"found", false}, {"pid", 0}};
+        PROCESSENTRY32W pe{ sizeof(pe) };
+        if (Process32FirstW(snap, &pe)) {
+            do {
+                const auto image = processImagePath(pe.th32ProcessID);
+                if (!image.empty() && sameFinalPath(image, expected)) {
+                    const auto pid = static_cast<int>(pe.th32ProcessID);
+                    CloseHandle(snap);
+                    return json{{"found", true}, {"pid", pid}};
+                }
+            } while (Process32NextW(snap, &pe));
+        }
+        CloseHandle(snap);
+        return json{{"found", false}, {"pid", 0}};
+    });
+
+    // RTSS profile API bridge.  The frontend resolves the installation path;
+    // the native shell performs the ABI-correct x64 DLL call here.
+    ipc_on("rtss.reloadProfiles", [](const json& a) -> json {
+        const auto dllPath = U2W(a.value("dllPath", std::string{}));
+        if (dllPath.empty())
+            return json{{"ok", false}, {"error", "RTSSHooks DLL 路径为空"}};
+        return nativeRtssReloadProfiles(dllPath);
     });
 
     // ── cpu.topology：检测 L3 缓存域（CCD）拓扑，决定 CPU 核心控制卡片是否显示。
@@ -15388,6 +16750,9 @@ static void sgBeginModernStandbyIntent() {
     g_sgModernWakeClassified = false;
     g_sgModernWakeClassifiedTick = 0;
     sgMarkSleepTrigger();
+    // Best-effort reinforcement only; never perform the HTTP/HC operation in
+    // this event callback.  The Host's own power observer is authoritative.
+    fanHostScheduleEmergencySuspend("kernel-power-506", generation);
     ipc_emit("power.suspending", {
         {"generation", generation}, {"modernStandby", true},
         {"intentSource", "kernel-power-506"},
@@ -15864,6 +17229,14 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         ipc_emit("window.blur");
         return 0;
     case WM_TIMER:
+        if (w == EXIT_CLEANUP_WATCHDOG_TIMER_ID) {
+            KillTimer(h, EXIT_CLEANUP_WATCHDOG_TIMER_ID);
+            appendNativeLifecycleLog("exit-cleanup-deadline", {
+                {"deadlineMs", EXIT_CLEANUP_WATCHDOG_MS}
+            });
+            postExitReadyOnce(h, g_exitCode.load(std::memory_order_relaxed));
+            return 0;
+        }
         if (w == POWER_RESUME_NUDGE_TIMER_ID) {
             KillTimer(g_hwnd, POWER_RESUME_NUDGE_TIMER_ID);
             if (g_powerLifecycle.load(std::memory_order_acquire) == PowerLifecycle::Resuming) {
@@ -16035,8 +17408,11 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         return 0;
     case WM_APP_EXIT_READY:
         if (!g_exitRequested.load()) return 0;
+        KillTimer(h, EXIT_CLEANUP_WATCHDOG_TIMER_ID);
         if (g_exitCleanupThread) {
-            WaitForSingleObject(g_exitCleanupThread, 0);
+            const DWORD cleanupWait = WaitForSingleObject(g_exitCleanupThread, 0);
+            if (cleanupWait != WAIT_OBJECT_0)
+                appendNativeLifecycleLog("exit-cleanup-worker-detached");
             CloseHandle(g_exitCleanupThread);
             g_exitCleanupThread = nullptr;
         }
@@ -16057,7 +17433,7 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         KillTimer(h, WEBVIEW_RECOVERY_ACTION_TIMER_ID);
         if (g_memTrayIcon) { DestroyIcon(g_memTrayIcon); g_memTrayIcon = nullptr; }
         if (g_tdpDaemonJob) { CloseHandle(g_tdpDaemonJob); g_tdpDaemonJob = nullptr; }
-        gamepadSerialStop();
+        gamepadSerialStop(500);
         closeWebViewsForExit();
         DestroyWindow(h);
         return 0;
@@ -16092,10 +17468,10 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         return 0;
     case WM_QUERYENDSESSION:
         // 系统注销/关机前先恢复被冻结游戏；返回 TRUE 允许会话结束继续。
-        sgCleanupBeforeExit();
+        (void)sgCleanupBeforeExit(true);
         return TRUE;
     case WM_ENDSESSION:
-        if (w) sgCleanupBeforeExit();
+        if (w) (void)sgCleanupBeforeExit(true);
         else g_sgCleanupDone = false; // 会话结束被取消，允许后续真正退出再次执行恢复
         return 0;
     case WM_CLOSE:
@@ -16106,7 +17482,7 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         beginAsyncExit(h, 0);
         return 0;
     case WM_DESTROY:
-        appendNativeLifecycleLog("window-destroy", {{"exitRequested", g_exitRequested.load()}});
+            appendNativeLifecycleLog("window-destroy", {{"exitRequested", g_exitRequested.load()}});
         if (g_exitRequested.load()) {
             g_summonQuit = true;
             PostQuitMessage((int)g_exitCode.load(std::memory_order_relaxed));
@@ -16114,15 +17490,15 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         }
         // CCD worker 退出（收尾清理）
         g_ccdStop.store(true);
-        gamepadSerialStop();
-        poolStop();
+        gamepadSerialStop(500);
+        poolStop(1000);
         // 取消电源通知订阅 + 清防抖定时器
         if (g_acdcNotify) { UnregisterPowerSettingNotification(g_acdcNotify); g_acdcNotify = nullptr; }
         if (g_monitorNotify) { UnregisterPowerSettingNotification(g_monitorNotify); g_monitorNotify = nullptr; }
         if (g_schemeNotify) { UnregisterPowerSettingNotification(g_schemeNotify); g_schemeNotify = nullptr; }
         sgStopKernelPowerSubscription();
         if (g_suspendResumeNotify) { PowerUnregisterSuspendResumeNotification(g_suspendResumeNotify); g_suspendResumeNotify = nullptr; }
-        sgStopWorkThread();
+        sgStopWorkThread(1000);
         sgStopSleepRetry();
         KillTimer(h, TIMER_ID_ACDC);
         KillTimer(h, SUMMON_FOCUS_TIMER_ID);
@@ -16134,8 +17510,8 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         if (g_memTrayIcon) { DestroyIcon(g_memTrayIcon); g_memTrayIcon = nullptr; }
         // 退出前恢复被冻结的进程；统一清理函数保证 app.exit/会话结束/窗口销毁只执行一次。
         stopTdpDaemonForExit();
-        stopTopMonitorForExit();
-        sgCleanupBeforeExit();
+        stopTopMonitorForExit(1000);
+        (void)sgCleanupBeforeExit(true);
         closeWebViewsForExit();
         // Cleanup watchers
         for (auto& [id, w] : g_watchers) {
@@ -16449,8 +17825,6 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         return 0;
     }
     case WM_POWERBROADCAST:
-        // 订阅式（非轮询）电源插拔通知。注册 GUID_ACDC_POWER_SOURCE 后，
-        // 仅当系统电源来源变化时 OS 才推送本消息 → 零后台损耗。
         if (w == PBT_APMQUERYSUSPEND || w == PBT_APMSUSPEND ||
             w == PBT_APMQUERYSUSPENDFAILED || w == PBT_APMQUERYSTANDBYFAILED ||
             w == PBT_APMRESUMEAUTOMATIC || w == PBT_APMRESUMESUSPEND ||
@@ -16563,6 +17937,9 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
                 g_inputReady.store(false, std::memory_order_release);
                 gamepadResetNativeState(true);
                 sgMarkSleepTrigger();
+                // A query may be cancelled.  Do not release or close the Fan
+                // Host at this stage; only the confirmed suspend boundary
+                // below may enqueue the best-effort cleanup worker.
                 ipc_emit("power.suspending", {
                     {"generation", generation},
                     {"queryBoundary", true},
@@ -16619,6 +17996,11 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
                     g_sgSleepQueryGeneration = 0;
                     if (g_powerLifecycle.load(std::memory_order_acquire) == PowerLifecycle::Suspending)
                         g_powerLifecycle.store(PowerLifecycle::Suspended, std::memory_order_release);
+                    // The query was only an intent marker and deliberately
+                    // did not touch Fan Host because it could be cancelled.
+                    // This is the first confirmed suspend boundary, so queue
+                    // the non-blocking native fallback now before returning.
+                    fanHostScheduleEmergencySuspend("suspend-confirmed", currentPowerGeneration());
                     traceLog("sleep suspend confirmed generation=%llu",
                              currentPowerGeneration());
                     return TRUE;
@@ -16639,6 +18021,7 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
                 stopPowerResumeWatchdog();
                 g_inputReady.store(false, std::memory_order_release);
                 gamepadResetNativeState(true);
+                fanHostScheduleEmergencySuspend("suspend-broadcast", generation);
                 ipc_emit("power.suspending", {
                     {"generation", generation},
                     {"hibernateAvailable", sgHibernateAvailable()}
@@ -17320,9 +18703,9 @@ int WINAPI wWinMain(HINSTANCE hi, HINSTANCE, LPWSTR, int ns) {
 
     // 兜底：即使通过 WM_QUIT 直接离开消息循环，也确保冻结进程被解除。
     shutdownSplashGraphics();
-    joinStartupResumeThread();
-    sgStopWorkThread();
-    poolStop();
+    joinStartupResumeThread(1000);
+    sgStopWorkThread(1000);
+    poolStop(1000);
     g_summonQuit = true;
     if (g_autoCloseThread) {
         WaitForSingleObject(g_autoCloseThread, 3000);
@@ -17330,8 +18713,8 @@ int WINAPI wWinMain(HINSTANCE hi, HINSTANCE, LPWSTR, int ns) {
         g_autoCloseThread = nullptr;
     }
             stopTdpDaemonForExit();
-            stopTopMonitorForExit();
-            sgCleanupBeforeExit();
+            stopTopMonitorForExit(1000);
+            (void)sgCleanupBeforeExit(true);
     closeWebViewsForExit();
     if (hMutex) CloseHandle(hMutex);
     CoUninitialize();

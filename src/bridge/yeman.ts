@@ -5,7 +5,7 @@
 //
 // 程序控制配置由本桥统一记录，TDP/FPS 的用户值不再依赖 PowerControl 下的 txt。
 // 任务计划只识别状态、不解析内容（schtasks 创建，/Query 判断存在即=开关状态）。
-import { fs, shell, registry, tdpDaemon, powerLifecycle, systemHibernate, type RunResult, type HibernateState } from './api';
+import { fs, shell, registry, rtss, tdpDaemon, powerLifecycle, systemHibernate, type RunResult, type HibernateState } from './api';
 import { invoke } from './ipc';
 import { readSettingsSection, saveSettingsSection, setSettingsDirectory } from './settingsRepository';
 
@@ -497,10 +497,10 @@ const DEFAULT_GAMEPAD_SETTINGS: GamepadSettings = {
   bDoubleMinimize: true,
   tdpShortcut: true,
   fpsShortcut: true,
-  killGame: false,
-  openKeyboard: false,
-  returnDesktop: false,
-  mouseToggle: false,
+  killGame: true,
+  openKeyboard: true,
+  returnDesktop: true,
+  mouseToggle: true,
   mouseBackend: 'joyxoff',
 };
 export async function summonGet(): Promise<GamepadSettings> {
@@ -1779,6 +1779,15 @@ export async function readRtssLimit(): Promise<number> {
   return 0;
 }
 let rtssConfigWriteQueue: Promise<void> = Promise.resolve();
+
+async function reloadRtssProfiles(dir: string): Promise<void> {
+  const result = await rtss.reloadProfiles(`${dir}\\RTSSHooks64.dll`);
+  if (!result?.ok) {
+    const detail = result?.error || (result?.win32Error ? `Win32 ${result.win32Error}` : '未知错误');
+    throw new Error(`RTSS 配置重载失败：${detail}`);
+  }
+}
+
 export function setRtssLimit(fps: number): Promise<void> {
   const run = rtssConfigWriteQueue.then(async () => {
     const dir = await resolveRtssDir();
@@ -1804,9 +1813,9 @@ export function setRtssLimit(fps: number): Promise<void> {
   await fs.writeTextFileAtomic(global, outLines.join('\r\n'));
   // 重载配置：外部改完文件后只 LoadProfile(重新载入磁盘) + UpdateProfiles(套用到运行中的游戏)。
   // ⚠ 不要 SaveProfile —— 它会把 RTSS 内存里的旧状态写回磁盘，覆盖刚改的内容甚至写坏（损坏根因）。
-  await shell.run('rundll32', [`${dir}\\RTSSHooks64.dll`, 'LoadProfile']);
-  await new Promise<void>((r) => setTimeout(r, 200)); // 等 RTSS 异步载入刚写的文件
-    await shell.run('rundll32', [`${dir}\\RTSSHooks64.dll`, 'UpdateProfiles']);
+  // ⚠ 不能用 rundll32：RTSS SDK 的 LoadProfile 是 void(LPCSTR)，与 rundll32
+  // 的 DllEntry(HWND,HINSTANCE,LPSTR,int) ABI 不兼容，会把 HWND 当成字符串指针。
+  await reloadRtssProfiles(dir);
   });
   rtssConfigWriteQueue = run.catch(() => {});
   return run;
@@ -1890,9 +1899,7 @@ export function setRtssZoom(ratio: number): Promise<void> {
   }
   await fs.writeTextFileAtomic(global, lines.join('\r\n'));
   // 强制 RTSS 重载配置：LoadProfile(重新载入磁盘) + UpdateProfiles(套用)。同样不要 SaveProfile（会把内存旧状态写回磁盘）。
-  await shell.run('rundll32', [`${dir}\\RTSSHooks64.dll`, 'LoadProfile']);
-  await new Promise<void>((r) => setTimeout(r, 200));
-    await shell.run('rundll32', [`${dir}\\RTSSHooks64.dll`, 'UpdateProfiles']);
+  await reloadRtssProfiles(dir);
   });
   rtssConfigWriteQueue = run.catch(() => {});
   return run;

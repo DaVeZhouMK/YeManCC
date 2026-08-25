@@ -879,9 +879,10 @@ onUnmounted(() => {
       <h3 class="card-title"><InlineIcon name="music" /> 音乐播放</h3>
 
       <div v-if="!hasFolder" class="music-empty">
-        <button class="quick-btn" :disabled="busy" @click="chooseFolder">
-          <InlineIcon name="folder" /> 选择音乐文件夹
-          <span class="quick-sub">播放该目录内的音乐文件（MP3/M4A/WAV/OGG/FLAC）</span>
+        <button class="quick-btn music-folder-btn" :disabled="busy" @click="chooseFolder">
+          <InlineIcon name="folder" />
+          <span class="music-folder-label">选择音乐文件夹</span>
+          <span class="quick-sub music-folder-desc">播放该目录内的音乐文件<br>(MP3/M4A/WAV/OGG/FLAC)</span>
         </button>
       </div>
 
@@ -1504,6 +1505,19 @@ onUnmounted(() => {
 .display-control-scale { min-width: 0; }
 .display-tip { display: block; margin-top: 6px; line-height: 1.35; }
 .music-empty { margin-top: 4px; }
+.music-folder-btn {
+  align-items: center;
+}
+.music-folder-label {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+.music-folder-desc {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin-left: 4px;
+  white-space: nowrap;
+}
 .music-now {
   display: flex;
   flex-direction: column;

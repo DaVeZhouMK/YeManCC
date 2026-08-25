@@ -20,6 +20,11 @@ import {
   steamStop,
   launchSteam,
 } from '@/bridge/yeman';
+import {
+  type CustomSteamLibrarySummary,
+  launchCustomSteamLibrary,
+  readCustomSteamLibrarySummary,
+} from '@/bridge/customSteamLibrary';
 
 const running = ref(false);
 const addonStates: Record<string, boolean> = {};
@@ -41,6 +46,9 @@ let steamPollBusy = false;
 let steamPollGeneration = 0;
 let steamActive = false;
 let stopUiVisibility: (() => void) | null = null;
+const customLibrarySummary = ref<CustomSteamLibrarySummary | null>(null);
+const customLibraryBusy = ref(false);
+const customLibraryRunning = ref(false);
 
 function restoreSteamStateFocus() {
   nextTick(() => {
@@ -353,6 +361,38 @@ async function launchBigPicture() {
   }
 }
 
+async function refreshCustomLibrarySummary() {
+  customLibrarySummary.value = await readCustomSteamLibrarySummary();
+}
+
+async function openCustomLibrary() {
+  if (customLibraryBusy.value) return;
+  customLibraryBusy.value = true;
+  errMsg.value = '';
+  try {
+    const result = await launchCustomSteamLibrary();
+    if (!result.ok) throw new Error(result.reason || '自定义游戏库启动失败');
+    customLibraryRunning.value = true;
+  } catch (error) {
+    showNotice(error instanceof Error ? error.message : String(error));
+  } finally {
+    customLibraryBusy.value = false;
+  }
+}
+
+function onCustomLibraryClosed() {
+  customLibraryRunning.value = false;
+  customLibraryBusy.value = false;
+  void refreshCustomLibrarySummary();
+}
+
+function onCustomLibraryConflict(event: Event) {
+  const detail = (event as CustomEvent<{ inputOwner?: string }>).detail;
+  customLibraryRunning.value = false;
+  customLibraryBusy.value = false;
+  showNotice(`自定义游戏库未接管输入（${detail?.inputOwner || 'unknown'}），已阻止主程序重复响应。`);
+}
+
 function launchLinkedFromPopup() {
   closeSteamLaunchPopup(false);
   void launch();
@@ -381,6 +421,8 @@ if (globalRefreshKey) {
 onMounted(() => {
   steamActive = true;
   window.addEventListener('ipc:gamepad-back', onSteamLaunchPopupBack);
+  window.addEventListener('customSteamLibrary:closed', onCustomLibraryClosed);
+  window.addEventListener('customSteamLibrary:conflict', onCustomLibraryConflict);
   stopUiVisibility = onUiVisibilityChange(({ visible }) => {
     if (!visible) {
       closeSteamLaunchPopup(false);
@@ -388,6 +430,7 @@ onMounted(() => {
     }
   });
   void refresh();
+  void refreshCustomLibrarySummary();
 });
 onActivated(() => {
   steamActive = true;
@@ -401,6 +444,7 @@ onActivated(() => {
     });
   }
   void refresh();
+  void refreshCustomLibrarySummary();
 });
 onDeactivated(() => {
   steamActive = false;
@@ -411,6 +455,8 @@ onDeactivated(() => {
 onBeforeUnmount(() => {
   closeSteamLaunchPopup(false);
   window.removeEventListener('ipc:gamepad-back', onSteamLaunchPopupBack);
+  window.removeEventListener('customSteamLibrary:closed', onCustomLibraryClosed);
+  window.removeEventListener('customSteamLibrary:conflict', onCustomLibraryConflict);
   stopSteamPolling();
   steamActive = false;
   stopSteamPolling();
@@ -516,8 +562,25 @@ onBeforeUnmount(() => {
       </div>
     </section>
 
-    <section class="card steam-scan-notice" aria-label="Steam大屏扫描入库功能制作中">
-      <h3 class="card-title"><InlineIcon name="steam" /> Steam大屏扫描入库功能制作中</h3>
+    <section class="card custom-library-entry-card" aria-label="自定义游戏库">
+      <h2>Steam自定义游戏库</h2>
+      <p class="custom-library-subtitle">扫描非Steam游戏加入Steam大屏</p>
+      <div v-if="customLibrarySummary" class="custom-library-summary" aria-label="游戏库分类统计">
+        <div><strong>{{ customLibrarySummary.waiting }}</strong><span>等待加入</span></div>
+        <div><strong>{{ customLibrarySummary.joined }}</strong><span>已加入</span></div>
+        <div><strong>{{ customLibrarySummary.needs }}</strong><span>需处理</span></div>
+        <div><strong>{{ customLibrarySummary.excluded }}</strong><span>不加入</span></div>
+      </div>
+      <div v-else class="custom-library-summary custom-library-summary-empty" aria-label="游戏库分类统计读取中">
+        <div><strong>—</strong><span>等待加入</span></div>
+        <div><strong>—</strong><span>已加入</span></div>
+        <div><strong>—</strong><span>需处理</span></div>
+        <div><strong>—</strong><span>不加入</span></div>
+      </div>
+      <button class="custom-library-open-button" type="button" :disabled="customLibraryBusy" @click="openCustomLibrary">
+        <InlineIcon name="play" />
+        {{ customLibraryRunning ? '重新打开自定义游戏库' : '打开自定义游戏库' }}
+      </button>
     </section>
 
   </div>
@@ -793,5 +856,88 @@ onBeforeUnmount(() => {
 .steam-launch-pop-leave-to {
   opacity: 0;
   transform: translateY(-4px);
+}
+.custom-library-entry-card {
+  padding: 12px 14px;
+}
+.custom-library-entry-card h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.25;
+}
+.custom-library-subtitle {
+  margin: 4px 0 10px;
+  color: var(--text-dim);
+  font-size: 11px;
+}
+.custom-library-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.custom-library-summary > div {
+  min-width: 0;
+  min-height: 46px;
+  padding: 8px 9px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-ctrl);
+  background: var(--bg-input);
+}
+.custom-library-summary strong {
+  display: block;
+  color: var(--accent);
+  font-size: 18px;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.custom-library-summary span {
+  display: block;
+  margin-top: 4px;
+  color: var(--text-dim);
+  font-size: 10px;
+}
+.custom-library-summary-empty {
+  opacity: 0.72;
+}
+.custom-library-open-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  width: 100%;
+  min-height: 40px;
+  border: 1px solid rgba(46, 166, 255, 0.65);
+  border-radius: var(--radius-ctrl);
+  background: linear-gradient(180deg, #2997cd, #187ca9);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+.custom-library-open-button:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+.custom-library-open-button:focus-visible {
+  box-shadow: var(--focus-ring);
+}
+.custom-library-open-button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.custom-library-path {
+  margin: 9px 0 0;
+  overflow: hidden;
+  color: var(--text-dim);
+  font-family: Consolas, monospace;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@media (max-width: 560px) {
+  .custom-library-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 </style>

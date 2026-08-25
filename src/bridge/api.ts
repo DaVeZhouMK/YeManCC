@@ -53,6 +53,20 @@ export const shell = {
     invoke<{ ok: boolean; pid?: number }>('shell.hidden', { program, args }),
 };
 
+export interface RtssReloadResult {
+  ok: boolean;
+  error?: string;
+  win32Error?: number;
+}
+
+// RTSSHooks exports are a native API, not rundll32 entry points.  Keep the
+// call behind a semantic IPC method so the native shell can invoke the
+// functions with their real SDK signatures.
+export const rtss = {
+  reloadProfiles: (dllPath: string) =>
+    invoke<RtssReloadResult>('rtss.reloadProfiles', { dllPath }),
+};
+
 export interface TdpDaemonResponse {
   version: number;
   requestId: string;
@@ -109,7 +123,12 @@ export const systemHibernate = {
 export const app = {
   exit: (code = 0) => invoke<boolean>('app.exit', { code }),
   dataDir: () => invoke<string>('app.dataDir'),
+  // The mutable Fan Host session capability must not follow the configurable
+  // window-title data directory. Native emergency/sleep/exit cleanup and the
+  // renderer therefore share this stable per-user location.
+  fanStateDir: () => invoke<string>('app.fanStateDir'),
   exeDir: () => invoke<string>('app.exeDir'),
+  pid: () => invoke<number>('app.pid'),
   // Native resolves the sibling PowerControl directory once at process start.
   // Frontend modules must use that exact value for unified settings writes.
   powerControlDir: () => invoke<string>('app.powerControlDir'),
@@ -202,6 +221,7 @@ export const tray = {
 
 export const proc = {
   running: (names: string[]) => invoke<Record<string, boolean>>('proc.running', { names }),
+  findExact: (path: string) => invoke<{ found: boolean; pid: number }>('proc.findExact', { path }),
   terminateTree: (pid: number) => invoke<{ ok: boolean; attempted: number; terminated: number }>('process.terminateTree', { pid }),
   identity: (pid: number) => invoke<{
     valid: boolean;
@@ -218,8 +238,20 @@ export interface HttpResponse {
 }
 
 export const http = {
-  request: (url: string, options: { method?: string; headers?: Record<string, string>; body?: string } = {}) =>
-    invoke<HttpResponse>('http.request', { url, ...options }, { timeoutMs: 30000 }),
+  request: (
+    url: string,
+    options: { method?: string; headers?: Record<string, string>; body?: string; timeoutMs?: number } = {},
+  ) => {
+    // Fan Host calls use explicit short deadlines so a dead loopback listener
+    // cannot occupy the IPC queue during exit; other callers retain 30s.
+    const timeoutMs = Math.max(250, Math.min(120000, Math.round(options.timeoutMs ?? 30000)));
+    const { timeoutMs: _ignored, ...requestOptions } = options;
+    return invoke<HttpResponse>(
+      'http.request',
+      { url, ...requestOptions, timeoutMs },
+      { timeoutMs: timeoutMs + 1000 },
+    );
+  },
 };
 
 export const registry = {

@@ -20,6 +20,7 @@ import { summonGet, type GamepadSettings } from '@/bridge/yeman';
 import { isUiVisible, onUiVisibilityChange } from '@/bridge/uiLifecycle';
 import { focusGamepadElement, setGamepadFocused } from '@/gamepad/focus';
 import { enqueueGamepadTaskDetached } from '@/gamepad/serial';
+import { fanFeatureEnabled } from '@/bridge/fanFeature';
 import { spatialNavigationTarget } from '@/gamepad/spatial';
 
 export interface GamepadEngineOptions {
@@ -40,6 +41,8 @@ let prevAxes: number[] = [];
 let lastNav = 0;
 let lastPageSwitch = -Infinity; // 切页冷却（防止连按卡顿）
 const PAGE_SWITCH_COOLDOWN = 100; // ms，原 400ms 过严致连按 LB/RB 丢按；降到 100ms 使快速切页（含切到 TDP）每次都生效
+const NAV_REPEAT_BASE = 220; // ms：普通空间导航重复间隔
+const INLINE_EDIT_REPEAT = Math.round(NAV_REPEAT_BASE / 3); // 节点编辑专用：约为普通导航的 1/3
 // 滑块线性加速：按住越久步长越大、间隔越短
 // ⚠️ 速度参数需与 native 手柄 Start+方向 自动连发保持一致（见 main.cpp 注释），修改时两边同步。
 let sliderAccelStart = 0;  // 本次按住起始时间（用于线性加速）
@@ -61,10 +64,10 @@ let gpSettings: GamepadSettings = {
   bDoubleMinimize: true,
   tdpShortcut: true,
   fpsShortcut: true,
-  killGame: false,
-  openKeyboard: false,
-  returnDesktop: false,
-  mouseToggle: false,
+  killGame: true,
+  openKeyboard: true,
+  returnDesktop: true,
+  mouseToggle: true,
   mouseBackend: 'joyxoff',
 };
 // 快捷应用「模拟鼠标」开启时：屏蔽内页按键选择/功能（上下导航、A/X），
@@ -95,6 +98,10 @@ let noPadStreak = 0;       // 连续无手柄帧计数（Grace 防瞬时断连�
 const NO_PAD_GRACE = 30;   // 约 0.5s@60fps：连续这么多帧无手柄才停止循环
 let summonActive = false;  // 呼出后置 true：强制视为可见，直到窗口再次隐藏（绕开 WebView2 可见态未及时刷新）
 let nativeUiInputActive = false;
+// This is a native decision mirror, not a second gate. While true the
+// renderer only advances its browser snapshot and never dispatches actions;
+// YeManCC native has already forwarded the semantic action to the child.
+let nativeChildInputOwned = false;
 type NativeUiAction =
   | 'page-prev' | 'page-next' | 'confirm' | 'back' | 'dropdown' | 'edit-game'
   | 'debug' | 'nav-left' | 'nav-right' | 'nav-up' | 'nav-down'
@@ -156,6 +163,13 @@ if (typeof window !== 'undefined') {
     if (!engineOpts || !action || testMode) return;
     nativeUiInputActive = true;
     enqueueGamepadTaskDetached(() => dispatchNativeUiAction(engineOpts!, action));
+  }) as EventListener);
+  window.addEventListener('ipc:gamepad.input-owner', ((e: CustomEvent<{ owner?: string }>) => {
+    nativeChildInputOwned = e.detail?.owner === 'custom-steam-library';
+    if (nativeChildInputOwned) {
+      prevButtons = [];
+      prevAxes = [];
+    }
   }) as EventListener);
   onUiVisibilityChange(({ visible }) => {
     if (visible && engineOpts && hasConnectedPad()) {
@@ -247,12 +261,17 @@ function getPad(): Gamepad | null {
   return null;
 }
 
-let visibleRoutePaths: string[] = ROUTES.map((r) => r.path);
-let visibleRouteTitles: string[] = ROUTES.map((r) => r.title);
+function routeAvailable(route: (typeof ROUTES)[number]): boolean {
+  if (route.hidden) return false;
+  return route.feature !== 'fan' || fanFeatureEnabled.value;
+}
+
+let visibleRoutePaths: string[] = ROUTES.filter(routeAvailable).map((r) => r.path);
+let visibleRouteTitles: string[] = ROUTES.filter(routeAvailable).map((r) => r.title);
 
 function setVisibleRoutes(enabled: boolean) {
   const hidden = enabled ? new Set(['/tdp', '/cpu']) : new Set<string>();
-  const visible = ROUTES.filter((r) => !hidden.has(r.path));
+  const visible = ROUTES.filter((r) => !hidden.has(r.path) && routeAvailable(r));
   visibleRoutePaths = visible.map((r) => r.path);
   visibleRouteTitles = visible.map((r) => r.title);
 }
@@ -734,6 +753,13 @@ function activate(opts: GamepadEngineOptions) {
     el.dispatchEvent(new CustomEvent('gp:dropdown-open', { bubbles: true }));
     return;
   }
+  // Fan node selectors opt into the native WebView picker. A on these
+  // controls must open the same dropdown the mouse opens, rather than silently
+  // cycling a value with no visible menu.
+  if (el.dataset && el.dataset.gpNativeDropdown !== undefined) {
+    (el as HTMLSelectElement).click();
+    return;
+  }
   // 原生下拉框 → 循环 option
   if (el.tagName === 'SELECT') {
     const sel = el as HTMLSelectElement;
@@ -951,7 +977,7 @@ function tick(opts: GamepadEngineOptions) {
 
     // Native Raw Input is the primary path after it has delivered one UI
     // action. Keep the browser API as a fallback for non-XInput devices.
-    if (nativeUiInputActive) {
+    if (nativeChildInputOwned || nativeUiInputActive) {
       prevButtons = b;
       prevAxes = a;
       rafId = requestAnimationFrame(() => tick(opts));
@@ -1062,7 +1088,10 @@ function tick(opts: GamepadEngineOptions) {
         // （见上方 sliderEditMode 分支）。这修复了“焦点一上滑块、左右就被吃掉、无法选后续元素”。
         const dirX = heldRight ? 1 : heldLeft ? -1 : 0;
         const dirY = heldDown ? 1 : heldUp ? -1 : 0;
-        if ((dirX !== 0 || dirY !== 0) && now - lastNav > 220) {
+        const inlineEditActive = !!(document.activeElement as HTMLElement | null)
+          ?.closest<HTMLElement>('[data-gp-inline-edit-active="true"]');
+        const repeatInterval = inlineEditActive ? INLINE_EDIT_REPEAT : NAV_REPEAT_BASE;
+        if ((dirX !== 0 || dirY !== 0) && now - lastNav > repeatInterval) {
           // ── 下拉菜单打开（teleport 到 body）时：只上下在菜单项内移动高亮，
           //    焦点严格限制在菜单内，不穿透到下层页面（修复手柄上下选出菜单外内容）；
           //    左右方向键不做事（与鼠标菜单一致，不再循环档位）──
