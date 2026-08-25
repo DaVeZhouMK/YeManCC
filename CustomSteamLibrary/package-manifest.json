@@ -115,13 +115,13 @@
                       },
                       {
                           "path":  "workspace-ui/app.js",
-                          "bytes":  132498,
-                          "sha256":  "89a2d568d82ca2e2038608b7815589365010e6c1ccc09d385230f293a28c0f15"
+                          "bytes":  132022,
+                          "sha256":  "d2b0669242d2d7f27c1cbee5e306e032d64888b16a916677ddab0a4fa9dcd65c"
                       },
                       {
                           "path":  "workspace-ui/styles.css",
-                          "bytes":  58408,
-                          "sha256":  "ee0dd87812b06b939bb54f703c2157c3f3cb02c52f88c653fe235e65d0ed20cf"
+                          "bytes":  58346,
+                          "sha256":  "9c3f8a276024f2d3497e84d92a16a343c0d372755ee8928e6c7c7ca058b12016"
                       },
                       {
                           "path":  "CUSTOM-STEAM-LIBRARY-INTEGRATION-CONTRACT.md",
