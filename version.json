@@ -1,6 +1,6 @@
 {
   "version": "0.0.20",
-  "notes": "升级器适配三目录结构，冻结风扇模块并保留既有 fan-host，强化 CustomSteamLibrary 独立健康握手。",
+  "notes": "旧两目录升级器兼容桥接版：先更新升级器，再继续升级到包含 CustomSteamLibrary 的三目录版本；冻结 fan-host。",
   "sha256": "",
   "publishedAt": "",
   "package": "Packages/YeManCC.zip"

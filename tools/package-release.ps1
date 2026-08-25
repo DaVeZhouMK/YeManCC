@@ -208,14 +208,22 @@ $CustomSteamLibrarySource = if ([string]::IsNullOrWhiteSpace($env:YEMAN_CUSTOM_S
   Get-FullPath $env:YEMAN_CUSTOM_STEAM_LIBRARY_SOURCE
 }
 
-# The ZIP envelope is manifest-driven. Keep the three currently required
-# product roots, but let future releases add another declared root without
-# changing the native updater's root-count logic.
+# The ZIP envelope is manifest-driven. The one-time legacy bridge deliberately
+# keeps the old YeManCC + PowerControl envelope so a pre-manifest updater can
+# install the new updater. All normal releases use the current three-root
+# envelope and can add future declared roots without a root-count change.
+$releaseEnvelope = if ([string]::IsNullOrWhiteSpace($env:YEMAN_RELEASE_ENVELOPE)) { 'full' } else { [string]$env:YEMAN_RELEASE_ENVELOPE }
+if ($releaseEnvelope -notin @('full', 'legacy-bridge')) {
+  throw "Unsupported release envelope: $releaseEnvelope"
+}
+$isLegacyBridge = $releaseEnvelope -eq 'legacy-bridge'
 $updateLayoutRoots = @(
   [ordered]@{ source = 'YeManCC'; target = 'YeManCC'; mode = 'program' },
-  [ordered]@{ source = 'PowerControl'; target = 'PowerControl'; mode = 'power-control' },
-  [ordered]@{ source = 'CustomSteamLibrary'; target = 'CustomSteamLibrary'; mode = 'green-child'; packageManifest = 'package-manifest.json'; stopProcesses = @('CustomSteamLibrary.exe', 'SteamArtworkLab.exe') }
+  [ordered]@{ source = 'PowerControl'; target = 'PowerControl'; mode = 'power-control' }
 )
+if (-not $isLegacyBridge) {
+  $updateLayoutRoots += [ordered]@{ source = 'CustomSteamLibrary'; target = 'CustomSteamLibrary'; mode = 'green-child'; packageManifest = 'package-manifest.json'; stopProcesses = @('CustomSteamLibrary.exe', 'SteamArtworkLab.exe') }
+}
 $requiredUpdateRoots = @($updateLayoutRoots | ForEach-Object { [string]$_.source } | Sort-Object -Unique)
 $fanHostUpdatePolicy = 'preserve-existing'
 
@@ -373,11 +381,13 @@ if (-not (Test-Path -LiteralPath (Join-Path $UpdateYeManCC 'YeManCC.exe') -PathT
 if (-not (Test-Path -LiteralPath (Join-Path $UpdateRoot 'PowerControl\pawnio\YeManTdpCtl.exe') -PathType Leaf)) {
   throw 'Update ZIP PowerControl directory is missing PawnIO runtime'
 }
-if (-not (Test-Path -LiteralPath (Join-Path $UpdateRoot 'CustomSteamLibrary\package-manifest.json') -PathType Leaf)) {
-  throw 'Update ZIP CustomSteamLibrary directory is missing package-manifest.json'
-}
-if (-not (Test-Path -LiteralPath (Join-Path $UpdateRoot 'CustomSteamLibrary\CustomSteamLibrary.exe') -PathType Leaf)) {
-  throw 'Update ZIP CustomSteamLibrary directory is missing CustomSteamLibrary.exe'
+if (-not $isLegacyBridge) {
+  if (-not (Test-Path -LiteralPath (Join-Path $UpdateRoot 'CustomSteamLibrary\package-manifest.json') -PathType Leaf)) {
+    throw 'Update ZIP CustomSteamLibrary directory is missing package-manifest.json'
+  }
+  if (-not (Test-Path -LiteralPath (Join-Path $UpdateRoot 'CustomSteamLibrary\CustomSteamLibrary.exe') -PathType Leaf)) {
+    throw 'Update ZIP CustomSteamLibrary directory is missing CustomSteamLibrary.exe'
+  }
 }
 if (-not (Test-Path -LiteralPath (Join-Path $UpdateYeManCC 'update-manifest.json') -PathType Leaf)) {
   throw 'Update ZIP YeManCC directory is missing update-manifest.json'
@@ -447,4 +457,5 @@ Write-Output "Release PowerControl: $ReleasePowerControl"
 Write-Output "Release CustomSteamLibrary: $ReleaseCustomSteamLibrary"
 Write-Output "Update package:       $compatPackage"
 Write-Output "Package SHA256:       $packageHash"
+Write-Output "Release envelope:     $releaseEnvelope"
 Write-Output "Assets:               $($assetSources.Values -join ', ')"
