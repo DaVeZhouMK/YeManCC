@@ -66,6 +66,7 @@ jobs:
         shell: pwsh
         run: |
           $env:YEMAN_WORKSPACE_ROOT = $env:GITHUB_WORKSPACE
+          $env:YEMAN_RELEASE_ENVELOPE = if ('${{ github.ref_name }}' -eq 'v0.0.20') { 'legacy-bridge' } else { 'full' }
           pnpm run release
 
       - name: Verify release outputs
@@ -136,6 +137,7 @@ jobs:
         with:
           files: |
             Release/Packages/YeManCC.zip
+          overwrite_files: true
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
