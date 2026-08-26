@@ -1,7 +1,7 @@
-{
-  "version": "0.0.21",
-  "notes": "旧版升级器兼容桥接版：先完成升级器迁移，随后再升级到包含 CustomSteamLibrary 的三目录版本；PowerControl\\fan-host 暂不参与。",
-  "sha256": "",
-  "publishedAt": "",
-  "package": "Packages/YeManCC.zip"
+﻿{
+    "version":  "0.0.21",
+    "notes":  "旧版升级器兼容桥接版：先完成升级器迁移，随后再升级到包含 CustomSteamLibrary 的三目录版本；PowerControl\\fan-host 暂不参与。",
+    "sha256":  "E288337B2AFA09C529AD8490AAB1E199AE70507ED0B1AC4CC6BFD968632C415F",
+    "publishedAt":  "2026-08-26",
+    "package":  "Packages/YeManCC.zip"
 }
