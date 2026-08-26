@@ -14,7 +14,7 @@ $suspendBody = if ($suspendStart -ge 0 -and $suspendEnd -gt $suspendStart) {
   $native.Substring($suspendStart, $suspendEnd - $suspendStart)
 } else { '' }
 $hostCallbackStart = $hostSource.IndexOf('private void OnPowerModeChanged')
-$hostQueueStart = $hostSource.IndexOf('private void QueuePowerTransition', $hostCallbackStart)
+$hostQueueStart = $hostSource.IndexOf('private object SuspendOnPowerWorker', $hostCallbackStart)
 $hostCallbackBody = if ($hostCallbackStart -ge 0 -and $hostQueueStart -gt $hostCallbackStart) {
   $hostSource.Substring($hostCallbackStart, $hostQueueStart - $hostCallbackStart)
 } else { '' }
@@ -37,8 +37,10 @@ $checks = [ordered]@{
     $native.Contains('if (suspendStatus != 404 && suspendStatus != 405)') -and
     $native.Contains('no concurrent close fallback')
   hostSystemPowerObserver = $hostSource.Contains('SystemEvents.PowerModeChanged += OnPowerModeChanged')
-  hostPowerCallbackQueues = $hostSource.Contains('QueuePowerTransition("suspend", () => { _ = engine.SuspendForSystemPower(); })') -and
-    $hostSource.Contains('QueuePowerTransition("resume", () => { _ = engine.ResumeForSystemPower(); })')
+  hostPowerCallbackQueues = $hostSource.Contains('QueuePowerTransition(') -and
+    $hostSource.Contains('PowerIngressTarget.Suspended') -and
+    $hostSource.Contains('SuspendOnPowerWorker') -and
+    $hostSource.Contains('engine.ResumeForSystemPower()')
   hostPowerCallbackHasNoWait = $hostCallbackBody.Contains('QueuePowerTransition') -and
     -not ($hostCallbackBody.Contains('.Wait(') -or $hostCallbackBody.Contains('.Result') -or
       $hostCallbackBody.Contains('GetAwaiter().GetResult') -or $hostCallbackBody.Contains('Thread.Sleep') -or

@@ -66,7 +66,7 @@ jobs:
         shell: pwsh
         run: |
           $env:YEMAN_WORKSPACE_ROOT = $env:GITHUB_WORKSPACE
-          $env:YEMAN_RELEASE_ENVELOPE = if ('${{ github.ref_name }}' -eq 'v0.0.20') { 'legacy-bridge' } else { 'full' }
+          $env:YEMAN_RELEASE_ENVELOPE = if ('${{ github.ref_name }}' -in @('v0.0.20', 'v0.0.21')) { 'legacy-bridge' } else { 'full' }
           pnpm run release
 
       - name: Verify release outputs

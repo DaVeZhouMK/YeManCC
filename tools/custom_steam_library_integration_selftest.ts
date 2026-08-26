@@ -19,6 +19,9 @@ assert(native.includes('customSteamLibrarySendSemanticAction'), 'native direct s
 assert(native.includes('if (customSteamLibraryChildForeground())'), 'native child ownership branch is missing');
 assert(native.includes('g_customSteamLibraryInputDeadline'), 'native launch/return deadline is missing');
 assert(native.includes('gamepad.input-owner'), 'native ownership notification is missing');
+assert(!native.includes('gamepadEmitUiAction("dropdown")'), 'native X button still emits dropdown');
+assert(!engine.includes("if (pressed(2))"), 'renderer fallback still maps X to dropdown');
+assert(!engine.includes("'dropdown'"), 'renderer still exposes dropdown as a native face-button action');
 assert(!bridge.includes('customSteamLibraryInputGate'), 'renderer input gate is still imported');
 assert(!bridge.includes('customSteamLibrarySessionActive'), 'renderer still decides input ownership');
 assert(!engine.includes('customSteamLibrarySessionActive'), 'gamepad engine still delegates arbitration to renderer');

@@ -262,7 +262,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('ipc:gamepad-back', onGpBack);
 });
 
-// ── 手柄 A/X：打开菜单（与鼠标点击一致），不再顺序轮转档位 ──
+// ── 手柄 A：打开菜单（与鼠标点击一致），不再顺序轮转档位 ──
 function onGpOpen(e: Event) {
   e.preventDefault();
   openMenu(true);

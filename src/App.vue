@@ -98,6 +98,14 @@ const dynamicBackgroundActive = ref(false);
 const backgroundSource = ref<'fixed' | 'dynamic'>('fixed');
 const backgroundFallbackUrls = ref<string[]>([]);
 const backgroundFallbackIndex = ref(0);
+// 只有图片或未被暂停的视频真正作为背景层显示时，才隐藏默认黑底。
+// 视频在电池保护/窗口隐藏时会暂时卸载，此时仍需要黑底托住半透明界面。
+const hasVisibleBackgroundMedia = computed(() => Boolean(
+  backgroundUrl.value && (
+    backgroundKind.value === 'image' ||
+    (backgroundKind.value === 'video' && !backgroundVideoSuspended.value)
+  ),
+));
 let appliedBackgroundIdentity: string | null = null;
 let lastDynamicGameIdentity: string | null = null;
 let dynamicBackgroundGeneration = 0;
@@ -1368,6 +1376,7 @@ onUnmounted(() => {
 <template>
   <div class="app-root">
     <div class="app-stage" :style="scalerStyle">
+      <div v-if="!hasVisibleBackgroundMedia" class="empty-background" aria-hidden="true" />
       <video
         v-if="backgroundUrl && backgroundKind === 'video' && !backgroundVideoSuspended"
         :key="backgroundVideoGeneration"
@@ -1433,6 +1442,13 @@ onUnmounted(() => {
   background: transparent;
   position: relative;
   isolation: isolate;
+}
+.empty-background {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background: rgba(0, 0, 0, 0.3);
+  pointer-events: none;
 }
 .user-background-video {
   position: absolute;

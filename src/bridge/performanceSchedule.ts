@@ -702,6 +702,12 @@ export interface GameCustomProfile {
   dc: ScheduleProfile;
   acMode?: ScheduleMode;
   dcMode?: ScheduleMode;
+  // Per-game CPU policy.  These fields are appended for compatibility with
+  // existing entries and are intentionally independent from AC/DC profiles.
+  corePolicyEnabled?: boolean;
+  corePolicyMode?: 'default' | 'only-big' | 'big-small' | 'only-small' | 'small-super-small' | 'all';
+  hyperThreadPolicyEnabled?: boolean;
+  hyperThreadPolicy?: 'default' | 'on' | 'off';
 }
 
 export interface GameCustomRtssProfile {
@@ -728,6 +734,14 @@ function defaultGameCustomConfig(): GameCustomConfig {
 
 function normalizeCustomProfile(raw: unknown, fallback: ScheduleProfile): GameCustomProfile {
   const r = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
+  const corePolicyModes = ['default', 'only-big', 'big-small', 'only-small', 'small-super-small', 'all'] as const;
+  const hyperThreadModes = ['default', 'on', 'off'] as const;
+  const corePolicyMode = corePolicyModes.includes(r.corePolicyMode as typeof corePolicyModes[number])
+    ? r.corePolicyMode as typeof corePolicyModes[number]
+    : 'default';
+  const hyperThreadPolicy = hyperThreadModes.includes(r.hyperThreadPolicy as typeof hyperThreadModes[number])
+    ? r.hyperThreadPolicy as typeof hyperThreadModes[number]
+    : 'default';
   return {
     displayName: typeof r.displayName === 'string' ? r.displayName : '',
     // Legacy entries were implicitly active; only an explicit false disables them.
@@ -736,6 +750,10 @@ function normalizeCustomProfile(raw: unknown, fallback: ScheduleProfile): GameCu
     dc: normalizeProfile(r.dc, fallback),
     acMode: isMode(r.acMode) ? r.acMode : undefined,
     dcMode: isMode(r.dcMode) ? r.dcMode : undefined,
+    corePolicyEnabled: r.corePolicyEnabled === true,
+    corePolicyMode,
+    hyperThreadPolicyEnabled: r.hyperThreadPolicyEnabled === true,
+    hyperThreadPolicy,
   };
 }
 

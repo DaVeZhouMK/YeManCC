@@ -293,13 +293,13 @@ async function main(): Promise<void> {
      hostSource.includes('hcOemReleaseCallbackCompleted') &&
     hostSource.includes('private void OpenHcDevice()') &&
     hostSource.includes('Invoke(device, "Open")') &&
-    hostSource.includes('StartHcDeviceManager();') &&
+    !hostSource.includes('StartHcDeviceManager();') &&
     hostSource.includes('Invoke(device!, "OpenEvents")') &&
-    hostSource.includes('WaitForHcDeviceOpenForRestore();') &&
-    hostSource.includes('HC_DEVICE_NOT_OPEN_FOR_RESTORE') &&
+    hostSource.includes('EnsureHcDeviceOpenForRestore();') &&
+    !hostSource.includes('HC_DEVICE_NOT_OPEN_FOR_RESTORE') &&
     !hostSource.includes('private void WaitForHcDeviceReady()') &&
     !hostSource.includes('HC_DEVICE_OPEN_TIMEOUT') &&
-     hostSource.includes('private void CloseHcDevice(bool stopDeviceManager = true)') &&
+    hostSource.includes('private void CloseHcDevice()') &&
     hostSource.includes('Invoke(device!, "Close")') &&
     hostSource.includes('CaptureHcProfileTemplate();') &&
     (hostSource.includes('CloneHcPowerProfilePreservingFanState(hcProfileTemplate)') ||
@@ -337,10 +337,10 @@ async function main(): Promise<void> {
     !expireLeaseBody.includes('RestoreHardware(close: true)') &&
     timeoutReturnedStart >= 0 && timeoutReturnedEnd > timeoutReturnedStart &&
     timeoutReturnedBody.includes('var completedHcClose =') &&
-    timeoutReturnedBody.includes('backend.OemRestoreVerified || completedHcClose') &&
+    timeoutReturnedBody.includes('(completedHcClose || backend.OemRestoreVerified)') &&
     timeoutReturnedBody.includes('hc.timeout-returned-after-completed-boundary') &&
     timeoutReturnedBody.includes('hc.timeout-returned-close-failure-after-oem-restore') &&
-    hostSource.includes('TimedOutOperationReturned?.Invoke(failure is null)') &&
+    hostSource.includes('TimedOutOperationReturned?.Invoke(workItem.Failure is null)') &&
     hostSource.includes('var timedOut = realBackend.OperationTimedOut;') &&
     hostSource.includes('state.HcCloseCleanupPending = true;') &&
     bridgeSource.includes('function assertHcSessionClosed(state: FanState, context: string): void') &&
@@ -416,15 +416,15 @@ async function main(): Promise<void> {
     staleHandlerBody.indexOf('FaultLocked') > staleHandlerBody.indexOf('return;'),
   'a stale isolated temperature sample must restore OEM and remain resumable; only failed recovery may fault-lock');
   assert(hcOpenCoreStart >= 0 && hcOpenCoreEnd > hcOpenCoreStart &&
-    hcOpenCoreBody.indexOf('StartHcDeviceManager();') >= 0 &&
-    hcOpenCoreBody.indexOf('WaitForHcDeviceReadyBeforeOpen();') > hcOpenCoreBody.indexOf('StartHcDeviceManager();') &&
+    hcOpenCoreBody.indexOf('StartHcDeviceManager();') < 0 &&
+    hcOpenCoreBody.indexOf('WaitForHcDeviceReadyBeforeOpen();') >= 0 &&
     hcOpenCoreBody.indexOf('OpenHcDevice();') > hcOpenCoreBody.indexOf('WaitForHcDeviceReadyBeforeOpen();') &&
     hcOpenEventsCoreStart >= 0 && hcOpenEventsCoreEnd > hcOpenEventsCoreStart &&
     !hcOpenEventsCoreBody.includes('StartHcDeviceManager();') &&
     hcOpenEventsCoreBody.includes('Invoke(device!, "OpenEvents")') &&
     hostSource.includes('if (IsOpen)\n                {\n                    try { CloseHcDevice(); }') &&
-    hostSource.includes('else\n                {\n                    StopHcDeviceManager();'),
-  'HC activation order must be DeviceManager -> IsReady probe -> Open -> OpenEvents; a failed Open may only stop DeviceManager and must not manufacture a Close write');
+    hostSource.includes('hcDeviceManagerLifecycle = "not-started/no-stop-required";'),
+  'fan-only activation order must be IsReady probe -> Open -> OpenEvents; a failed Open must not manufacture a DeviceManager stop or Close write');
   assert(hcOpenCoreBody.includes('openAttempted = false;') &&
     hcOpenCoreBody.includes('oemBaselineCaptured = false;') &&
     hostSource.includes('A failed HC Open() is not an active fan session') &&
@@ -468,7 +468,7 @@ async function main(): Promise<void> {
     hostSource.includes('OnHcCpuTemperatureSampled'),
   'temperature monitor must preserve HC\'s ordered Package/Tctl event stream while separately tracking a steady valid sample as monitor health');
   const engineCloseStart = hostSource.indexOf('public object Close()');
-  const engineCloseBody = hostSource.slice(engineCloseStart, engineCloseStart + 700);
+  const engineCloseBody = hostSource.slice(engineCloseStart, engineCloseStart + 1800);
   assert(engineCloseStart >= 0 &&
     engineCloseBody.indexOf('BlockWritesForClose();') >= 0 &&
     engineCloseBody.indexOf('BlockWritesForClose();') < engineCloseBody.indexOf('lock (gate)') &&

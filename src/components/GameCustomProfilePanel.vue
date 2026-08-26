@@ -3,6 +3,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import AppIcon from '@/components/AppIcon.vue';
 import { focusGamepadElement } from '@/gamepad/focus';
 import Dropdown from '@/components/Dropdown.vue';
+import Toggle from '@/components/Toggle.vue';
 import {
   FLOAT_PROFILES,
   getTdpTarget,
@@ -26,6 +27,14 @@ import {
 import { detectPowerMode } from '@/bridge/yeman';
 import { detectedGameName, type DetectedGame } from '@/bridge/gamedetect';
 import { tryAcquireQuickAction } from '@/bridge/quickActionLock';
+import {
+  applyGameCorePolicy,
+  clearGameCorePolicy,
+  detectGameCorePolicy,
+  type GameCorePolicyCapabilities,
+  type GameCorePolicyMode,
+  type GameHyperThreadMode,
+} from '@/bridge/gameCorePolicy';
 
 const props = defineProps<{ game: DetectedGame | null; open: boolean }>();
 const emit = defineEmits<{
@@ -74,6 +83,13 @@ const error = ref('');
 const message = ref('');
 const expanded = ref(false);
 const lastAppliedIdentity = ref('');
+const lastCorePolicyIdentity = ref('');
+const corePolicyCapabilities = ref<GameCorePolicyCapabilities | null>(null);
+const corePolicyEnabled = ref(false);
+const corePolicyMode = ref<GameCorePolicyMode>('default');
+const hyperThreadPolicyEnabled = ref(false);
+const hyperThreadPolicy = ref<GameHyperThreadMode>('default');
+const corePolicyStatus = ref('');
 let stopScheduleListener: (() => void) | null = null;
 let loadRevision = 0;
 let transientApplyRetryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -91,6 +107,15 @@ const customEnabled = computed(() => entry.value?.enabled === true);
 const gameAvailable = computed(() => !!props.game && !!key.value);
 const gameName = computed(() => detectedGameName(props.game) || props.game?.name || key.value || '当前游戏');
 const scheduleEnabled = computed(() => schedule.value?.enabled === true);
+const corePolicyVisible = computed(() => hasConfiguration.value && (
+  corePolicyCapabilities.value?.heterogeneous === true ||
+  corePolicyCapabilities.value?.smtAvailable === true
+));
+const corePolicyCardClass = computed(() => {
+  const count = Number(corePolicyCapabilities.value?.heterogeneous === true) +
+    Number(corePolicyCapabilities.value?.smtAvailable === true);
+  return count === 1 ? 'single' : 'double';
+});
 
 function isScheduleMode(value: unknown): value is ScheduleMode {
   return typeof value === 'string' && MODE_ORDER.includes(value as ScheduleMode);
@@ -158,6 +183,10 @@ function makeEntry(
     dcMode: modes.dc,
     ac: cloneProfile(currentSchedule.profiles.ac[modes.ac]),
     dc: cloneProfile(currentSchedule.profiles.dc[modes.dc]),
+    corePolicyEnabled: current?.corePolicyEnabled ?? false,
+    corePolicyMode: isCorePolicyMode(current?.corePolicyMode) ? current.corePolicyMode : 'default',
+    hyperThreadPolicyEnabled: current?.hyperThreadPolicyEnabled ?? false,
+    hyperThreadPolicy: isHyperThreadMode(current?.hyperThreadPolicy) ? current.hyperThreadPolicy : 'default',
   };
 }
 
@@ -184,30 +213,146 @@ async function applyExistingProfile(): Promise<void> {
   const target = props.game;
   const current = entry.value;
   const currentSchedule = schedule.value;
-  if (!target || !current || current.enabled === false || !currentSchedule || !scheduleEnabled.value) return;
-  const identity = `${target.pid}:${target.processCreated}:${key.value}`;
-  if (lastAppliedIdentity.value === identity) return;
-  lastAppliedIdentity.value = identity;
-  try {
-    const profiles = profilesForEntry(current, currentSchedule);
-    const applied = await applyGameCustomProfiles(profiles.ac, profiles.dc, {
-      pid: target.pid,
-      processCreated: target.processCreated,
-    });
-    if (!applied) lastAppliedIdentity.value = '';
-    else transientApplyRetryCount = 0;
-  } catch (e) {
-    lastAppliedIdentity.value = '';
-    // These errors are transient during WebView/native recovery or while the
-    // native worker queue is draining. Retry quietly instead of presenting a
-    // red application failure for an operation that has not permanently failed.
-    if (isTransientApplyError(e)) {
-      scheduleTransientApplyRetry();
-      return;
+  if (target && current && current.enabled !== false && currentSchedule && scheduleEnabled.value) {
+    const identity = `${target.pid}:${target.processCreated}:${key.value}`;
+    if (lastAppliedIdentity.value !== identity) {
+      lastAppliedIdentity.value = identity;
+      try {
+        const profiles = profilesForEntry(current, currentSchedule);
+        const applied = await applyGameCustomProfiles(profiles.ac, profiles.dc, {
+          pid: target.pid,
+          processCreated: target.processCreated,
+        });
+        if (!applied) lastAppliedIdentity.value = '';
+        else transientApplyRetryCount = 0;
+      } catch (e) {
+        lastAppliedIdentity.value = '';
+        // These errors are transient during WebView/native recovery or while the
+        // native worker queue is draining. Retry quietly instead of presenting a
+        // red application failure for an operation that has not permanently failed.
+        if (isTransientApplyError(e)) {
+          scheduleTransientApplyRetry();
+        } else {
+          transientApplyRetryCount = 0;
+          announce('', `应用当前游戏专属配置失败：${(e as Error).message}`);
+        }
+      }
     }
-    transientApplyRetryCount = 0;
-    announce('', `应用当前游戏专属配置失败：${(e as Error).message}`);
   }
+  await applyCurrentCorePolicy(target, current);
+}
+
+function corePolicyTarget(target: DetectedGame | null): { pid: number; processCreated: string } | undefined {
+  return target ? { pid: target.pid, processCreated: target.processCreated } : undefined;
+}
+
+function corePolicyIsActive(): boolean {
+  const coreActive = corePolicyEnabled.value &&
+    corePolicyCapabilities.value?.heterogeneous === true &&
+    corePolicyMode.value !== 'default';
+  const hyperThreadActive = hyperThreadPolicyEnabled.value &&
+    corePolicyCapabilities.value?.smtAvailable === true &&
+    hyperThreadPolicy.value !== 'default';
+  return coreActive || hyperThreadActive;
+}
+
+async function applyCurrentCorePolicy(
+  target: DetectedGame | null = props.game,
+  current: GameCustomProfile | undefined = entry.value,
+): Promise<void> {
+  const identity = target ? `${target.pid}:${target.processCreated}:${key.value}` : '';
+  // 探测失败时保持已有进程限制，避免一次短暂 IPC/系统探测错误把用户
+  // 已经启用的专属策略误清掉；下一次识别刷新会继续尝试。
+  if (target && current && !corePolicyCapabilities.value) return;
+  if (!target || !current || !corePolicyIsActive()) {
+    const cleared = await clearGameCorePolicy(current ? corePolicyTarget(target) : undefined);
+    if (!cleared) throw new Error('恢复游戏原始 CPU 设置失败');
+    lastCorePolicyIdentity.value = '';
+    corePolicyStatus.value = '';
+    return;
+  }
+  if (lastCorePolicyIdentity.value === identity) return;
+  const result = await applyGameCorePolicy(
+    corePolicyTarget(target)!,
+    corePolicyEnabled.value ? corePolicyMode.value : 'default',
+    hyperThreadPolicyEnabled.value ? hyperThreadPolicy.value : 'default',
+  );
+  if (!result?.ok || !result.applied) {
+    throw new Error(result?.error || '当前游戏 CPU 设置未应用');
+  }
+  lastCorePolicyIdentity.value = identity;
+  corePolicyStatus.value = `已应用到当前游戏：CPU Set ${result.cpuSetCount} 个 · 亲和性 ${result.affinityMask}`;
+}
+
+async function saveCorePolicyPatch(
+  patch: Partial<Pick<GameCustomProfile, 'corePolicyEnabled' | 'corePolicyMode' | 'hyperThreadPolicyEnabled' | 'hyperThreadPolicy'>>,
+  successMessage: string,
+): Promise<void> {
+  const current = entry.value;
+  if (!current || busy.value || !props.game || !key.value) return;
+  loadRevision += 1;
+  const release = tryAcquireQuickAction('top-custom-core-policy');
+  if (!release) {
+    announce('', '已有其它快捷操作正在执行，请稍候');
+    return;
+  }
+  const previous = current;
+  const nextEntry: GameCustomProfile = { ...current, ...patch };
+  const next: GameCustomConfig = {
+    ...config.value,
+    entries: { ...config.value.entries, [key.value]: nextEntry },
+  };
+  busy.value = true;
+  try {
+    await saveGameCustomConfig(next);
+    config.value = next;
+    syncCorePolicyFromEntry();
+    lastCorePolicyIdentity.value = '';
+    await applyCurrentCorePolicy(props.game, nextEntry);
+    announce(`${successMessage}${corePolicyStatus.value ? '，并已应用到当前游戏' : ''}`);
+    emit('changed');
+  } catch (e) {
+    try {
+      await saveGameCustomConfig({
+        ...config.value,
+        entries: { ...config.value.entries, [key.value]: previous },
+      });
+    } catch { /* 下一次 load 会重新读取磁盘状态。 */ }
+    config.value = {
+      ...config.value,
+      entries: { ...config.value.entries, [key.value]: previous },
+    };
+    syncCorePolicyFromEntry();
+    lastCorePolicyIdentity.value = '';
+    announce('', `保存专属核心设置失败：${(e as Error).message}`);
+  } finally {
+    busy.value = false;
+    release();
+  }
+}
+
+function toggleCorePolicy(value: boolean): void {
+  const nextMode = value && corePolicyMode.value === 'default'
+    ? 'big-small' as GameCorePolicyMode
+    : corePolicyMode.value;
+  void saveCorePolicyPatch(
+    { corePolicyEnabled: value, corePolicyMode: nextMode },
+    value ? '已开启当前游戏大小核心控制（大核为主）' : '已关闭当前游戏大小核心控制',
+  );
+}
+
+function selectCorePolicyMode(value: string | number): void {
+  if (!isCorePolicyMode(value)) return;
+  void saveCorePolicyPatch({ corePolicyMode: value }, `已选择大小核心：${corePolicyModeOptions.value.find((item) => item.value === value)?.label || value}`);
+}
+
+function toggleHyperThreadPolicy(value: boolean): void {
+  void saveCorePolicyPatch({ hyperThreadPolicyEnabled: value }, value ? '已开启当前游戏超线程控制' : '已关闭当前游戏超线程控制');
+}
+
+function selectHyperThreadPolicy(value: string | number): void {
+  if (!isHyperThreadMode(value)) return;
+  void saveCorePolicyPatch({ hyperThreadPolicy: value }, `已选择超线程：${hyperThreadModeOptions.find((item) => item.value === value)?.label || value}`);
 }
 
 async function load(): Promise<void> {
@@ -218,8 +363,11 @@ async function load(): Promise<void> {
   config.value = loaded;
   schedule.value = loadedSchedule;
   syncSelectedModes();
+  syncCorePolicyFromEntry();
   if (!entry.value) lastAppliedIdentity.value = '';
+  if (!entry.value) lastCorePolicyIdentity.value = '';
   powerSide.value = await detectPowerMode().catch(() => 'ac');
+  corePolicyCapabilities.value = await detectGameCorePolicy();
   if (revision !== loadRevision || busy.value || !props.open) return;
   await applyExistingProfile();
 }
@@ -256,6 +404,7 @@ async function createConfiguration(): Promise<void> {
     await saveGameCustomConfig(next);
     config.value = next;
     selectedModes.value = modes;
+    syncCorePolicyFromEntry();
     lastAppliedIdentity.value = '';
 
     // 创建只保存配置，不改变当前性能状态；用户稍后点击“未启用专属配置”
@@ -277,6 +426,56 @@ function focusExpandedEntry(): void {
     if (first) focusGamepadElement(first);
   });
 }
+
+function isCorePolicyMode(value: unknown): value is GameCorePolicyMode {
+  return value === 'default' || value === 'only-big' || value === 'big-small' ||
+    value === 'only-small' || value === 'small-super-small' || value === 'all';
+}
+
+function isHyperThreadMode(value: unknown): value is GameHyperThreadMode {
+  return value === 'default' || value === 'on' || value === 'off';
+}
+
+function syncCorePolicyFromEntry(): void {
+  const current = entry.value;
+  corePolicyEnabled.value = current?.corePolicyEnabled === true;
+  corePolicyMode.value = isCorePolicyMode(current?.corePolicyMode)
+    ? current!.corePolicyMode!
+    : 'default';
+  hyperThreadPolicyEnabled.value = current?.hyperThreadPolicyEnabled === true;
+  hyperThreadPolicy.value = isHyperThreadMode(current?.hyperThreadPolicy)
+    ? current!.hyperThreadPolicy!
+    : 'default';
+}
+
+const corePolicyModeOptions = computed(() => {
+  const classes = corePolicyCapabilities.value?.efficiencyClasses.length ?? 0;
+  const options: Array<{ value: GameCorePolicyMode; label: string; sub: string }> = [
+    { value: 'default', label: 'Windows 默认调度', sub: '不限制当前游戏核心' },
+    {
+      value: 'big-small',
+      label: '大核为主',
+      sub: classes >= 3 ? '大核 + 小核，排除超小' : '大核 + 小核',
+    },
+    { value: 'only-big', label: '仅大核', sub: '只允许性能等级最高的核心' },
+  ];
+  if (classes >= 3) {
+    options.push(
+      { value: 'only-small', label: '仅小核', sub: '只允许中间效率等级核心' },
+      { value: 'small-super-small', label: '小核 + 超小核', sub: '排除大核' },
+    );
+  } else {
+    options.push({ value: 'only-small', label: '仅小核', sub: '只允许效率等级核心' });
+  }
+  options.push({ value: 'all', label: '全部核心', sub: '允许所有已识别核心' });
+  return options;
+});
+
+const hyperThreadModeOptions = [
+  { value: 'default' as GameHyperThreadMode, label: 'Windows 默认', sub: '不改变超线程分配' },
+  { value: 'on' as GameHyperThreadMode, label: '允许超线程', sub: '允许每个物理核的全部线程' },
+  { value: 'off' as GameHyperThreadMode, label: '本游戏不使用超线程', sub: '每个物理核只保留一个线程' },
+];
 
 function disableLeavingBody(el: Element): void {
   if (!(el instanceof HTMLElement)) return;
@@ -339,6 +538,7 @@ async function selectMode(side: PowerSide, rawMode: string | number): Promise<vo
     await saveGameCustomConfig(next);
     config.value = next;
     selectedModes.value = modes;
+    syncCorePolicyFromEntry();
     lastAppliedIdentity.value = '';
 
     let applied = false;
@@ -349,6 +549,7 @@ async function selectMode(side: PowerSide, rawMode: string | number): Promise<vo
         processCreated: props.game.processCreated,
       });
     }
+    await applyCurrentCorePolicy(props.game, nextEntry);
     const suffix = nextEntry.enabled === false
       ? '（已保存，当前未启用）'
       : (applied ? '并已应用' : '（已保存，当前未下发）');
@@ -384,6 +585,7 @@ async function toggleCustomEnabled(): Promise<void> {
     await saveGameCustomConfig(next);
     config.value = next;
     lastAppliedIdentity.value = '';
+    syncCorePolicyFromEntry();
 
     if (nextEnabled) {
       const profiles = profilesForEntry(nextEntry, currentSchedule);
@@ -393,6 +595,7 @@ async function toggleCustomEnabled(): Promise<void> {
       });
       if (!applied) throw new Error('锁定游戏已变化，专属配置未应用');
       lastAppliedIdentity.value = `${props.game.pid}:${props.game.processCreated}:${key.value}`;
+      await applyCurrentCorePolicy(props.game, nextEntry);
       announce('已启用并应用专属配置');
     } else {
       // 关闭后只恢复当前电源侧的普通自动档位；手动全局模式不主动改硬件。
@@ -425,6 +628,9 @@ watch(() => [props.open, props.game?.pid, props.game?.processCreated], () => {
 
 watch(() => gameAvailable.value, (available) => {
   if (available) return;
+  void clearGameCorePolicy().catch(() => {});
+  lastCorePolicyIdentity.value = '';
+  corePolicyStatus.value = '';
   const activeElement = document.activeElement as HTMLElement | null;
   const focusWasInCustom = !!activeElement?.closest('[data-gp-custom-entry], [data-gp-custom-body]');
   expanded.value = false;
@@ -512,6 +718,60 @@ onUnmounted(() => {
           </div>
         </div>
       </div>
+
+      <div
+        v-if="corePolicyVisible"
+        class="game-core-policy-list"
+        :class="corePolicyCardClass"
+        data-gp-game-row="custom-core-policy"
+      >
+        <div v-if="corePolicyCapabilities?.heterogeneous" class="game-core-policy-card">
+          <Toggle
+            :model-value="corePolicyEnabled"
+            label="大小核心控制"
+            description="CPU Set + 进程亲和性 · 当前游戏"
+            color="accent"
+            :disabled="busy"
+            @update:model-value="toggleCorePolicy"
+          />
+          <div class="game-core-policy-picker">
+            <small>核心组合</small>
+            <Dropdown
+              :model-value="corePolicyMode"
+              :options="corePolicyModeOptions"
+              :disabled="busy || !corePolicyEnabled"
+              color="accent"
+              aria-label="当前游戏大小核心组合"
+              @update:model-value="selectCorePolicyMode"
+            />
+          </div>
+        </div>
+
+        <div v-if="corePolicyCapabilities?.smtAvailable" class="game-core-policy-card">
+          <Toggle
+            :model-value="hyperThreadPolicyEnabled"
+            label="超线程控制"
+            description="当前游戏进程 · 不改系统"
+            color="dc"
+            :disabled="busy"
+            @update:model-value="toggleHyperThreadPolicy"
+          />
+          <div class="game-core-policy-picker">
+            <small>超线程组合</small>
+            <Dropdown
+              :model-value="hyperThreadPolicy"
+              :options="hyperThreadModeOptions"
+              :disabled="busy || !hyperThreadPolicyEnabled"
+              color="dc"
+              aria-label="当前游戏超线程控制"
+              @update:model-value="selectHyperThreadPolicy"
+            />
+          </div>
+        </div>
+      </div>
+
+      <small v-if="corePolicyStatus" class="custom-top-hint core-policy-status">{{ corePolicyStatus }}</small>
+      <small v-if="corePolicyVisible" class="custom-top-hint">只作用于当前识别游戏，不改变系统核心分类，不需要重启。</small>
 
       <div v-if="hasConfiguration" class="custom-top-actions" data-gp-custom-actions data-gp-game-row="custom-actions">
         <button
@@ -662,6 +922,30 @@ onUnmounted(() => {
 .side-name small, .mode-picker > small, .custom-top-hint { color: var(--text-dim); font-size: 11px; white-space: nowrap; }
 .mode-picker { min-width: 0; display: grid; gap: 4px; }
 .mode-picker > small { overflow: hidden; text-overflow: ellipsis; }
+.game-core-policy-list {
+  display: grid;
+  gap: 8px;
+}
+.game-core-policy-list.double { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.game-core-policy-list.single { grid-template-columns: minmax(0, 1fr); }
+.game-core-policy-card {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+  padding: 9px 10px 10px;
+  border: 1px solid rgba(255,255,255,.055);
+  border-radius: 9px;
+  background: var(--bg-input);
+}
+.game-core-policy-card :deep(.toggle-row) { padding: 0 0 5px; }
+.game-core-policy-card :deep(.toggle-label) { font-size: 12px; }
+.game-core-policy-card :deep(.toggle-desc) {
+  white-space: normal;
+  line-height: 1.25;
+}
+.game-core-policy-picker { display: grid; gap: 4px; min-width: 0; }
+.game-core-policy-picker > small { color: var(--text-dim); font-size: 10px; }
+.core-policy-status { overflow: hidden; text-overflow: ellipsis; }
 .custom-top-hint { display: block; }
 .custom-delete-confirm {
   display: grid;
