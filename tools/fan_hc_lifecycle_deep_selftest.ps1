@@ -126,32 +126,29 @@ Require-Contains 'HC SystemManager resume guard' $hcSystemText 'if (isPowerSuspe
 # 2. YeMan's equivalent single device boundary and serialized transitions.
 $hostOpen = Slice $hostText 'private void OpenCore()' 'public void OpenEvents()'
 Require-Order 'YeMan Open' $hostOpen @(
-  'StartHcDeviceManager();',
   'WaitForHcDeviceReadyBeforeOpen();',
   'OpenHcDevice();',
   'CaptureOemBaseline();'
 )
+if ($hostOpen.Contains('StartHcDeviceManager();')) { throw 'YeMan fan-only Open must not start HC DeviceManager' }
 $hostEvents = Slice $hostText 'private void OpenEventsCore()' 'private void SubscribeExternalProfileEvents()'
 Require-Order 'YeMan OpenEvents' $hostEvents @(
-  'AssertHcNonFanManagersIsolated();',
   'Invoke(device!, "OpenEvents");',
-  'WaitForHcDeviceOpenForRestore();'
+  'EnsureHcDeviceOpenForRestore();'
 )
-$hostClose = Slice $hostText 'private void CloseCore(bool stopDeviceManager)' 'private void WaitForHcManagersBeforeWindowClose()'
+$hostClose = Slice $hostText 'private void CloseCore(bool stopDeviceManager)' 'private void CloseHcDevice()'
 Require-Order 'YeMan Close' $hostClose @(
-  'WaitForHcManagersBeforeWindowClose();',
   'StopCpuTemperatureMonitor();',
-  'UnsubscribeExternalProfileEvents();',
-  'CloseHcDevice(stopDeviceManager);'
+  'CloseHcDevice();'
 )
-$hostDeviceClose = Slice $hostText 'private void CloseHcDevice(bool stopDeviceManager = true)' 'private void SetHcPhase'
+$hostDeviceClose = Slice $hostText 'private void CloseHcDevice()' 'private static void ExecuteCloseBoundary'
 Require-Order 'YeMan virtual close' $hostDeviceClose @(
   'Invoke(device!, "Close");',
-  'StopHcDeviceManager();'
+  'hcDeviceManagerLifecycle = "not-started/no-stop-required";'
 )
 Require-Contains 'YeMan close owner' $hostText 'Interlocked.Exchange(ref closeBoundaryClaimed, 1)'
 Require-Contains 'YeMan close pending dedupe' $hostText 'HC_CLOSE_PENDING'
-Require-Contains 'YeMan manager stop retry' $hostText 'HC DeviceManager.Stop'
+Require-Contains 'YeMan manager isolation marker' $hostText 'not-started/no-stop-required'
 Require-Contains 'YeMan host ordered power queue' $hostText 'Channel.CreateUnbounded<PowerTransition>'
 Require-Contains 'YeMan host ordered power queue' $hostText 'powerTransitions.Writer.TryWrite'
 Require-Contains 'YeMan host ordered power queue' $hostText 'ProcessPowerTransitionsAsync'
@@ -184,7 +181,9 @@ Require-Contains 'frontend fast-resume adoption' $frontendText 'Always perform o
 #    them as equivalence: YeMan deliberately does not start HC's complete
 #    ManagerFactory graph, and HC has no universal physical OEM ack.
 $fullManagerGraph = $hostText.IndexOf('foreach (IManager manager in ManagerFactory.Managers)', [StringComparison]::Ordinal) -ge 0
-$fanOnlyIsolation = $hostText.IndexOf('AssertHcNonFanManagersIsolated', [StringComparison]::Ordinal) -ge 0
+$fanOnlyIsolation = (-not $hostText.Contains('StartHcDeviceManager();')) -and
+  (-not $hostText.Contains('StopHcDeviceManager();')) -and
+  $hostText.Contains('hcDeviceManagerLifecycle = "not-started/no-stop-required";')
 $routeSpecificReadback = $hostText.IndexOf('hc-default-table-readback-confirmed', [StringComparison]::Ordinal) -ge 0
 $differences = @(
   [pscustomobject]@{ id = 'T1-HC-FULL-MANAGER-GRAPH'; severity = 'P1'; status = 'needs-investigation'; detail = 'Fan Host intentionally keeps HC non-fan ManagerFactory graph stopped; this is not full HC application equivalence.' },

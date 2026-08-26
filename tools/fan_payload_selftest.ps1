@@ -135,7 +135,8 @@ $checks = [ordered]@{
   bridgeRequiresFactoryBootstrapClosure = $bridge.Contains("{ file: 'WindowsInput.dll'") -and $bridge.Contains("{ file: 'HidLibrary.dll'") -and $bridge.Contains("{ file: 'SharpDX.Direct3D9.dll'") -and $bridge.Contains("{ file: 'SharpDX.XInput.dll'") -and $bridge.Contains("{ file: 'hidapi.net.dll'") -and $bridge.Contains("{ file: 'hidapi.dll'")
   # HC ROGAlly dispatches CPU/GPU/Mid SetFanCurve calls. GetFanCurve is kept
   # as optional diagnostics only; HC has no cross-firmware ACK contract and
-  # no direct vendor fallback belongs in this Host.
+  # no direct vendor fallback belongs in this Host. The fan-only Host no
+  # longer invents a second IsOpen/readiness gate after the HC virtual Open.
   hostHasHcAsusRestoreReadback = (
     -not $hostSource.Contains('IsHcAsusWriteAcknowledged') -and
     -not $hostSource.Contains('write was not acknowledged') -and
@@ -149,8 +150,9 @@ $checks = [ordered]@{
     $hostSource.Contains('private void MarkHcOemReleaseCallbackCompleted()') -and
     $hostSource.Contains('private void OpenHcDevice()') -and
     $hostSource.Contains('Invoke(device!, "OpenEvents")') -and
-    $hostSource.Contains('private void WaitForHcDeviceOpenForRestore()') -and
-    $hostSource.Contains('HC_DEVICE_NOT_OPEN_FOR_RESTORE') -and
+    $hostSource.Contains('private void WaitForHcDeviceReadyBeforeOpen()') -and
+    $hostSource.Contains('private void EnsureHcDeviceOpenForRestore()') -and
+    -not $hostSource.Contains('HC_DEVICE_NOT_OPEN_FOR_RESTORE') -and
     ($hostSource.Contains('private void CloseHcDevice()') -or $hostSource.Contains('private void CloseHcDevice(bool stopDeviceManager = true)')) -and
     $hostSource.Contains('ApplyPowerProfile(profile);') -and
     $hostSource.Contains('CaptureHcProfileTemplate();') -and

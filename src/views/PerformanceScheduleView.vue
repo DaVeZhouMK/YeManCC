@@ -199,6 +199,29 @@ const editModeOptions = computed(() => MODE_ORDER.map((mode) => ({
   label: MODE_META[mode].label,
   sub: modeOptionSub(selectedSide.value, mode),
 })));
+
+// 编辑器的手柄导航按视觉网格固定行列，不再用 range input（只有 6px 高）
+// 与下拉按钮的 DOM 中心点猜测上下关系。每个可见编辑控件都加入同一张
+// 视觉坐标表，保证同一行左右切换、相邻行上下切换。
+const editorGridKeys = computed(() => {
+  const draft = editingDraft.value;
+  if (!draft) return [] as string[];
+  const keys: string[] = [];
+  if (isHeterogeneousCpu.value) keys.push('coreMode');
+  if (draft.fpsTarget > 0) keys.push('cpuTarget');
+  if (draft.cpuTarget === 'none' || draft.fpsTarget === 0) keys.push('cpuPreset');
+  if (draft.fpsTarget > 0) keys.push('tdpStrategy');
+  return keys;
+});
+function editorGridPosition(key: string): { row: number; col: number } | undefined {
+  const index = editorGridKeys.value.indexOf(key);
+  if (index < 0) return undefined;
+  return { row: 1 + Math.floor(index / 2), col: index % 2 };
+}
+const editorGridRowCount = computed(() => Math.ceil(editorGridKeys.value.length / 2));
+const editorTdpRow = computed(() => 1 + editorGridRowCount.value);
+const editorFpsRow = computed(() => editorTdpRow.value + 1);
+const editorActionsRow = computed(() => editorFpsRow.value + 1);
 const STRATEGY_LABEL: Record<TdpFloatStrategy, string> = {
   none: '无下降',
   aggressive: '激进浮动',
@@ -927,6 +950,8 @@ onUnmounted(() => {
             :options="editModeOptions"
             :color="sideColor"
             :disabled="busy"
+            gp-row="0"
+            gp-col="0"
             show-selected-sub
             aria-label="选择要编辑的性能档位"
             @update:model-value="selectEditingMode"
@@ -942,6 +967,8 @@ onUnmounted(() => {
             :options="CORE_MODE_OPTS"
             :color="sideColor"
             :disabled="busy"
+            :gp-row="editorGridPosition('coreMode')?.row"
+            :gp-col="editorGridPosition('coreMode')?.col"
             @update:model-value="updateEditing('coreMode', $event as CoreMode)"
           />
         </label>
@@ -952,6 +979,8 @@ onUnmounted(() => {
             :options="CPU_FLOAT_OPTS"
             :color="sideColor"
             :disabled="busy"
+            :gp-row="editorGridPosition('cpuTarget')?.row"
+            :gp-col="editorGridPosition('cpuTarget')?.col"
             show-selected-sub
             @update:model-value="updateEditing('cpuTarget', $event as FloatProfile)"
           />
@@ -963,6 +992,8 @@ onUnmounted(() => {
             :options="CPU_OPTS"
             :color="sideColor"
             :disabled="busy"
+            :gp-row="editorGridPosition('cpuPreset')?.row"
+            :gp-col="editorGridPosition('cpuPreset')?.col"
             show-selected-sub
             :selected-sub-text="cpuPresetShortDetail(editingDraft.cpuPreset)"
             @update:model-value="updateEditing('cpuPreset', $event as CpuPreset)"
@@ -975,6 +1006,8 @@ onUnmounted(() => {
             :options="TDP_STRATEGY_OPTS"
             :color="sideColor"
             :disabled="busy"
+            :gp-row="editorGridPosition('tdpStrategy')?.row"
+            :gp-col="editorGridPosition('tdpStrategy')?.col"
             show-selected-sub
             @update:model-value="updateEditing('tdpStrategy', $event as TdpFloatStrategy)"
           />
@@ -992,6 +1025,8 @@ onUnmounted(() => {
             unit="W"
             :color="sideColor"
             :disabled="busy"
+            :gp-row="editorTdpRow"
+            gp-col="0"
             @update:model-value="updateEditing('tdpMax', $event)"
           />
           <Dropdown
@@ -1001,6 +1036,8 @@ onUnmounted(() => {
             :color="sideColor"
             :disabled="busy"
             width="104px"
+            :gp-row="editorTdpRow"
+            gp-col="1"
             aria-label="TDP 最大值上限"
             @update:model-value="onTdpCeilingChange"
           />
@@ -1016,6 +1053,8 @@ onUnmounted(() => {
             :value-text="editingDraft.fpsTarget === 0 ? '不锁帧' : undefined"
             :color="sideColor"
             :disabled="busy || editingDraft.fpsTarget === 0"
+            :gp-row="editorFpsRow"
+            gp-col="0"
             @update:model-value="updateEditing('fpsTarget', $event)"
           />
           <Dropdown
@@ -1025,6 +1064,8 @@ onUnmounted(() => {
             :color="sideColor"
             :disabled="busy"
             width="104px"
+            :gp-row="editorFpsRow"
+            gp-col="1"
             aria-label="帧数目标上限"
             @update:model-value="onFpsCeilingChange"
           />
@@ -1037,13 +1078,15 @@ onUnmounted(() => {
           type="button"
           data-gp-group="schedule-editor-actions"
           class="editor-reset"
+          :data-gp-row="editorActionsRow"
+          data-gp-col="0"
           :disabled="busy"
           @click="requestResetProfiles"
         >
           <AppIcon name="refresh" />配置重制
         </button>
-        <button type="button" data-gp-group="schedule-editor-actions" class="primary" :disabled="busy" @click="saveEditor">保存组合</button>
-        <button type="button" data-gp-group="schedule-editor-actions" class="editor-cancel" @click="closeEditor">
+        <button type="button" data-gp-group="schedule-editor-actions" class="primary" :data-gp-row="editorActionsRow" data-gp-col="1" :disabled="busy" @click="saveEditor">保存组合</button>
+        <button type="button" data-gp-group="schedule-editor-actions" class="editor-cancel" :data-gp-row="editorActionsRow" data-gp-col="2" @click="closeEditor">
           取消 <small class="gp-hint">B</small>
         </button>
       </div>

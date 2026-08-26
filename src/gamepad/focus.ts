@@ -1,5 +1,9 @@
 const DEFAULT_SAFE_TOP = 24;
 const DEFAULT_SAFE_BOTTOM = 24;
+// 只在控件靠近底部时做小幅回收，避免一次方向键把整页大幅拉到中间。
+const GENTLE_BOTTOM_ZONE = 64;
+const GENTLE_REPOSITION_MAX = 72;
+const GENTLE_CENTER_RATIO = 0.54;
 
 function parsePixels(value: string, fallback: number): number {
   const parsed = Number.parseFloat(value);
@@ -178,14 +182,18 @@ function getVisibleScrollRect(container: HTMLElement): { top: number; bottom: nu
 }
 
 /** Keep an element fully inside every scrollable ancestor's safe area.
- * When moving upward with the gamepad, prefer the existing bottom safe edge
- * while the target is already visible. This lets the same scroll correction
- * naturally unwind to scrollTop=0 and reveal the page content above it.
+ * When a target enters from below, gently favor the middle of the usable
+ * viewport. A target that is only slightly clipped is moved just enough to
+ * become fully visible; a target already visible near the bottom gets only a
+ * small one-shot nudge. This keeps the old edge-safe behavior without making
+ * the focused control sit against the bottom edge.
  */
-export function scrollElementIntoSafeArea(el: HTMLElement, preferBottom = false): void {
+export function scrollElementIntoSafeArea(el: HTMLElement): void {
   for (const container of findScrollableAncestors(el)) {
     const style = getComputedStyle(container);
     let visualPerScrollUnit = visualScale(container);
+    let gentleShiftRemaining = GENTLE_REPOSITION_MAX;
+    let visibilityCorrectionApplied = false;
     const safeTopCss = parsePixels(style.scrollPaddingTop, 0);
     const safeBottomCss = parsePixels(style.scrollPaddingBottom, 0);
 
@@ -200,15 +208,48 @@ export function scrollElementIntoSafeArea(el: HTMLElement, preferBottom = false)
       const viewportBottom = visibleRect.bottom - safeBottom;
       const availableHeight = Math.max(0, viewportBottom - viewportTop);
       let visualDelta = 0;
+      let gentleCorrectionRequested = false;
 
       if (elementRect.height > availableHeight) {
         visualDelta = elementRect.top - viewportTop;
-      } else if (preferBottom && elementRect.bottom < viewportBottom) {
-        visualDelta = elementRect.bottom - viewportBottom;
       } else if (elementRect.top < viewportTop) {
         visualDelta = elementRect.top - viewportTop;
       } else if (elementRect.bottom > viewportBottom) {
-        visualDelta = elementRect.bottom - viewportBottom;
+        const overflow = elementRect.bottom - viewportBottom;
+        if (overflow <= GENTLE_BOTTOM_ZONE) {
+          // First guarantee complete visibility, preserving the old strategy
+          // for controls that are only a few pixels below the safe edge.
+          visualDelta = overflow;
+          visibilityCorrectionApplied = true;
+        } else {
+          // Larger jumps are easier to use when the focused control lands
+          // around the middle, but the desired center is still slightly below
+          // the true midpoint so the page does not feel over-scrolled.
+          const minCenter = viewportTop + elementRect.height / 2;
+          const maxCenter = viewportBottom - elementRect.height / 2;
+          const desiredCenter = Math.max(
+            minCenter,
+            Math.min(maxCenter, viewportTop + availableHeight * GENTLE_CENTER_RATIO),
+          );
+          visualDelta = elementRect.top + elementRect.height / 2 - desiredCenter;
+        }
+      } else if (
+        !visibilityCorrectionApplied &&
+        gentleShiftRemaining > 0 &&
+        elementRect.bottom > viewportBottom - GENTLE_BOTTOM_ZONE
+      ) {
+        // Already visible but visually low: pull it up only a little. The
+        // remaining budget is shared by the re-measurement loop below, so a
+        // single focus operation cannot turn into a full-page reposition.
+        const minCenter = viewportTop + elementRect.height / 2;
+        const maxCenter = viewportBottom - elementRect.height / 2;
+        const desiredCenter = Math.max(
+          minCenter,
+          Math.min(maxCenter, viewportTop + availableHeight * GENTLE_CENTER_RATIO),
+        );
+        const desiredDelta = elementRect.top + elementRect.height / 2 - desiredCenter;
+        visualDelta = Math.max(-gentleShiftRemaining, Math.min(gentleShiftRemaining, desiredDelta));
+        gentleCorrectionRequested = Math.abs(visualDelta) >= 0.5;
       }
 
       if (Math.abs(visualDelta) < 0.5) break;
@@ -226,6 +267,9 @@ export function scrollElementIntoSafeArea(el: HTMLElement, preferBottom = false)
 
       const actualVisualMovement = beforeTop - el.getBoundingClientRect().top;
       if (Math.abs(actualVisualMovement) >= 0.5) {
+        if (gentleCorrectionRequested) {
+          gentleShiftRemaining = Math.max(0, gentleShiftRemaining - Math.abs(actualVisualMovement));
+        }
         visualPerScrollUnit = Math.max(
           0.5,
           Math.min(4, Math.abs(actualVisualMovement / (actualScroll - beforeScroll))),
@@ -241,14 +285,14 @@ export function setGamepadFocused(el: HTMLElement | null): void {
 }
 
 /** Programmatic focus entry point for controller navigation and modal restore. */
-export function focusGamepadElement(el: HTMLElement | null, preferBottom = false): boolean {
+export function focusGamepadElement(el: HTMLElement | null): boolean {
   if (!el || !el.isConnected || el.hasAttribute('disabled')) return false;
   if (el.getAttribute('aria-hidden') === 'true' || el.closest('[hidden], [inert], [aria-hidden="true"]')) return false;
   const style = getComputedStyle(el);
   if (style.display === 'none' || style.visibility === 'hidden') return false;
   el.focus({ preventScroll: true });
   getGamepadViewportSafeArea();
-  scrollElementIntoSafeArea(el, preferBottom);
+  scrollElementIntoSafeArea(el);
   setGamepadFocused(el);
   return document.activeElement === el;
 }

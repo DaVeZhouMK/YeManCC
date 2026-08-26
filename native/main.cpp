@@ -4822,7 +4822,7 @@ static const char* customSteamLibrarySemanticAction(const char* action) {
     if (!action) return nullptr;
     if (strcmp(action, "page-prev") == 0) return "tab-previous";
     if (strcmp(action, "page-next") == 0) return "tab-next";
-    if (strcmp(action, "confirm") == 0 || strcmp(action, "dropdown") == 0) return "accept";
+    if (strcmp(action, "confirm") == 0) return "accept";
     if (strcmp(action, "back") == 0) return "back";
     if (strcmp(action, "edit-game") == 0) return "edit";
     if (strcmp(action, "navigate-left") == 0 || strcmp(action, "navigate-right") == 0 ||
@@ -4925,7 +4925,6 @@ static void gamepadProcessUiInput(WORD w, ULONGLONG now) {
     if (!back) {
         if (pressed(XINPUT_GAMEPAD_A)) gamepadEmitUiAction("confirm");
         if (pressed(XINPUT_GAMEPAD_B)) gamepadEmitUiAction("back");
-        if (pressed(XINPUT_GAMEPAD_X)) gamepadEmitUiAction("dropdown");
         if (pressed(XINPUT_GAMEPAD_Y)) gamepadEmitUiAction("edit-game");
     }
 
@@ -5572,6 +5571,342 @@ static CoreArchitecture detectCoreArchitecture() {
 }
 
 // ================================================================
+//  当前游戏进程的 CPU Set + 亲和性策略
+//
+// 这是进程级限制，不写 SmallProcessorMask，也不改变电源方案。CPU Set
+// 负责告诉 Windows 该进程可用哪些逻辑处理器，进程亲和性再提供一个
+// 明确的硬边界；两者同时设置，避免游戏启动后又被调度到未选择的核心。
+// ================================================================
+
+static void ccdForgetProcess(DWORD pid);
+
+struct GameCoreCpuSetRecord {
+    DWORD id = 0;
+    WORD group = 0;
+    BYTE logicalIndex = 0;
+    BYTE coreIndex = 0;
+    BYTE efficiencyClass = 0;
+};
+
+static std::vector<GameCoreCpuSetRecord> enumerateGameCoreCpuSets() {
+    std::vector<GameCoreCpuSetRecord> records;
+    ULONG length = 0;
+    const BOOL probe = GetSystemCpuSetInformation(nullptr, 0, &length, nullptr, 0);
+    if (probe || GetLastError() != ERROR_INSUFFICIENT_BUFFER || length == 0)
+        return records;
+    std::vector<BYTE> buffer(length);
+    ULONG returned = 0;
+    if (!GetSystemCpuSetInformation(
+            reinterpret_cast<PSYSTEM_CPU_SET_INFORMATION>(buffer.data()),
+            length, &returned, nullptr, 0))
+        return records;
+
+    ULONG offset = 0;
+    while (offset + sizeof(SYSTEM_CPU_SET_INFORMATION) <= returned) {
+        auto* info = reinterpret_cast<PSYSTEM_CPU_SET_INFORMATION>(buffer.data() + offset);
+        if (info->Size < sizeof(SYSTEM_CPU_SET_INFORMATION) || offset + info->Size > returned)
+            break;
+        if (info->Type == CpuSetInformation) {
+            records.push_back({
+                info->CpuSet.Id,
+                info->CpuSet.Group,
+                info->CpuSet.LogicalProcessorIndex,
+                info->CpuSet.CoreIndex,
+                info->CpuSet.EfficiencyClass,
+            });
+        }
+        offset += info->Size;
+    }
+    return records;
+}
+
+using GetProcessDefaultCpuSetsFn = BOOL (WINAPI*)(HANDLE, PULONG, ULONG, PULONG);
+using SetProcessDefaultCpuSetsFn = BOOL (WINAPI*)(HANDLE, const ULONG*, ULONG);
+
+static GetProcessDefaultCpuSetsFn gameCoreGetProcessDefaultCpuSets() {
+    static auto fn = reinterpret_cast<GetProcessDefaultCpuSetsFn>(
+        GetProcAddress(GetModuleHandleW(L"kernel32.dll"), "GetProcessDefaultCpuSets"));
+    return fn;
+}
+
+static SetProcessDefaultCpuSetsFn gameCoreSetProcessDefaultCpuSets() {
+    static auto fn = reinterpret_cast<SetProcessDefaultCpuSetsFn>(
+        GetProcAddress(GetModuleHandleW(L"kernel32.dll"), "SetProcessDefaultCpuSets"));
+    return fn;
+}
+
+static bool gameCoreReadProcessDefaultCpuSets(
+    HANDLE process, std::vector<ULONG>& ids) {
+    const auto fn = gameCoreGetProcessDefaultCpuSets();
+    if (!fn) return false;
+    ULONG required = 0;
+    if (!fn(process, nullptr, 0, &required)) {
+        const DWORD error = GetLastError();
+        if (error != ERROR_INSUFFICIENT_BUFFER && error != ERROR_SUCCESS)
+            return false;
+    }
+    if (required == 0) return true;
+    ids.resize(required);
+    ULONG returned = 0;
+    if (!fn(process, ids.data(), required, &returned)) {
+        ids.clear();
+        return false;
+    }
+    ids.resize(returned);
+    return true;
+}
+
+struct GameCorePolicyLease {
+    bool active = false;
+    DWORD pid = 0;
+    ULONGLONG processCreated = 0;
+    DWORD_PTR originalAffinity = 0;
+    bool originalAffinityValid = false;
+    std::vector<ULONG> originalCpuSets;
+    bool originalCpuSetsValid = false;
+};
+
+static std::mutex g_gameCorePolicyMutex;
+static GameCorePolicyLease g_gameCorePolicyLease;
+// CCD 的全局刷新线程读取这个原子值，避免把本功能刚设置的进程亲和性
+// 每 30 秒覆盖掉；不在 CCD 锁内反向获取 gameCorePolicyMutex，避免死锁。
+static std::atomic<DWORD> g_gameCorePolicyPid{0};
+
+static bool gameCorePolicyIdentityMatches(DWORD pid, ULONGLONG expectedCreated) {
+    if (!pid || !expectedCreated) return false;
+    ULONGLONG actualCreated = 0;
+    return focusQueryProcessIdentity(pid, nullptr, &actualCreated) &&
+        actualCreated == expectedCreated;
+}
+
+static bool gameCoreRestoreLeaseLocked() {
+    if (!g_gameCorePolicyLease.active) return true;
+    const auto lease = g_gameCorePolicyLease;
+    g_gameCorePolicyLease = {};
+    g_gameCorePolicyPid.store(0, std::memory_order_release);
+    ccdForgetProcess(lease.pid);
+
+    // PID 已退出或已被复用时，不能向新进程写入旧游戏的恢复值。
+    if (!gameCorePolicyIdentityMatches(lease.pid, lease.processCreated)) return true;
+    HANDLE process = OpenProcess(
+        PROCESS_SET_INFORMATION | PROCESS_QUERY_INFORMATION | PROCESS_QUERY_LIMITED_INFORMATION,
+        FALSE, lease.pid);
+    if (!process) return false;
+
+    bool ok = true;
+    if (lease.originalCpuSetsValid) {
+        const auto fn = gameCoreSetProcessDefaultCpuSets();
+        if (!fn || (!lease.originalCpuSets.empty()
+                ? !fn(process, lease.originalCpuSets.data(),
+                      static_cast<ULONG>(lease.originalCpuSets.size()))
+                : !fn(process, nullptr, 0))) {
+            ok = false;
+        }
+    }
+    if (lease.originalAffinityValid &&
+        !SetProcessAffinityMask(process, lease.originalAffinity)) {
+        ok = false;
+    }
+    CloseHandle(process);
+    return ok;
+}
+
+static std::string gameCorePolicyHex(DWORD_PTR value) {
+    if (value == 0) return "0x0";
+    char buffer[2 + sizeof(DWORD_PTR) * 2 + 1]{};
+    snprintf(buffer, sizeof(buffer), sizeof(DWORD_PTR) == 8 ? "0x%llX" : "0x%lX",
+             static_cast<unsigned long long>(value));
+    return buffer;
+}
+
+static bool gameCorePolicyClassSelected(
+    const std::string& mode, BYTE value, const std::vector<int>& classes) {
+    if (mode == "default" || mode == "all") return true;
+    if (classes.empty()) return false;
+    const int minimum = classes.front();
+    const int maximum = classes.back();
+    // Windows 定义：EfficiencyClass 数值越高，处理器越快但越不节能，
+    // 因此最高等级才是大核，最低等级是超小/小核。
+    if (mode == "only-big") return value == maximum;
+    if (mode == "big-small") {
+        // 三类 CPU：大核+小核，排除最低效率等级的超小核。
+        // 两类 CPU：没有“超小核”，大核+小核就是全部核心。
+        return classes.size() < 3 ? true : value > minimum;
+    }
+    if (mode == "only-small") {
+        // 三类 CPU 的中间等级是小核；两类 CPU 的低等级是小核。
+        return value == (classes.size() >= 3 ? classes[1] : minimum);
+    }
+    if (mode == "small-super-small") return value < maximum;
+    return false;
+}
+
+static json gameCorePolicyCapabilities() {
+    const CoreArchitecture architecture = detectCoreArchitecture();
+    const SmtLive smt = detectSmtLive();
+    json classes = json::array();
+    for (const int value : architecture.classes) classes.push_back(value);
+    return {
+        {"detected", architecture.detected},
+        {"heterogeneous", architecture.heterogeneous},
+        {"smtAvailable", smt.logic > smt.phys && smt.phys > 0},
+        {"efficiencyClasses", classes},
+        {"logical", architecture.logical},
+        {"physical", architecture.physical},
+        {"smtLogical", smt.logic},
+        {"smtPhysical", smt.phys},
+        {"source", architecture.source},
+    };
+}
+
+static json gameCorePolicyApply(const json& args) {
+    const DWORD pid = args.value("pid", 0u);
+    const std::string expectedRaw = args.value("processCreated", std::string{});
+    const std::string mode = args.value("mode", std::string("default"));
+    const std::string hyperThreadMode = args.value("hyperThreadMode", std::string("default"));
+    static const std::unordered_set<std::string> modes = {
+        "default", "only-big", "big-small", "only-small", "small-super-small", "all"
+    };
+    if (!pid || pid == 4 || pid == GetCurrentProcessId())
+        return json{{"ok", false}, {"applied", false}, {"error", "目标进程无效"}};
+    if (!modes.count(mode))
+        return json{{"ok", false}, {"applied", false}, {"error", "大小核心模式无效"}};
+    if (hyperThreadMode != "default" && hyperThreadMode != "on" && hyperThreadMode != "off")
+        return json{{"ok", false}, {"applied", false}, {"error", "超线程模式无效"}};
+
+    ULONGLONG expectedCreated = 0;
+    try { expectedCreated = expectedRaw.empty() ? 0 : std::stoull(expectedRaw); }
+    catch (...) { expectedCreated = 0; }
+    if (!gameCorePolicyIdentityMatches(pid, expectedCreated))
+        return json{{"ok", false}, {"applied", false}, {"error", "目标游戏已变化或已退出"}};
+
+    std::lock_guard<std::mutex> lock(g_gameCorePolicyMutex);
+    if (mode == "default" && hyperThreadMode == "default") {
+        if (!gameCoreRestoreLeaseLocked())
+            return json{{"ok", false}, {"applied", false}, {"error", "恢复游戏原始 CPU 设置失败"}};
+        return json{{"ok", true}, {"applied", false}, {"mode", mode}, {"hyperThreadMode", hyperThreadMode}};
+    }
+
+    // 同一时间只保留一个游戏进程的恢复租约。切换目标前先恢复旧目标，
+    // 新目标失败时不会留下半套限制。
+    if (g_gameCorePolicyLease.active &&
+        (g_gameCorePolicyLease.pid != pid || g_gameCorePolicyLease.processCreated != expectedCreated)) {
+        if (!gameCoreRestoreLeaseLocked())
+            return json{{"ok", false}, {"applied", false}, {"error", "恢复上一个游戏的 CPU 设置失败"}};
+    }
+    if (g_gameCorePolicyLease.active) {
+        if (!gameCoreRestoreLeaseLocked())
+            return json{{"ok", false}, {"applied", false}, {"error", "更新游戏 CPU 设置前恢复失败"}};
+    }
+
+    const auto architecture = detectCoreArchitecture();
+    const auto records = enumerateGameCoreCpuSets();
+    if (records.empty())
+        return json{{"ok", false}, {"applied", false}, {"error", "Windows 未提供 CPU Set 信息"}};
+    if (mode != "default" && mode != "all" && !architecture.heterogeneous)
+        return json{{"ok", false}, {"applied", false}, {"error", "本机没有可识别的大小核心"}};
+
+    std::vector<int> classes = architecture.classes;
+    if (classes.empty()) {
+        for (const auto& record : records) classes.push_back(record.efficiencyClass);
+        sortUniqueClasses(classes);
+    }
+    std::vector<GameCoreCpuSetRecord> selected;
+    std::set<std::pair<WORD, BYTE>> selectedPhysicalCores;
+    for (const auto& record : records) {
+        if (!gameCorePolicyClassSelected(mode, record.efficiencyClass, classes)) continue;
+        if (hyperThreadMode == "off" &&
+            !selectedPhysicalCores.emplace(record.group, record.coreIndex).second) continue;
+        selected.push_back(record);
+    }
+    if (selected.empty())
+        return json{{"ok", false}, {"applied", false}, {"error", "所选核心组合为空"}};
+    const WORD group = selected.front().group;
+    for (const auto& record : selected) {
+        if (record.group != group)
+            return json{{"ok", false}, {"applied", false}, {"error", "跨处理器组暂不支持进程亲和性限制"}};
+        if (record.logicalIndex >= sizeof(DWORD_PTR) * 8)
+            return json{{"ok", false}, {"applied", false}, {"error", "逻辑处理器编号超出 Windows 亲和性掩码范围"}};
+    }
+
+    std::vector<ULONG> selectedIds;
+    selectedIds.reserve(selected.size());
+    DWORD_PTR selectedMask = 0;
+    for (const auto& record : selected) {
+        selectedIds.push_back(record.id);
+        selectedMask |= (static_cast<DWORD_PTR>(1) << record.logicalIndex);
+    }
+    if (!selectedMask)
+        return json{{"ok", false}, {"applied", false}, {"error", "所选亲和性掩码为空"}};
+
+    HANDLE process = OpenProcess(
+        PROCESS_SET_INFORMATION | PROCESS_QUERY_INFORMATION | PROCESS_QUERY_LIMITED_INFORMATION,
+        FALSE, pid);
+    if (!process)
+        return json{{"ok", false}, {"applied", false}, {"error", "无法打开目标游戏进程"}};
+    DWORD_PTR originalAffinity = 0;
+    DWORD_PTR systemAffinity = 0;
+    const bool affinityRead = GetProcessAffinityMask(process, &originalAffinity, &systemAffinity) != FALSE;
+    std::vector<ULONG> originalCpuSets;
+    const bool cpuSetsRead = gameCoreReadProcessDefaultCpuSets(process, originalCpuSets);
+    const auto setCpuSets = gameCoreSetProcessDefaultCpuSets();
+    if (!affinityRead || !cpuSetsRead || !setCpuSets) {
+        CloseHandle(process);
+        return json{{"ok", false}, {"applied", false}, {"error", "Windows 不支持读取进程 CPU Set/亲和性"}};
+    }
+
+    bool applied = setCpuSets(process, selectedIds.data(), static_cast<ULONG>(selectedIds.size())) != FALSE;
+    if (applied) applied = SetProcessAffinityMask(process, selectedMask) != FALSE;
+    const DWORD applyError = applied ? ERROR_SUCCESS : GetLastError();
+    CloseHandle(process);
+    if (!applied) {
+        HANDLE rollback = OpenProcess(
+            PROCESS_SET_INFORMATION | PROCESS_QUERY_INFORMATION | PROCESS_QUERY_LIMITED_INFORMATION,
+            FALSE, pid);
+        if (rollback) {
+            if (!originalCpuSets.empty()) setCpuSets(rollback, originalCpuSets.data(), static_cast<ULONG>(originalCpuSets.size()));
+            else setCpuSets(rollback, nullptr, 0);
+            if (affinityRead) SetProcessAffinityMask(rollback, originalAffinity);
+            CloseHandle(rollback);
+        }
+        return json{{"ok", false}, {"applied", false},
+                    {"error", std::string("应用游戏 CPU 设置失败，错误码 ") + std::to_string(applyError)}};
+    }
+
+    g_gameCorePolicyLease = {
+        true, pid, expectedCreated, originalAffinity, affinityRead,
+        std::move(originalCpuSets), cpuSetsRead,
+    };
+    g_gameCorePolicyPid.store(pid, std::memory_order_release);
+    json classValues = json::array();
+    for (const auto& record : selected) classValues.push_back(record.efficiencyClass);
+    return json{
+        {"ok", true}, {"applied", true}, {"mode", mode},
+        {"hyperThreadMode", hyperThreadMode},
+        {"cpuSetCount", static_cast<int>(selectedIds.size())},
+        {"affinityMask", gameCorePolicyHex(selectedMask)},
+        {"efficiencyClasses", classValues},
+        {"processorGroup", group},
+    };
+}
+
+static json gameCorePolicyClear(const json& args) {
+    const DWORD requestedPid = args.value("pid", 0u);
+    const std::string requestedCreated = args.value("processCreated", std::string{});
+    std::lock_guard<std::mutex> lock(g_gameCorePolicyMutex);
+    if (requestedPid && requestedPid != g_gameCorePolicyLease.pid)
+        return json{{"ok", true}, {"cleared", false}};
+    if (requestedPid && !requestedCreated.empty()) {
+        ULONGLONG created = 0;
+        try { created = std::stoull(requestedCreated); } catch (...) {}
+        if (created && created != g_gameCorePolicyLease.processCreated)
+            return json{{"ok", true}, {"cleared", false}};
+    }
+    const bool ok = gameCoreRestoreLeaseLocked();
+    return json{{"ok", ok}, {"cleared", ok}};
+}
+
+// ================================================================
 //  CCD 核心控制：L3 域拓扑检测 + 全局进程亲和性（UXTU 同款思路）
 // ================================================================
 
@@ -5688,10 +6023,18 @@ static std::atomic<bool>      g_ccdStop{false};
 static DWORD                  g_ccdSelfPid = 0;
 static std::wstring           g_ccdSelfExe;
 
+static void ccdForgetProcess(DWORD pid) {
+    if (!pid) return;
+    std::lock_guard<std::mutex> lock(g_ccdMutex);
+    g_ccdSeen.erase(pid);
+}
+
 static void writeLog(const std::string& level, const std::string& msg);  // 定义在文件后部, 前置声明供 CCD 日志用
 
 static bool ccdSkipProcess(DWORD pid, const std::wstring& exe) {
     if (pid == 0 || pid == g_ccdSelfPid) return true;
+    // 当前游戏若启用了专属 CPU Set/亲和性，CCD 的全局刷新不能覆盖它。
+    if (pid == g_gameCorePolicyPid.load(std::memory_order_acquire)) return true;
     static const wchar_t* skip[] = {
         L"system", L"registry", L"smss.exe", L"csrss.exe", L"wininit.exe",
         L"services.exe", L"lsass.exe", L"winlogon.exe", L"audiodg.exe",
@@ -9197,6 +9540,9 @@ static bool ipc_cmd_async(const std::string& cmd) {
         // the WebView2 owner thread. A frozen game can leave window/renderer
         // callbacks pending even though the native call itself is PID-only.
         "game.suspend", "game.resume",
+        // Per-game CPU Set/affinity operations open/query another process and
+        // must stay off the WebView2 owner thread as well.
+        "game.corePolicy.detect", "game.corePolicy.apply", "game.corePolicy.clear",
     };
     if (lvl1.count(cmd)) return true;
     if (g_asyncMode >= 2 && lvl2.count(cmd)) return true;
@@ -10857,6 +11203,15 @@ static void reg_shell_app() {
         sgAppendJsonResumedPids(resumed, result);
         focusSingleResumedGame(std::move(resumed.pids));
         return result;
+    });
+    ipc_on("game.corePolicy.detect", [](const json&) -> json {
+        return gameCorePolicyCapabilities();
+    });
+    ipc_on("game.corePolicy.apply", [](const json& a) -> json {
+        return gameCorePolicyApply(a);
+    });
+    ipc_on("game.corePolicy.clear", [](const json& a) -> json {
+        return gameCorePolicyClear(a);
     });
     ipc_on("monitor.start", [](const json& a) -> json {
         const bool top = a.value("top", false);
@@ -17483,6 +17838,12 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         return 0;
     case WM_DESTROY:
             appendNativeLifecycleLog("window-destroy", {{"exitRequested", g_exitRequested.load()}});
+        // 正常退出时恢复当前游戏原始的 CPU Set/亲和性；异常强退无法保证
+        // 收尾，这是 Windows 进程级限制本身的边界。
+        {
+            std::lock_guard<std::mutex> lock(g_gameCorePolicyMutex);
+            (void)gameCoreRestoreLeaseLocked();
+        }
         if (g_exitRequested.load()) {
             g_summonQuit = true;
             PostQuitMessage((int)g_exitCode.load(std::memory_order_relaxed));

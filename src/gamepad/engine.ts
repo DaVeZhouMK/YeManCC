@@ -9,7 +9,7 @@
 //   A(0)           → 确认/点击/切换
 //   B(1)           → 取消/blur
 //   Y(3)           → 全局编辑游戏识别名单
-//   X(2)           → 下拉菜单（与 A 一致：打开菜单选择）
+//   X(2)           → 不参与 YeManCC 统一页面调度
 //   Start(9)       → 调试面板
 //   D-pad/左摇杆   → 页面内焦点移动（空间导航）
 //   LT(6)/RT(7)/←→ → 滑块微调（仅 A 进入“编辑模式”后；未进入时方向键只移动焦点）
@@ -103,7 +103,7 @@ let nativeUiInputActive = false;
 // YeManCC native has already forwarded the semantic action to the child.
 let nativeChildInputOwned = false;
 type NativeUiAction =
-  | 'page-prev' | 'page-next' | 'confirm' | 'back' | 'dropdown' | 'edit-game'
+  | 'page-prev' | 'page-next' | 'confirm' | 'back' | 'edit-game'
   | 'debug' | 'nav-left' | 'nav-right' | 'nav-up' | 'nav-down'
   | 'slider-decrease' | 'slider-increase';
 
@@ -377,7 +377,7 @@ function focusables(): HTMLElement[] {
       if (el.getAttribute('aria-disabled') === 'true') return false;
       // Vue Transition 会在离场动画期间保留二级菜单 DOM。父气泡状态
       // 已经折叠时，即使旧按钮仍有尺寸，也绝不能进入手柄候选列表。
-      const submenuBody = el.closest<HTMLElement>('[data-gp-game-rules-body], [data-gp-custom-body]');
+      const submenuBody = el.closest<HTMLElement>('[data-gp-game-rules-body], [data-gp-custom-body], [data-gp-timeout-body]');
       const submenuPanel = submenuBody?.closest<HTMLElement>('[data-gp-expanded]');
       if (submenuBody && submenuPanel?.dataset.gpExpanded !== 'true') return false;
       const style = getComputedStyle(el);
@@ -412,7 +412,7 @@ function gameMenuControlForRow(menu: HTMLElement, rowKey: string): HTMLElement |
   if (!target) return null;
   if (target.hasAttribute('disabled') || target.getAttribute('aria-disabled') === 'true') return null;
   if (target.closest('[hidden], [inert], [aria-hidden="true"]')) return null;
-  const body = target.closest<HTMLElement>('[data-gp-game-rules-body], [data-gp-custom-body]');
+  const body = target.closest<HTMLElement>('[data-gp-game-rules-body], [data-gp-custom-body], [data-gp-timeout-body]');
   const panel = body?.closest<HTMLElement>('[data-gp-expanded]');
   if (body && panel?.dataset.gpExpanded !== 'true') return null;
   const style = getComputedStyle(target);
@@ -502,7 +502,7 @@ function moveFocus(dx: number, dy: number) {
   if (explicitTarget !== undefined) {
     if (explicitTarget) {
       try {
-        if (!focusGamepadElement(explicitTarget, dy < 0)) {
+        if (!focusGamepadElement(explicitTarget)) {
           explicitTarget.focus({ preventScroll: false });
           setGamepadFocused(explicitTarget);
         }
@@ -517,7 +517,7 @@ function moveFocus(dx: number, dy: number) {
     const target = moveGameMenuFocus(activeGameMenu, base, dy);
     if (target) {
       try {
-        focusGamepadElement(target, dy < 0);
+        focusGamepadElement(target);
       } catch {
         // Ignore transient DOM changes during Vue transitions.
       }
@@ -704,7 +704,7 @@ function moveFocus(dx: number, dy: number) {
 
   if (best) {
     try {
-      if (!focusGamepadElement(best, dy < 0)) {
+      if (!focusGamepadElement(best)) {
         best.focus({ preventScroll: false });
         setGamepadFocused(best);
       }
@@ -728,7 +728,9 @@ function activate(opts: GamepadEngineOptions) {
   // 的黑白名单按钮或专属配置 AC/DC 下拉。
   if (!focusables().includes(el)) {
     const gameMenu = document.querySelector<HTMLElement>('[data-gp-game-quick-menu]');
-    const recovery = el.closest('[data-gp-custom-body]')
+    const recovery = el.closest('[data-gp-timeout-body]')
+      ? document.querySelector<HTMLElement>('[data-gp-timeout-entry]')
+      : el.closest('[data-gp-custom-body]')
       ? gameMenu?.querySelector<HTMLElement>('[data-gp-custom-entry]')
       : el.closest('[data-gp-game-rules-body]')
         ? gameMenu?.querySelector<HTMLElement>('[data-gp-game-rules-entry]')
@@ -864,7 +866,6 @@ function dispatchNativeUiAction(opts: GamepadEngineOptions, action: NativeUiActi
     return;
   }
   const gameMenuOpen = !!document.querySelector('[data-gp-game-quick-menu]');
-  const gameQuickDialogOpen = !!document.querySelector('[data-gp-game-quick-dialog]');
   if (mouseModeSuppress && !gameMenuOpen) return;
   if (action === 'debug') {
     window.dispatchEvent(new CustomEvent('ipc:gamepad-start'));
@@ -876,18 +877,6 @@ function dispatchNativeUiAction(opts: GamepadEngineOptions, action: NativeUiActi
     log(opts, 'A -> confirm');
     return;
   }
-  if (action === 'dropdown') {
-    if (gameQuickDialogOpen) return;
-    const el = document.activeElement as HTMLElement | null;
-    if (el?.dataset?.gpDropdown !== undefined) {
-      el.dispatchEvent(new CustomEvent('gp:dropdown-open', { bubbles: true }));
-    } else if (el?.tagName === 'SELECT') {
-      activate(opts);
-    }
-    log(opts, 'X -> dropdown');
-    return;
-  }
-
   if (action === 'slider-decrease' || action === 'slider-increase') {
     if (sliderEditMode && isRangeInput(document.activeElement as HTMLElement)) {
       adjustSlider(action === 'slider-increase' ? 1 : -1);
@@ -1051,21 +1040,6 @@ function tick(opts: GamepadEngineOptions) {
     }
     if (pressed(1)) enqueueGamepadTaskDetached(() => handleGamepadBack(opts));
     if (pressed(3)) enqueueGamepadTaskDetached(() => handleGamepadEditGame(opts));
-    if (pressed(2)) {
-      const el = document.activeElement as HTMLElement | null;
-      if (el?.dataset?.gpDropdown !== undefined) {
-        enqueueGamepadTaskDetached(() => {
-          const current = document.activeElement as HTMLElement | null;
-          if (current?.dataset?.gpDropdown !== undefined) {
-            current.dispatchEvent(new CustomEvent('gp:dropdown-open', { bubbles: true }));
-          }
-        });
-      } else if (el?.tagName === 'SELECT') {
-        enqueueGamepadTaskDetached(() => activate(opts));
-      }
-      log(opts, 'X · 下拉');
-    }
-
     // ── Start 键作为修饰键：Start + 方向键快捷调节 ──
     // ⚠️ 实际调节逻辑已移到 native Raw Input 回调（仅在有输入时被唤醒），
     //    这样在游戏内全屏、窗口未聚焦时也能生效且零延迟。前端只负责：

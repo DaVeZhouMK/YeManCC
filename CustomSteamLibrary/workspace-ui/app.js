@@ -17,6 +17,10 @@ let artworkCandidates = [];
 let downloadingCandidateUrl = "";
 let artworkTaskToken = 0;
 let artworkTaskInFlight = false;
+const ARTWORK_PREFETCH_TTL_MS = 5 * 60 * 1000;
+const ARTWORK_PREFETCH_MAX_PRELOADS = 16;
+const artworkPrefetchCache = new Map();
+let artworkPrefetchPendingCount = 0;
 let cancelInFlight = false;
 let searchReturnToEdit = false;
 let identitySearchInFlight = false;
@@ -35,6 +39,7 @@ const manualIdentifyGenerations = new Map();
 let identitySearchEllipsisTimer = 0;
 let identitySearchEllipsisStep = 0;
 let currentCardDirectory = '';
+let libraryFocusMemory = null;
 let manualRefreshProgress = { phase: 'idle', current: 0, total: 0 };
 let controllerBackLastAt = 0;
 let controllerBackResetTimer = 0;
@@ -46,7 +51,11 @@ const DIRECTIONAL_ACTION_DEDUPE_MS = 90;
 // separately so closing the editor can return the single navigation focus to
 // the exact card that opened it, even after the card's blur handler ran.
 let editReturnCardDirectory = '';
-const noticeTimers = new WeakMap();
+const NOTICE_DURATION_MS = 8000;
+const noticeQueue = [];
+let noticeActive = false;
+let noticeTimer = 0;
+let noticeSequence = 0;
 const workspaceDropdownStates = new WeakMap();
 let openWorkspaceDropdownState = null;
 
@@ -55,6 +64,16 @@ const library = $('#library');
 const busy = $('#busy');
 const notice = $('#notice');
 const libraryNotice = $('#library-notice');
+// Notices are status-only surfaces. Keep them outside keyboard/gamepad focus even when visible.
+[notice, libraryNotice].forEach(element => { if (element) element.inert = true; });
+const toastNotice = document.createElement('section');
+toastNotice.id = 'global-notice';
+toastNotice.className = 'notice hidden';
+toastNotice.setAttribute('role', 'status');
+toastNotice.setAttribute('aria-live', 'polite');
+toastNotice.setAttribute('aria-atomic', 'true');
+toastNotice.inert = true;
+document.body.appendChild(toastNotice);
 
 // Keep the standalone workspace visually aligned with the parent YeManCC page.
 // The entry title is a product name, while the blue section eyebrow belongs to
@@ -276,6 +295,7 @@ function upgradeWorkspaceSelect(select) {
   trigger.innerHTML = '<span class="workspace-dropdown-label"></span><span class="workspace-dropdown-caret" aria-hidden="true">⌄</span>';
   const menu = document.createElement('div');
   menu.className = 'workspace-dropdown-menu';
+  menu.dataset.selectId = select.id || '';
   menu.setAttribute('role', 'listbox');
   const state = { select, wrapper, trigger, menu, open: false, highlight: 0 };
   workspaceDropdownStates.set(select, state);
@@ -299,11 +319,30 @@ function updateWorkspaceFocusMarker(target) {
   document.querySelectorAll('.workspace-focus-visible').forEach(item => item.classList.remove('workspace-focus-visible'));
   const element = target instanceof Element ? target : null;
   if (!element || element.matches('.workspace-native-select')) return;
-  const inEditor = element.closest('#edit-modal, #identity-search-modal');
+  const inWorkspaceModal = element.closest('.modal');
   const isDropdownItem = element.matches('.workspace-dropdown-trigger, .workspace-dropdown-option');
-  if (inEditor || isDropdownItem) element.classList.add('workspace-focus-visible');
+  if (inWorkspaceModal || isDropdownItem) element.classList.add('workspace-focus-visible');
 }
-document.addEventListener('focusin', event => updateWorkspaceFocusMarker(event.target), true);
+function libraryFocusDescriptor(target) {
+  const element = target instanceof Element ? target : null;
+  if (!element || !element.closest('#library-view')) return null;
+  if (element.matches('.game-card')) return { type: 'card', directory: String(element.dataset.directory || '').toLocaleLowerCase() };
+  if (element.matches('.page-tab')) return { type: 'tab', tab: element.dataset.tab || '' };
+  if (element.id) return { type: 'id', id: element.id };
+  return null;
+}
+function rememberLibraryFocus(target) {
+  const descriptor = libraryFocusDescriptor(target);
+  if (descriptor) libraryFocusMemory = descriptor;
+}
+function resolveLibraryFocusDescriptor(descriptor) {
+  if (!descriptor) return null;
+  if (descriptor.type === 'card') return libraryCards().find(card => String(card.dataset.directory || '').toLocaleLowerCase() === descriptor.directory) || null;
+  if (descriptor.type === 'tab') return [...document.querySelectorAll('#library-view .page-tab')].find(tab => tab.dataset.tab === descriptor.tab) || null;
+  if (descriptor.type === 'id') { const element = document.getElementById(descriptor.id); return element?.closest('#library-view') ? element : null; }
+  return null;
+}
+document.addEventListener('focusin', event => { updateWorkspaceFocusMarker(event.target); rememberLibraryFocus(event.target); }, true);
 document.addEventListener('pointerdown', event => closeWorkspaceDropdownAtBoundary(event.target), true);
 window.addEventListener('resize', () => { if (openWorkspaceDropdownState) workspaceDropdownSetPosition(openWorkspaceDropdownState); });
 window.addEventListener('scroll', () => { if (openWorkspaceDropdownState) workspaceDropdownSetPosition(openWorkspaceDropdownState); }, true);
@@ -349,28 +388,47 @@ function cancelEditorBackgroundTasks() {
     stopIdentitySearchLoading();
     invoke('cancelIdentitySearch', { executable }).catch(() => {});
   }
-  if (artworkTaskInFlight) {
+  if (artworkTaskInFlight || artworkPrefetchPendingCount > 0) {
     artworkTaskToken++;
     artworkTaskInFlight = false;
     downloadingCandidateUrl = '';
     invoke('cancelArtwork').catch(() => {});
   }
 }
+function showNextNotice() {
+  if (noticeActive || !noticeQueue.length) return;
+  const item = noticeQueue.shift();
+  noticeActive = true;
+  const sequence = ++noticeSequence;
+  toastNotice.textContent = item.message;
+  toastNotice.classList.remove('hidden', 'error');
+  if (item.error) toastNotice.classList.add('error');
+  noticeTimer = window.setTimeout(() => {
+    if (sequence !== noticeSequence) return;
+    toastNotice.classList.add('hidden');
+    toastNotice.classList.remove('error');
+    noticeActive = false;
+    noticeTimer = 0;
+    showNextNotice();
+  }, NOTICE_DURATION_MS);
+}
 function showNotice(message, error = false, target = notice) {
-  if (!target) return;
-  const previousTimer = noticeTimers.get(target);
-  if (previousTimer) clearTimeout(previousTimer);
-  target.textContent = message;
-  target.classList.remove('hidden', 'error');
-  if (error) target.classList.add('error');
-  noticeTimers.set(target, window.setTimeout(() => { target.classList.add('hidden'); noticeTimers.delete(target); }, 5000));
+  const text = String(message ?? '').trim();
+  if (!text) return;
+  const duplicate = (noticeActive && toastNotice.textContent === text) || noticeQueue.some(item => item.message === text && item.error === error);
+  if (duplicate) return;
+  noticeQueue.push({ message: text, error: Boolean(error), target });
+  showNextNotice();
 }
 function clearNotice(target = notice) {
-  if (!target) return;
-  const timer = noticeTimers.get(target);
-  if (timer) clearTimeout(timer);
-  noticeTimers.delete(target);
-  target.classList.add('hidden');
+  if (target) target.classList.add('hidden');
+  noticeQueue.length = 0;
+  noticeSequence++;
+  if (noticeTimer) window.clearTimeout(noticeTimer);
+  noticeTimer = 0;
+  noticeActive = false;
+  toastNotice.classList.add('hidden');
+  toastNotice.classList.remove('error');
 }
 function showError(error, target = notice) { showNotice(error?.message || String(error), true, target); }
 function askConfirm(title, message, confirmLabel = '确认') { return new Promise(resolve => { confirmResolver = resolve; $('#confirm-title').textContent = title; $('#confirm-message').textContent = message; $('#confirm-confirm').textContent = confirmLabel; $('#confirm-modal').classList.remove('hidden'); }); }
@@ -463,6 +521,8 @@ function categoryCounts(games = mergedGames()) {
 }
 function selectedReadyCount() { const selected = new Set(selectedCommitDirectories()); return mergedGames().filter(game => isSteamReady(game) && category(game) === activeTab && selected.has(keyFor(game))).length; }
 function selectedSteamCount() { return mergedGames().filter(game => category(game) === 'in-steam' && (selectedSteamDirectories === null || selectedSteamDirectories.has(keyFor(game)))).length; }
+function formatCount(value) { const count = Number.isFinite(Number(value)) ? Math.max(0, Number(value)) : 0; return `[${count}个]`; }
+function formatSelectedCount(value) { const count = Number.isFinite(Number(value)) ? Math.max(0, Number(value)) : 0; return `[已选${count}个]`; }
 function pageSelectable(game, page = activeTab) { const itemCategory = category(game); if (itemCategory !== page) return false; return page !== 'not-in-steam' || isSteamReady(game); }
 function pageSelectionKeys(page = activeTab) {
   if (page === 'not-in-steam') return new Set(selectedGameDirectories === null ? defaultSelectedDirectories() : selectedGameDirectories);
@@ -494,7 +554,7 @@ function renderEntry() {
   const counts = categoryCounts(games);
   $('#entry-summary').innerHTML = CATEGORY_ORDER.map(code => {
     const definition = categoryDefinition(code);
-    return '<div data-category="' + code + '"><strong>' + counts[code] + '</strong><span>' + definition.label + '</span></div>';
+    return '<div data-category="' + code + '"><strong>' + formatCount(counts[code]) + '</strong><span>' + definition.label + '</span></div>';
   }).join('');
   $('#entry-summary')?.setAttribute('aria-label', '游戏库分类统计：等待加入、已加入、需处理、不加入');
   if ($('#entry-view') && !$('#entry-view').classList.contains('hidden') && !document.querySelector('.modal:not(.hidden)')) {
@@ -535,7 +595,7 @@ document.addEventListener('focusin', event => closeLibraryMenuAtBoundary(event.t
 function renderRoots() {
   const rawRoots = snapshot.config?.roots ?? snapshot.config?.libraryRoots ?? snapshot.library?.roots ?? [];
   const roots = Array.isArray(rawRoots) ? rawRoots : (rawRoots ? [rawRoots] : []);
-  $('#root-count').innerHTML = `<b class="count-value">${roots.length}</b>个`;
+  $('#root-count').innerHTML = `<b class="count-value">${formatCount(roots.length)}</b>`;
   const directoryPanel = $('#directory-settings-panel');
   const directoryToggle = $('#directory-settings-toggle');
   if (directoryPanel && directoryToggle) directoryToggle.setAttribute('aria-expanded', String(!directoryPanel.classList.contains('hidden')));
@@ -550,7 +610,7 @@ function renderManualGameDirectories() {
   const raw = snapshot.config?.manualGameDirectories;
   const entries = Array.isArray(raw) ? raw : [];
   const directories = entries.map(item => typeof item === 'string' ? item : (item?.path || item?.gameDirectory || '')).filter(Boolean);
-  $('#manual-count').innerHTML = `<b class="count-value">${directories.length}</b>个`;
+  $('#manual-count').innerHTML = `<b class="count-value">${formatCount(directories.length)}</b>`;
   if (!directories.length) {
     const empty = document.createElement('p'); empty.className = 'manual-game-empty'; empty.textContent = '暂无单独添加的游戏'; list.appendChild(empty); return;
   }
@@ -780,6 +840,12 @@ function moveLibraryDirectional(key) {
       if (focusWorkspaceElement(targetToolbar)) return true;
     }
   }
+  if (zone.name === 'none') {
+    const fallback = (key === 'ArrowUp' || key === 'ArrowLeft')
+      ? (tabs[0] || header[0] || toolbar[0] || cards[0])
+      : (toolbar[0] || tabs[0] || cards[0] || header[0]);
+    return focusWorkspaceElement(fallback) || true;
+  }
   const moved = moveSpatialFocus(allItems, key, zone.item);
   if (moved) return true;
   if (zone.name === 'cards' && key === 'ArrowUp') {
@@ -790,6 +856,22 @@ function moveLibraryDirectional(key) {
       ? (tabs[0] || header[0]) : (toolbar[0] || cards[0])) || true;
   }
   return true;
+}
+function ensureLibraryFocus() {
+  if ($('#library-view').classList.contains('hidden') || libraryModalOpen()) return true;
+  if (libraryFocusZone().name !== 'none') return true;
+  const target = resolveLibraryFocusDescriptor(libraryFocusMemory) || libraryCards()[0] || libraryPageTabs()[0] || libraryToolbarItems()[0];
+  return target ? focusWorkspaceElement(target, false) : false;
+}
+function scheduleLibraryFocusRepair() {
+  const delays = [0, 32, 96, 220, 480];
+  let attempt = 0;
+  const repair = () => {
+    if (ensureLibraryFocus() || attempt >= delays.length - 1) return;
+    attempt += 1;
+    window.setTimeout(repair, delays[attempt]);
+  };
+  window.requestAnimationFrame(repair);
 }
 function visibleFocusables(root) {
   if (!root) return [];
@@ -866,6 +948,30 @@ function moveSpatialFocus(items, key, active = document.activeElement) {
 function moveContainerFocus(root, key) {
   return moveSpatialFocus(visibleFocusables(root), key);
 }
+function editIdentityFocusTarget(key, active) {
+  const nameTargets = [$('#identity-name'), workspaceDropdownTriggerForSelect($('#identity-name-candidates'))]
+    .filter(item => item && isVisuallyPresent(item));
+  const idTargets = [$('#identity-steam-id'), $('#identity-steam-id-clear')]
+    .filter(item => item && isVisuallyPresent(item));
+  const wallpaper = $('#artwork-wallpaper-preview');
+  if (key === 'ArrowUp' && idTargets.includes(active)) return nameTargets[0] || null;
+  if (key === 'ArrowUp' && nameTargets.includes(active)) return wallpaper || null;
+  if (key === 'ArrowDown' && nameTargets.includes(active)) return idTargets[0] || null;
+  return null;
+}
+function editArtworkFocusTarget(key, active) {
+  const cover = $('#artwork-cover-preview');
+  const wallpaper = $('#artwork-wallpaper-preview');
+  if (!cover || !wallpaper || ![cover, wallpaper].includes(active)) return null;
+  if (key === 'ArrowLeft') return active === wallpaper ? cover : null;
+  if (key === 'ArrowRight') return active === cover ? wallpaper : null;
+  if (key === 'ArrowDown') {
+    if (active === wallpaper) return $('#identity-name') || null;
+    return workspaceDropdownTriggerForSelect($('#edit-primary-select')) ||
+      workspaceDropdownTriggerForSelect($('#edit-bucket-select')) || null;
+  }
+  return null;
+}
 function editModalFocusItems() {
   const modal = $('#edit-modal');
   return visibleFocusables(modal).filter(item => !item.matches('.workspace-native-select'));
@@ -884,6 +990,10 @@ function editModalRows(items) {
 function moveEditModalFocus(key) {
   const items = editModalFocusItems();
   if (!items.length) return false;
+  const artworkTarget = editArtworkFocusTarget(key, document.activeElement);
+  if (artworkTarget) return focusWorkspaceElement(artworkTarget);
+  const identityTarget = editIdentityFocusTarget(key, document.activeElement);
+  if (identityTarget) return focusWorkspaceElement(identityTarget);
   // Do not use data-edit-row here. Those values describe semantic form
   // groups, not the visual layout: cover and wallpaper are side by side, and
   // the primary/name controls can be in different columns. The controller
@@ -891,8 +1001,13 @@ function moveEditModalFocus(key) {
   return moveSpatialFocus(items, key) || true;
 }
 function activeWorkspaceModal() {
-  return ['#busy','#confirm-modal','#artwork-action-modal','#edit-modal','#artwork-search-modal','#identity-search-modal','#steam-commit-modal','#steam-delete-modal']
-    .map(selector => $(selector)).find(item => item && !item.classList.contains('hidden')) || null;
+  const modalOrder = [...document.querySelectorAll('.modal')];
+  return modalOrder.filter(item => !item.classList.contains('hidden')).sort((left, right) => {
+    const leftZ = Number.parseInt(getComputedStyle(left).zIndex, 10) || 0;
+    const rightZ = Number.parseInt(getComputedStyle(right).zIndex, 10) || 0;
+    if (leftZ !== rightZ) return rightZ - leftZ;
+    return modalOrder.indexOf(right) - modalOrder.indexOf(left);
+  })[0] || null;
 }
 function artworkActionControls() {
   const modal = $('#artwork-action-modal');
@@ -931,11 +1046,40 @@ function handleArtworkActionGamepadKey(event) {
   }
   return false;
 }
+function identitySearchModalControls() {
+  const modal = $('#identity-search-modal');
+  if (!modal || modal.classList.contains('hidden')) return [];
+  const trigger = workspaceDropdownTriggerForSelect($('#identity-search-select'));
+  const confirm = modal.querySelector('#identity-search-list > .button');
+  return [trigger, confirm].filter(item => item && isVisuallyPresent(item));
+}
+function handleIdentitySearchGamepadKey(event) {
+  const modal = $('#identity-search-modal');
+  if (!modal || modal.classList.contains('hidden')) return false;
+  const controls = identitySearchModalControls();
+  if (!controls.length) return true;
+  const active = document.activeElement;
+  if (['ArrowUp', 'ArrowDown'].includes(event.key)) {
+    event.preventDefault();
+    event.stopPropagation();
+    const current = controls.indexOf(active);
+    const next = event.key === 'ArrowDown' ? current + 1 : current - 1;
+    if (current >= 0 && next >= 0 && next < controls.length) focusWorkspaceElement(controls[next]);
+    return true;
+  }
+  if (['ArrowLeft', 'ArrowRight'].includes(event.key)) {
+    event.preventDefault();
+    event.stopPropagation();
+    return true;
+  }
+  return false;
+}
 function handleModalGamepadKey(event) {
   const modal = activeWorkspaceModal();
   if (!modal) return false;
   if (workspaceDropdownKey(event)) return true;
   if (modal.id === 'artwork-action-modal' && handleArtworkActionGamepadKey(event)) return true;
+  if (modal.id === 'identity-search-modal' && handleIdentitySearchGamepadKey(event)) return true;
   const key = event.key;
   if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(key)) {
     event.preventDefault(); event.stopPropagation();
@@ -1036,15 +1180,18 @@ function syncPageSelectionControls() {
 }
 function renderLibrary() {
   const games = mergedGames(); const counts = categoryCounts(games);
-  $('#count-not-in-steam').textContent = counts['not-in-steam']; $('#count-in-steam').textContent = counts['in-steam']; $('#count-unclassified').textContent = counts.unclassified; $('#count-non-game').textContent = counts['non-game']; $('#library-subtitle').textContent = `${games.length} 个项目 · 已确认 ${games.filter(game => game.status === 'ready').length} 个主程序`;
-  document.querySelectorAll('.page-tab').forEach(tab => tab.classList.toggle('active', tab.dataset.tab === activeTab)); const inSteam = activeTab === 'in-steam'; const notInSteam = activeTab === 'not-in-steam'; document.querySelector('.steam-target-copy')?.classList.add('hidden'); document.querySelector('.steam-bar')?.classList.remove('hidden'); $('#commit-button').classList.toggle('hidden', inSteam); $('#delete-button').classList.toggle('hidden', !inSteam); $('#commit-button').innerHTML = `点击加入 已选<span class="count-value">${selectedPageCount()}</span>个`; $('#delete-button').innerHTML = `点击删除 已选<span class="count-value">${selectedSteamCount()}</span>个`; $('#commit-button').disabled = inSteam || selectedReadyCount() === 0; $('#commit-button').title = '只加入当前页中已验证且已选中的项目'; $('#delete-button').disabled = selectedSteamCount() === 0; $("#in-steam-limitation").classList.add("hidden"); syncPageSelectionControls(); renderRoots();
+  $('#count-not-in-steam').textContent = formatCount(counts['not-in-steam']); $('#count-in-steam').textContent = formatCount(counts['in-steam']); $('#count-unclassified').textContent = formatCount(counts.unclassified); $('#count-non-game').textContent = formatCount(counts['non-game']); $('#library-subtitle').textContent = `${formatCount(games.length)} 项目 · 已确认 ${formatCount(games.filter(game => game.status === 'ready').length)} 主程序`;
+  document.querySelectorAll('.page-tab').forEach(tab => tab.classList.toggle('active', tab.dataset.tab === activeTab)); const inSteam = activeTab === 'in-steam'; const notInSteam = activeTab === 'not-in-steam'; document.querySelector('.steam-target-copy')?.classList.add('hidden'); document.querySelector('.steam-bar')?.classList.remove('hidden'); $('#commit-button').classList.toggle('hidden', inSteam); $('#delete-button').classList.toggle('hidden', !inSteam); $('#commit-button').innerHTML = `点击加入Steam <span class="count-label">${formatSelectedCount(selectedPageCount())}</span>`; $('#delete-button').innerHTML = `点击删除 <span class="count-label">${formatSelectedCount(selectedSteamCount())}</span>`; $('#commit-button').disabled = inSteam || selectedReadyCount() === 0; $('#commit-button').title = '只加入当前页中已验证且已选中的项目'; $('#delete-button').disabled = selectedSteamCount() === 0; $("#in-steam-limitation").classList.add("hidden"); syncPageSelectionControls(); renderRoots();
   renderArtworkRefreshControl();
-  const focusedDir = activeLibraryCard()?.dataset.directory || '';
+  const focusedDescriptor = libraryFocusDescriptor(document.activeElement) || libraryFocusMemory;
+  const focusedDir = focusedDescriptor?.type === 'card' ? focusedDescriptor.directory : (activeLibraryCard()?.dataset.directory || '');
   library.replaceChildren(); const visible = games.filter(game => category(game) === activeTab); visible.forEach(game => library.appendChild(createCard(game))); $('#empty').classList.toggle('hidden', visible.length !== 0); library.classList.toggle('hidden', visible.length === 0);
   if (visible.length > 0 && !libraryModalOpen()) {
     const restore = focusedDir ? libraryCards().find(c => c.dataset.directory === focusedDir) : null;
-    const shouldFocus = restore || !$('#library-view').contains(document.activeElement);
-    if (shouldFocus) requestAnimationFrame(() => { if (!libraryModalOpen()) focusLibraryCard(restore || libraryCards()[0]); });
+    const remembered = resolveLibraryFocusDescriptor(focusedDescriptor);
+    const shouldFocus = restore || remembered || !$('#library-view').contains(document.activeElement);
+    if (shouldFocus) requestAnimationFrame(() => { if (!libraryModalOpen()) focusWorkspaceElement(restore || remembered || libraryCards()[0]); });
+    else scheduleLibraryFocusRepair();
   }
 }
 function candidateDataFor(game) {
@@ -1162,6 +1309,9 @@ function focusEditModal() {
 function openEdit(game) {
   if (!game) return;
   try {
+    const previousExecutable = normalizedUiPath(selectedActionGame?.primaryExecutable || '');
+    const nextExecutable = normalizedUiPath(game.primaryExecutable || '');
+    if (previousExecutable && nextExecutable && previousExecutable !== nextExecutable) cancelEditorBackgroundTasks();
     const returnDirectory = keyFor(game);
     if (returnDirectory) editReturnCardDirectory = returnDirectory;
     if (!editDraft || normalizedUiPath(editDraft.game?.primaryExecutable) !== normalizedUiPath(game.primaryExecutable)) editDraft = draftFor(game);
@@ -1185,6 +1335,7 @@ function openEdit(game) {
     const primaryDropdown = workspaceDropdownForSelect(select);
     primaryDropdown?.wrapper.classList.toggle('hidden', candidates.length <= 1);
     $('#edit-modal').classList.remove('hidden'); requestAnimationFrame(focusEditModal);
+    startArtworkPrefetch(selectedActionGame);
   } catch (error) {
     reportUiError('open-edit', error, { executable: game.primaryExecutable || '', gameDirectory: game.gameDirectory || '' });
     $('#edit-modal')?.classList.add('hidden');
@@ -1209,7 +1360,7 @@ function renderSearchCandidates(game, candidatesOverride = null, queryOverride =
   });
   list.replaceChildren(); stopIdentitySearchLoading();
   const query = String(queryOverride ?? game?._searchQuery ?? artworkSearchQuery(game) ?? '').trim();
-  $('#identity-search-query').value = query;
+  $('#identity-search-query').textContent = query;
   $('#identity-search-summary').textContent = `名称：${query || '（未填写）'} · ${candidates.length} 个候选 · 请选择名称和 ID`;
   if (!candidates.length) { list.innerHTML = '<div class="identity-search-empty">暂无候选名称，请修改名称后再次自动识别。</div>'; return; }
   const select = document.createElement('select');
@@ -1260,7 +1411,7 @@ async function identifyCandidate(candidate) {
 function identityEventMatches(message) {
   const executable = normalizedUiPath(message?.executable || '');
   const expectedExecutable = normalizedUiPath(selectedActionGame?.primaryExecutable || '');
-  const expectedQuery = String($('#identity-search-query')?.value || '').trim();
+  const expectedQuery = String($('#identity-search-query')?.textContent || '').trim();
   if (expectedExecutable && executable !== expectedExecutable) return false;
   if (expectedQuery && message?.query && String(message.query) !== expectedQuery) return false;
   if (message?.jobId) {
@@ -1290,11 +1441,11 @@ async function searchGame() {
   identitySearchManualCandidate = steamId ? {
     name, steamAppId: Number(steamId), provider: '当前输入', manualSelection: true, score: 1, year: 0
   } : null;
-  $('#identity-search-query').value = name;
+  $('#identity-search-query').textContent = name;
   $('#identity-search-summary').textContent = `名称：${name} · 正在后台搜索候选，不会阻塞编辑页面`;
   $('#identity-search-list').replaceChildren(); startIdentitySearchLoading();
   $('#identity-search-modal').classList.remove('hidden');
-  requestAnimationFrame(() => $('#identity-search-query').focus());
+  requestAnimationFrame(() => $('#identity-search-cancel')?.focus({ preventScroll: true }));
   try {
     const result = await invoke('searchIdentity', { executable: game.primaryExecutable, query: name });
     if (token !== identitySearchToken || identitySearchCancelled) return;
@@ -1402,6 +1553,84 @@ function artworkActionForCurrentType(action) {
 function artworkSearchQuery(game) { return gameDisplayName(game) || String(game.primaryExecutable || '').split(/[\\/]/).pop().replace(/\.exe$/i, ''); }
 function formalSteamAppId(game) { if (game?.override?.idCleared === true) return ''; const value = game.override?.steamId || game.steam?.steamStoreAppId || game.steam?.storefrontAppId || game.steam?.appId || game.steam?.canonicalAppId || game.steam?.localAppId || game.steam?.requestedAppId || ''; const text = String(value ?? '').trim(); return /^[1-9]\d*$/.test(text) ? text : ''; }
 function artworkSearchSteamId(game) { return formalSteamAppId(game); }
+function artworkSearchCacheKey(game, type) {
+  const executable = normalizedUiPath(game?.primaryExecutable || '');
+  const query = artworkSearchQuery(game).trim();
+  const steamAppId = artworkSearchSteamId(game);
+  return `${executable}\u001f${type}\u001f${query}\u001f${steamAppId}`;
+}
+function artworkSearchRequest(game, type) {
+  return {
+    executable: game?.primaryExecutable || '',
+    query: artworkSearchQuery(game),
+    type,
+    steamAppId: artworkSearchSteamId(game)
+  };
+}
+function artworkPrefetchEntryFresh(entry) {
+  if (!entry) return false;
+  if (entry.pending) return true;
+  const completedAt = Number(entry.completedAt || 0);
+  return Boolean(entry.result) && completedAt > 0 && Date.now() - completedAt <= ARTWORK_PREFETCH_TTL_MS;
+}
+function warmArtworkPreviewCache(result) {
+  const candidates = Array.isArray(result?.candidates) ? result.candidates : [];
+  const urls = [...new Set(candidates.slice(0, ARTWORK_PREFETCH_MAX_PRELOADS)
+    .map(candidate => candidate?.previewUrl || candidate?.url)
+    .filter(url => typeof url === 'string' && /^https?:/i.test(url)))];
+  if (!urls.length) return;
+  const preload = () => {
+    for (const url of urls) {
+      const image = new Image();
+      image.decoding = 'async';
+      image.loading = 'eager';
+      image.src = url;
+    }
+  };
+  if (typeof window.requestIdleCallback === 'function') window.requestIdleCallback(preload, { timeout: 1200 });
+  else window.setTimeout(preload, 0);
+}
+function ensureArtworkSearch(game, type) {
+  const key = artworkSearchCacheKey(game, type);
+  const existing = artworkPrefetchCache.get(key);
+  if (artworkPrefetchEntryFresh(existing)) {
+    return existing.pending || Promise.resolve(existing.result);
+  }
+  if (existing) artworkPrefetchCache.delete(key);
+  const entry = { key, startedAt: Date.now(), completedAt: 0, result: null, error: null, pending: null };
+  const request = invoke('searchArtwork', artworkSearchRequest(game, type));
+  entry.pending = request.then(result => {
+    if (artworkPrefetchCache.get(key) === entry) {
+      entry.result = result;
+      entry.completedAt = Date.now();
+      entry.pending = null;
+      entry.error = null;
+      warmArtworkPreviewCache(result);
+    }
+    return result;
+  }).catch(error => {
+    if (artworkPrefetchCache.get(key) === entry) {
+      entry.pending = null;
+      entry.completedAt = Date.now();
+      entry.error = String(error?.message || error || '素材搜索失败');
+    }
+    throw error;
+  });
+  artworkPrefetchCache.set(key, entry);
+  return entry.pending;
+}
+function startArtworkPrefetch(game) {
+  if (!game) return;
+  for (const type of ['cover', 'wallpaper']) {
+    const key = artworkSearchCacheKey(game, type);
+    const cached = artworkPrefetchCache.get(key);
+    if (artworkPrefetchEntryFresh(cached)) continue;
+    artworkPrefetchPendingCount++;
+    ensureArtworkSearch(game, type).catch(() => {}).finally(() => {
+      artworkPrefetchPendingCount = Math.max(0, artworkPrefetchPendingCount - 1);
+    });
+  }
+}
 function artworkDraftFromGame(game) {
   const override = artworkOverride(game);
   const protection = override.artworkProtection && typeof override.artworkProtection === "object" ? override.artworkProtection : {};
@@ -1413,13 +1642,25 @@ function artworkDraftFromGame(game) {
   };
   return { cover: slotFor("cover"), wallpaper: slotFor("wallpaper"), dirty: { cover: false, wallpaper: false } };
 }
-function openArtworkEditor() { if (!selectedActionGame) return; const artworkId = artworkSearchSteamId(selectedActionGame); $('#artwork-search-hint').textContent = artworkId ? `已确认 Steam AppID ${artworkId}` : `搜索词：${artworkSearchQuery(selectedActionGame)}（优先产品名称，其次 EXE）`; renderArtworkDraft(); $('#artwork-status').classList.add('hidden'); $('#edit-modal').classList.remove('hidden'); }
+function openArtworkEditor() { if (!selectedActionGame) return; const artworkId = artworkSearchSteamId(selectedActionGame); $('#artwork-search-hint').textContent = artworkId ? `已确认 Steam AppID ${artworkId}` : `搜索词：${artworkSearchQuery(selectedActionGame)}（优先产品名称，其次 EXE）`; renderArtworkDraft(); $('#artwork-status').classList.add('hidden'); $('#edit-modal').classList.remove('hidden'); startArtworkPrefetch(selectedActionGame); }
 async function promptArtworkPath(type) { if (!selectedActionGame) return; try { const result = await invoke('pickArtwork', { type }); if (result?.cancelled || !result?.path) return; artworkDraft[type] = { state: "set", asset: { path: result.path, file: result.path } }; artworkDraft.dirty[type] = true; renderArtworkDraft(); } catch (error) { showError(error, libraryNotice); } }
 function clearArtwork(type) { artworkDraft[type] = { state: "deleted", asset: null }; artworkDraft.dirty[type] = true; renderArtworkDraft(); showNotice(`${type === "cover" ? "封面" : "壁纸"}已标记删除；点击“保存内容”后应用。`, false, libraryNotice); }
 function moveArtworkCandidateFocus(card, key) {
   const cards = [...document.querySelectorAll("#artwork-search-list .artwork-candidate")];
   if (!cards.includes(card) || cards.length < 2) return false;
   return moveSpatialFocus(cards, key, card);
+}
+function artworkProviderLabel(provider) {
+  if (provider === "steam-cdn" || provider === "steam-store") return "Steam 官方";
+  if (provider === "playnite-igdb") return "Playnite-IGDB";
+  if (provider === "baidu-image") return "百度图片";
+  return provider || "图片候选";
+}
+function artworkCandidateFallbackTitle(candidate) {
+  if (candidate?.provider === "steam-cdn") return "Steam 官方候选";
+  if (candidate?.provider === "playnite-igdb") return "Playnite-IGDB 候选";
+  if (candidate?.provider === "baidu-image") return "百度图片候选";
+  return "图片候选";
 }
 function renderArtworkCandidates(result) {
   artworkCandidates = Array.isArray(result?.candidates) ? result.candidates : [];
@@ -1430,7 +1671,7 @@ function renderArtworkCandidates(result) {
   for (const candidate of artworkCandidates) {
     const card = document.createElement("button"); card.type = "button"; card.className = "artwork-candidate"; card.tabIndex = 0;
     const dimensions = `${Number(candidate.width || 0)}×${Number(candidate.height || 0)}`;
-    card.innerHTML = `<span class="artwork-candidate-preview"><img src="${escapeHtml(candidate.previewUrl || candidate.url)}" alt="候选图片" loading="lazy"></span><strong class="artwork-candidate-title">${escapeHtml(candidate.title || (candidate.provider === "steam-cdn" ? "Steam AppID 候选" : "百度图片候选"))}</strong><span class="artwork-candidate-meta"><span>${candidate.provider === "steam-cdn" ? "Steam CDN" : "百度图片"}</span><span>${dimensions}</span><span>${candidate.preferred ? "优选" : "合格"}</span></span>`;
+    card.innerHTML = `<span class="artwork-candidate-preview"><img src="${escapeHtml(candidate.previewUrl || candidate.url)}" alt="候选图片" loading="lazy"></span><strong class="artwork-candidate-title">${escapeHtml(candidate.title || artworkCandidateFallbackTitle(candidate))}</strong><span class="artwork-candidate-meta"><span>${escapeHtml(artworkProviderLabel(candidate.provider))}</span><span>${dimensions}</span><span>${candidate.preferred ? "优选" : "合格"}</span></span>`;
     card.addEventListener("click", () => applyArtworkCandidate(candidate, card));
      card.addEventListener("keydown", event => {
        if (event.target !== card) return;
@@ -1483,7 +1724,7 @@ async function searchArtwork(type) {
   $("#artwork-search-list").innerHTML = '<div class="search-loading"><strong>正在获取候选图片</strong><span>搜索完成后可直接选择素材</span></div>';
   $("#artwork-search-empty").classList.add("hidden");
   $("#artwork-search-modal").classList.remove("hidden");
-  try { const result = await invoke("searchArtwork", { query: artworkSearchQuery(selectedActionGame), type, steamAppId: artworkSearchSteamId(selectedActionGame) }); if (token === artworkTaskToken) renderArtworkCandidates(result); }
+  try { const result = await ensureArtworkSearch(selectedActionGame, type); if (token === artworkTaskToken) renderArtworkCandidates(result); }
   catch (error) { if (token === artworkTaskToken && !String(error?.message || error).includes("CANCELLED")) { $("#artwork-search-list").innerHTML = '<div class="search-loading error">搜索失败，可返回后改用“指定图片”</div>'; showError(error, libraryNotice); } }
   finally { if (token === artworkTaskToken) artworkTaskInFlight = false; }
 }
@@ -1627,6 +1868,7 @@ async function openLibraryView() {
     renderEntry();
     renderLibrary();
     clearNotice(libraryNotice);
+    scheduleLibraryFocusRepair();
   } catch (error) {
     showError(error, libraryNotice);
   }
@@ -1843,7 +2085,9 @@ window.chrome.webview.addEventListener('message', event => {
   }
   if (message.scrape) {
     snapshot.scrape = message.scrape;
-    if (!$('#library-view').classList.contains('hidden')) renderLibrary();
+    // Background progress must not rebuild the card DOM on every tick. The
+    // progress controls update below, while terminal events schedule one
+    // coalesced snapshot refresh; this preserves the active gamepad focus.
   }
   if (message.event === 'library-first-run-started') {
     showNotice('正在自动扫描游戏库；仅首次打开时执行，页面保持可操作。', false, libraryNotice);
@@ -1889,6 +2133,7 @@ window.chrome.webview.addEventListener('message', event => {
     }
     if (message.status === 'ready' || message.status === 'failed') scheduleSilentRefresh();
   } else if (message.event === 'scrape-complete') {
+    setBusy(false);
     if (String(message.scrape?.mode || '') === 'manual-refresh') {
       const total = Number(message.total);
       const current = Number(message.current);
@@ -1902,6 +2147,7 @@ window.chrome.webview.addEventListener('message', event => {
     scheduleSilentRefresh();
     showNotice(String(message.scrape?.mode || '') === 'manual-refresh' ? '手动刷新已完成' : '后台更新已完成。', false, libraryNotice);
   } else if (message.event === 'scrape-paused') {
+    setBusy(false);
     if (String(message.scrape?.mode || '') === 'manual-refresh') {
       manualRefreshProgress = {
         phase: 'paused',
@@ -1964,6 +2210,7 @@ window.chrome.webview.addEventListener('message', event => {
       showNotice('自动识别暂未完成，原页面保持不变，可稍后重试。', false, libraryNotice);
     }
   } else if (message.event === 'scrape-error' || message.event === 'library-open-error') {
+    if (message.event === 'scrape-error') setBusy(false);
     if (message.event === 'scrape-error' && String(message.scrape?.mode || '') === 'manual-refresh') {
       manualRefreshProgress = { phase: 'failed', current: manualRefreshProgress.current, total: manualRefreshProgress.total };
       renderArtworkRefreshControl();
@@ -1993,7 +2240,7 @@ const updateSteamArtworkButton = (() => {
   button.id = 'update-steam-artwork-button';
   button.type = 'button';
   button.className = 'button ghost hidden';
-  button.innerHTML = '更新Steam图标 已选<span class="count-value">0</span>个';
+  button.innerHTML = `更新Steam图标 <span class="count-label">${formatSelectedCount(0)}</span>`;
   $('#commit-button')?.before(button);
   return button;
 })();
@@ -2003,7 +2250,7 @@ function syncUpdateSteamArtworkButton() {
   const count = selectedSteamCount();
   updateSteamArtworkButton.classList.toggle('hidden', !visible);
   updateSteamArtworkButton.disabled = !visible || count === 0;
-  updateSteamArtworkButton.innerHTML = `更新Steam图标 已选<span class="count-value">${count}</span>个`;
+  updateSteamArtworkButton.innerHTML = `更新Steam图标 <span class="count-label">${formatSelectedCount(count)}</span>`;
 }
 const baseRenderLibrary = renderLibrary;
 renderLibrary = function () { baseRenderLibrary(); syncUpdateSteamArtworkButton(); };
@@ -2042,22 +2289,4 @@ invoke('startup').then(async result => {
   renderEntry();
   await openLibraryView();
 }).catch(showError);
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 

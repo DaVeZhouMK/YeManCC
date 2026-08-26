@@ -15,6 +15,9 @@ const props = withDefaults(
     disabled?: boolean;
     hint?: string;
     valueText?: string;
+    /** Optional spatial-navigation coordinates for the range input. */
+    gpRow?: number | string;
+    gpCol?: number | string;
   }>(),
   { min: 0, max: 100, step: 1, color: 'accent', disabled: false }
 );
@@ -91,6 +94,8 @@ function onKeyup(e: KeyboardEvent) {
         :value="modelValue"
         :disabled="disabled"
         :aria-label="label || '滑块'"
+        :data-gp-row="gpRow"
+        :data-gp-col="gpCol"
         @input="onInput"
         @change="onChange"
         @keydown="onKeydown"

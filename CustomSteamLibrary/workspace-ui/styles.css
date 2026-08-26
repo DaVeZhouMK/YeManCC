@@ -97,6 +97,104 @@
 .workspace-focus-visible { outline:3px solid #fff!important; outline-offset:2px; box-shadow:0 0 0 5px rgba(90,168,255,.78)!important; }
 .workspace-dropdown-trigger.workspace-focus-visible { border-color:#fff; }
 
+/* Modal controls use the same white controller/mouse focus treatment as game
+   cards. Keep the action surface visually consistent even when WebView does
+   not expose :focus-visible for a programmatic gamepad focus. */
+.artwork-action-buttons .button:hover,
+.artwork-action-buttons .button:focus-visible,
+.artwork-action-buttons .button.workspace-focus-visible {
+  border-color:#fff!important;
+  box-shadow:0 0 0 3px #fff,0 0 0 6px rgba(90,168,255,.78)!important;
+  filter:none;
+}
+.identity-search-modal-card { width:min(760px,100%); }
+.identity-search-query {
+  margin:8px 0 0;
+  padding:0;
+  color:#f4f7fb;
+  font-size:18px;
+  font-weight:850;
+  line-height:1.35;
+  overflow-wrap:anywhere;
+}
+.identity-search-modal-card .workspace-dropdown-trigger {
+  min-height:46px;
+  border-radius:8px;
+  background:#142130;
+  align-items:flex-start;
+}
+.identity-search-modal-card .workspace-dropdown-label {
+  white-space:normal;
+  overflow:visible;
+  text-overflow:clip;
+  overflow-wrap:anywhere;
+  line-height:1.35;
+}
+.identity-search-modal-card .workspace-dropdown-option {
+  border-radius:6px;
+  white-space:normal;
+  align-items:flex-start;
+}
+.identity-search-modal-card .workspace-dropdown-option > span {
+  white-space:normal;
+  overflow:visible;
+  text-overflow:clip;
+  overflow-wrap:anywhere;
+}
+.identity-search-modal-card .workspace-dropdown-menu {
+  border-radius:10px;
+  padding:5px;
+  overflow-y:auto;
+  overflow-x:hidden;
+  background:#161d29;
+}
+.workspace-dropdown-menu[data-select-id="identity-search-select"] {
+  border-radius:10px;
+  padding:5px;
+  overflow-y:auto;
+  overflow-x:hidden;
+  background:#161d29;
+}
+.workspace-dropdown-menu[data-select-id="identity-search-select"] .workspace-dropdown-option {
+  border-radius:8px;
+  white-space:normal;
+  align-items:flex-start;
+}
+.workspace-dropdown-menu[data-select-id="identity-search-select"] .workspace-dropdown-option > span {
+  white-space:normal;
+  overflow:visible;
+  text-overflow:clip;
+  overflow-wrap:anywhere;
+}
+#identity-search-modal,
+#artwork-search-modal { z-index:70; }
+#identity-search-modal .identity-search-list {
+  grid-template-columns:minmax(0,1fr);
+  gap:10px;
+}
+#identity-search-modal .identity-search-list > .workspace-dropdown,
+#identity-search-modal .identity-search-list > .button {
+  width:100%;
+  min-width:0;
+}
+#identity-search-modal .identity-search-list > .button {
+  justify-self:stretch;
+  min-height:48px;
+  margin-top:0;
+  border-radius:10px;
+}
+#identity-search-modal .workspace-dropdown-trigger,
+#identity-search-modal .workspace-dropdown-option {
+  border-radius:10px;
+}
+#identity-search-modal .workspace-dropdown-trigger.workspace-focus-visible,
+#identity-search-modal .identity-search-list > .button.workspace-focus-visible,
+.workspace-dropdown-menu[data-select-id="identity-search-select"] .workspace-dropdown-option.workspace-focus-visible {
+  outline:none!important;
+  border-color:#fff!important;
+  box-shadow:0 0 0 3px #fff,0 0 0 6px rgba(90,168,255,.8)!important;
+}
+
 
 
 
@@ -157,6 +255,13 @@
   .edit-layout { grid-template-columns:1fr; }
   .edit-artwork-panel .artwork-pane[data-artwork-type="wallpaper"] .artwork-dropzone { margin-top:0; }
 }
+
+/* All non-blocking notices are passive viewport toasts, never layout or gamepad targets. */
+.notice { position:fixed; right:24px; bottom:74px; z-index:30; width:min(440px,calc(100vw - 48px)); margin:0; pointer-events:none; user-select:none; transform:translateY(18px); opacity:0; transition:transform .24s ease,opacity .18s ease; contain:layout paint; }
+.notice:not(.hidden) { transform:translateY(0); opacity:1; }
+.notice { color:#fff; background:rgba(10,18,28,.96); border-color:rgba(101,216,255,.72); box-shadow:0 14px 38px rgba(0,0,0,.48),0 0 0 1px rgba(255,255,255,.08); font-size:15px; font-weight:800; line-height:1.45; text-shadow:0 1px 2px rgba(0,0,0,.65); backdrop-filter:blur(8px); }
+.notice.error { color:#fff; background:rgba(55,17,27,.97); border-color:rgba(255,127,139,.78); }
+@media (max-width:620px) { .notice { right:14px; bottom:64px; width:calc(100vw - 28px); } }
 
 /* Address and manual-game controls are explicit buttons/panels so they remain
    clickable with both mouse and controller navigation. */
@@ -349,22 +454,31 @@
 }
 .count-value {
   display:inline-block;
-  width:3ch;
-  min-width:3ch;
+  width:6ch;
+  min-width:6ch;
   text-align:right;
+  font-variant-numeric:tabular-nums;
+  white-space:nowrap;
+}
+.count-label {
+  display:inline-block;
+  min-width:8ch;
+  white-space:nowrap;
+  text-align:left;
   font-variant-numeric:tabular-nums;
 }
 .page-tab strong {
   display:inline-block;
-  min-width:3ch;
+  min-width:6ch;
   text-align:right;
   font-variant-numeric:tabular-nums;
+  white-space:nowrap;
 }
 .library-menu-row #root-count,
 .library-menu-row #manual-count {
   display:inline-flex;
   align-items:center;
-  min-width:5ch;
+  min-width:6ch;
   justify-content:flex-end;
 }
 .library-menu-row .menu-toggle span {

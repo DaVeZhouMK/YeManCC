@@ -90,33 +90,31 @@ Require-Order 'HC ROG Close' $rogClose @(
 
 $hostOpen = Slice $hostText 'private void OpenCore()' 'public void OpenEvents()'
 Require-Order 'YeMan Open' $hostOpen @(
-  'StartHcDeviceManager();',
   'WaitForHcDeviceReadyBeforeOpen();',
   'OpenHcDevice();',
   'CaptureOemBaseline();'
 )
+if ($hostOpen.Contains('StartHcDeviceManager();')) { throw 'YeMan fan-only Open must not start HC DeviceManager' }
 $hostEvents = Slice $hostText 'private void OpenEventsCore()' 'private void SubscribeExternalProfileEvents()'
 Require-Order 'YeMan OpenEvents' $hostEvents @(
-  'AssertHcNonFanManagersIsolated();',
   'Invoke(device!, "OpenEvents");',
-  'WaitForHcDeviceOpenForRestore();'
+  'EnsureHcDeviceOpenForRestore();'
 )
-$hostClose = Slice $hostText 'private void CloseCore(bool stopDeviceManager)' 'private void WaitForHcManagersBeforeWindowClose()'
+$hostClose = Slice $hostText 'private void CloseCore(bool stopDeviceManager)' 'private void CloseHcDevice()'
 Require-Order 'YeMan Close' $hostClose @(
-  'WaitForHcManagersBeforeWindowClose();',
   'StopCpuTemperatureMonitor();',
-  'UnsubscribeExternalProfileEvents();',
-  'CloseHcDevice(stopDeviceManager);'
+  'CloseHcDevice();'
 )
-$hostCloseBoundary = Slice $hostText 'private void CloseHcDevice(bool stopDeviceManager = true)' 'private void SetHcPhase'
+$hostCloseBoundary = Slice $hostText 'private void CloseHcDevice()' 'private static void ExecuteCloseBoundary'
 Require-Order 'YeMan CloseHcDevice' $hostCloseBoundary @(
   'Invoke(device!, "Close");',
-  'StopHcDeviceManager();'
+  'hcDeviceManagerLifecycle = "not-started/no-stop-required";'
 )
 
 $fullGraph = $hostText.IndexOf('foreach (IManager manager in ManagerFactory.Managers)', [StringComparison]::Ordinal) -ge 0
-$fanOnly = ($hostText.IndexOf('StartHcDeviceManager();', [StringComparison]::Ordinal) -ge 0) -and
-  ($hostText.IndexOf('AssertHcNonFanManagersIsolated', [StringComparison]::Ordinal) -ge 0)
+$fanOnly = (-not $hostText.Contains('StartHcDeviceManager();')) -and
+  (-not $hostText.Contains('StopHcDeviceManager();')) -and
+  ($hostText.Contains('hcDeviceManagerLifecycle = "not-started/no-stop-required";'))
 $directCallback = $hostText.IndexOf('Invoke("PowerProfileManager_Applied", profile', [StringComparison]::Ordinal) -ge 0
 $powerManagerStarted = $hostText.IndexOf('Invoke(hcPowerProfileManager, "Start")', [StringComparison]::Ordinal) -ge 0
 

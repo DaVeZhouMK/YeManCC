@@ -106,15 +106,17 @@ if ($base.IndexOf('SetFanControl(false);', $base.IndexOf('public virtual void Cl
 }
 
 $closeCoreStart = $hostText.IndexOf('private void CloseCore(bool stopDeviceManager)')
-$closeCoreEnd = $hostText.IndexOf('private void WaitForHcManagersBeforeWindowClose()', $closeCoreStart)
+$closeCoreEnd = $hostText.IndexOf('private void CloseHcDevice()', $closeCoreStart)
 if ($closeCoreStart -lt 0 -or $closeCoreEnd -le $closeCoreStart) { throw 'Fan Host CloseCore boundary missing' }
 $closeCore = $hostText.Substring($closeCoreStart, $closeCoreEnd - $closeCoreStart)
-if ($closeCore -notmatch 'CloseHcDevice\(stopDeviceManager\)' -or $closeCore -match 'ApplyPowerProfile\(') {
+if ($closeCore -notmatch 'CloseHcDevice\(\)' -or $closeCore -match '(?m)^\s*(?:\w+\.)?ApplyPowerProfile\(') {
   throw 'Fan Host process close no longer has the direct HC virtual Close boundary'
 }
 
 $fullManagerGraph = $hostText.Contains('foreach (IManager manager in ManagerFactory.Managers)')
-$fanOnlyManagerIsolation = $hostText.Contains('AssertHcNonFanManagersIsolated') -and $hostText.Contains('StartHcDeviceManager()')
+$fanOnlyManagerIsolation = (-not $hostText.Contains('StartHcDeviceManager()')) -and
+  (-not $hostText.Contains('StopHcDeviceManager()')) -and
+  $hostText.Contains('not-started/no-stop-required')
 $profileDirectCallback = $hostText.Contains('Invoke("PowerProfileManager_Applied", profile')
 $profileManagerStarted = $hostText.Contains('Invoke(hcDeviceManager, "Start")') -and $hostText.Contains('powerProfileManager, "Start"')
 $ownerGroups = @($summary | Group-Object CloseOwner | Sort-Object Name | ForEach-Object { "$($_.Name)=$($_.Count)" })

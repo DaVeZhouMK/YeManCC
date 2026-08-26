@@ -35,7 +35,6 @@ const errMsg = ref('');
 const customAddons = ref<SteamCustomAddon[]>([]);
 const steamRunKnown = ref(false);
 const steamChecking = ref(false);
-const addonsExpanded = ref(false);
 const steamLaunchPopupOpen = ref(false);
 const steamStateButtonEl = ref<HTMLButtonElement | null>(null);
 const steamLaunchPopupPanelEl = ref<HTMLElement | null>(null);
@@ -510,18 +509,9 @@ onBeforeUnmount(() => {
       </Transition>
     </section>
 
-    <section class="card">
-      <button
-        type="button"
-        class="card-title addon-card-toggle"
-        :aria-expanded="addonsExpanded"
-        aria-controls="steam-addon-list"
-        @click="addonsExpanded = !addonsExpanded"
-      >
-        <span><InlineIcon name="link" /> 联动启动项</span>
-        <span class="addon-card-chevron" aria-hidden="true">{{ addonsExpanded ? '▴' : '▾' }}</span>
-      </button>
-      <div v-if="addonsExpanded" id="steam-addon-list" class="addon-list">
+    <section class="card addon-card">
+      <h3 class="card-title addon-card-title"><InlineIcon name="link" /> 联动启动项</h3>
+      <div id="steam-addon-list" class="addon-list">
         <div v-for="l in STEAM_ADDONS" :key="l.key" class="addon-row">
           <button class="addon-launch-btn" :disabled="busy" title="启动程序" @click="launchFixedAddon(l.exe)">
             <InlineIcon name="play" /> 启动
@@ -664,26 +654,7 @@ onBeforeUnmount(() => {
 .addon-launch-btn:disabled {
   opacity: 0.58;
 }
-.addon-card-toggle {
-  width: 100%;
-  justify-content: space-between;
-  border: 0;
-  padding: 0;
-  background: transparent;
-  color: var(--text);
-  text-align: left;
-  cursor: pointer;
-}
-.addon-card-toggle > span:first-child {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-.addon-card-chevron {
-  color: var(--text-dim);
-  font-size: 14px;
-  line-height: 1;
-}
+.addon-card-title { margin-bottom: 10px; }
 .addon-list {
   display: grid;
   gap: 4px;
@@ -701,6 +672,11 @@ onBeforeUnmount(() => {
   grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
   gap: 8px;
+  min-height: 42px;
+  padding: 6px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg-input) 88%, transparent);
 }
 .addon-row :deep(.toggle-row) {
   min-width: 0;
@@ -726,8 +702,10 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 8px;
   min-height: 36px;
-  padding: 5px 0;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  padding: 6px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg-input) 88%, transparent);
 }
 .custom-addon-row :deep(.toggle-row) {
   min-width: 0;
