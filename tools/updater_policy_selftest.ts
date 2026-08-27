@@ -45,6 +45,8 @@ for (const token of [
   'updatePackageLayoutIsSafe(staging)',
   'update-manifest.json',
   'Get-UpdateLayoutRoots',
+  'return @($definitions.ToArray())',
+  'YeManCC\\\\CustomSteamLibrary',
   'Register-AdditionalLayoutRootsForRollback',
   'Copy-AdditionalLayoutRootsChecked',
   'CustomSteamLibrary',
