@@ -66,8 +66,10 @@ jobs:
         shell: pwsh
         run: |
           $env:YEMAN_WORKSPACE_ROOT = $env:GITHUB_WORKSPACE
-          $env:YEMAN_RELEASE_ENVELOPE = if ('${{ github.ref_name }}' -eq 'v0.0.22') { 'legacy-bootstrap' } elseif ('${{ github.ref_name }}' -in @('v0.0.20', 'v0.0.21')) { 'legacy-bridge' } else { 'full' }
-          pnpm run release
+          $releaseEnvelope = if ('${{ github.ref_name }}' -in @('v0.0.22', 'v0.0.23')) { 'legacy-bootstrap' } elseif ('${{ github.ref_name }}' -in @('v0.0.20', 'v0.0.21')) { 'legacy-bridge' } else { 'full' }
+          $env:YEMAN_RELEASE_ENVELOPE = $releaseEnvelope
+          pnpm run build
+          powershell -NoProfile -ExecutionPolicy Bypass -File tools/package-release.ps1 -WorkspaceRoot $env:GITHUB_WORKSPACE -ReleaseEnvelope $releaseEnvelope
 
       - name: Verify release outputs
         shell: pwsh
@@ -121,8 +123,8 @@ jobs:
               throw "YeManCC.zip roots do not match update-manifest.json; missing: $($missingZipRoots -join ', '); unexpected: $($unexpectedZipRoots -join ', '); got: $($roots -join ', ')"
             }
             $layoutManifestEntries = @($zip.Entries | Where-Object { $_.FullName.Replace('\', '/') -eq 'YeManCC/update-manifest.json' })
-            if ('${{ github.ref_name }}' -eq 'v0.0.22') {
-              if ($layoutManifestEntries.Count -ne 0) { throw 'v0.0.22 bootstrap ZIP must not contain YeManCC/update-manifest.json' }
+            if ('${{ github.ref_name }}' -in @('v0.0.22', 'v0.0.23')) {
+              if ($layoutManifestEntries.Count -ne 0) { throw '${{ github.ref_name }} bootstrap ZIP must not contain YeManCC/update-manifest.json' }
             } elseif ($layoutManifestEntries.Count -ne 1) {
               throw 'YeManCC.zip must contain exactly one YeManCC/update-manifest.json'
             }
@@ -200,21 +202,27 @@ jobs:
             throw "Refusing to replace main/version.json $($currentJson.version) with older $($generated.version)"
           }
 
-      - name: Commit version manifest back to main
+      - name: Commit version manifest back to main via API
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          git fetch origin main
-          git checkout -B main origin/main
-          Copy-Item -LiteralPath (Join-Path $env:RUNNER_TEMP 'version.json') -Destination version.json -Force
-          git add version.json
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git diff --cached --quiet
-          if ($LASTEXITCODE -eq 0) {
-            Write-Output 'no change'
-          } else {
-            git commit -m "chore: update version manifest (${{ github.ref_name }})"
-            if ($LASTEXITCODE -ne 0) { throw 'Failed to commit generated version manifest' }
-            git push origin HEAD:main
-            if ($LASTEXITCODE -ne 0) { throw 'Failed to push generated version manifest' }
+          $repo = '${{ github.repository }}'
+          $manifestPath = Join-Path $env:RUNNER_TEMP 'version.json'
+          $generated = (Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8).TrimStart([char]0xFEFF) | ConvertFrom-Json
+          $current = gh api "repos/$repo/contents/version.json?ref=main" | ConvertFrom-Json
+          $currentText = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(($current.content -replace '\s', ''))).TrimStart([char]0xFEFF)
+          $currentJson = $currentText | ConvertFrom-Json
+          if ([version]$generated.version -lt [version]$currentJson.version) {
+            throw "Refusing to replace main/version.json $($currentJson.version) with older $($generated.version)"
           }
+          $content = [Convert]::ToBase64String([IO.File]::ReadAllBytes($manifestPath))
+          $payload = [ordered]@{
+            message = "chore: update version manifest (${{ github.ref_name }})"
+            content = $content
+            sha = [string]$current.sha
+            branch = 'main'
+          } | ConvertTo-Json -Compress
+          $result = $payload | gh api --method PUT "repos/$repo/contents/version.json" --input - | ConvertFrom-Json
+          if (-not $result.commit.sha) { throw 'Failed to commit generated version manifest through GitHub API' }
+          Write-Output "version manifest committed: $($result.commit.sha)"

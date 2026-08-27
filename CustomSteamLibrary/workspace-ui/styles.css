@@ -29,6 +29,8 @@
 .artwork-candidate-meta { display:flex; justify-content:space-between; gap:5px; margin-top:7px; color:#b9c9d9; font-size:11px; }
 .artwork-candidate-title { display:block; min-height:2.9em; margin-top:7px; color:#e6f3ff; font-size:12px; line-height:1.45; white-space:normal; overflow-wrap:anywhere; }
 .artwork-candidate.loading { opacity:.65; }
+.artwork-candidate.unavailable { opacity:.42; cursor:not-allowed; filter:grayscale(.7); }
+.artwork-candidate.unavailable:hover,.artwork-candidate.unavailable:focus-visible { border-color:rgba(255,255,255,.13); background:rgba(0,0,0,.2); }
 .artwork-candidate.loading .artwork-candidate-preview::after { content:"下载中…"; position:absolute; padding:5px 8px; border-radius:99px; color:#fff; background:rgba(0,0,0,.72); }
 .empty-search { padding:26px; color:var(--muted); text-align:center; }
 @media (max-width:1120px) { .artwork-search-list,.artwork-search-grid { grid-template-columns:repeat(4,minmax(0,1fr)); } }
@@ -37,12 +39,17 @@
 
 /* SteamOS-style library presentation: artwork is the card, title sits below it. */
 .library-view { min-height:calc(100vh - 40px); }
-.library-heading { margin-bottom:12px; }
+.library-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:18px; margin-bottom:12px; }
+.library-heading-actions { display:flex; align-items:flex-start; justify-content:flex-end; gap:8px; flex:0 0 auto; }
 .steam-target-copy { display:none!important; }
 .steam-bar { display:flex; flex-wrap:wrap; gap:8px; justify-content:flex-end; border:0; padding:0; background:transparent; }
 .library-grid { grid-template-columns:repeat(5,minmax(0,1fr)); gap:34px 28px; margin-top:18px; padding:8px 2px 48px; }
-.game-card { min-height:0; border:2px solid transparent; border-radius:10px; background:transparent; overflow:visible; }
+.game-card { position:relative; min-height:0; border:2px solid transparent; border-radius:10px; background:transparent; overflow:visible; }
 .game-card:hover,.game-card:focus-visible { border-color:rgba(101,216,255,.7); background:rgba(101,216,255,.08); }
+.game-card-scrape-overlay { position:absolute; inset:0; z-index:6; display:none; place-items:center; align-content:center; gap:9px; border-radius:8px; color:#e8f7ff; background:rgba(4,7,11,.5); pointer-events:none; }
+.game-card.scrape-active .game-card-scrape-overlay { display:grid; }
+.game-card-scrape-overlay .spinner { width:42px; height:42px; border-width:4px; }
+.game-card-scrape-label { color:#e8f7ff; font-size:12px; font-weight:850; text-shadow:0 1px 4px rgba(0,0,0,.7); }
 .game-card:focus-visible::after { content:"按 X 编辑"; position:absolute; right:8px; top:8px; z-index:2; padding:5px 8px; border-radius:999px; color:#061019; background:var(--cyan); font-size:11px; font-weight:900; }
 .game-card.selected-for-steam { border-color:var(--cyan); background:rgba(30,139,190,.2); box-shadow:0 0 0 2px rgba(101,216,255,.18); }
 .game-main { display:flex; flex-direction:column; gap:10px; padding:8px; }
@@ -62,10 +69,18 @@
 .identity-search-select { width:100%; min-height:46px; padding:8px 12px; border:1px solid rgba(101,216,255,.45); border-radius:8px; color:#f4f7fb; background:#1a2532; font-weight:750; } .identity-search-select option { padding:8px; color:#f4f7fb; background:#1a2532; } .identity-search-list > .button { justify-self:end; min-width:150px; margin-top:4px; }
 .refresh-artwork { display:inline-flex; align-items:center; justify-content:center; gap:8px; min-width:188px; white-space:nowrap; } .refresh-artwork.paused { color:#aab7c7; border-color:rgba(147,160,178,.45); background:rgba(55,65,78,.32); } .refresh-spinner { width:14px; height:14px; border:2px solid currentColor; border-right-color:transparent; border-radius:50%; display:inline-block; animation:artwork-spin .9s linear infinite; } .refresh-artwork.paused .refresh-spinner { animation-play-state:paused; opacity:.55; } @keyframes artwork-spin { to { transform:rotate(360deg); } }
 
+.page-limitation#in-steam-limitation:not(.hidden) { display:block!important; }
+
 /* Native select controls must stay readable in the dark Steam-like theme. */
 .field select, .steam-bar select, #edit-primary-select { color-scheme:dark; color:#f4f7fb; background-color:#142130; border-color:rgba(101,216,255,.42); appearance:auto; }
 .field select option, .steam-bar select option, #edit-primary-select option { color:#f4f7fb; background-color:#142130; }
 #edit-primary-select { min-height:46px; font-weight:750; }
+.steam-runtime-state { display:inline-flex; align-items:center; justify-content:center; min-height:40px; padding:8px 11px; border:1px solid rgba(255,255,255,.16); border-radius:8px; color:#dce7f3; background:rgba(255,255,255,.055); font-size:12px; font-weight:850; white-space:nowrap; cursor:pointer; }
+.steam-runtime-state.running { color:#ffd2d2; border-color:rgba(255,107,122,.48); background:rgba(150,32,48,.2); }
+.steam-runtime-state.closed { color:#c8f5d5; border-color:rgba(92,211,132,.42); background:rgba(36,129,73,.2); }
+.steam-runtime-state.checking { color:#ffe1a4; border-color:rgba(255,202,93,.38); background:rgba(157,108,28,.18); }
+.library-menu-row .steam-runtime-state { flex:0 0 auto; }
+@media (max-width:620px) { .library-heading-actions { align-items:stretch; flex-direction:column; } .library-heading-actions .button { width:100%; } }
 .identity-id-row { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:8px; align-items:center; }
 .identity-clear-button { min-width:64px; min-height:40px; }
 .identity-name-row { display:grid; grid-template-columns:minmax(0,1fr) minmax(210px,34%); gap:8px; align-items:center; }
@@ -210,6 +225,7 @@
 .library-heading .eyebrow { display:none; }
 .app-heading h1,
 .library-heading h1 { margin:0; font-size:22px; line-height:1.25; }
+.app-brand-subtitle { display:block; margin-top:3px; color:#8f9eae; font-size:11px; line-height:1.35; font-weight:700; }
 .app-heading p { margin-top:5px; font-size:12px; }
 .entry-summary { gap:6px; margin-bottom:10px; }
 .entry-summary div { min-height:54px; padding:9px 10px; }

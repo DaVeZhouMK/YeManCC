@@ -1,6 +1,6 @@
 # Custom Steam Library 升级契约（与 YeManCC 升级器对齐）
 
-状态（2026-08-25）：YeManCC 三目录 `green-child` 升级适配、CustomSteamLibrary 独立隐藏启动健康握手、完整事务回滚和临时包模拟回归已完成；尚未对 `C:\SOFT\YeMan\YeManCC` 正式安装目录执行真实升级。`mainProgramIntegration=true` 同时表示 protocol 1 运行时接入和当前主程序升级器已具备子包适配，但不代表实体手柄窗口验收已完成。当前正式目标为 `C:\SOFT\YeMan\YeManCC\CustomSteamLibrary`；本次桥接包先修复主升级器，再由后续全量包启用子包覆盖。
+状态（2026-08-25）：YeManCC 三目录 `green-child` 升级适配、CustomSteamLibrary 独立隐藏启动健康握手、完整事务回滚和临时包模拟回归已完成；尚未对 `C:\SOFT\YeMan\YeManCC` 正式安装目录执行真实升级。`mainProgramIntegration=true` 同时表示 protocol 1 运行时接入和当前主程序升级器已具备子包适配，但不代表实体手柄窗口验收已完成。本轮只更新 CustomSteamLibrary 包自身的默认目录，不修改 YeManCC 升级器。
 
 这份文档解决三个容易混淆的问题：
 
