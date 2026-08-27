@@ -1,7 +1,7 @@
-{
-  "version": "0.0.22",
-  "notes": "兼容引导包：修复升级器 PowerShell 参数类型错误，内嵌 CustomSteamLibrary 到 YeManCC\\CustomSteamLibrary；PowerControl\\fan-host 暂不参与。",
-  "sha256": "A380FAF90BD5028079387EA7830DAD667744A772CC47869290A112D9F3ED48FA",
-  "publishedAt": "2026-08-27",
-  "package": "Packages/YeManCC.zip"
+﻿{
+    "version":  "0.0.23",
+    "notes":  "两根目录兼容包：更新 CustomSteamLibrary 今日程序包并嵌入 YeManCC\\CustomSteamLibrary；PowerControl\\fan-host 暂不参与。",
+    "sha256":  "887ABE41067FEA4ECF9DF1EB0A86605A95B8A639B93DC7167206CE64533F19B0",
+    "publishedAt":  "2026-08-27",
+    "package":  "Packages/YeManCC.zip"
 }
