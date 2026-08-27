@@ -1,6 +1,6 @@
 # Custom Steam Library 升级契约（与 YeManCC 升级器对齐）
 
-状态（2026-08-25）：YeManCC 三目录 `green-child` 升级适配、CustomSteamLibrary 独立隐藏启动健康握手、完整事务回滚和临时包模拟回归已完成；尚未对 `C:\SOFT\YeMan` 正式安装目录执行真实升级。`mainProgramIntegration=true` 同时表示 protocol 1 运行时接入和当前主程序升级器已具备子包适配，但不代表实体手柄窗口验收已完成。
+状态（2026-08-25）：YeManCC 三目录 `green-child` 升级适配、CustomSteamLibrary 独立隐藏启动健康握手、完整事务回滚和临时包模拟回归已完成；尚未对 `C:\SOFT\YeMan\YeManCC` 正式安装目录执行真实升级。`mainProgramIntegration=true` 同时表示 protocol 1 运行时接入和当前主程序升级器已具备子包适配，但不代表实体手柄窗口验收已完成。当前正式目标为 `C:\SOFT\YeMan\YeManCC\CustomSteamLibrary`；本次桥接包先修复主升级器，再由后续全量包启用子包覆盖。
 
 这份文档解决三个容易混淆的问题：
 
@@ -14,7 +14,7 @@
 | --- | --- | --- | --- |
 | 源码 | `C:\SOFT\YeManCC-Work\SteamArtworkLab` | 宿主、Worker、Web UI、验证脚本和任务文档 | 不进入用户升级包 |
 | 开发构建 | `SteamArtworkLab\build` | `SteamLibraryWorkspace.exe`、`SteamArtworkLab.exe` 等测试产物 | 只选择经过验证的两个构建文件 |
-| 绿色程序包 | `C:\SOFT\YeMan\CustomSteamLibrary` | `CustomSteamLibrary.exe`、Worker、UI、图标和清单 | 只覆盖受管程序文件 |
+| 绿色程序包 | `C:\SOFT\YeMan\YeManCC\CustomSteamLibrary` | `CustomSteamLibrary.exe`、Worker、UI、图标和清单 | 只覆盖受管程序文件 |
 | 持久数据 | `D:\YeMan\CustomSteamLibrary\data` | 配置、游戏信息、图片、缓存、任务和状态 | 永不随程序包覆盖或删除 |
 | YeManCC 主程序源码 | `C:\SOFT\YeManXX\YeManCC4\YeManCC3` | 一级菜单、统一手柄、主程序升级器 | 三目录升级适配和子程序健康握手已启用 |
 | 主程序更新暂存 | `%LOCALAPPDATA%\YeManCC\update` | YeManCC 自己的下载、暂存和回滚 | 不能直接作为子程序数据目录 |
@@ -37,7 +37,7 @@ mainProgramIntegration: true
 安装后的目录边界：
 
 ```text
-C:\SOFT\YeMan\CustomSteamLibrary\
+C:\SOFT\YeMan\YeManCC\CustomSteamLibrary\
 ├─ CustomSteamLibrary.exe          # 受管程序文件
 ├─ SteamArtworkLab.exe             # 受管 Worker
 ├─ workspace-ui\                   # 受管 UI 文件

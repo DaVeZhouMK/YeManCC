@@ -2,7 +2,7 @@
 
 状态（2026-08-25）：阶段 0「检查与冻结」、阶段 2A「数据目录规范化与旧路径迁移」、阶段 2B「配置双重备份、恢复与真实抓取」已完成；阶段 3 的 YeManCC 一级菜单、protocol 1 启动/关闭桥、主程序唯一手柄转发、三目录 `green-child` 升级适配和 CustomSteamLibrary 独立隐藏启动健康握手已完成源码与临时包回归。默认安装目录真实升级、实体手柄窗口验收仍未完成。
 
-> 当前切换点（2026-08-25）：运行时接入和 green-child 自动更新均已进入源码启用、分步验收。独立程序仍可单独启动；主程序固定使用 `C:\SOFT\YeMan\CustomSteamLibrary\CustomSteamLibrary.exe`，数据规则不改变。升级完成必须同时通过 Custom 子程序健康握手和 YeManCC 主程序握手；正式目录升级另行执行。
+> 当前切换点（2026-08-25）：运行时接入和 green-child 自动更新均已进入源码启用、分步验收。CustomSteamLibrary 独立包默认位于 `C:\SOFT\YeMan\YeManCC\CustomSteamLibrary`，数据规则不改变；主程序桥接和升级器现已将该嵌套目录作为默认目标，并保留旧兄弟目录只读兼容。升级完成必须同时通过 Custom 子程序健康握手和 YeManCC 主程序握手；正式目录升级另行执行。
 
 ### 当前状态矩阵
 
@@ -21,10 +21,10 @@
 
 - 中文名：`Steam自定义游戏库`
 - 英文名：`Custom Steam Library`
-- canonical 程序根目录：`C:\SOFT\YeMan\CustomSteamLibrary`
+- canonical 程序根目录：`C:\SOFT\YeMan\YeManCC\CustomSteamLibrary`
 - 有 D 盘时的数据根目录：`D:\YeMan\CustomSteamLibrary\data`
-- 无 D 盘时的数据根目录：程序根目录下的 `data`；canonical 安装时即为 `C:\SOFT\YeMan\CustomSteamLibrary\data`
-- 绿色软件规则：安装到任意目录都能运行；程序通过自身 EXE 所在目录识别资源、Worker、缓存和默认数据位置。`C:\SOFT\YeMan\CustomSteamLibrary` 是默认安装位置，不作为不可移动的运行时硬编码。
+- 无 D 盘时的数据根目录：程序根目录下的 `data`；canonical 安装时即为 `C:\SOFT\YeMan\YeManCC\CustomSteamLibrary\data`
+- 绿色软件规则：安装到任意目录都能运行；程序通过自身 EXE 所在目录识别资源、Worker、缓存和默认数据位置。`C:\SOFT\YeMan\YeManCC\CustomSteamLibrary` 是默认安装位置，不作为不可移动的运行时硬编码。
 - 本阶段已统一原生窗口标题、原生自定义标题栏和网页标题；独立发行入口已确定为 `CustomSteamLibrary.exe`，已嵌入多尺寸图标和 PE 产品信息。
 
 ## 2. 当前检查结论

@@ -14317,7 +14317,11 @@ static void reg_updater() {
         // 依赖包固定目标目录（与前端 yeman.ts 的 PC_DIR 默认一致）
         std::wstring pcDir = L"C:\\SOFT\\YeMan\\PowerControl";
         const std::wstring installRoot = fspath::path(exedir).parent_path().wstring();
-        const std::wstring customSteamLibraryDir = installRoot + L"\\CustomSteamLibrary";
+        // Canonical child location: the existing CustomSteamLibrary package
+        // lives under YeManCC. A manifest-declared green-child may override
+        // this default later, but a bridge package must still resolve the
+        // already-installed nested directory without shipping that child.
+        const std::wstring customSteamLibraryDir = installRoot + L"\\YeManCC\\CustomSteamLibrary";
         std::wstring supportPath = exedir + L"\\YeMan-Support.html";
         auto script = app_data_dir() + L"\\update.ps1";
         auto psLiteral = [](const std::wstring& value) {
@@ -14454,14 +14458,13 @@ static void reg_updater() {
               f << "    foreach ($processName in $stopProcesses) { if ([IO.Path]::GetFileName($processName) -ne $processName -or [IO.Path]::GetExtension($processName) -ine '.exe' -or $processName.IndexOfAny([char[]]'*?[]') -ge 0) { throw ('invalid stopProcesses entry: ' + $processName) } }\n";
               f << "    if ($source -ieq 'YeManCC' -and $target -ine 'YeManCC') { throw 'YeManCC target is fixed' }\n";
               f << "    if ($source -ieq 'PowerControl' -and $target -ine 'PowerControl') { throw 'PowerControl target is fixed' }\n";
-              f << "    if ($source -ieq 'CustomSteamLibrary' -and $target -ine 'CustomSteamLibrary') { throw 'CustomSteamLibrary target is fixed' }\n";
               f << "    $definitions.Add([pscustomobject]@{ source = $source; target = $target; mode = $mode; packageManifest = $packageManifest; stopProcesses = $stopProcesses; managedPaths = @() })\n";
               f << "  }\n";
               f << "  $declared = @($definitions | ForEach-Object source | Sort-Object -Unique)\n";
               f << "  foreach ($required in $requiredRoots) { if ($required -notin $declared) { throw ('required root has no definition: ' + $required) } }\n";
              f << "  $actual = @(Get-ChildItem -LiteralPath $staging -Directory -Force | ForEach-Object Name | Sort-Object -Unique)\n";
              f << "  if (Compare-Object $declared $actual) { throw 'update-manifest roots do not match extracted package roots' }\n";
-             f << "  return @($definitions)\n";
+             f << "  return @($definitions.ToArray())\n";
              f << "}\n";
              f << "function Get-CustomManagedPaths {\n";
              f << "  if (!(Test-Path -LiteralPath $customSteamLibraryManifest -PathType Leaf)) { throw 'CustomSteamLibrary package-manifest.json missing' }\n";
@@ -14781,6 +14784,9 @@ static void reg_updater() {
               f << "    Start-Sleep -Milliseconds 100\n";
               f << "  }\n";
               f << "  $layoutRoots = @(Get-UpdateLayoutRoots)\n";
+              f << "  $customRoot = $layoutRoots | Where-Object { $_.source -ieq 'CustomSteamLibrary' } | Select-Object -First 1\n";
+              f << "  if ($customRoot) { $customSteamLibraryDir = [IO.Path]::GetFullPath((Join-Path $installRoot ([string]$customRoot.target))) }\n";
+              f << "  $customSteamLibraryRootPrefix = ([IO.Path]::GetFullPath($customSteamLibraryDir)).TrimEnd('\\') + '\\'\n";
               f << "  $fanHostPackagePresent = Test-Path -LiteralPath $fanHostSource -PathType Container\n";
               f << "  $customRootPresent = @($layoutRoots | Where-Object { $_.source -ieq 'CustomSteamLibrary' }).Count -gt 0\n";
               f << "  if ($customRootPresent) { Stop-CustomSteamLibraryProcesses }\n";

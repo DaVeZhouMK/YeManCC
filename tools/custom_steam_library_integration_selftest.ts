@@ -10,6 +10,13 @@ const native = fs.readFileSync(path.join(root, 'native', 'main.cpp'), 'utf8');
 const bridge = fs.readFileSync(path.join(root, 'src', 'bridge', 'customSteamLibrary.ts'), 'utf8');
 const engine = fs.readFileSync(path.join(root, 'src', 'gamepad', 'engine.ts'), 'utf8');
 
+assert(native.includes('return @($definitions.ToArray())'), 'PowerShell layout roots must return a plain array');
+assert(native.includes('installRoot + L"\\\\YeManCC\\\\CustomSteamLibrary"'), 'native updater canonical child path is missing');
+assert(!native.includes("CustomSteamLibrary target is fixed"), 'CustomSteamLibrary target is still hard-coded to the legacy sibling');
+assert(bridge.includes("C:\\\\SOFT\\\\YeMan\\\\YeManCC\\\\CustomSteamLibrary"), 'bridge canonical child path is missing');
+assert(bridge.indexOf("joinWindowsPath(exeDir, 'CustomSteamLibrary\\\\CustomSteamLibrary.exe')") >= 0, 'bridge must prefer the nested child beside YeManCC.exe');
+assert(bridge.includes('LEGACY_CUSTOM_STEAM_LIBRARY_ROOT'), 'bridge legacy path fallback is missing');
+
 // The native YeManCC gamepad loop is the only arbitration owner. This test is
 // intentionally a source contract check: a renderer-side gate must not be
 // reintroduced as a second input state machine.

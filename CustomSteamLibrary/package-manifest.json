@@ -30,7 +30,7 @@
                     "adapter":  "YeManCC.child-package.v1",
                     "currentMainUpdaterSupported":  true,
                     "installMode":  "child-overlay",
-                    "targetRoot":  "C:\\SOFT\\YeMan\\CustomSteamLibrary",
+                    "targetRoot":  "C:\\SOFT\\YeMan\\YeManCC\\CustomSteamLibrary",
                     "stagingRoot":  ".upgrade\\staging",
                     "rollbackRoot":  "backups\\upgrades",
                     "requiredStoppedProcesses":  [
@@ -125,18 +125,18 @@
                       },
                       {
                           "path":  "CUSTOM-STEAM-LIBRARY-INTEGRATION-CONTRACT.md",
-                          "bytes":  5023,
-                          "sha256":  "cd5431d96eb4f5d102378e5ea701456063ea2a8502e8d84f37672f6174885581"
+                          "bytes":  5180,
+                          "sha256":  "a41b83f0757038fcd4def8912d114912e9d066acc28a60ebf0ceaf0082570ceb"
                       },
                       {
                           "path":  "SEPARATION-TASK-CUSTOM-STEAM-LIBRARY.md",
-                          "bytes":  55760,
-                          "sha256":  "87ebc5a262b0674654908396a599a93b74820085e576f3cfe4df1ea7b3760c2a"
+                          "bytes":  55866,
+                          "sha256":  "36e40b7f6d0c8d99a90ba5baf893d5316b7cd190a1d10178fdc48306443e1e4f"
                       },
                       {
                           "path":  "CUSTOM-STEAM-LIBRARY-UPGRADE-CONTRACT.md",
-                          "bytes":  9805,
-                          "sha256":  "df9548eddd4263353a2fe395d3ea9f93a778e09c7654b5245e2bd51954e0ff77"
+                          "bytes":  9977,
+                          "sha256":  "3b2807198e826e05a1091607a401c8ca1b0b8ea589daa82c44499b5afa775ba3"
                       }
                   ]
 }

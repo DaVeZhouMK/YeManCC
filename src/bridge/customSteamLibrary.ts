@@ -13,7 +13,10 @@ export const CUSTOM_STEAM_LIBRARY_PROTOCOL_VERSION = 1;
 export const CUSTOM_STEAM_LIBRARY_ROUTE = '/custom-steam-library';
 export const CUSTOM_STEAM_LIBRARY_TITLE = 'Steam自定义游戏库';
 export const CUSTOM_STEAM_LIBRARY_CLASS = 'YeManSteamLibraryWorkspace';
-export const CUSTOM_STEAM_LIBRARY_ROOT = 'C:\\SOFT\\YeMan\\CustomSteamLibrary';
+/** Canonical installed child directory under the YeManCC program root. */
+export const CUSTOM_STEAM_LIBRARY_ROOT = 'C:\\SOFT\\YeMan\\YeManCC\\CustomSteamLibrary';
+/** Read-only fallback for installations created before the nested layout. */
+const LEGACY_CUSTOM_STEAM_LIBRARY_ROOT = 'C:\\SOFT\\YeMan\\CustomSteamLibrary';
 export const CUSTOM_STEAM_LIBRARY_DATA_ROOT = 'D:\\YeMan\\CustomSteamLibrary\\data';
 
 export interface CustomSteamLibrarySummary {
@@ -61,10 +64,13 @@ function parentWindowsPath(path: string): string {
 async function resolveExecutable(): Promise<string> {
   const exeDir = await app.exeDir();
   const candidates = [
-    // Normal installed layout: C:\\SOFT\\YeMan\\YeManCC\\YeManCC.exe
+    // Normal installed layout: YeManCC.exe and its child package share a root.
+    joinWindowsPath(exeDir, 'CustomSteamLibrary\\CustomSteamLibrary.exe'),
+    // Legacy sibling layout remains a read-only compatibility fallback.
     joinWindowsPath(parentWindowsPath(exeDir), 'CustomSteamLibrary\\CustomSteamLibrary.exe'),
-    // User-frozen default path for a portable deployment.
+    // User-frozen canonical path for a standard installation.
     `${CUSTOM_STEAM_LIBRARY_ROOT}\\CustomSteamLibrary.exe`,
+    `${LEGACY_CUSTOM_STEAM_LIBRARY_ROOT}\\CustomSteamLibrary.exe`,
   ];
   for (const candidate of candidates) {
     if (await fs.exists(candidate).catch(() => false)) return candidate;
@@ -94,7 +100,13 @@ function summaryFromPlan(plan: any): CustomSteamLibrarySummary {
 
 /** Read only the latest local cache for the first-level summary bubble. */
 export async function readCustomSteamLibrarySummary(): Promise<CustomSteamLibrarySummary | null> {
-  const roots = [CUSTOM_STEAM_LIBRARY_DATA_ROOT, `${CUSTOM_STEAM_LIBRARY_ROOT}\\data`]
+  const exeDir = await app.exeDir().catch(() => '');
+  const roots = [
+    CUSTOM_STEAM_LIBRARY_DATA_ROOT,
+    exeDir ? joinWindowsPath(exeDir, 'CustomSteamLibrary\\data') : '',
+    `${CUSTOM_STEAM_LIBRARY_ROOT}\\data`,
+    `${LEGACY_CUSTOM_STEAM_LIBRARY_ROOT}\\data`,
+  ].filter(Boolean)
     .filter((root, index, all) => all.indexOf(root) === index);
   for (const root of roots) {
     try {

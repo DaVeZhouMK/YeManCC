@@ -112,7 +112,9 @@ function Test-IsExcludedPowerControlPath([string]$Relative, [bool]$IsDirectory) 
   $r = $Relative.Replace('/', '\')
   # Fan Host is deliberately frozen for this release. It is not part of the
   # update payload, and an existing installed copy must remain untouched.
-  if ($r -match '^fan-host(?:\\|$)') { return $true }
+  if ($r -match '^fan-host(?:\\|$)') {
+    return $true
+  }
   if ($r -match '(^|\\)(\.git|build|dist|__pycache__|KX\.bak_removed|product-old-files-[^\\]+)(\\|$)') { return $true }
   if ($r -match '^(TPD|intel|ryzenadj|tools|pawnio|OpenSpeedy|RTSS-Overlays)(\\|$)') { return $true }
   if ($IsDirectory) { return $false }
@@ -208,21 +210,23 @@ $CustomSteamLibrarySource = if ([string]::IsNullOrWhiteSpace($env:YEMAN_CUSTOM_S
   Get-FullPath $env:YEMAN_CUSTOM_STEAM_LIBRARY_SOURCE
 }
 
-# The ZIP envelope is manifest-driven. The one-time legacy bridge deliberately
-# keeps the old YeManCC + PowerControl envelope so a pre-manifest updater can
-# install the new updater. All normal releases use the current three-root
-# envelope and can add future declared roots without a root-count change.
+# The ZIP envelope is manifest-driven. The legacy bridge keeps the old
+# YeManCC + PowerControl envelope so a pre-manifest updater can install the
+# new updater. The bootstrap variant also embeds the ready CustomSteamLibrary
+# under YeManCC while omitting the manifest from the ZIP, so the broken
+# pre-manifest PowerShell helper takes its safe no-manifest path.
 $releaseEnvelope = if ([string]::IsNullOrWhiteSpace($env:YEMAN_RELEASE_ENVELOPE)) { 'full' } else { [string]$env:YEMAN_RELEASE_ENVELOPE }
-if ($releaseEnvelope -notin @('full', 'legacy-bridge')) {
+if ($releaseEnvelope -notin @('full', 'legacy-bridge', 'legacy-bootstrap')) {
   throw "Unsupported release envelope: $releaseEnvelope"
 }
-$isLegacyBridge = $releaseEnvelope -eq 'legacy-bridge'
+$isLegacyBootstrap = $releaseEnvelope -eq 'legacy-bootstrap'
+$isLegacyBridge = $releaseEnvelope -in @('legacy-bridge', 'legacy-bootstrap')
 $updateLayoutRoots = @(
   [ordered]@{ source = 'YeManCC'; target = 'YeManCC'; mode = 'program' },
   [ordered]@{ source = 'PowerControl'; target = 'PowerControl'; mode = 'power-control' }
 )
 if (-not $isLegacyBridge) {
-  $updateLayoutRoots += [ordered]@{ source = 'CustomSteamLibrary'; target = 'CustomSteamLibrary'; mode = 'green-child'; packageManifest = 'package-manifest.json'; stopProcesses = @('CustomSteamLibrary.exe', 'SteamArtworkLab.exe') }
+  $updateLayoutRoots += [ordered]@{ source = 'CustomSteamLibrary'; target = 'YeManCC\CustomSteamLibrary'; mode = 'green-child'; packageManifest = 'package-manifest.json'; stopProcesses = @('CustomSteamLibrary.exe', 'SteamArtworkLab.exe') }
 }
 $requiredUpdateRoots = @($updateLayoutRoots | ForEach-Object { [string]$_.source } | Sort-Object -Unique)
 $fanHostUpdatePolicy = 'preserve-existing'
@@ -257,6 +261,9 @@ $sourcePowerControl = Join-Path $ProjectRoot 'PowerControl'
 Copy-PowerControlTemplates $sourcePowerControl $StagingPowerControl
 Assert-CustomSteamLibraryPackage $CustomSteamLibrarySource | Out-Null
 Copy-DirectoryContents $CustomSteamLibrarySource $StagingCustomSteamLibrary
+if ($isLegacyBootstrap) {
+  Copy-DirectoryContents $CustomSteamLibrarySource (Join-Path $StagingYeManCC 'CustomSteamLibrary')
+}
 
 $updateLayoutManifest = [ordered]@{
   schemaVersion = 1
@@ -315,9 +322,7 @@ foreach ($relative in $requiredPowerControl) {
   if (-not (Test-Path -LiteralPath (Join-Path $StagingPowerControl $relative))) { throw "Release PowerControl item is missing: $relative" }
 }
 $fanHostStagingPath = Join-Path $StagingPowerControl 'fan-host'
-if (Test-Path -LiteralPath $fanHostStagingPath) {
-  throw 'Fan Host must be excluded from this release staging area'
-}
+if (Test-Path -LiteralPath $fanHostStagingPath) { throw 'Fan Host must be excluded from this release staging area' }
 
 $pawnioExpected = @($assetLock.files | Where-Object component -eq 'PawnIO' | ForEach-Object { ([string]$_.releasePath).Substring('pawnio/'.Length).Replace('/', '\') } | Sort-Object)
 $pawnioActual = @(Get-ChildItem -LiteralPath (Join-Path $StagingPowerControl 'pawnio') -Recurse -File | ForEach-Object { Get-RelativePath (Join-Path $StagingPowerControl 'pawnio') $_.FullName } | Sort-Object)
@@ -327,7 +332,7 @@ $forbidden = @()
 foreach ($file in Get-ChildItem -LiteralPath $StagingRoot -Recurse -Force -File) {
   $relative = Get-RelativePath $StagingRoot $file.FullName
   $isFormalFanHostAuthorization = $relative -ieq 'PowerControl\fan-host\YeManFanHost.authorization.md'
-  $isCustomSteamLibraryManagedDocument = $relative -match '^CustomSteamLibrary\\(CUSTOM-STEAM-LIBRARY-INTEGRATION-CONTRACT|CUSTOM-STEAM-LIBRARY-UPGRADE-CONTRACT|SEPARATION-TASK-CUSTOM-STEAM-LIBRARY)\.md$'
+  $isCustomSteamLibraryManagedDocument = $relative -match '^(?:CustomSteamLibrary|YeManCC\\CustomSteamLibrary)\\(CUSTOM-STEAM-LIBRARY-INTEGRATION-CONTRACT|CUSTOM-STEAM-LIBRARY-UPGRADE-CONTRACT|SEPARATION-TASK-CUSTOM-STEAM-LIBRARY)\.md$'
   if (
     $relative -match '(^|\\)(\.git|node_modules|build|dist|testrun|outputs|__pycache__|\.workbuddy)(\\|$)' -or
     $relative -match '\.(bak(?:_|$)|obj$|pdb$|ilk$|log$|pid$|hb$|py$|spec$|ts$|vue$|cpp$)' -or
@@ -344,6 +349,7 @@ $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 $backupRoot = Join-Path $BackupReleaseRoot "PreTask5-$stamp"
 New-Item -ItemType Directory -Force -Path $ReleaseRoot | Out-Null
 $releaseItems = @($updateLayoutRoots | ForEach-Object { Join-Path $ReleaseRoot ([string]$_.source) }) + @(
+  (Join-Path $ReleaseRoot 'CustomSteamLibrary'),
   $ReleasePackages,
   (Join-Path $ReleaseRoot 'version.json'),
   (Join-Path $ReleaseRoot 'release-manifest.json'),
@@ -367,6 +373,9 @@ foreach ($root in $updateLayoutRoots) {
   Copy-DirectoryContents $source $destination
 }
 $UpdateYeManCC = Join-Path $UpdateRoot 'YeManCC'
+if ($isLegacyBootstrap) {
+  Remove-Item -LiteralPath (Join-Path $UpdateYeManCC 'update-manifest.json') -Force
+}
 
 $updateTopLevel = @(Get-ChildItem -LiteralPath $UpdateRoot -Force | Select-Object -ExpandProperty Name | Sort-Object)
 $declaredUpdateRoots = @($updateLayoutRoots | ForEach-Object { [string]$_.source } | Sort-Object -Unique)
@@ -389,7 +398,7 @@ if (-not $isLegacyBridge) {
     throw 'Update ZIP CustomSteamLibrary directory is missing CustomSteamLibrary.exe'
   }
 }
-if (-not (Test-Path -LiteralPath (Join-Path $UpdateYeManCC 'update-manifest.json') -PathType Leaf)) {
+if (-not $isLegacyBootstrap -and -not (Test-Path -LiteralPath (Join-Path $UpdateYeManCC 'update-manifest.json') -PathType Leaf)) {
   throw 'Update ZIP YeManCC directory is missing update-manifest.json'
 }
 
@@ -407,15 +416,16 @@ try {
   if ($missingZipRoots.Count -gt 0 -or $unexpectedZipRoots.Count -gt 0) {
     throw "YeManCC.zip roots do not match update-manifest.json; missing: $($missingZipRoots -join ', '); unexpected: $($unexpectedZipRoots -join ', '); got: $($zipRoots -join ', ')"
   }
-  if (@($zipArchive.Entries | Where-Object { $_.FullName.Replace('\', '/') -eq 'YeManCC/update-manifest.json' }).Count -ne 1) {
+  $layoutManifestEntries = @($zipArchive.Entries | Where-Object { $_.FullName.Replace('\', '/') -eq 'YeManCC/update-manifest.json' })
+  if ($isLegacyBootstrap) {
+    if ($layoutManifestEntries.Count -ne 0) { throw 'legacy bootstrap YeManCC.zip must not contain update-manifest.json' }
+  } elseif ($layoutManifestEntries.Count -ne 1) {
     throw 'YeManCC.zip must contain exactly one YeManCC/update-manifest.json'
   }
   $fanHostEntries = @($zipArchive.Entries | Where-Object {
     $_.FullName.Replace('\', '/').TrimStart('/') -match '^PowerControl/fan-host(?:/|$)'
   })
-  if ($fanHostEntries.Count -gt 0) {
-    throw "YeManCC.zip must not contain PowerControl/fan-host entries: $($fanHostEntries.FullName -join ', ')"
-  }
+  if ($fanHostEntries.Count -gt 0) { throw "YeManCC.zip must not contain PowerControl/fan-host entries: $($fanHostEntries.FullName -join ', ')" }
   $flatEntries = @($zipArchive.Entries | Where-Object {
     $normalized = $_.FullName.Replace('\', '/').TrimStart('/')
     $normalized -match '^(YeManCC\.exe|YeMan-Support\.html|assets/|CustomSteamLibrary\.exe|SteamArtworkLab\.exe|workspace-ui/)'
