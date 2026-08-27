@@ -1,6 +1,6 @@
 {
-  "version": "0.0.22",
-  "notes": "兼容引导包：修复升级器 PowerShell 参数类型错误，内嵌 CustomSteamLibrary 到 YeManCC\\CustomSteamLibrary；PowerControl\\fan-host 暂不参与。",
+  "version": "0.0.23",
+  "notes": "两根目录兼容包：更新 CustomSteamLibrary 今日程序包并嵌入 YeManCC\\CustomSteamLibrary；PowerControl\\fan-host 暂不参与。",
   "sha256": "",
   "publishedAt": "",
   "package": "Packages/YeManCC.zip"

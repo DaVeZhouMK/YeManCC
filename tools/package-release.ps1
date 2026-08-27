@@ -8,7 +8,10 @@
 #>
 [CmdletBinding()]
 param(
-  [string]$WorkspaceRoot = $env:YEMAN_WORKSPACE_ROOT
+  [string]$WorkspaceRoot = $env:YEMAN_WORKSPACE_ROOT,
+  [ValidateSet('full', 'legacy-bridge', 'legacy-bootstrap')]
+  [string]$ReleaseEnvelope = '',
+  [string]$CustomSteamLibrarySource = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -204,10 +207,14 @@ $ReleasePowerControl = Join-Path $ReleaseRoot 'PowerControl'
 $ReleaseCustomSteamLibrary = Join-Path $ReleaseRoot 'CustomSteamLibrary'
 $ReleasePackages = Join-Path $ReleaseRoot 'Packages'
 
-$CustomSteamLibrarySource = if ([string]::IsNullOrWhiteSpace($env:YEMAN_CUSTOM_STEAM_LIBRARY_SOURCE)) {
+$customSteamLibrarySourceFromEnv = [string]$env:YEMAN_CUSTOM_STEAM_LIBRARY_SOURCE
+if (-not [string]::IsNullOrWhiteSpace($customSteamLibrarySourceFromEnv) -and [string]::IsNullOrWhiteSpace($CustomSteamLibrarySource)) {
+  throw 'CustomSteamLibrary source override requires the explicit -CustomSteamLibrarySource parameter; refusing a stale environment override.'
+}
+$CustomSteamLibrarySource = if ([string]::IsNullOrWhiteSpace($CustomSteamLibrarySource)) {
   Join-Path $ProjectRoot 'CustomSteamLibrary'
 } else {
-  Get-FullPath $env:YEMAN_CUSTOM_STEAM_LIBRARY_SOURCE
+  Get-FullPath $CustomSteamLibrarySource
 }
 
 # The ZIP envelope is manifest-driven. The legacy bridge keeps the old
@@ -215,7 +222,15 @@ $CustomSteamLibrarySource = if ([string]::IsNullOrWhiteSpace($env:YEMAN_CUSTOM_S
 # new updater. The bootstrap variant also embeds the ready CustomSteamLibrary
 # under YeManCC while omitting the manifest from the ZIP, so the broken
 # pre-manifest PowerShell helper takes its safe no-manifest path.
-$releaseEnvelope = if ([string]::IsNullOrWhiteSpace($env:YEMAN_RELEASE_ENVELOPE)) { 'full' } else { [string]$env:YEMAN_RELEASE_ENVELOPE }
+$releaseEnvelopeFromEnv = [string]$env:YEMAN_RELEASE_ENVELOPE
+if ([string]::IsNullOrWhiteSpace($ReleaseEnvelope)) {
+  if (-not [string]::IsNullOrWhiteSpace($releaseEnvelopeFromEnv) -and $releaseEnvelopeFromEnv -ne 'full') {
+    throw 'Legacy release envelope requires the explicit -ReleaseEnvelope parameter; refusing to overwrite the normal Release package.'
+  }
+  $releaseEnvelope = 'full'
+} else {
+  $releaseEnvelope = $ReleaseEnvelope
+}
 if ($releaseEnvelope -notin @('full', 'legacy-bridge', 'legacy-bootstrap')) {
   throw "Unsupported release envelope: $releaseEnvelope"
 }

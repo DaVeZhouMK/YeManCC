@@ -1,6 +1,6 @@
 # Custom Steam Library 接入契约（YeManCC protocol 1）
 
-状态（2026-08-25）：protocol 1 运行时接入、三目录升级适配和 CustomSteamLibrary 独立隐藏启动健康握手已完成源码与临时包回归；正式安装目录和实体手柄窗口级验收仍未完成。独立发行目录为 `C:\SOFT\YeMan\YeManCC\CustomSteamLibrary`；YeManCC 已增加一级菜单 `自定义游戏库`、异步启动/关闭 IPC 和唯一手柄输入转发。当前桥接与升级器以该嵌套目录为默认目标，同时保留旧兄弟目录只读兼容。
+状态（2026-08-25）：protocol 1 运行时接入、三目录升级适配和 CustomSteamLibrary 独立隐藏启动健康握手已完成源码与临时包回归；正式安装目录和实体手柄窗口级验收仍未完成。独立发行目录为 `C:\SOFT\YeMan\YeManCC\CustomSteamLibrary`；YeManCC 已增加一级菜单 `自定义游戏库`、异步启动/关闭 IPC 和唯一手柄输入转发。本次只迁移 CustomSteamLibrary 包自身，YeManCC 现有固定桥接路径和升级器未在本轮修改。
 
 ## 1. 角色
 
@@ -72,6 +72,6 @@ edit
 ## 6. 本轮实施边界
 
 - 主程序源码入口：`src/router.ts`、`src/views/CustomSteamLibraryView.vue`。
-- 主程序原生桥：默认调用 `C:\SOFT\YeMan\YeManCC\CustomSteamLibrary\CustomSteamLibrary.exe`，旧兄弟目录仅作为兼容回退，启动命令不经过可编辑路径输入。
+- 主程序原生桥：固定调用 `C:\SOFT\YeMan\CustomSteamLibrary\CustomSteamLibrary.exe`，启动命令不经过可编辑路径输入。
 - 输入所有权：子程序运行期间由 YeManCC 原生 XInput 线程唯一消费；主程序前端引擎通过 `isChildInputActive` 让出 UI 操作，启动按键必须先释放后才允许转发。
 - 默认安装目录当前有正在运行的旧实例时，不强制覆盖；需先正常关闭 `YeManCC.exe` 和 `CustomSteamLibrary.exe`，再部署最新包。
