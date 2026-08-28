@@ -1,5 +1,5 @@
 {
-  "version": "0.0.23",
+  "version": "0.0.24",
   "notes": "两根目录兼容包：更新 CustomSteamLibrary 今日程序包并嵌入 YeManCC\\CustomSteamLibrary；PowerControl\\fan-host 暂不参与。",
   "sha256": "",
   "publishedAt": "",
