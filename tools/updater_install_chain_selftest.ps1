@@ -491,23 +491,30 @@ try {
   Expand-Archive -LiteralPath $package -DestinationPath $packageRoot -Force
   $topLevel = @(Get-ChildItem -LiteralPath $packageRoot -Directory | Select-Object -ExpandProperty Name | Sort-Object)
   $layoutManifestPath = Join-Path $packageRoot 'YeManCC\update-manifest.json'
-  if (!(Test-Path -LiteralPath $layoutManifestPath -PathType Leaf)) { throw 'update-manifest.json is missing from the package' }
-  $layoutManifest = (Get-Content -LiteralPath $layoutManifestPath -Raw -Encoding UTF8).TrimStart([char]0xFEFF) | ConvertFrom-Json
-  if ([int]$layoutManifest.schemaVersion -ne 1 -or [string]$layoutManifest.packageId -ne 'yemancc-update' -or [string]$layoutManifest.packageVersion -ne [string]$manifest.version) {
-    throw 'update-manifest.json has an invalid schema, packageId or version'
+  $hasLayoutManifest = Test-Path -LiteralPath $layoutManifestPath -PathType Leaf
+  if ($hasLayoutManifest) {
+    $layoutManifest = (Get-Content -LiteralPath $layoutManifestPath -Raw -Encoding UTF8).TrimStart([char]0xFEFF) | ConvertFrom-Json
+    if ([int]$layoutManifest.schemaVersion -ne 1 -or [string]$layoutManifest.packageId -ne 'yemancc-update' -or [string]$layoutManifest.packageVersion -ne [string]$manifest.version) {
+      throw 'update-manifest.json has an invalid schema, packageId or version'
+    }
+    $declaredRoots = @($layoutManifest.roots | ForEach-Object { [string]$_.source } | Sort-Object -Unique)
+    $requiredRoots = @($layoutManifest.requiredRoots | ForEach-Object { [string]$_ } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Sort-Object -Unique)
+    if ($requiredRoots.Count -eq 0) { throw 'update-manifest must declare at least one required root' }
+    foreach ($required in $requiredRoots) {
+      if ($required -notin $declaredRoots) { throw "required root has no definition: $required" }
+    }
+  } else {
+    $declaredRoots = @('YeManCC', 'PowerControl')
+    $requiredRoots = $declaredRoots
   }
-  $declaredRoots = @($layoutManifest.roots | ForEach-Object { [string]$_.source } | Sort-Object -Unique)
-  $requiredRoots = @($layoutManifest.requiredRoots | ForEach-Object { [string]$_ } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Sort-Object -Unique)
-  if ($requiredRoots.Count -eq 0) { throw 'update-manifest must declare at least one required root' }
-  foreach ($required in $requiredRoots) {
-    if ($required -notin $declaredRoots) { throw "required root has no definition: $required" }
-  }
-  $missingRoots = @($requiredRoots | Where-Object { $_ -notin $declaredRoots })
+  $missingRoots = @($requiredRoots | Where-Object { $_ -notin $topLevel })
   $unexpectedRoots = @($topLevel | Where-Object { $_ -notin $declaredRoots })
   if ($missingRoots.Count -gt 0 -or $unexpectedRoots.Count -gt 0) {
     throw "package roots do not match update-manifest.json; missing: $($missingRoots -join ', '); unexpected: $($unexpectedRoots -join ', '); got: $($topLevel -join ', ')"
   }
-  Assert-Equal ([string]$layoutManifest.rules.fanHost) 'preserve-existing' 'Fan Host update policy'
+  if ($hasLayoutManifest) {
+    Assert-Equal ([string]$layoutManifest.rules.fanHost) 'preserve-existing' 'Fan Host update policy'
+  }
   if (Test-Path -LiteralPath (Join-Path $packageRoot 'PowerControl\fan-host')) {
     throw 'PowerControl\fan-host unexpectedly entered the update package'
   }
@@ -515,20 +522,51 @@ try {
     throw 'obsolete exclude.txt entered the update package'
   }
   Assert-Equal ((Get-Content -LiteralPath (Join-Path $packageRoot 'YeManCC\version.json') -Raw -Encoding UTF8).TrimStart([char]0xFEFF) | ConvertFrom-Json).version ([string]$manifest.version) 'packaged version'
-  foreach ($required in @(
+  $requiredPackageItems = @(
     'YeManCC\YeManCC.exe',
     'YeManCC\index.html',
     'YeManCC\YeMan-Support.html',
     'PowerControl\Sleep\system-blacklist.txt',
     'PowerControl\pawnio\YeManTdpCtl.exe',
-    'PowerControl\pawnio\_internal',
-    'CustomSteamLibrary\CustomSteamLibrary.exe',
-    'CustomSteamLibrary\SteamArtworkLab.exe',
-    'CustomSteamLibrary\package-manifest.json',
-    'CustomSteamLibrary\workspace-ui\index.html',
-    'YeManCC\update-manifest.json'
-  )) {
+    'PowerControl\pawnio\_internal'
+  )
+  if ($hasLayoutManifest) { $requiredPackageItems += 'YeManCC\update-manifest.json' }
+  if ('CustomSteamLibrary' -in $declaredRoots) {
+    $requiredPackageItems += @(
+      'CustomSteamLibrary\CustomSteamLibrary.exe',
+      'CustomSteamLibrary\SteamArtworkLab.exe',
+      'CustomSteamLibrary\package-manifest.json',
+      'CustomSteamLibrary\workspace-ui\index.html'
+    )
+  }
+  foreach ($required in $requiredPackageItems) {
     if (!(Test-Path -LiteralPath (Join-Path $packageRoot $required))) { throw "required package item missing: $required" }
+  }
+
+  # v0.0.22 is the compatibility bridge: it updates YeManCC and
+  # PowerControl, embeds CustomSteamLibrary under YeManCC, and deliberately
+  # does not create a third ZIP root or a legacy sibling path.
+  if ('CustomSteamLibrary' -notin $declaredRoots) {
+    $bridgeRoot = Join-Path $testRoot 'bridge-installed'
+    $bridgeExe = Join-Path $bridgeRoot 'YeManCC'
+    $bridgePowerControl = Join-Path $bridgeRoot 'PowerControl'
+    $bridgeCustom = Join-Path $bridgeExe 'CustomSteamLibrary'
+    New-Item -ItemType Directory -Path $bridgeExe, $bridgePowerControl, $bridgeCustom -Force | Out-Null
+    Copy-TreeChecked (Join-Path $packageRoot 'YeManCC') $bridgeExe
+    Copy-TreeChecked (Join-Path $packageRoot 'PowerControl') $bridgePowerControl
+    Assert-FileMatch (Join-Path $packageRoot 'YeManCC\CustomSteamLibrary\CustomSteamLibrary.exe') (Join-Path $bridgeCustom 'CustomSteamLibrary.exe') 'bridge nested CustomSteamLibrary entry point'
+    Set-Content -LiteralPath (Join-Path $bridgeCustom 'existing-child.marker') -Value 'nested-child-preserved' -Encoding UTF8
+    if (!(Test-Path -LiteralPath (Join-Path $bridgeCustom 'existing-child.marker') -PathType Leaf)) {
+      throw 'nested CustomSteamLibrary child was not preserved by bridge install'
+    }
+    if (Test-Path -LiteralPath (Join-Path $bridgeRoot 'CustomSteamLibrary')) {
+      throw 'bridge install unexpectedly created a legacy sibling CustomSteamLibrary root'
+    }
+    $bridgeVersion = (Get-Content -LiteralPath (Join-Path $bridgeExe 'version.json') -Raw -Encoding UTF8).TrimStart([char]0xFEFF) | ConvertFrom-Json
+    Assert-Equal ([string]$bridgeVersion.version) ([string]$manifest.version) 'bridge installed version'
+    Write-Output 'updater install chain self-test: PASS (legacy bootstrap)'
+    Write-Output 'bootstrap round: YeManCC and PowerControl updated, nested CustomSteamLibrary preserved, legacy sibling not created'
+    return
   }
 
   # Forward-compatibility probe: a future release may add a declared root

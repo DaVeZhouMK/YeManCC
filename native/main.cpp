@@ -710,6 +710,7 @@ static HPOWERNOTIFY       g_schemeNotify = nullptr; // 活动电源方案通知�
 static HPOWERNOTIFY       g_suspendResumeNotify = nullptr; // Windows 8+ 专用挂起/恢复订阅句柄
 static EVT_HANDLE         g_sgKernelPowerSubscription = nullptr; // Kernel-Power 506/507 intent evidence
 static int               g_lastAcState  = -1;      // -1=未初始化 0=离电(DC) 1=插电(AC)
+static std::atomic<unsigned long long> g_acdcDebounceGeneration{1};
 static std::vector<DWORD> g_acSwitchTicks;          // 5 秒滑动窗口内的真实切换时间戳
 
 #define TIMER_ID_ACDC     0xA100  // 尾防抖 SetTimer id（避开已用的 99）
@@ -4364,6 +4365,7 @@ static void stopPowerResumeWatchdog() {
 
 static void appendWebViewDiagnostic(json entry);
 static void ipc_emit(const std::string& ev, const json& data);
+static unsigned long long currentPowerGeneration();
 static void probePowerResumeStability(unsigned long long generation);
 
 static void schedulePowerResumeProbe(unsigned long long generation, UINT delayMs) {
@@ -9584,8 +9586,28 @@ static void ipc_on(const std::string& cmd, IpcFn fn) {
 
 static void ipc_emit(const std::string& ev, const json& data = {}) {
     if (!g_view) return;
-    json m = {{"event", ev}, {"data", data}};
+    json enriched = data.is_object() ? data : json::object();
+    if (ev.rfind("power.", 0) == 0) {
+        if (!enriched.contains("generation"))
+            enriched["generation"] = currentPowerGeneration();
+        if (!enriched.contains("source"))
+            enriched["source"] = std::string("native.") + ev.substr(6);
+    }
+    json m = {{"event", ev}, {"data", enriched}};
     g_view->PostWebMessageAsJson(U2W(m.dump()).c_str());
+    if (ev == "power.suspending" || ev == "power.resuming") {
+        enriched["eventType"] = "PowerPending";
+        json pending = {{"event", "power.pending"}, {"data", enriched}};
+        g_view->PostWebMessageAsJson(U2W(pending.dump()).c_str());
+    } else if (ev == "power.resumed") {
+        enriched["eventType"] = "PowerReady";
+        json ready = {{"event", "power.ready"}, {"data", enriched}};
+        g_view->PostWebMessageAsJson(U2W(ready.dump()).c_str());
+    } else if (ev == "power.sourceChanged" || ev == "power.acChanged" || ev == "power.schemeChanged") {
+        enriched["eventType"] = "AcDcChanged";
+        json acdc = {{"event", "power.acDcChanged"}, {"data", enriched}};
+        g_view->PostWebMessageAsJson(U2W(acdc.dump()).c_str());
+    }
 }
 
 static std::wstring updateProgressPath() {
@@ -11964,7 +11986,9 @@ static std::string fanHostReadSessionToken() {
 static bool fanHostEmergencyPost(const wchar_t* endpoint, const char* reason,
                                  int maxAttempts = 2,
                                  bool requireSafeState = true,
-                                 DWORD* lastResponseStatus = nullptr) {
+                                 DWORD* lastResponseStatus = nullptr,
+                                 unsigned long long generation = 0,
+                                 const char* source = nullptr) {
     maxAttempts = (std::max)(1, maxAttempts);
     if (lastResponseStatus) *lastResponseStatus = 0;
     const auto sessionToken = fanHostReadSessionToken();
@@ -11999,11 +12023,19 @@ static bool fanHostEmergencyPost(const wchar_t* endpoint, const char* reason,
         if (request) {
             const auto headers = std::wstring(L"Content-Type: application/json\r\n") +
                 L"X-YeMan-Fan-Session: " + U2W(sessionToken) + L"\r\n";
-            const char payload[] = "{}";
+            json requestBody = json::object();
+            if (generation > 0) {
+                requestBody["generation"] = generation;
+                requestBody["source"] = source && *source ? source : "native.power";
+                requestBody["reason"] = reason && *reason ? reason : "unknown";
+            }
+            const std::string payload = requestBody.dump();
             if (WinHttpAddRequestHeaders(request, headers.c_str(), (DWORD)-1,
                                          WINHTTP_ADDREQ_FLAG_ADD) &&
                 WinHttpSendRequest(request, WINHTTP_NO_ADDITIONAL_HEADERS, 0,
-                                   (LPVOID)payload, 2, 2, 0) &&
+                                   (LPVOID)payload.data(),
+                                   static_cast<DWORD>(payload.size()),
+                                   static_cast<DWORD>(payload.size()), 0) &&
                 WinHttpReceiveResponse(request, nullptr)) {
                 DWORD size = sizeof(status);
                 WinHttpQueryHeaders(request,
@@ -12120,9 +12152,11 @@ static bool fanHostEmergencyPost(const wchar_t* endpoint, const char* reason,
     return false;
 }
 
-static bool fanHostEmergencySuspend(const char* reason) {
+static bool fanHostEmergencySuspend(const char* reason,
+                                    unsigned long long generation) {
     DWORD suspendStatus = 0;
-    if (fanHostEmergencyPost(L"/api/suspend", reason, 2, true, &suspendStatus)) return true;
+    if (fanHostEmergencyPost(L"/api/suspend", reason, 2, true, &suspendStatus,
+                             generation, "native.power")) return true;
     // Only an explicit legacy 404/405 proves that the Host has no suspend
     // route. A timeout/409/5xx is ambiguous: the first request may still be
     // inside the serialized HC gate. Sending /api/close in that case creates
@@ -12204,7 +12238,7 @@ static void fanHostScheduleEmergencySuspend(const char* reason,
         std::thread([reasonText = std::string(reason ? reason : "unknown"), generation] {
             bool safe = false;
             if (!g_exitRequested.load(std::memory_order_acquire)) {
-                safe = fanHostEmergencySuspend(reasonText.c_str());
+                safe = fanHostEmergencySuspend(reasonText.c_str(), generation);
             }
             traceLog("fan Host async sleep cleanup generation=%llu safe=%d",
                      generation, safe ? 1 : 0);
@@ -14317,7 +14351,11 @@ static void reg_updater() {
         // 依赖包固定目标目录（与前端 yeman.ts 的 PC_DIR 默认一致）
         std::wstring pcDir = L"C:\\SOFT\\YeMan\\PowerControl";
         const std::wstring installRoot = fspath::path(exedir).parent_path().wstring();
-        const std::wstring customSteamLibraryDir = installRoot + L"\\CustomSteamLibrary";
+        // Canonical child location: the existing CustomSteamLibrary package
+        // lives under YeManCC. A manifest-declared green-child may override
+        // this default later, but a bridge package must still resolve the
+        // already-installed nested directory without shipping that child.
+        const std::wstring customSteamLibraryDir = installRoot + L"\\YeManCC\\CustomSteamLibrary";
         std::wstring supportPath = exedir + L"\\YeMan-Support.html";
         auto script = app_data_dir() + L"\\update.ps1";
         auto psLiteral = [](const std::wstring& value) {
@@ -14454,14 +14492,13 @@ static void reg_updater() {
               f << "    foreach ($processName in $stopProcesses) { if ([IO.Path]::GetFileName($processName) -ne $processName -or [IO.Path]::GetExtension($processName) -ine '.exe' -or $processName.IndexOfAny([char[]]'*?[]') -ge 0) { throw ('invalid stopProcesses entry: ' + $processName) } }\n";
               f << "    if ($source -ieq 'YeManCC' -and $target -ine 'YeManCC') { throw 'YeManCC target is fixed' }\n";
               f << "    if ($source -ieq 'PowerControl' -and $target -ine 'PowerControl') { throw 'PowerControl target is fixed' }\n";
-              f << "    if ($source -ieq 'CustomSteamLibrary' -and $target -ine 'CustomSteamLibrary') { throw 'CustomSteamLibrary target is fixed' }\n";
               f << "    $definitions.Add([pscustomobject]@{ source = $source; target = $target; mode = $mode; packageManifest = $packageManifest; stopProcesses = $stopProcesses; managedPaths = @() })\n";
               f << "  }\n";
               f << "  $declared = @($definitions | ForEach-Object source | Sort-Object -Unique)\n";
               f << "  foreach ($required in $requiredRoots) { if ($required -notin $declared) { throw ('required root has no definition: ' + $required) } }\n";
              f << "  $actual = @(Get-ChildItem -LiteralPath $staging -Directory -Force | ForEach-Object Name | Sort-Object -Unique)\n";
              f << "  if (Compare-Object $declared $actual) { throw 'update-manifest roots do not match extracted package roots' }\n";
-             f << "  return @($definitions)\n";
+             f << "  return @($definitions.ToArray())\n";
              f << "}\n";
              f << "function Get-CustomManagedPaths {\n";
              f << "  if (!(Test-Path -LiteralPath $customSteamLibraryManifest -PathType Leaf)) { throw 'CustomSteamLibrary package-manifest.json missing' }\n";
@@ -14781,6 +14818,9 @@ static void reg_updater() {
               f << "    Start-Sleep -Milliseconds 100\n";
               f << "  }\n";
               f << "  $layoutRoots = @(Get-UpdateLayoutRoots)\n";
+              f << "  $customRoot = $layoutRoots | Where-Object { $_.source -ieq 'CustomSteamLibrary' } | Select-Object -First 1\n";
+              f << "  if ($customRoot) { $customSteamLibraryDir = [IO.Path]::GetFullPath((Join-Path $installRoot ([string]$customRoot.target))) }\n";
+              f << "  $customSteamLibraryRootPrefix = ([IO.Path]::GetFullPath($customSteamLibraryDir)).TrimEnd('\\') + '\\'\n";
               f << "  $fanHostPackagePresent = Test-Path -LiteralPath $fanHostSource -PathType Container\n";
               f << "  $customRootPresent = @($layoutRoots | Where-Object { $_.source -ieq 'CustomSteamLibrary' }).Count -gt 0\n";
               f << "  if ($customRootPresent) { Stop-CustomSteamLibraryProcesses }\n";
@@ -18209,10 +18249,20 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
                     g_lastAcState = ac;
                 } else if (ac != g_lastAcState) {
                     g_lastAcState = ac;
-                    sgRecordFact("acdc-change", {{"ac", ac == 1}});
+                    const auto generation = currentPowerGeneration();
+                    g_acdcDebounceGeneration.store(generation, std::memory_order_release);
+                    sgRecordFact("acdc-change", {
+                        {"ac", ac == 1},
+                        {"generation", generation},
+                        {"source", "native.acdc"}
+                    });
                     sgNoteExternalDeviceAcDcChange();
                     // 视频背景专用轻量事件：即时暂停/恢复；不触发 CPU/TDP 等重型链路。
-                    ipc_emit("power.sourceChanged", {{"ac", ac == 1}});
+                    ipc_emit("power.sourceChanged", {
+                        {"ac", ac == 1},
+                        {"generation", generation},
+                        {"source", "native.acdc"}
+                    });
                     // ── 熔断：5s 滑动窗口内真实切换 >10 次 → 请求完整退出，避免系统卡死且不绕过 Sleep Guard 恢复。──
                     DWORD now = GetTickCount();
                     g_acSwitchTicks.push_back(now);
@@ -18227,16 +18277,23 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
                     }
                     // ── 尾防抖：连续切换只在最后一次之后 5s 触发一次刷新 ──
                     // SetTimer 同 id 会重置倒计时 → 天然实现「顺延到最后一次重新计时」。
-                    SetTimer(h, TIMER_ID_ACDC, ACDC_DEBOUNCE_MS,
+                        SetTimer(h, TIMER_ID_ACDC, ACDC_DEBOUNCE_MS,
                         [](HWND hh, UINT, UINT_PTR id, DWORD) {
                             KillTimer(hh, id);
-                            ipc_emit("power.acChanged", {{"ac", g_lastAcState == 1}});
+                            ipc_emit("power.acChanged", {
+                                {"ac", g_lastAcState == 1},
+                                {"generation", g_acdcDebounceGeneration.load(std::memory_order_acquire)},
+                                {"source", "native.acdc.debounced"}
+                            });
                         });
                 }
             }
         else if (IsEqualGUID(pbs->PowerSetting, YM_GUID_ACTIVE_POWERSCHEME)) {
                 // Windows 活动电源方案变化广播：仅转发事件，方案是否恢复由前端 CPU guard 决定。
-                ipc_emit("power.schemeChanged", {});
+                ipc_emit("power.schemeChanged", {
+                    {"generation", currentPowerGeneration()},
+                    {"source", "native.power-scheme"}
+                });
             }
             else if (IsEqualGUID(pbs->PowerSetting, YM_GUID_MONITOR_POWER_ON) &&
                      pbs->DataLength >= sizeof(DWORD)) {

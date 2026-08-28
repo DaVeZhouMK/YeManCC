@@ -45,6 +45,8 @@ for (const token of [
   'updatePackageLayoutIsSafe(staging)',
   'update-manifest.json',
   'Get-UpdateLayoutRoots',
+  'return @($definitions.ToArray())',
+  'YeManCC\\\\CustomSteamLibrary',
   'Register-AdditionalLayoutRootsForRollback',
   'Copy-AdditionalLayoutRootsChecked',
   'CustomSteamLibrary',
@@ -160,6 +162,7 @@ assert.ok(workflow.includes('$requiredRoots = @($layoutManifest.requiredRoots'))
 assert.ok(workflow.includes('foreach ($definition in @($layoutManifest.roots))'));
 assert.ok(workflow.includes('Published asset SHA-256 mismatch'));
 assert.ok(workflow.includes('Refusing to replace main/version.json'));
-assert.ok(workflow.includes("shell: pwsh\n        run: |\n          git fetch origin main"));
+assert.ok(workflow.includes('name: Commit version manifest back to main via API'));
+assert.ok(workflow.includes('gh api --method PUT'));
 
 console.log('updater policy self-test: PASS');
