@@ -1,4 +1,4 @@
-import { app, fs, shell } from '@/bridge/api';
+import { app, fs, shell, windowApi } from '@/bridge/api';
 import { invoke } from '@/bridge/ipc';
 
 /**
@@ -46,6 +46,30 @@ export interface CustomSteamLibraryStatus {
 let sessionActive = false;
 let sessionWatchTimer: ReturnType<typeof setInterval> | null = null;
 let sessionWatchDeadline = 0;
+let sessionWatchObservedPresent = false;
+
+// The custom library is a separate process. Window hand-off is therefore
+// deliberately best-effort: an older shell, a missing YMCC window, or a
+// shutting-down IPC endpoint must never delay opening/closing the library.
+const WINDOW_HANDOFF_TIMEOUT_MS = 800;
+
+function requestYeManWindowAction(action: 'minimize' | 'show'): void {
+  try {
+    // window.show follows the same path as clicking the YMCC taskbar button:
+    // SW_RESTORE for a minimized window, otherwise SW_SHOW. Do not use
+    // SW_MAXIMIZE here because that changes a normal window's saved size and
+    // position instead of restoring the state the user left it in.
+    const request = action === 'minimize' ? windowApi.minimize() : windowApi.show();
+    void Promise.race([
+      request,
+      new Promise<boolean>(resolve => {
+        setTimeout(() => resolve(false), WINDOW_HANDOFF_TIMEOUT_MS);
+      }),
+    ]).catch(() => false);
+  } catch {
+    // YMCC may not exist when this bridge is reused by a standalone shell.
+  }
+}
 
 function trimWindowsPath(value: string): string {
   return value.replace(/[\\/]+$/, '');
@@ -141,6 +165,7 @@ function clearSessionWatch(): void {
   if (sessionWatchTimer) clearInterval(sessionWatchTimer);
   sessionWatchTimer = null;
   sessionWatchDeadline = 0;
+  sessionWatchObservedPresent = false;
 }
 
 async function stopNativeIntegrationSession(): Promise<void> {
@@ -155,8 +180,10 @@ function beginSessionWatch(): void {
     try {
       const status = await invoke<CustomSteamLibraryStatus>('customSteamLibrary.status');
       if (status.present) {
+        sessionWatchObservedPresent = true;
         if (status.compatible === false || status.inputOwner !== 'parent') {
           sessionActive = false;
+          requestYeManWindowAction('show');
           await stopNativeIntegrationSession();
           clearSessionWatch();
           window.dispatchEvent(new CustomEvent('customSteamLibrary:conflict', {
@@ -169,14 +196,16 @@ function beginSessionWatch(): void {
       // The native process can need several turns to create WebView2. Keep
       // the parent fully suppressed during this window; never pass the input
       // back merely because the child window is not painted yet.
-      if (Date.now() < sessionWatchDeadline) return;
+      if (Date.now() < sessionWatchDeadline && !sessionWatchObservedPresent) return;
       sessionActive = false;
+      requestYeManWindowAction('show');
       await stopNativeIntegrationSession();
       clearSessionWatch();
       window.dispatchEvent(new CustomEvent('customSteamLibrary:closed'));
     } catch {
       if (Date.now() >= sessionWatchDeadline) {
         sessionActive = false;
+        requestYeManWindowAction('show');
         await stopNativeIntegrationSession();
         clearSessionWatch();
         window.dispatchEvent(new CustomEvent('customSteamLibrary:closed'));
@@ -204,7 +233,10 @@ export async function launchCustomSteamLibrary(): Promise<CustomSteamLibraryLaun
       '--input-owner=parent',
     ]);
     sessionActive = launched.ok === true;
-    if (sessionActive) beginSessionWatch();
+    if (sessionActive) {
+      beginSessionWatch();
+      requestYeManWindowAction('minimize');
+    }
     return { ok: sessionActive, executable, pid: launched.pid };
   } catch (error) {
     await stopCustomSteamLibrarySession();

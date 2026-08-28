@@ -1,6 +1,6 @@
 {
-  "version": "0.0.24",
-  "notes": "两根目录兼容包：更新 CustomSteamLibrary 今日程序包并嵌入 YeManCC\\CustomSteamLibrary；PowerControl\\fan-host 暂不参与。",
+  "version": "0.0.25",
+  "notes": "两根目录小修复：修正窗口最大化/恢复交接；CustomSteamLibrary 继续位于 YeManCC\\CustomSteamLibrary，PowerControl\\fan-host 暂不参与。",
   "sha256": "",
   "publishedAt": "",
   "package": "Packages/YeManCC.zip"
