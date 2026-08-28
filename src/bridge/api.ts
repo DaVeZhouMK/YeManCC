@@ -176,6 +176,7 @@ export const windowApi = {
   startDrag: () => invoke<boolean>('window.startDrag'),
   startResize: (edge: string) => invoke<boolean>('window.startResize', { edge }),
   minimize: () => invoke<boolean>('window.minimize'),
+  maximize: () => invoke<boolean>('window.maximize'),
   show: () => invoke<boolean>('window.show'),
   getState: () => invoke<{ visible: boolean; minimized: boolean }>('window.getState'),
   setTitle: (title: string) => invoke<boolean>('window.setTitle', { title }),
