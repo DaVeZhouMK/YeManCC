@@ -66,7 +66,7 @@ jobs:
         shell: pwsh
         run: |
           $env:YEMAN_WORKSPACE_ROOT = $env:GITHUB_WORKSPACE
-          $releaseEnvelope = if ('${{ github.ref_name }}' -in @('v0.0.22', 'v0.0.23', 'v0.0.24', 'v0.0.25')) { 'legacy-bootstrap' } elseif ('${{ github.ref_name }}' -in @('v0.0.20', 'v0.0.21')) { 'legacy-bridge' } else { 'full' }
+          $releaseEnvelope = if ('${{ github.ref_name }}' -in @('v0.0.22', 'v0.0.23', 'v0.0.24', 'v0.0.25', 'v0.0.26')) { 'legacy-bootstrap' } elseif ('${{ github.ref_name }}' -in @('v0.0.20', 'v0.0.21')) { 'legacy-bridge' } else { 'full' }
           $env:YEMAN_RELEASE_ENVELOPE = $releaseEnvelope
           pnpm run build
           powershell -NoProfile -ExecutionPolicy Bypass -File tools/package-release.ps1 -WorkspaceRoot $env:GITHUB_WORKSPACE -ReleaseEnvelope $releaseEnvelope
@@ -123,7 +123,7 @@ jobs:
               throw "YeManCC.zip roots do not match update-manifest.json; missing: $($missingZipRoots -join ', '); unexpected: $($unexpectedZipRoots -join ', '); got: $($roots -join ', ')"
             }
             $layoutManifestEntries = @($zip.Entries | Where-Object { $_.FullName.Replace('\', '/') -eq 'YeManCC/update-manifest.json' })
-            if ('${{ github.ref_name }}' -in @('v0.0.22', 'v0.0.23', 'v0.0.24', 'v0.0.25')) {
+            if ('${{ github.ref_name }}' -in @('v0.0.22', 'v0.0.23', 'v0.0.24', 'v0.0.25', 'v0.0.26')) {
               if ($layoutManifestEntries.Count -ne 0) { throw '${{ github.ref_name }} bootstrap ZIP must not contain YeManCC/update-manifest.json' }
             } elseif ($layoutManifestEntries.Count -ne 1) {
               throw 'YeManCC.zip must contain exactly one YeManCC/update-manifest.json'
