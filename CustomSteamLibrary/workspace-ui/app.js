@@ -498,13 +498,27 @@ function selectedCommitDirectories() {
 function selectedTargetArguments() { return { accountId: '', steamRoot: '', selectionMode: 'all-steam-accounts', selectedGameDirectories: selectedCommitDirectories() }; }
 
 const steamReadyStatuses = new Set(['ready-to-add', 'ready-not-selected']);
-const CATEGORY_ORDER = Object.freeze(['not-in-steam', 'in-steam', 'unclassified', 'non-game']);
+const CATEGORY_ORDER = Object.freeze(['not-in-steam', 'in-steam', 'native-steam', 'unclassified', 'non-game']);
 const CATEGORY_DEFINITIONS = Object.freeze({
   'not-in-steam': Object.freeze({ label: '等待加入', tone: 'good' }),
   'in-steam': Object.freeze({ label: '已加入', tone: 'steam' }),
+  'native-steam': Object.freeze({ label: '原生Steam', tone: 'native-steam' }),
   unclassified: Object.freeze({ label: '需处理', tone: 'warn' }),
   'non-game': Object.freeze({ label: '不加入', tone: 'muted-badge' })
 });
+function ensureNativeSteamTab() {
+  const tabs = document.querySelector('.page-tabs');
+  if (!tabs || tabs.querySelector('[data-tab="native-steam"]')) return;
+  const anchor = tabs.querySelector('[data-tab="in-steam"]');
+  if (!anchor) return;
+  const tab = document.createElement('button');
+  tab.className = 'page-tab';
+  tab.dataset.tab = 'native-steam';
+  tab.type = 'button';
+  tab.innerHTML = '原生Steam <strong id="count-native-steam">[0个]</strong>';
+  tab.addEventListener('click', () => { closeLibraryMenuPanels(); activeTab = 'native-steam'; renderLibrary(); });
+  anchor.after(tab);
+}
 function isSteamReady(game) { return steamReadyStatuses.has(game.steam?.status); }
 function isNonGame(game) { return game.contentType === 'non-game' || game.status === 'unrecognized-tool' || game.unrecognizedTool; }
 function keyFor(game) { return normalizedUiPath(game?.gameDirectory || ''); }
@@ -546,7 +560,13 @@ function mergedGames() {
     }, override, resolvedIdentity: resolved };
   }).sort((a, b) => String(a.directoryName || '').localeCompare(String(b.directoryName || ''), 'zh-Hans'));
 }
+function isNativeSteamGame(game) {
+  return game?.steamNative === true || game?.contentType === 'steam-native' ||
+    game?.steam?.steamNative === true || game?.steam?.steamOwnership === 'native-steam' ||
+    game?.steam?.status === 'steam-native';
+}
 function category(game) {
+  if (isNativeSteamGame(game)) return 'native-steam';
   if (game.steam?.status === 'already-in-steam' || game.steam?.status === 'added-to-steam') return 'in-steam';
   const bucket = manualBucket(game);
   if (bucket !== 'auto') return bucket;
@@ -570,7 +590,7 @@ function selectedReadyCount() { const selected = new Set(selectedCommitDirectori
 function selectedSteamCount() { return mergedGames().filter(game => category(game) === 'in-steam' && (selectedSteamDirectories === null || selectedSteamDirectories.has(keyFor(game)))).length; }
 function formatCount(value) { const count = Number.isFinite(Number(value)) ? Math.max(0, Number(value)) : 0; return `[${count}个]`; }
 function formatSelectedCount(value) { const count = Number.isFinite(Number(value)) ? Math.max(0, Number(value)) : 0; return `[已选${count}个]`; }
-function pageSelectable(game, page = activeTab) { const itemCategory = category(game); if (itemCategory !== page) return false; return page !== 'not-in-steam' || isSteamReady(game); }
+function pageSelectable(game, page = activeTab) { const itemCategory = category(game); if (itemCategory !== page || page === 'native-steam') return false; return page !== 'not-in-steam' || isSteamReady(game); }
 function pageSelectionKeys(page = activeTab) {
   if (page === 'not-in-steam') return new Set(selectedGameDirectories === null ? defaultSelectedDirectories() : selectedGameDirectories);
   if (page === 'in-steam') return new Set(selectedSteamDirectories === null ? defaultSelectedSteamDirectories() : selectedSteamDirectories);
@@ -594,6 +614,7 @@ function initials(name) { const parts = String(name || '?').trim().split(/[\s\-_
 function manualArtworkPriority(game) { const override = game?.override || {}; const policy = override.artworkProtection || {}; return Boolean(override.cover || override.wallpaper || policy.cover === 'manual' || policy.cover === 'deleted' || policy.wallpaper === 'manual' || policy.wallpaper === 'deleted'); }
 function artworkMarkup(game, name) { const manual = game.override?.cover || game.override?.artwork?.cover; const preview = manual?.url ? manual : game.steam?.artworkPreview?.tall; const previewUrl = artworkPreviewUrl(preview); return previewUrl ? `<img src="${escapeHtml(previewUrl)}" alt="${escapeHtml(name)} 封面" loading="lazy">` : escapeHtml(initials(name)); }
 function scrapeStatusFor(game) {
+  if (isNativeSteamGame(game)) return null;
   const executable = normalizedUiPath(game?.primaryExecutable || '');
   if (!executable) return null;
   const items = snapshot.scrape?.items || {};
@@ -726,12 +747,12 @@ function renderSteamRuntimeState() {
   if (state) {
     const running = steamRuntimeState.running;
     state.className = `button steam-runtime-state ${running === true ? 'running' : running === false ? 'closed' : 'checking'}`;
-    state.textContent = running === true ? 'Steam 运行中' : running === false ? 'Steam 已关闭' : 'Steam 检测中';
-    state.title = running === true ? '点击请求 Steam 温和退出' : running === false ? 'Steam 已关闭，点击重新检测' : '正在检查 Steam 状态';
+    state.textContent = running === true ? 'Steam 运行中' : running === false ? 'Steam 已关闭，可以导入' : 'Steam 检测中';
+    state.title = running === true ? '点击请求 Steam 温和退出' : running === false ? 'Steam 已关闭，可以导入；点击重新检测' : '正在检查 Steam 状态';
     state.disabled = running === null;
   }
   const button = $('#commit-button');
-  if (!button || activeTab === 'in-steam') return;
+  if (!button || activeTab === 'in-steam' || activeTab === 'native-steam') return;
   const running = steamRuntimeState.running;
   const label = running === true ? '点击关闭Steam' : running === false ? '点击加入Steam' : '检测Steam状态';
   button.innerHTML = `${label} <span class="count-label">${formatSelectedCount(selectedPageCount())}</span>`;
@@ -838,7 +859,7 @@ function createCard(game) {
   card.classList.toggle("selection-enabled", canSelect); card.classList.toggle("selected-for-steam", checked); card.classList.toggle("unselected-for-steam", canSelect && !checked);
   card.classList.toggle("current-card", currentCardDirectory === keyFor(game));
   card.setAttribute("aria-pressed", canSelect ? (checked ? "true" : "false") : "false"); card.setAttribute("aria-label", `${name}，${canSelect ? (checked ? "已选中，点击或按 A 取消选择；按 X 编辑" : "未选中，点击或按 A 选择；按 X 编辑") : "按 X 编辑"}`); card.title = "双击编辑";
-  card.innerHTML = `<span class="card-art-glow" aria-hidden="true"></span><div class="game-main"><div class="cover-placeholder">${artworkMarkup(game, name)}</div><h2 class="game-card-name">${escapeHtml(name)}</h2></div><span class="game-card-scrape-overlay" aria-hidden="true"><span class="spinner"></span><span class="game-card-scrape-label">正在刮削</span></span>`;
+  card.innerHTML = `<span class="card-art-glow" aria-hidden="true"></span><div class="game-main"><div class="cover-placeholder">${artworkMarkup(game, name)}</div><div><h2 class="game-card-name">${escapeHtml(name)}</h2></div></div><span class="game-card-scrape-overlay" aria-hidden="true"><span class="spinner"></span><span class="game-card-scrape-label">正在刮削</span></span>`;
   const cardArtwork = game.override?.cover || game.override?.artwork?.cover || game.steam?.artworkPreview?.tall;
   const cardArtworkUrl = artworkPreviewUrl(cardArtwork);
   const glow = card.querySelector(".card-art-glow");
@@ -1360,8 +1381,9 @@ function syncPageSelectionControls() {
 }
 function renderLibrary() {
   const games = mergedGames(); const counts = categoryCounts(games);
-  $('#count-not-in-steam').textContent = formatCount(counts['not-in-steam']); $('#count-in-steam').textContent = formatCount(counts['in-steam']); $('#count-unclassified').textContent = formatCount(counts.unclassified); $('#count-non-game').textContent = formatCount(counts['non-game']); $('#library-subtitle').textContent = `${formatCount(games.length)} 项目 · 已确认 ${formatCount(games.filter(game => game.status === 'ready').length)} 主程序`;
-  document.querySelectorAll('.page-tab').forEach(tab => tab.classList.toggle('active', tab.dataset.tab === activeTab)); const inSteam = activeTab === 'in-steam'; const notInSteam = activeTab === 'not-in-steam'; document.querySelector('.steam-target-copy')?.classList.add('hidden'); document.querySelector('.steam-bar')?.classList.remove('hidden'); $('#commit-button').classList.toggle('hidden', inSteam); $('#delete-button').classList.toggle('hidden', !inSteam); $('#commit-button').innerHTML = `点击加入Steam <span class="count-label">${formatSelectedCount(selectedPageCount())}</span>`; $('#delete-button').innerHTML = `点击删除 <span class="count-label">${formatSelectedCount(selectedSteamCount())}</span>`; $('#commit-button').disabled = inSteam || selectedReadyCount() === 0; $('#commit-button').title = '只加入当前页中已验证且已选中的项目'; $('#delete-button').disabled = selectedSteamCount() === 0; $("#in-steam-limitation").classList.add("hidden"); syncPageSelectionControls(); renderRoots(); renderSteamRuntimeState();
+  ensureNativeSteamTab();
+  $('#count-not-in-steam').textContent = formatCount(counts['not-in-steam']); $('#count-in-steam').textContent = formatCount(counts['in-steam']); $('#count-native-steam').textContent = formatCount(counts['native-steam']); $('#count-unclassified').textContent = formatCount(counts.unclassified); $('#count-non-game').textContent = formatCount(counts['non-game']); $('#library-subtitle').textContent = `${formatCount(games.length)} 项目 · 已确认 ${formatCount(games.filter(game => game.status === 'ready').length)} 主程序`;
+  document.querySelectorAll('.page-tab').forEach(tab => tab.classList.toggle('active', tab.dataset.tab === activeTab)); const inSteam = activeTab === 'in-steam'; const nativeSteam = activeTab === 'native-steam'; const notInSteam = activeTab === 'not-in-steam'; document.querySelector('.steam-target-copy')?.classList.add('hidden'); document.querySelector('.steam-bar')?.classList.remove('hidden'); $('#commit-button').classList.toggle('hidden', inSteam || nativeSteam); $('#delete-button').classList.toggle('hidden', !inSteam); $('#commit-button').innerHTML = `点击加入Steam <span class="count-label">${formatSelectedCount(selectedPageCount())}</span>`; $('#delete-button').innerHTML = `点击删除 <span class="count-label">${formatSelectedCount(selectedSteamCount())}</span>`; $('#commit-button').disabled = inSteam || nativeSteam || selectedReadyCount() === 0; $('#commit-button').title = nativeSteam ? '原生 Steam 游戏不能通过自定义库重复导入' : '只加入当前页中已验证且已选中的项目'; $('#delete-button').disabled = selectedSteamCount() === 0; $("#in-steam-limitation").classList.add("hidden"); syncPageSelectionControls(); renderRoots(); renderSteamRuntimeState();
   renderArtworkRefreshControl();
   renderSteamTarget();
   const focusedDescriptor = libraryFocusDescriptor(document.activeElement) || libraryFocusMemory;
@@ -1447,7 +1469,11 @@ function syncIdentityDraft() {
   const steamId = draftSteamId();
   game.override = { ...(game.override || {}) };
   if (name) game.override.name = name; else delete game.override.name;
-  if (steamId) { game.override.steamId = Number(steamId); delete game.override.igdbId; delete game.override.idCleared; }
+  if (isNativeSteamGame(game)) {
+    delete game.override.steamId;
+    delete game.override.igdbId;
+    delete game.override.idCleared;
+  } else if (steamId) { game.override.steamId = Number(steamId); delete game.override.igdbId; delete game.override.idCleared; }
   else if (steamIdClearPending || game.override.idCleared === true) { delete game.override.steamId; game.override.idCleared = true; }
   editDraft.identityDirty = true;
   selectedActionGame = game;
@@ -1487,6 +1513,30 @@ function focusEditModal() {
     modal.querySelector('#artwork-cover-preview');
   return focusModalItem(modal, preferred);
 }
+function refreshNativeArtworkForEdit(game) {
+  if (!isNativeSteamGame(game) || !game.primaryExecutable) return;
+  const executable = normalizedUiPath(game.primaryExecutable);
+  invoke('refreshNativeArtwork', { executable: game.primaryExecutable }).then(result => {
+    if (!result) return;
+    snapshot = result;
+    renderEntry();
+    const refreshed = mergedGames().find(item => normalizedUiPath(item.primaryExecutable) === executable);
+    if (!refreshed || normalizedUiPath(selectedActionGame?.primaryExecutable || '') !== executable) {
+      if (!$('#library-view').classList.contains('hidden')) renderLibrary();
+      return;
+    }
+    selectedActionGame = refreshed;
+    editDraft = draftFor(refreshed);
+    artworkDraft = artworkDraftFromGame(refreshed);
+    artworkPageBase = {
+      cover: artworkDraft.cover ? { ...artworkDraft.cover } : null,
+      wallpaper: artworkDraft.wallpaper ? { ...artworkDraft.wallpaper } : null
+    };
+    renderEditDraft(refreshed);
+    renderArtworkDraft();
+    if (!$('#library-view').classList.contains('hidden')) renderLibrary();
+  }).catch(error => showError(error, libraryNotice));
+}
 function openEdit(game) {
   if (!game) return;
   try {
@@ -1504,6 +1554,11 @@ function openEdit(game) {
     const override = selectedActionGame.override || {};
     $('#identity-name').value = override.name || selectedActionGame.steam?.suggestedName || selectedActionGame.primaryProductName || selectedActionGame.directoryName || '';
     $('#identity-steam-id').value = formalSteamAppId(selectedActionGame);
+    const nativeSteam = isNativeSteamGame(selectedActionGame);
+    $('#identity-steam-id').readOnly = nativeSteam;
+    $('#identity-steam-id').title = nativeSteam ? '原生 Steam AppID 来自 appmanifest，不允许手动改写' : '';
+    $('#identity-steam-id-clear').disabled = nativeSteam;
+    if (nativeSteam) $('#artwork-search-hint').textContent = `原生 Steam AppID ${formalSteamAppId(selectedActionGame)}；素材启动时读取缓存，进入手动编辑时刷新 Steam 本地素材`;
     const rawCandidates = (selectedActionGame.candidates || []).filter(candidate => candidate.role !== 'mod-manager' && candidate.path);
     const currentPath = selectedActionGame.primaryExecutable || '';
     const candidates = currentPath && !rawCandidates.some(candidate => normalizedUiPath(candidate.path) === normalizedUiPath(currentPath)) ? [{ path: currentPath, relativePath: currentPath, current: true }, ...rawCandidates] : rawCandidates;
@@ -1517,6 +1572,7 @@ function openEdit(game) {
     primaryDropdown?.wrapper.classList.toggle('hidden', candidates.length <= 1);
     $('#edit-modal').classList.remove('hidden'); requestAnimationFrame(focusEditModal);
     startArtworkPrefetch(selectedActionGame);
+    if (nativeSteam) refreshNativeArtworkForEdit(selectedActionGame);
   } catch (error) {
     reportUiError('open-edit', error, { executable: game.primaryExecutable || '', gameDirectory: game.gameDirectory || '' });
     $('#edit-modal')?.classList.add('hidden');
@@ -1796,7 +1852,7 @@ function artworkActionForCurrentType(action) {
   return false;
 }
 function artworkSearchQuery(game) { return gameDisplayName(game) || String(game.primaryExecutable || '').split(/[\\/]/).pop().replace(/\.exe$/i, ''); }
-function formalSteamAppId(game) { if (game?.override?.idCleared === true) return ''; const value = game.override?.steamId || game.steam?.steamStoreAppId || game.steam?.storefrontAppId || game.steam?.appId || game.steam?.canonicalAppId || game.steam?.localAppId || game.steam?.requestedAppId || ''; const text = String(value ?? '').trim(); return /^[1-9]\d*$/.test(text) ? text : ''; }
+function formalSteamAppId(game) { if (isNativeSteamGame(game)) { const native = game?.steam?.nativeSteamAppId || game?.nativeSteamAppId || game?.steam?.steamStoreAppId || ''; const nativeText = String(native ?? '').trim(); return /^[1-9]\d*$/.test(nativeText) ? nativeText : ''; } if (game?.override?.idCleared === true) return ''; const value = game.override?.steamId || game.steam?.steamStoreAppId || game.steam?.storefrontAppId || game.steam?.appId || game.steam?.canonicalAppId || game.steam?.localAppId || game.steam?.requestedAppId || ''; const text = String(value ?? '').trim(); return /^[1-9]\d*$/.test(text) ? text : ''; }
 function artworkSearchSteamId(game) { return formalSteamAppId(game); }
 function artworkSearchCacheKey(game, type) {
   const executable = normalizedUiPath(game?.primaryExecutable || '');
@@ -2227,7 +2283,7 @@ async function commitSelectedGames(forceCloseSteam = false, steamExecutable = ''
     forceCloseSteam ? '已加入 Steam；快捷方式和图片已校验，Steam 大屏正在重新启动。' : '已加入 Steam；快捷方式和图片已校验。');
 }
 async function closeSteamOnly() {
-  await runBusy('closeSteam', '正在关闭 Steam', '正在请求 Steam 保存数据并温和退出。', {}, 'Steam 已关闭，现在可以点击“点击加入Steam”。');
+  await runBusy('closeSteam', '正在关闭 Steam', '正在请求 Steam 保存数据并温和退出。', {}, 'Steam 已关闭，可以导入。');
   await refreshSteamRuntimeState(true);
 }
 async function requestSteamCommit() {
@@ -2649,6 +2705,7 @@ updateSteamArtworkButton.addEventListener('click', async () => {
 // Build the visible editor dropdowns before the first startup snapshot so a
 // fast controller A/方向键 press cannot land on a native select during the
 // initial render race.
+ensureNativeSteamTab();
 upgradeEditDropdowns();
 
 window.setInterval(() => {

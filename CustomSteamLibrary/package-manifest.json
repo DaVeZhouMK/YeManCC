@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "packageId": "custom-steam-library",
   "packageType": "green-child",
-  "packageVersion": "0.1.3",
+  "packageVersion": "0.0.24",
   "productName": "Steam自定义游戏库",
   "productNameEnglish": "Custom Steam Library",
   "entryPoint": "CustomSteamLibrary.exe",
@@ -73,10 +73,10 @@
   "legacyPaths": [
     "D:\\YeMan\\Steam大屏"
   ],
-  "generatedAt": "2026-08-27",
+  "generatedAt": "2026-08-28",
   "sourceBuild": {
-    "host": "e5d11a74efc2f7ecf2629085b4c76a1d13b1f6ab68fc3b296c4eba7aa088979b",
-    "worker": "f814f0ed776a74410e0191ba2c32bcd1052ed1e411d8b14d19fe8053d4fdbf2f"
+    "host": "a76b9d719c817239000387416898b1b9e5c5a425ee0456848054c11e0b2a18d3",
+    "worker": "a63963a7e7d0469123349614ba9b89c582053b1c22b8e24e8c2ecca5fe605771"
   },
   "files": [
     "CustomSteamLibrary.exe",
@@ -93,13 +93,13 @@
   "fileIndex": [
     {
       "path": "CustomSteamLibrary.exe",
-      "bytes": 1289216,
-      "sha256": "e5d11a74efc2f7ecf2629085b4c76a1d13b1f6ab68fc3b296c4eba7aa088979b"
+      "bytes": 1377280,
+      "sha256": "a76b9d719c817239000387416898b1b9e5c5a425ee0456848054c11e0b2a18d3"
     },
     {
       "path": "SteamArtworkLab.exe",
-      "bytes": 2549248,
-      "sha256": "f814f0ed776a74410e0191ba2c32bcd1052ed1e411d8b14d19fe8053d4fdbf2f"
+      "bytes": 2585088,
+      "sha256": "a63963a7e7d0469123349614ba9b89c582053b1c22b8e24e8c2ecca5fe605771"
     },
     {
       "path": "run-workspace.bat",
@@ -107,24 +107,24 @@
       "sha256": "8de9f08333a6748df5812f8b8f2f54cf305741773e7ee8246a44a2f2ab7784ce"
     },
     {
-      "path": "assets/custom-steam-library.ico",
+      "path": "assets\\custom-steam-library.ico",
       "bytes": 125864,
       "sha256": "6bdea618684f30f5ec1d0b53bdab854aa3cbba00fd32ea551ba580d24cbc76af"
     },
     {
-      "path": "workspace-ui/index.html",
+      "path": "workspace-ui\\index.html",
       "bytes": 11852,
       "sha256": "3fb893d78e391a3f80a7e471b1b14abd693857b08cfa366a3b4d178eac4f770d"
     },
     {
-      "path": "workspace-ui/app.js",
-      "bytes": 164041,
-      "sha256": "f9fd1e94bdc074b30f06deb2a0fabcbb5612c64f4a39772f9657ec17531e0d14"
+      "path": "workspace-ui\\app.js",
+      "bytes": 167523,
+      "sha256": "c04a81495985db3ed9c4987345a757b13de11d02a0ed5f49d7f35f5d16e689f6"
     },
     {
-      "path": "workspace-ui/styles.css",
-      "bytes": 64377,
-      "sha256": "1f288f91d3ab62e85447cbef0b94bc8e63c88072d3677e730d7b0e1273a3731e"
+      "path": "workspace-ui\\styles.css",
+      "bytes": 64619,
+      "sha256": "9a849ce5d96fc2f2b289ea753b01dee2c3a85464741636bddf0cdadd75900776"
     },
     {
       "path": "CUSTOM-STEAM-LIBRARY-INTEGRATION-CONTRACT.md",
