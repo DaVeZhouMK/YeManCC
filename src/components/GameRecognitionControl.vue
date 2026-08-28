@@ -69,6 +69,8 @@ const gameButtonStatus = computed(() => gameIdentifying.value
 
 function syncGame(next: DetectedGame | null, preserveRuleMenu = false): void {
   const locked = getLockedGameTarget();
+  const previous = game.value;
+  const menuWasOpen = gameRuleMenu.value !== null;
   // A locked top-menu target owns the quick-action session. Background polls
   // must not replace it with a newly detected foreground game.
   if (locked && !next) {
@@ -83,13 +85,26 @@ function syncGame(next: DetectedGame | null, preserveRuleMenu = false): void {
   if (gameIdentifying.value) return;
   if (next) {
     summonCandidate.value = null;
-    if (!preserveRuleMenu) gameRuleMenu.value = null;
+    // Background recognition publishes the same PID repeatedly. Keeping the
+    // menu open across those snapshots is essential for controller users:
+    // otherwise a normal poll races the Y-open animation and folds the menu
+    // back up. A genuinely different game still invalidates the old menu.
+    const sameTarget = isGameTargetSame(previous, next);
+    if (!preserveRuleMenu && menuWasOpen && previous && !sameTarget) {
+      gameRuleMenu.value = null;
+    }
   }
 }
 
 function focusGameRulePanel(): void {
   nextTick(() => {
-    const first = gameRulePanelEl.value?.querySelector<HTMLElement>('button:not(:disabled), input:not(:disabled)');
+    const candidates = gameRulePanelEl.value
+      ? Array.from(gameRulePanelEl.value.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled)'))
+      : [];
+    const first = candidates.find((el) =>
+      !el.hasAttribute('data-gp-ignore') &&
+      !el.closest('[data-gp-group="game-quick-game-controls"]'),
+    );
     if (first) focusGamepadElement(first);
   });
 }

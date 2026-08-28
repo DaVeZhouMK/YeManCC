@@ -510,10 +510,13 @@ async function applyPerformanceScheduleUnsafe(
     // 避免 AC 配置被写到 DC（或反之）造成电池下跑极端档（2026-08-05 修复 TOCTOU）。
     if ((await detectPowerMode()) !== side) return false;
     assertScheduleOpCurrent();
-    await runOptionalPerformanceScheduleTdp(side, profile.tdpMax, () =>
-      setTdp(side, profile.tdpMax, { apply: false, save: true }));
+    await runOptionalPerformanceScheduleTdp(side, profile.tdpMax, async () => {
+      await setTdp(side, profile.tdpMax, { apply: false, save: true });
+    });
     assertScheduleOpCurrent();
-    await notifyTdpMaxChanged(profile.tdpMax);
+    await runOptionalPerformanceScheduleTdp(side, profile.tdpMax, async () => {
+      await notifyTdpMaxChanged(profile.tdpMax);
+    });
     assertScheduleOpCurrent();
     if (!fpsFloatEnabled) {
       // 不锁帧=0：RTSS 解锁，停止 CPU/TDP 浮动，并用固定 CPU 挡位接管。
@@ -536,8 +539,9 @@ async function applyPerformanceScheduleUnsafe(
   if ((await detectPowerMode()) !== side) return false;
   // 新预设统一按 TDP 优先：先写入并应用当前侧 TDP，再套用 CPU 浮动/CPU 挡位。
   assertScheduleOpCurrent();
-  await runOptionalPerformanceScheduleTdp(side, profile.tdpMax, () =>
-    setTdp(side, profile.tdpMax, { apply: true, save: true }));
+  await runOptionalPerformanceScheduleTdp(side, profile.tdpMax, async () => {
+    await setTdp(side, profile.tdpMax, { apply: true, save: true });
+  });
   assertScheduleOpCurrent();
   if (!fpsFloatEnabled) {
     await setFloatTarget(0);
@@ -930,10 +934,13 @@ async function applyGameCustomProfilesUnsafe(
   if ((await detectPowerMode()) !== side) return false;
   if (getFloatInfo().enabled) {
     if (!(await checkpoint()) || (await detectPowerMode()) !== side) return false;
-    await runOptionalPerformanceScheduleTdp(side, profile.tdpMax, () =>
-      setTdp(side, profile.tdpMax, { apply: false, save: true }));
+    await runOptionalPerformanceScheduleTdp(side, profile.tdpMax, async () => {
+      await setTdp(side, profile.tdpMax, { apply: false, save: true });
+    });
     if (!(await checkpoint()) || (await detectPowerMode()) !== side) return false;
-    await notifyTdpMaxChanged(profile.tdpMax);
+    await runOptionalPerformanceScheduleTdp(side, profile.tdpMax, async () => {
+      await notifyTdpMaxChanged(profile.tdpMax);
+    });
     if (!(await checkpoint())) return false;
     if (!fpsFloatEnabled) {
       // 专属档位同样遵守 0=不锁帧：不继承上一个游戏/档位的 CPU/TDP 浮动。
@@ -950,8 +957,9 @@ async function applyGameCustomProfilesUnsafe(
     return checkpoint();
   }
   if (!(await checkpoint()) || (await detectPowerMode()) !== side) return false;
-  await runOptionalPerformanceScheduleTdp(side, profile.tdpMax, () =>
-    setTdp(side, profile.tdpMax, { apply: true, save: true }));
+  await runOptionalPerformanceScheduleTdp(side, profile.tdpMax, async () => {
+    await setTdp(side, profile.tdpMax, { apply: true, save: true });
+  });
   if (!(await checkpoint())) return false;
   if (!fpsFloatEnabled) {
     await setFloatTarget(0);

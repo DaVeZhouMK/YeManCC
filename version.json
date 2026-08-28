@@ -1,7 +1,7 @@
-﻿{
-    "version":  "0.0.25",
-    "notes":  "两根目录小修复：修正窗口最大化/恢复交接；CustomSteamLibrary 继续位于 YeManCC\\CustomSteamLibrary，PowerControl\\fan-host 暂不参与。",
-    "sha256":  "E5B49057E86226D6171EEFBB899E1477C0132A8CC196F2EAAB4F5CA915E06D06",
-    "publishedAt":  "2026-08-28",
-    "package":  "Packages/YeManCC.zip"
+{
+  "version": "0.0.26",
+  "notes": "候选升级包：同步当前源码修复与健壮性改动；CustomSteamLibrary 继续位于 YeManCC\\CustomSteamLibrary，PowerControl\\fan-host 暂不参与。",
+  "sha256": "",
+  "publishedAt": "",
+  "package": "Packages/YeManCC.zip"
 }

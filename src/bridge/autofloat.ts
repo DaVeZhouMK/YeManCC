@@ -200,7 +200,8 @@ async function applyTdpLimit(next: number): Promise<number> {
   // 与顶部 TDP 滑块共用 setTdp 的实际下发路径；save:false 保证只改硬件临时值，不改 TDP最大值配置。
   // 常驻 daemon 方案已生效：setTdp → ensureTdpDaemon（心跳新鲜直接复用）→ 写命令文件（毫秒级），
   // 不再每几秒 CreateProcess(YeManTdpCtl.exe)，根治 IDC_APPSTARTING 转圈。
-  await setTdp(tdpMode, value, { apply: true, save: false, vendor });
+  const applied = await setTdp(tdpMode, value, { apply: true, save: false, vendor });
+  if (!applied) return tdpLimit;
   tdpVendor = vendor;
   tdpLimit = value;
   notify();

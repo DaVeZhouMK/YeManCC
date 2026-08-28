@@ -7,7 +7,7 @@ import {
   type FanNode,
   type FanState,
 } from './fanApi';
-import { fanDiagnosticLog } from './fanDiagnostics';
+import { fanDiagnosticLog, setFanDiagnosticPowerGeneration } from './fanDiagnostics';
 
 /**
  * Real-host integration boundary.
@@ -23,12 +23,18 @@ export const FAN_HOST_DEFAULT_PORT = 8765;
 // turn the next curve operation into a stale-lease failure.
 const DEFAULT_LEASE_RENEWAL_INTERVAL_MS = 5000;
 const RECOVERY_RETRY_DELAYS_MS = [0, 250, 750];
+// Lease heartbeat is deliberately separate from the normal read-only session
+// observer. The former renews HC ownership; the latter only checks state and
+// must not be shortened to the lease cadence.
+const NORMAL_SESSION_CHECK_INTERVAL_MS = 30_000;
+const RECOVERY_OBSERVATION_INTERVAL_MS = 2_000;
+const RECOVERY_OBSERVATION_MAX_ATTEMPTS = 30;
+const RECOVERY_WINDOW_MS = 60_000;
+const RECOVERY_MAX_ATTEMPTS = 3;
 // A real Host owns the serialized HC recovery timer.  The UI must observe that
 // owner instead of issuing a second restore/close request while its ACPI/HID
-// call is still unwinding.  Thirty seconds covers the Host's 1/2/4/8/16 sec
-// backoff window without making a failed lifecycle operation spin the WebView.
-const HOST_RECOVERY_POLL_INTERVAL_MS = 500;
-const HOST_RECOVERY_TIMEOUT_MS = 30_000;
+// call is still unwinding. Recovery observation is a bounded 2s x 30 window;
+// within that window at most three route-rebuild triggers are allowed.
 
 async function waitForRecoveryRetry(attempt: number): Promise<void> {
   const delay = RECOVERY_RETRY_DELAYS_MS[Math.min(attempt, RECOVERY_RETRY_DELAYS_MS.length - 1)];
@@ -865,6 +871,18 @@ function isExternalFanControlConflict(error: unknown): boolean {
   return /\b(?:FAN_ROUTE_CONFLICT|HC_OPENLIB_CONFLICT|EXTERNAL_FAN_OWNER)\b/i.test(message);
 }
 
+/**
+ * A route-loss response is different from a normal lease expiry or write
+ * rejection. The native Host has already stopped its temperature source and
+ * owns the one HC Close/unbind boundary; the bridge must observe that boundary
+ * and then rebuild the same curve on a newly stable HC route. This classifier
+ * is used only by the heartbeat path, never by a user mutation or HTTP layer.
+ */
+function isHidRouteLoss(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /\b(?:HC_SESSION_ROUTE_LOST|HC_SESSION_UNAVAILABLE|hc-device-is-open-false|route-marker-lost)\b/i.test(message);
+}
+
 function isHcCloseCleanupPending(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
   return /\bHC_CLOSE_PENDING\b|HC Close 资源清理/i.test(message);
@@ -932,7 +950,28 @@ export class FanHostLifecycle {
   private eventsOpened = false;
   private operation: Promise<unknown> = Promise.resolve();
   private heartbeatTimer: ReturnType<typeof setTimeout> | null = null;
+  private sessionCheckTimer: ReturnType<typeof setTimeout> | null = null;
+  private sessionCheckInFlight = false;
+  // A normal session check is intentionally sparse. Once a read-only check
+  // observes that an external controller/OEM has taken the route, keep the
+  // same lifecycle owner but poll at the Phase-2 2s cadence for one bounded
+  // 60s recovery window. This is YeMan observation/reacquisition only; HC
+  // Open/OpenEvents/lease/curve ordering remains the single write path.
+  private sessionRecoveryBurstUntil = 0;
+  private sessionRecoveryAttempts = 0;
+  // Once a burst exhausts its three triggers, do not immediately start a new
+  // burst for the same unresolved route loss. Normal 30s checks continue and
+  // re-arm only after a healthy route is observed.
+  private sessionRecoveryExhausted = false;
+  private lastRecoveryPowerGeneration = 0;
+  private sessionRecoveryInFlight = false;
+  private sessionGeneration = 0;
+  private powerGeneration = 0;
   private writeReady = false;
+  // The resident Host owns Close/unbind. This bridge marker only prevents a
+  // second route-rebuild waiter from being created if a timer and an explicit
+  // heartbeat observe the same HID removal in one lifecycle turn.
+  private recoveryOwner: 'none' | 'hid-route' = 'none';
   // The globally-owned lifecycle, not a mounted FanView, remembers the last
   // acknowledged curve. This keeps a full OEM -> fresh HC session -> replay
   // transaction possible after KeepAlive evicts the fan page during sleep.
@@ -956,6 +995,41 @@ export class FanHostLifecycle {
   get currentLease(): FanLease | null { return this.lease ? { ...this.lease } : null; }
   get processId(): number | null { return this.process?.pid ?? null; }
 
+  /** Bind lifecycle diagnostics to the native power transaction currently
+   * being consumed.  Older WebView events may omit generation; those events
+   * must not erase a newer value. */
+  setPowerGeneration(generation: number): void {
+    if (Number.isFinite(generation) && generation > this.powerGeneration) {
+      this.powerGeneration = generation;
+      setFanDiagnosticPowerGeneration(generation);
+      fanDiagnosticLog('lifecycle.power-generation', { generation });
+    }
+  }
+
+  /**
+   * AC/DC is a YeMan observation signal, not a replacement for HC's profile
+   * callback. If a route-loss recovery burst is already active, the physical
+   * power transition refreshes that same bounded window and gives it a new
+   * three-attempt budget. It never starts hardware control by itself.
+   */
+  notifyPowerSourceChanged(source = 'acdc', generation?: number): void {
+    const now = Date.now();
+    const eventGeneration = Number.isFinite(generation) && Number(generation) > 0 ? Number(generation) : 0;
+    if (eventGeneration > 0 && eventGeneration === this.lastRecoveryPowerGeneration) return;
+    if (eventGeneration > 0) this.lastRecoveryPowerGeneration = eventGeneration;
+    if (!this.process || !this.activeCurve || this.sessionRecoveryExhausted ||
+        now >= this.sessionRecoveryBurstUntil || this.sessionRecoveryAttempts >= RECOVERY_MAX_ATTEMPTS) return;
+    this.sessionRecoveryBurstUntil = now + RECOVERY_WINDOW_MS;
+    this.sessionRecoveryAttempts = 0;
+    fanDiagnosticLog('lifecycle.recovery-window-refreshed', {
+      source,
+      burstUntil: this.sessionRecoveryBurstUntil,
+      maxAttempts: RECOVERY_MAX_ATTEMPTS,
+      generation: this.powerGeneration,
+    });
+    this.scheduleSessionCheck();
+  }
+
   /** Read host telemetry without changing ownership or hardware state. */
   async getState(): Promise<FanState> {
     return this.enqueue(() => this.adapter.getState());
@@ -977,8 +1051,14 @@ export class FanHostLifecycle {
 
   private setState(next: FanHostLifecycleState): void {
     this.stateValue = next;
-    fanDiagnosticLog('lifecycle.state', { state: next });
+    fanDiagnosticLog('lifecycle.state', { state: next, generation: this.powerGeneration });
     this.onState?.(next);
+  }
+
+  private advanceSessionGeneration(): number {
+    this.sessionGeneration += 1;
+    this.stopSessionCheck();
+    return this.sessionGeneration;
   }
 
   /**
@@ -1006,18 +1086,18 @@ export class FanHostLifecycle {
    */
   private async waitForHostRecovery(
     requireStopped = false,
-    timeoutMs = HOST_RECOVERY_TIMEOUT_MS,
   ): Promise<FanState> {
-    const deadline = Date.now() + timeoutMs;
     let last: FanState | null = null;
-    while (Date.now() < deadline) {
+    for (let attempt = 0; attempt < RECOVERY_OBSERVATION_MAX_ATTEMPTS; attempt += 1) {
       const remote = await this.adapter.getState().catch(() => null);
       if (remote) {
         last = remote;
         this.syncRemoteSessionState(remote);
         if (isSafeHostRecoveryState(remote, requireStopped)) return remote;
       }
-      await new Promise<void>((resolve) => setTimeout(resolve, HOST_RECOVERY_POLL_INTERVAL_MS));
+      if (attempt + 1 < RECOVERY_OBSERVATION_MAX_ATTEMPTS) {
+        await new Promise<void>((resolve) => setTimeout(resolve, RECOVERY_OBSERVATION_INTERVAL_MS));
+      }
     }
     const suffix = last ? `（最后状态：${String(last.state ?? 'unknown')}）` : '';
     throw new Error(`Fan Host 安全恢复在等待窗口内未确认${suffix}`);
@@ -1098,6 +1178,7 @@ export class FanHostLifecycle {
     this.setState('starting');
     try {
       this.process = await this.launcher.start(this.config);
+      this.advanceSessionGeneration();
       if ('setSessionToken' in this.adapter && typeof this.adapter.setSessionToken === 'function') {
         this.adapter.setSessionToken(this.config.sessionToken);
       }
@@ -1189,6 +1270,7 @@ export class FanHostLifecycle {
     if (!this.writeReady) throw new Error('当前风扇数据路线已识别，但真实写入/恢复尚未验证');
     try {
       if (!this.opened) {
+        this.advanceSessionGeneration();
         // Mark the session before the call. HC/Open can touch EC and then
         // throw; recovery must therefore attempt OEM restore even when the
         // promise rejects before the normal success assignment.
@@ -1209,7 +1291,9 @@ export class FanHostLifecycle {
       // Host lease to expire and correctly restore OEM after its timeout.
       // Start renewal only once this control session is actually active.
       this.activeCurve = cloneFanNodes(nodes);
+      this.sessionRecoveryExhausted = false;
       this.scheduleHeartbeat();
+      this.scheduleSessionCheck();
       return applied;
     } catch (error) {
       try { await this.recoverAfterMutationFailure(); }
@@ -1233,6 +1317,7 @@ export class FanHostLifecycle {
     if (!this.writeReady) throw new Error('当前风扇数据路线已识别，但真实写入/恢复尚未验证');
     try {
       if (!this.opened) {
+        this.advanceSessionGeneration();
         this.opened = true;
         const opened = await this.adapter.open();
         this.syncRemoteSessionState(opened);
@@ -1248,7 +1333,9 @@ export class FanHostLifecycle {
       // Keep the first preset path identical to a manual curve apply: the
       // lease watchdog starts only after the initial write has succeeded.
       if (nodes) this.activeCurve = cloneFanNodes(nodes);
+      this.sessionRecoveryExhausted = false;
       this.scheduleHeartbeat();
+      this.scheduleSessionCheck();
       return applied;
     } catch (error) {
       try { await this.recoverAfterMutationFailure(); }
@@ -1282,6 +1369,7 @@ export class FanHostLifecycle {
         return { state: 'Stopped', powerState: 'Unknown', hardwareWrites: false, hardwareWritesObserved: false };
       }
       this.stopHeartbeat();
+      this.stopSessionCheck();
       const hadLease = this.lease !== null;
       try {
         if (this.lease || this.opened) await this.restoreAndRelease();
@@ -1314,6 +1402,7 @@ export class FanHostLifecycle {
       }
       this.activeCurve = null;
       this.resumeCurve = null;
+      this.sessionRecoveryExhausted = false;
       this.setState('awaiting-control');
       return this.adapter.getState();
     });
@@ -1322,12 +1411,35 @@ export class FanHostLifecycle {
   async heartbeat(): Promise<FanLease> {
     return this.enqueue(async () => {
       if (this.state !== 'ready' || !this.lease) throw new Error('Fan lease 不可用');
+      const curveBeforeRouteLoss = this.activeCurve ? cloneFanNodes(this.activeCurve) : null;
       try {
         this.lease = await this.adapter.heartbeat(this.lease.leaseId);
         fanDiagnosticLog('lifecycle.heartbeat-success', { state: this.state });
         return { ...this.lease };
       } catch (error) {
         fanDiagnosticLog('lifecycle.heartbeat-failure', { state: this.state, error: error instanceof Error ? error.message : String(error) });
+        this.stopHeartbeat();
+        this.stopSessionCheck();
+        this.advanceSessionGeneration();
+        if (curveBeforeRouteLoss && isHidRouteLoss(error)) {
+          try {
+            // The C# Host has already claimed and serialized the HC
+            // Close/unbind boundary. Do not send restore/close from this
+            // layer; wait for its terminal AwaitingControl evidence, probe a
+            // stable route, and then issue exactly Open -> OpenEvents -> lease
+            // -> curve through the existing mutation transaction.
+            return await this.recoverAfterHidRemoval(curveBeforeRouteLoss);
+          } catch (recoveryError) {
+            // Keep the desired curve available for an explicit later retry,
+            // but never keep a lease or a heartbeat alive after a failed
+            // rebuild.
+            this.lease = null;
+            this.activeCurve = cloneFanNodes(curveBeforeRouteLoss);
+            const recoveryMessage = recoveryError instanceof Error ? recoveryError.message : String(recoveryError);
+            this.setState('fault-locked');
+            throw new Error(`HC 路线丢失后自动重建失败：${recoveryMessage}`);
+          }
+        }
         await this.recoverAfterMutationFailure();
         if (isExternalFanControlConflict(error) && this.stateValue !== 'fault-locked' && this.stateValue !== 'unknown') {
           this.setState('conflict-locked');
@@ -1366,6 +1478,8 @@ export class FanHostLifecycle {
         // CurrentDevice.Close() call. Profile Hardware handoff belongs only
         // to an explicit control disable, not to suspend.
         this.stopHeartbeat();
+        this.stopSessionCheck();
+        this.advanceSessionGeneration();
         const suspended = await this.adapter.suspend();
         assertHcSessionSuspended(suspended, 'Fan Host suspend');
         // The Host has completed the HC Close boundary. A lease is scoped to
@@ -1444,14 +1558,17 @@ export class FanHostLifecycle {
           // session, which is not an HC lifecycle transition.
           let remoteAfterResume: FanState | null = null;
           if (resumedState.state === 'Resuming') {
-            for (let poll = 0; poll < 180; poll += 1) {
+            for (let poll = 0; poll < RECOVERY_OBSERVATION_MAX_ATTEMPTS; poll += 1) {
               const remote = await this.adapter.getState();
               if (remote.state !== 'Resuming') {
                 remoteAfterResume = remote;
                 break;
               }
-              await new Promise<void>((resolve) => setTimeout(resolve, 250));
+              if (poll + 1 < RECOVERY_OBSERVATION_MAX_ATTEMPTS) {
+                await new Promise<void>((resolve) => setTimeout(resolve, RECOVERY_OBSERVATION_INTERVAL_MS));
+              }
             }
+            if (!remoteAfterResume) throw new Error('FAN_RESUME_OBSERVATION_TIMEOUT');
           } else if (resumedState.state === 'Ready') {
             remoteAfterResume = await this.adapter.getState().catch(() => null);
           }
@@ -1654,6 +1771,72 @@ export class FanHostLifecycle {
     }
   }
 
+  /**
+   * Rebuild one control session after the resident Host has closed a lost HID
+   * route. All calls remain inside the lifecycle queue; no second Close or
+   * profile restore is sent while HC's original owner is unwinding.
+   */
+  private async recoverAfterHidRemoval(curve: readonly FanNode[]): Promise<FanLease> {
+    if (this.recoveryOwner !== 'none') throw new Error('HC_RECOVERY_OWNER_BUSY');
+    this.recoveryOwner = 'hid-route';
+    try {
+      const remote = await this.waitForHostRecovery(false);
+      this.syncRemoteSessionState(remote);
+      if (String(remote.state ?? '').toLowerCase() !== 'awaitingcontrol') {
+        throw new Error(`HC_ROUTE_RECOVERY_NOT_CLOSED: ${String(remote.state ?? 'unknown')}`);
+      }
+
+      // Handshake is read-only route admission. Do not call Open until the
+      // route identity and explicit write/recovery gate are stable again.
+      let handshake: FanHandshake | null = null;
+      let gate: FanDeviceGateResult | null = null;
+      let lastError: unknown;
+      for (let attempt = 0; attempt < RECOVERY_RETRY_DELAYS_MS.length; attempt += 1) {
+        try {
+          if (attempt > 0) await waitForRecoveryRetry(attempt);
+          handshake = await this.adapter.handshake();
+          gate = evaluateFanDeviceGate(handshake, this.savedIdentity);
+          if (gate.allowed && gate.writeReady) break;
+          throw new Error(gate.reason);
+        } catch (error) {
+          lastError = error;
+          handshake = null;
+          gate = null;
+        }
+      }
+      if (!handshake || !gate?.allowed || !gate.writeReady) {
+        throw lastError instanceof Error ? lastError : new Error('HC_ROUTE_NOT_STABLE');
+      }
+      this.savedIdentity = handshake.deviceIdentity ?? this.savedIdentity;
+      this.writeReady = gate.writeReady;
+
+      // A completed HC Close invalidates the old Open/OpenEvents and lease;
+      // never trust a stale local flag when a compatible adapter omitted the
+      // optional telemetry fields.
+      this.opened = remote.openCalled === true;
+      this.eventsOpened = remote.openEventsCalled === true;
+      this.lease = null;
+      this.activeCurve = cloneFanNodes(curve);
+      this.setState('awaiting-control');
+      await this.applyMutation(curve);
+      if (!this.lease) throw new Error('HC_ROUTE_REBUILD_LEASE_MISSING');
+      return { ...this.lease };
+    } finally {
+      this.recoveryOwner = 'none';
+    }
+  }
+
+  private isObservedRouteLoss(remote: FanState): boolean {
+    const remoteState = String(remote.state ?? '').toLowerCase();
+    // A confirmed sleep/process boundary is not an external takeover. The
+    // existing SystemPending/SystemReady owner handles those states and must
+    // not be raced by the route observer.
+    if (remoteState === 'suspended' || remoteState === 'stopped') return false;
+    if (remoteState === 'awaitingcontrol' && remote.hardwareWritesEnabled !== true) return true;
+    if (remote.openCalled === false || remote.openEventsCalled === false) return true;
+    return remoteState === 'faultlocked' || remoteState === 'unknown';
+  }
+
   private async restoreAndRelease(): Promise<void> {
     if (this.lease) {
       try {
@@ -1766,6 +1949,137 @@ export class FanHostLifecycle {
     if (this.heartbeatTimer !== null) {
       clearTimeout(this.heartbeatTimer);
       this.heartbeatTimer = null;
+    }
+  }
+
+  /** Schedule the normal read-only session observer, never the lease renewer. */
+  private scheduleSessionCheck(): void {
+    this.stopSessionCheck();
+    const burstActive = Date.now() < this.sessionRecoveryBurstUntil;
+    const recoveryAwaitingControl = this.state === 'awaiting-control';
+    if (!this.process || (this.state !== 'ready' && !recoveryAwaitingControl) ||
+        (this.state === 'ready' && !this.lease)) return;
+    const generation = this.sessionGeneration;
+    const intervalMs = burstActive ? RECOVERY_OBSERVATION_INTERVAL_MS : NORMAL_SESSION_CHECK_INTERVAL_MS;
+    this.sessionCheckTimer = setTimeout(() => {
+      this.sessionCheckTimer = null;
+      if (this.sessionCheckInFlight || generation !== this.sessionGeneration ||
+          (this.state !== 'ready' && !recoveryAwaitingControl) ||
+          (this.state === 'ready' && !this.lease)) return;
+      this.sessionCheckInFlight = true;
+      void this.enqueue(async () => {
+        const retryAwaitingControl = this.state === 'awaiting-control';
+        if (generation !== this.sessionGeneration ||
+            (this.state !== 'ready' && !retryAwaitingControl) ||
+            (this.state === 'ready' && !this.lease)) return;
+        try {
+          const remote = await this.adapter.getState();
+          if (generation !== this.sessionGeneration) return;
+          this.syncRemoteSessionState(remote);
+          const remoteState = String(remote.state ?? '').toLowerCase();
+          const sessionClosed = remote.openCalled === false || remote.openEventsCalled === false;
+          const curveBeforeRouteLoss = this.activeCurve ? cloneFanNodes(this.activeCurve) : null;
+          const routeLossObserved = Boolean(curveBeforeRouteLoss && this.isObservedRouteLoss(remote));
+          const burstStillActive = Date.now() < this.sessionRecoveryBurstUntil;
+          if (!routeLossObserved && this.sessionRecoveryExhausted) {
+            this.sessionRecoveryExhausted = false;
+            this.sessionRecoveryAttempts = 0;
+            fanDiagnosticLog('lifecycle.recovery-cycle-rearmed', { generation, remoteState });
+          }
+          if (routeLossObserved && !this.sessionRecoveryExhausted && !this.sessionRecoveryInFlight && !this.recoveryOwnerIsBusy() &&
+              (!burstStillActive || this.sessionRecoveryAttempts < RECOVERY_MAX_ATTEMPTS)) {
+            if (!burstStillActive) {
+              this.sessionRecoveryBurstUntil = Date.now() + RECOVERY_WINDOW_MS;
+              this.sessionRecoveryAttempts = 0;
+            }
+            this.sessionRecoveryAttempts += 1;
+            const recoveryAttempt = this.sessionRecoveryAttempts;
+            this.sessionRecoveryInFlight = true;
+            this.stopHeartbeat();
+            fanDiagnosticLog('lifecycle.external-route-loss-observed', {
+              generation,
+              remoteState,
+              openCalled: remote.openCalled,
+              openEventsCalled: remote.openEventsCalled,
+              hardwareWritesEnabled: remote.hardwareWritesEnabled,
+              burstUntil: this.sessionRecoveryBurstUntil,
+              attempt: recoveryAttempt,
+              maxAttempts: RECOVERY_MAX_ATTEMPTS,
+            });
+            try {
+              await this.recoverAfterHidRemoval(curveBeforeRouteLoss);
+              this.sessionRecoveryBurstUntil = 0;
+              this.sessionRecoveryAttempts = 0;
+              this.sessionRecoveryExhausted = false;
+              this.scheduleSessionCheck();
+            } catch (error) {
+              fanDiagnosticLog('lifecycle.external-route-recovery-failure', {
+                generation,
+                error: error instanceof Error ? error.message : String(error),
+                burstRemainingMs: Math.max(0, this.sessionRecoveryBurstUntil - Date.now()),
+                attempt: recoveryAttempt,
+                maxAttempts: RECOVERY_MAX_ATTEMPTS,
+              });
+              if (recoveryAttempt < RECOVERY_MAX_ATTEMPTS && Date.now() < this.sessionRecoveryBurstUntil) {
+                this.setState('awaiting-control');
+                this.scheduleSessionCheck();
+              } else {
+                // Three recovery triggers complete this burst. Return to the
+                // sparse observer; a later, distinct route loss may start a
+                // new burst, but this cycle must not keep writing at 2s.
+                this.sessionRecoveryBurstUntil = 0;
+                this.sessionRecoveryAttempts = 0;
+                this.sessionRecoveryExhausted = true;
+                this.setState('awaiting-control');
+                this.scheduleSessionCheck();
+              }
+            } finally {
+              this.sessionRecoveryInFlight = false;
+            }
+            return;
+          }
+          if (routeLossObserved && burstStillActive && this.sessionRecoveryAttempts >= RECOVERY_MAX_ATTEMPTS) {
+            this.sessionRecoveryBurstUntil = 0;
+            this.sessionRecoveryAttempts = 0;
+            this.sessionRecoveryExhausted = true;
+            this.setState('awaiting-control');
+            this.scheduleSessionCheck();
+            return;
+          }
+          if (remoteState === 'faultlocked' || remoteState === 'unknown' ||
+              remote.hcCloseCleanupPending === true || sessionClosed) {
+            this.stopHeartbeat();
+            this.stopSessionCheck();
+            this.setState('fault-locked');
+            return;
+          }
+          this.scheduleSessionCheck();
+        } catch (error) {
+          if (generation !== this.sessionGeneration) return;
+          this.stopHeartbeat();
+          this.stopSessionCheck();
+          this.setState('fault-locked');
+          fanDiagnosticLog('lifecycle.session-check-failure', {
+            generation,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        } finally {
+          this.sessionCheckInFlight = false;
+        }
+      }).catch(() => {
+        this.sessionCheckInFlight = false;
+      });
+    }, intervalMs);
+  }
+
+  private recoveryOwnerIsBusy(): boolean {
+    return this.recoveryOwner !== 'none';
+  }
+
+  private stopSessionCheck(): void {
+    if (this.sessionCheckTimer !== null) {
+      clearTimeout(this.sessionCheckTimer);
+      this.sessionCheckTimer = null;
     }
   }
 }

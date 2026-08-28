@@ -1,5 +1,5 @@
 import { http } from './api';
-import { fanDiagnosticLog } from './fanDiagnostics';
+import { fanDiagnosticLog, getFanDiagnosticPowerGeneration } from './fanDiagnostics';
 
 /** Main-program boundary for the imported Fan API. Disabled by default. */
 export type FanPreset = 'soft' | 'balanced' | 'aggressive';
@@ -88,6 +88,22 @@ export interface FanApiAdapter {
   /** Request the resident Host to exit only after close/restore succeeds. */
   shutdown(): Promise<void>;
   setSessionToken?(token: string): void;
+}
+
+/** Structured transport/HTTP failure consumed by lifecycle and UI gates.
+ * `message` remains compatible with existing localized error handling. */
+export class FanApiError extends Error {
+  readonly status: number;
+  readonly errorCode?: string;
+  readonly generation: number;
+
+  constructor(message: string, status: number, errorCode?: string) {
+    super(message);
+    this.name = 'FanApiError';
+    this.status = status;
+    this.errorCode = errorCode;
+    this.generation = getFanDiagnosticPowerGeneration();
+  }
 }
 
 function responseHeader(headers: string, name: string): string | undefined {
@@ -209,6 +225,7 @@ export class HttpFanApiAdapter implements FanApiAdapter {
         ok: response.status >= 200 && response.status < 300 && parsed.ok !== false,
         durationMs: Date.now() - startedAt,
         requestId: responseHeader(response.headers, 'X-YeMan-Fan-Request-Id'),
+        generation: getFanDiagnosticPowerGeneration(),
         errorCode: code,
         request: summarizeRequestBody(bodyText),
         response: summarizeFanState(parsed.state ?? parsed),
@@ -218,7 +235,7 @@ export class HttpFanApiAdapter implements FanApiAdapter {
         // translates it for users, while the lifecycle can distinguish a known
         // external-controller conflict from a retryable transport failure.
         const message = parsed?.error?.message || `Fan API 请求失败 (${response.status})`;
-        throw new Error(code ? `${code}: ${message}` : message);
+        throw new FanApiError(code ? `${code}: ${message}` : message, response.status, code);
       }
       return parsed;
     } catch (error) {
@@ -226,6 +243,7 @@ export class HttpFanApiAdapter implements FanApiAdapter {
         method,
         path,
         durationMs: Date.now() - startedAt,
+        generation: getFanDiagnosticPowerGeneration(),
         request: summarizeRequestBody(bodyText),
         error: error instanceof Error ? error.message : String(error),
       });

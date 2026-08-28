@@ -63,12 +63,31 @@ const graphDragArmed = ref<number | null>(null);
 let telemetryTimer: ReturnType<typeof window.setInterval> | null = null;
 let curveApplyPromise: Promise<void> | null = null;
 let curveApplyPending = false;
-let fanWasActiveBeforeSuspend = false;
 let fanSuspendBoundary = false;
-let fanResumeGeneration = 0;
-let fanResumeTimer: ReturnType<typeof window.setTimeout> | null = null;
+let fanPowerGeneration = 0;
 const hostState = ref<FanHostLifecycleState>(FAN_FORCE_PREVIEW ? 'awaiting-control' : fanHostLifecycle.state);
 const statusMessage = ref(FAN_FORCE_PREVIEW ? '模拟预览：握手成功' : '正在握手识别…');
+
+/** Keep the graph point and its lower editor card as one spatial selection.
+ * The graph and the four cards are two renderings of the same node; allowing
+ * them to drift made the controller highlight a different node than the one
+ * being edited. */
+function selectNode(index: number): void {
+  graphSelectedNode.value = index;
+  configSelectedNode.value = index;
+}
+
+const statusHint = computed(() => {
+  if (supported.value) return '';
+  if (hostState.value === 'fault-locked' || hostState.value === 'conflict-locked' || hostState.value === 'unknown') {
+    return '风扇控制恢复中，请重试。';
+  }
+  if (hostState.value === 'starting' || hostState.value === 'handshaking') {
+    return '正在握手识别风扇控制路线…';
+  }
+  if (settings.configured) return '已记住风扇设备，等待本次握手完成。';
+  return '未检测到可用的风扇控制路线。';
+});
 
 function graphX(tempC: number): number {
   return GRAPH_LEFT + tempC * GRAPH_X_SCALE;
@@ -144,7 +163,7 @@ function nodeOptions(index: number, field: 'tempC' | 'dutyPercent'): number[] {
   const min = field === 'dutyPercent'
     ? Math.max(index === 3 ? 50 : 0, predecessor)
     : Math.max(0, predecessor);
-  const max = 100;
+  const max = field === 'tempC' && index === 2 ? 85 : 100;
   const values: number[] = [];
   for (let value = min; value <= max; value += 5) values.push(value);
   if (current >= min && current <= max && !values.includes(current)) values.push(current);
@@ -205,7 +224,7 @@ function updateGraphNode(index: number, event: PointerEvent, commit = false): vo
 
 function onGraphNodePointerDown(index: number, event: PointerEvent): void {
   event.preventDefault();
-  graphSelectedNode.value = index;
+  selectNode(index);
   draggingNode.value = index;
   (event.currentTarget as HTMLElement).setPointerCapture?.(event.pointerId);
   updateGraphNode(index, event);
@@ -226,7 +245,7 @@ function onGraphNodePointerUp(index: number, event: PointerEvent): void {
 }
 
 function onGraphNodeClick(index: number, event: MouseEvent): void {
-  graphSelectedNode.value = index;
+  selectNode(index);
   // Native gamepad A and keyboard Enter both invoke HTMLElement.click() with
   // detail=0. A first press arms the shared spatial editor; a second press
   // commits it. A physical mouse click remains a selection only, preserving
@@ -247,6 +266,7 @@ function onGraphNodeClick(index: number, event: MouseEvent): void {
 
 function onGraphSpatialEdit(index: number, event: Event): void {
   if (graphDragArmed.value !== index) return;
+  selectNode(index);
   const detail = (event as CustomEvent<{ dx?: number; dy?: number }>).detail ?? {};
   const dx = Number(detail.dx) || 0;
   const dy = Number(detail.dy) || 0;
@@ -332,63 +352,13 @@ function stopTelemetry(): void {
   telemetryTimer = null;
 }
 
-function cancelFanResume(): void {
-  fanResumeGeneration += 1;
-  if (fanResumeTimer !== null) window.clearTimeout(fanResumeTimer);
-  fanResumeTimer = null;
-}
-
-async function resumeFanControlAfterWake(generation: number): Promise<void> {
-  // Native/App power handlers and WebView recreation can deliver resume more
-  // than once. The generation check makes this replay single-owner and keeps
-  // a stale wake from writing after a newer suspend/exit boundary.
-  const delays = [250, 750, 1500] as const;
-  for (let attempt = 0; attempt < delays.length; attempt += 1) {
-    if (generation !== fanResumeGeneration || !fanWasActiveBeforeSuspend) return;
-    if (attempt > 0) await new Promise<void>((resolve) => setTimeout(resolve, delays[attempt]));
-    if (generation !== fanResumeGeneration || !fanWasActiveBeforeSuspend) return;
-    try {
-      statusMessage.value = attempt === 0 ? '唤醒后正在恢复风扇控制…' : '唤醒后正在重试风扇控制…';
-      // App.vue owns the durable resume path. This component may have been
-      // recreated after KeepAlive eviction, so it reflects lifecycle state
-      // only and must never issue a second curve write.
-      await fanHostLifecycle.resume();
-      controlReady.value = fanHostLifecycle.controlReady;
-      hostState.value = fanHostLifecycle.state;
-      if (fanHostLifecycle.state === 'ready') {
-        controlActive.value = true;
-        setFanControlActive(true);
-        setFanNavigationDuty(expectedDuty.value);
-        startTelemetry();
-        fanWasActiveBeforeSuspend = false;
-        statusMessage.value = '唤醒后风扇控制已自动恢复';
-        return;
-      }
-    } catch (error) {
-      fanDiagnosticLog('lifecycle.resume-auto-apply-failure', {
-        attempt,
-        state: fanHostLifecycle.state,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
-  }
-  if (generation === fanResumeGeneration && fanWasActiveBeforeSuspend) {
-    fanWasActiveBeforeSuspend = false;
-    controlActive.value = false;
-    setFanControlActive(false);
-    setFanNavigationDuty(0);
-    stopTelemetry();
-    statusMessage.value = '唤醒后风扇控制恢复失败，已保持 OEM，请手动重试';
-  }
-}
-
-function onFanPowerSuspending(): void {
-  // The native power boundary may be reported twice (query/broadcast). Keep
-  // the first active snapshot instead of overwriting it after the UI is reset.
+function onFanPowerSuspending(event: Event): void {
+  const generation = Number((event as CustomEvent<{ generation?: number }>).detail?.generation) || 0;
+  if (generation > fanPowerGeneration) fanPowerGeneration = generation;
+  // App.vue is the sole lifecycle owner. FanView only consumes the boundary
+  // to close its UI/write indicator immediately; it never calls Host suspend.
   if (!fanSuspendBoundary) {
     fanSuspendBoundary = true;
-    fanWasActiveBeforeSuspend = controlActive.value;
-    cancelFanResume();
   }
   controlActive.value = false;
   setFanControlActive(false);
@@ -398,24 +368,39 @@ function onFanPowerSuspending(): void {
   statusMessage.value = '睡眠前已恢复 OEM 控制';
 }
 
-function onFanPowerResumed(): void {
-  if (!fanSuspendBoundary) return;
+function onFanLifecycleResumed(event: Event): void {
+  const detail = (event as CustomEvent<{ generation?: number; state?: FanHostLifecycleState }>).detail ?? {};
+  const generation = Number(detail.generation) || 0;
+  if (generation > 0 && generation < fanPowerGeneration) return;
+  if (generation > fanPowerGeneration) fanPowerGeneration = generation;
   fanSuspendBoundary = false;
-  const shouldResume = fanWasActiveBeforeSuspend;
+  controlReady.value = fanHostLifecycle.controlReady;
+  hostState.value = fanHostLifecycle.state;
+  if (detail.state === 'ready' && fanHostLifecycle.state === 'ready') {
+    controlActive.value = true;
+    setFanControlActive(true);
+    setFanNavigationDuty(expectedDuty.value);
+    startTelemetry();
+    statusMessage.value = '唤醒后风扇控制已自动恢复';
+    return;
+  }
   controlActive.value = false;
   setFanControlActive(false);
   setFanNavigationDuty(0);
   stopTelemetry();
-  hostState.value = 'awaiting-control';
-  if (!shouldResume) {
-    statusMessage.value = supported.value ? '唤醒后请重新开启风扇控制' : '风扇不支持';
-    return;
-  }
-  const generation = ++fanResumeGeneration;
-  fanResumeTimer = window.setTimeout(() => {
-    fanResumeTimer = null;
-    void resumeFanControlAfterWake(generation);
-  }, 250);
+  statusMessage.value = supported.value ? '唤醒后请重新开启风扇控制' : '风扇不支持';
+}
+
+function onFanLifecycleResumeFailed(event: Event): void {
+  const detail = (event as CustomEvent<{ message?: unknown; state?: FanHostLifecycleState }>).detail ?? {};
+  fanSuspendBoundary = false;
+  controlActive.value = false;
+  setFanControlActive(false);
+  setFanNavigationDuty(0);
+  stopTelemetry();
+  hostState.value = detail.state ?? fanHostLifecycle.state;
+  statusMessage.value = '唤醒后风扇控制恢复失败，已保持 OEM，请手动重试';
+  fanDiagnosticLog('ui.resume-consumed-failure', { state: hostState.value, message: detail.message });
 }
 
 async function ensureSupported(): Promise<boolean> {
@@ -436,7 +421,9 @@ async function ensureSupported(): Promise<boolean> {
     supported.value = true;
     controlReady.value = fanHostLifecycle.controlReady;
     hostState.value = fanHostLifecycle.state;
-    statusMessage.value = '握手成功，真实写入能力待确认';
+    statusMessage.value = fanHostLifecycle.controlReady
+      ? (fanHostLifecycle.state === 'ready' ? '控制已开启' : '握手成功')
+      : '握手成功，真实写入能力待确认';
     return true;
   }
   try {
@@ -462,6 +449,40 @@ async function ensureSupported(): Promise<boolean> {
       ? '风扇控制恢复中，请重试'
       : readableFanError(error);
     return false;
+  }
+}
+
+/**
+ * FanView is allowed to unmount when the user changes the main page. The
+ * resident Host and its lease deliberately stay alive, so a fresh view must
+ * adopt the Host's authoritative Ready/write state instead of defaulting its
+ * local button back to “未开启”. This is read-only and never sends a second
+ * Open/Enable request.
+ */
+async function adoptResidentControlState(): Promise<void> {
+  if (FAN_FORCE_PREVIEW) return;
+  try {
+    const remote = await fanHostLifecycle.getState();
+    hostState.value = fanHostLifecycle.state;
+    const active = ['Ready', 'Open'].includes(String(remote.state)) &&
+      remote.hardwareWritesEnabled === true &&
+      remote.unknownState !== true &&
+      remote.oemRestoreConfirmed !== true &&
+      remote.hcCloseCleanupPending !== true;
+    controlActive.value = active;
+    setFanControlActive(active);
+    if (active) {
+      controlReady.value = true;
+      statusMessage.value = '控制已开启';
+      setFanNavigationDuty(expectedDuty.value);
+      startTelemetry();
+      fanDiagnosticLog('ui.resident-control-adopted', { state: remote.state });
+    } else {
+      setFanNavigationDuty(0);
+    }
+  } catch {
+    // The normal telemetry loop performs safety recovery if the resident Host
+    // cannot be read; do not issue a second close from a remounted page.
   }
 }
 
@@ -525,11 +546,6 @@ function requestCurveApply(): Promise<void> {
 
 async function toggleControl(): Promise<void> {
   if (busy.value) return;
-  if (!controlActive.value && fanWasActiveBeforeSuspend) {
-    // A deliberate user action supersedes an automatic wake replay.
-    fanWasActiveBeforeSuspend = false;
-    cancelFanResume();
-  }
   if (controlActive.value) {
     fanDiagnosticLog('ui.control-disable-begin');
     if (FAN_FORCE_PREVIEW) {
@@ -653,24 +669,26 @@ function onFanExitCleanupFailed(event: Event): void {
 
 onMounted(() => {
   window.addEventListener('ipc:power.suspending', onFanPowerSuspending);
-  window.addEventListener('ipc:power.resumed', onFanPowerResumed);
+  window.addEventListener('fan:lifecycle-resumed', onFanLifecycleResumed);
+  window.addEventListener('fan:lifecycle-resume-failed', onFanLifecycleResumeFailed);
   window.addEventListener('ipc:gamepad-back', onFanGamepadBack);
   window.addEventListener('ipc:fan.exit.cleanup-failed', onFanExitCleanupFailed);
   if (FAN_FORCE_PREVIEW) {
     supported.value = true;
     return;
   }
-  void ensureSupported();
+  void ensureSupported().then((ok) => {
+    if (ok) void adoptResidentControlState();
+  });
 });
 
 onUnmounted(() => {
   window.removeEventListener('ipc:power.suspending', onFanPowerSuspending);
-  window.removeEventListener('ipc:power.resumed', onFanPowerResumed);
+  window.removeEventListener('fan:lifecycle-resumed', onFanLifecycleResumed);
+  window.removeEventListener('fan:lifecycle-resume-failed', onFanLifecycleResumeFailed);
   window.removeEventListener('ipc:gamepad-back', onFanGamepadBack);
   window.removeEventListener('ipc:fan.exit.cleanup-failed', onFanExitCleanupFailed);
   stopTelemetry();
-  cancelFanResume();
-  fanWasActiveBeforeSuspend = false;
   fanSuspendBoundary = false;
 });
 </script>
@@ -678,10 +696,10 @@ onUnmounted(() => {
 <template>
   <section class="fan-page">
     <header class="fan-header"><div><div class="fan-kicker">Fan API</div><h1>风扇控制</h1></div></header>
-    <div class="fan-status-banner" :class="{ supported }"><strong>{{ statusText }}</strong><span v-if="!supported">未检测到可用的风扇控制路线。</span></div>
+    <div class="fan-status-banner" :class="{ supported }"><strong>{{ statusText }}</strong><span v-if="statusHint">{{ statusHint }}</span></div>
     <section class="fan-card controls-card" aria-label="风扇控制状态">
-      <div class="control-line" data-gp-row="0"><button class="control-state control-button fan-toggle" :class="{ 'fan-toggle-active': controlActive }" data-gp-row="0" data-gp-col="0" type="button" :disabled="!supported || !controlReady || busy" @click="toggleControl">{{ controlText }}</button><span class="control-state">期望转速 {{ expectedDuty }}%</span><span class="control-state temperature-state">温度 {{ temperatureText }}</span></div>
-      <div class="control-line" data-gp-row="1"><Dropdown class="control-dropdown" popup-class="fan-control-popup" :model-value="selectedPreset" :options="PRESET_OPTIONS" :disabled="!supported || !controlReady || busy" aria-label="转速预设" gp-row="1" gp-col="0" @change="choosePreset" /><button class="control-state control-button" data-gp-row="1" data-gp-col="1" type="button" :disabled="!supported || !controlReady || busy" @click="resetCurve">重置转速</button><button class="control-state control-button" data-gp-row="1" data-gp-col="2" type="button" :disabled="!supported || !controlReady" @click="toggleMotion">风扇图标 {{ motionEnabled ? '转动' : '静止' }}</button></div>
+      <div class="control-line" data-gp-row="0"><button class="control-state control-button fan-toggle" :class="{ 'fan-toggle-active': controlActive }" data-gp-row="0" data-gp-col="0" type="button" :disabled="!supported || !controlReady || busy" @click="toggleControl">{{ controlText }}</button><button class="control-state control-button" data-gp-row="0" data-gp-col="1" type="button" :disabled="!supported || !controlReady" @click="toggleMotion">风扇图标 {{ motionEnabled ? '转动' : '静止' }}</button><span class="control-state temperature-state">温度 {{ temperatureText }}</span></div>
+      <div class="control-line" data-gp-row="1"><Dropdown class="control-dropdown" popup-class="fan-control-popup" :model-value="selectedPreset" :options="PRESET_OPTIONS" :disabled="!supported || !controlReady || busy" aria-label="转速预设" gp-row="1" gp-col="0" @change="choosePreset" /><button class="control-state control-button" data-gp-row="1" data-gp-col="1" type="button" :disabled="!supported || !controlReady || busy" @click="resetCurve">重置转速</button><span class="control-state">期望转速 {{ expectedDuty }}%</span></div>
     </section>
     <section class="fan-card chart-card" aria-label="四节点风扇曲线">
       <div class="chart-title"><strong>风扇曲线</strong></div>
@@ -706,16 +724,16 @@ onUnmounted(() => {
           <text x="14" y="195" text-anchor="middle" class="axis-label" transform="rotate(-90 14 195)">风扇转速 (%)</text>
         </svg>
         <div class="chart-node-hit-layer" aria-label="曲线节点">
-          <button v-for="(node, index) in nodes" :key="`hit-${index}`" class="chart-node-hit" :class="{ active: graphSelectedNode === index, 'edit-armed': graphDragArmed === index }" :style="nodePointStyle(node)" type="button" :data-gp-row="2" :data-gp-col="index" data-gp-inline-edit :data-gp-inline-edit-active="graphDragArmed === index ? 'true' : undefined" :aria-pressed="graphDragArmed === index" :aria-label="`节点 ${index + 1} ${node.tempC}°C ${node.dutyPercent}%`" @focus="graphSelectedNode = index" @click="onGraphNodeClick(index, $event)" @gp:spatial-edit="onGraphSpatialEdit(index, $event)" @pointerdown="onGraphNodePointerDown(index, $event)" @pointermove="onGraphNodePointerMove(index, $event)" @pointerup="onGraphNodePointerUp(index, $event)" @pointercancel="onGraphNodePointerUp(index, $event)"><span>节点 {{ index + 1 }}</span></button>
+          <button v-for="(node, index) in nodes" :key="`hit-${index}`" class="chart-node-hit" :class="{ active: graphSelectedNode === index, 'edit-armed': graphDragArmed === index }" :style="nodePointStyle(node)" type="button" :data-gp-row="2" :data-gp-col="index" data-gp-inline-edit data-gp-inline-edit-repeat-ms="5" :data-gp-inline-edit-active="graphDragArmed === index ? 'true' : undefined" :aria-pressed="graphDragArmed === index" :aria-label="`节点 ${index + 1} ${node.tempC}°C ${node.dutyPercent}%`" @focus="selectNode(index)" @click="onGraphNodeClick(index, $event)" @gp:spatial-edit="onGraphSpatialEdit(index, $event)" @pointerdown="onGraphNodePointerDown(index, $event)" @pointermove="onGraphNodePointerMove(index, $event)" @pointerup="onGraphNodePointerUp(index, $event)" @pointercancel="onGraphNodePointerUp(index, $event)"><span>节点 {{ index + 1 }}</span></button>
         </div>
       </div>
-      <div class="node-grid" aria-label="节点配置"><article v-for="(node, index) in nodes" :key="index" class="node-card" :class="{ active: configSelectedNode === index }" @click="configSelectedNode = index"><strong>节点 {{ index + 1 }}</strong><label>温度<Dropdown :model-value="node.tempC" :options="nodeDropdownOptions(index, 'tempC')" :disabled="!supported || busy" :aria-label="`节点 ${index + 1} 温度`" :gp-row="3" :gp-col="index" @change="updateNodeValue(index, 'tempC', $event)" /></label><label>转速<Dropdown :model-value="node.dutyPercent" :options="nodeDropdownOptions(index, 'dutyPercent')" :disabled="!supported || busy" :aria-label="`节点 ${index + 1} 转速`" :gp-row="4" :gp-col="index" @change="updateNodeValue(index, 'dutyPercent', $event)" /></label></article></div>
+      <div class="node-grid" aria-label="节点配置"><article v-for="(node, index) in nodes" :key="index" class="node-card" :class="{ active: configSelectedNode === index }" @click="selectNode(index)" @focusin="selectNode(index)"><strong>节点 {{ index + 1 }}</strong><label>温度<Dropdown :model-value="node.tempC" :options="nodeDropdownOptions(index, 'tempC')" :disabled="!supported || busy" :aria-label="`节点 ${index + 1} 温度`" :gp-row="3" :gp-col="index" @change="updateNodeValue(index, 'tempC', $event)" /></label><label>转速<Dropdown :model-value="node.dutyPercent" :options="nodeDropdownOptions(index, 'dutyPercent')" :disabled="!supported || busy" :aria-label="`节点 ${index + 1} 转速`" :gp-row="4" :gp-col="index" @change="updateNodeValue(index, 'dutyPercent', $event)" /></label></article></div>
     </section>
   </section>
 </template>
 
 <style scoped>
-.fan-page { height: 100%; overflow: auto; padding: 14px 14px 28px; }.fan-header { display:flex;align-items:center;justify-content:space-between;margin-bottom:10px }.fan-kicker{color:var(--accent);font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase}h1{margin:3px 0 0;font-size:21px}.fan-status-banner,.fan-card{border-radius:var(--radius);background:var(--bg-panel)}.fan-status-banner{display:grid;gap:4px;padding:10px 12px;margin-bottom:9px;color:var(--text-dim);font-size:11px}.fan-status-banner strong{color:var(--text);font-size:13px}.fan-status-banner.supported strong{color:var(--accent)}.fan-card{padding:11px 12px;margin-bottom:9px}.controls-card{display:grid;gap:8px}.control-line{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}.control-state{min-width:0;min-height:35px;border:1px solid #29384a;border-radius:var(--radius-ctrl);background:var(--bg-input);color:var(--text-dim);font:inherit;font-size:11px;font-weight:700;text-align:center}.control-state{display:flex;align-items:center;justify-content:center;padding:0 6px}.control-dropdown{min-width:0}.control-dropdown :deep(.dd-trigger){justify-content:center;text-align:center;position:relative}.control-dropdown :deep(.dd-value){justify-content:center;text-align:center;padding:0 18px 0 4px}.control-dropdown :deep(.dd-caret){position:absolute;right:10px}.control-dropdown :deep(.dd-menu){min-width:100%}.control-dropdown :deep(.dd-option){position:relative;justify-content:center;text-align:center}.control-dropdown :deep(.dd-opt-label){text-align:center}.control-dropdown :deep(.dd-check){position:absolute;right:10px}.control-button:not(:disabled){cursor:pointer;color:var(--text)}.control-button:not(:disabled):hover{border-color:var(--accent);background:#162434}.fan-toggle-active:not(:disabled){background:#1269a3;border-color:#2ea6ff;color:#fff;box-shadow:0 0 0 1px rgba(46,166,255,.32),0 0 12px rgba(46,166,255,.2)}.fan-toggle-active:not(:disabled):hover{background:#197dbb;border-color:#65c1ff}.chart-title{display:flex;justify-content:space-between;align-items:center;margin-bottom:5px;color:var(--text-dim);font-size:10px}.chart-title strong{color:var(--text);font-size:13px}.chart-wrap{position:relative;width:100%;}.fan-chart{display:block;width:100%;height:auto;overflow:visible}.chart-node-hit-layer{position:absolute;inset:0;pointer-events:none}.chart-node-hit{position:absolute;transform:translate(-50%,-50%);width:32px;height:32px;padding:0;border:2px solid transparent;border-radius:50%;background:transparent;color:transparent;font-size:0;line-height:1;pointer-events:auto;cursor:pointer}.chart-node-hit::after{content:'';position:absolute;inset:8px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 2px var(--bg-panel)}.chart-node-hit:hover,.chart-node-hit:focus-visible,.chart-node-hit.focused{border-color:#fff;outline:none;box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 45%,transparent)}.chart-node-hit.active::after{box-shadow:0 0 0 2px #fff,0 0 10px color-mix(in srgb,var(--accent) 55%,transparent)}.grid-lines line{stroke:color-mix(in srgb,var(--text-dim) 18%,transparent);stroke-width:1}.curve{fill:none;stroke:var(--accent);stroke-width:3;stroke-linejoin:round;stroke-linecap:round}.node-halo{fill:color-mix(in srgb,var(--accent) 14%,transparent)}.node-point{fill:var(--accent);stroke:var(--bg-panel);stroke-width:2}.node-point.active{stroke:#fff;stroke-width:2.5}.chart-node text{fill:var(--text);font-size:10px;pointer-events:none}.chart-node text+text{fill:var(--text-dim);font-size:9px}.axis-label{fill:var(--text-dim);font-size:10px}.node-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px;margin-top:8px}.node-card{display:grid;gap:5px;padding:8px;border:1px solid #29384a;border-radius:var(--radius-ctrl);background:var(--bg-input);cursor:pointer}.node-card.active{border-color:color-mix(in srgb,var(--accent) 55%,transparent)}.node-card strong{color:var(--text);font-size:11px;text-align:center}.node-card label{display:grid;gap:3px;color:var(--text-dim);font-size:10px;text-align:center}.node-card :deep(.dd-trigger){min-height:27px;padding:4px 7px;font-size:10px;text-align:center}.node-card :deep(.dd-value){justify-content:center}.node-card :deep(.dd-caret){width:12px;height:12px}.node-card :deep(.dd-menu){--dd-popup-font-size:12px;--dd-popup-option-py:7px;--dd-popup-option-px:8px}@media(max-width:560px){.control-line{grid-template-columns:1fr}.node-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.fan-page { height: 100%; overflow: auto; padding: 14px 14px 28px; }.fan-header { display:flex;align-items:center;justify-content:space-between;margin-bottom:10px }.fan-kicker{color:var(--accent);font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase}h1{margin:3px 0 0;font-size:21px}.fan-status-banner,.fan-card{border-radius:var(--radius);background:var(--bg-panel)}.fan-status-banner{display:grid;gap:4px;padding:10px 12px;margin-bottom:9px;color:var(--text-dim);font-size:11px}.fan-status-banner strong{color:var(--text);font-size:13px}.fan-status-banner.supported strong{color:var(--accent)}.fan-card{padding:11px 12px;margin-bottom:9px}.controls-card{display:grid;gap:8px}.control-line{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}.control-state{min-width:0;min-height:35px;border:1px solid #29384a;border-radius:var(--radius-ctrl);background:var(--bg-input);color:var(--text-dim);font:inherit;font-size:11px;font-weight:700;text-align:center}.control-state{display:flex;align-items:center;justify-content:center;padding:0 6px}.control-dropdown{min-width:0}.control-dropdown :deep(.dd-trigger){justify-content:center;text-align:center;position:relative}.control-dropdown :deep(.dd-value){justify-content:center;text-align:center;padding:0 18px 0 4px}.control-dropdown :deep(.dd-caret){position:absolute;right:10px}.control-dropdown :deep(.dd-menu){min-width:100%}.control-dropdown :deep(.dd-option){position:relative;justify-content:center;text-align:center}.control-dropdown :deep(.dd-opt-label){text-align:center}.control-dropdown :deep(.dd-check){position:absolute;right:10px}.control-button:not(:disabled){cursor:pointer;color:var(--text)}.control-button:not(:disabled):hover{border-color:var(--accent);background:#162434}.fan-toggle-active:not(:disabled){background:#1269a3;border-color:#2ea6ff;color:#fff;box-shadow:0 0 0 1px rgba(46,166,255,.32),0 0 12px rgba(46,166,255,.2)}.fan-toggle-active:not(:disabled):hover{background:#197dbb;border-color:#65c1ff}.fan-toggle-active.focused:not(:disabled),.fan-toggle-active:focus-visible:not(:disabled){box-shadow:inset 0 0 0 2px #fff,var(--focus-ring)}.chart-title{display:flex;justify-content:space-between;align-items:center;margin-bottom:5px;color:var(--text-dim);font-size:10px}.chart-title strong{color:var(--text);font-size:13px}.chart-wrap{position:relative;width:100%;}.fan-chart{display:block;width:100%;height:auto;overflow:visible}.chart-node-hit-layer{position:absolute;inset:0;pointer-events:none}.chart-node-hit{position:absolute;transform:translate(-50%,-50%);width:32px;height:32px;padding:0;border:2px solid transparent;border-radius:50%;background:transparent;color:transparent;font-size:0;line-height:1;pointer-events:auto;cursor:pointer}.chart-node-hit::after{content:'';position:absolute;inset:8px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 2px var(--bg-panel)}.chart-node-hit:hover,.chart-node-hit:focus-visible,.chart-node-hit.focused{border-color:#fff;outline:none;box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 45%,transparent)}.chart-node-hit.active::after{box-shadow:0 0 0 2px #fff,0 0 10px color-mix(in srgb,var(--accent) 55%,transparent)}.grid-lines line{stroke:color-mix(in srgb,var(--text-dim) 18%,transparent);stroke-width:1}.curve{fill:none;stroke:var(--accent);stroke-width:3;stroke-linejoin:round;stroke-linecap:round}.node-halo{fill:color-mix(in srgb,var(--accent) 14%,transparent)}.node-point{fill:var(--accent);stroke:var(--bg-panel);stroke-width:2}.node-point.active{stroke:#fff;stroke-width:2.5}.chart-node text{fill:var(--text);font-size:10px;pointer-events:none}.chart-node text+text{fill:var(--text-dim);font-size:9px}.axis-label{fill:var(--text-dim);font-size:10px}.node-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px;margin-top:8px}.node-card{display:grid;gap:5px;padding:8px;border:1px solid #29384a;border-radius:var(--radius-ctrl);background:var(--bg-input);cursor:pointer}.node-card.active{border-color:color-mix(in srgb,var(--accent) 55%,transparent)}.node-card strong{color:var(--text);font-size:11px;text-align:center}.node-card label{display:grid;gap:3px;color:var(--text-dim);font-size:10px;text-align:center}.node-card :deep(.dd-trigger){min-height:27px;padding:4px 7px;font-size:10px;text-align:center}.node-card :deep(.dd-value){justify-content:center}.node-card :deep(.dd-caret){width:12px;height:12px}.node-card :deep(.dd-menu){--dd-popup-font-size:12px;--dd-popup-option-py:7px;--dd-popup-option-px:8px}@media(max-width:560px){.control-line{grid-template-columns:1fr}.node-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 .chart-node-hit { touch-action: none; }
 .chart-node-hit.edit-armed { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb,var(--accent) 40%,transparent); }
 :global(.fan-control-popup) .dd-option { justify-content: center; text-align: center; position: relative; }

@@ -119,6 +119,7 @@ const DEFAULTS: UnifiedSettings = {
   quickApps: { apps: [] },
   startupDesired: {
     bootControlCenter: true,
+    fanControl: false,
     rtss: false,
     energyStar: false,
     memoryCleanup: false,

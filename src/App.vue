@@ -46,6 +46,7 @@ import {
   rememberFanDevice,
   setFanControlActive,
 } from '@/bridge/fanFeature';
+import { fanDiagnosticLog } from '@/bridge/fanDiagnostics';
 import { FAN_REAL_HOST_ENABLED, fanHostLifecycle, resolveFanHostConfig } from '@/bridge/fanHost';
 
 applyTheme(
@@ -622,7 +623,8 @@ function notePowerTransitionGeneration(e: Event): number {
   return generation;
 }
 function onPowerSuspending(e: Event): void {
-  notePowerTransitionGeneration(e);
+  const generation = notePowerTransitionGeneration(e);
+  fanHostLifecycle.setPowerGeneration(generation);
   // No-op while the real Fan Host gate is false. When separately enabled,
   // lifecycle ordering restores OEM before the backend is suspended.
   // FanView can be evicted from KeepAlive, so the root owns the navigation
@@ -638,7 +640,8 @@ function onPowerSuspending(e: Event): void {
   suspendBackgroundVideo();
 }
 function onPowerResuming(e: Event): void {
-  notePowerTransitionGeneration(e);
+  const generation = notePowerTransitionGeneration(e);
+  fanHostLifecycle.setPowerGeneration(generation);
   if (resumeVideoTimer !== null) {
     window.clearTimeout(resumeVideoTimer);
     resumeVideoTimer = null;
@@ -647,13 +650,32 @@ function onPowerResuming(e: Event): void {
 }
 function onPowerResumed(e: Event): void {
   const generation = powerEventGeneration(e);
+  fanHostLifecycle.setPowerGeneration(generation);
   // The global lifecycle owns the remembered, already-acknowledged curve.
   // This stays alive when KeepAlive evicts FanView during suspend. The
   // lifecycle itself re-handshakes, reopens HC and gets a fresh lease before
   // it can replay anything; a failure leaves OEM ownership in place.
-  void fanHostLifecycle.resume()
-    .then(() => setFanControlActive(fanHostLifecycle.state === 'ready'))
-    .catch(() => setFanControlActive(false));
+  if (generation <= 0 || generation > latestFanResumeGeneration) {
+    if (generation > 0) latestFanResumeGeneration = generation;
+    void fanHostLifecycle.resume()
+      .then(() => {
+        setFanControlActive(fanHostLifecycle.state === 'ready');
+        const state = fanHostLifecycle.state;
+        window.dispatchEvent(new CustomEvent('fan:lifecycle-resumed', {
+          detail: { generation, state },
+        }));
+      })
+      .catch((error) => {
+        setFanControlActive(false);
+        window.dispatchEvent(new CustomEvent('fan:lifecycle-resume-failed', {
+          detail: {
+            generation,
+            state: fanHostLifecycle.state,
+            message: error instanceof Error ? error.message : String(error),
+          },
+        }));
+      });
+  }
   if (generation > committedResumeGeneration) scheduleResumeTransaction(generation);
   scheduleSleepPowerPlanOptimization();
   if (resumeVideoTimer !== null) window.clearTimeout(resumeVideoTimer);
@@ -853,6 +875,7 @@ function scheduleSleepPowerPlanOptimization(): void {
   sleepPlanOptimizationQueue = run.catch(() => {});
 }
 let latestResumeGeneration = 0;
+let latestFanResumeGeneration = 0;
 let committedResumeGeneration = 0;
 let resumeLifecycleActive = true;
 // Recovery notifications are normally delivered as events. WebView2 can be
@@ -1157,6 +1180,22 @@ onMounted(async () => {
     if (FAN_REAL_HOST_ENABLED && !FAN_FORCE_PREVIEW) {
       const gate = await fanHostLifecycle.start();
       await recordFanHandshake(gate.allowed, handshakeIdentity);
+      const startup = await readSettingsSection<{ fanControl?: boolean }>('startupDesired')
+        .catch((): { fanControl?: boolean } => ({ fanControl: false }));
+      if (startup.fanControl === true && gate.allowed && gate.writeReady) {
+        fanDiagnosticLog('lifecycle.startup-control-begin', { preset: configuredFan.preset });
+        try {
+          const state = await fanHostLifecycle.apply(configuredFan.nodes);
+          const active = state.hardwareWritesEnabled === true && state.hardwareWritesObserved === true;
+          setFanControlActive(active);
+          fanDiagnosticLog('lifecycle.startup-control-success', { active, preset: configuredFan.preset });
+        } catch (error) {
+          setFanControlActive(false);
+          fanDiagnosticLog('lifecycle.startup-control-failure', {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
     }
   } catch { /* unavailable/unsupported devices remain fail-closed */ }
   await loadUiSettings();
@@ -1213,11 +1252,15 @@ stopUiVisibility = onUiVisibilityChange(({ visible }) => {
   window.addEventListener('background:video-battery-pause-changed', onBackgroundVideoPauseChanged as EventListener);
   window.addEventListener('ui-settings:loaded', onUiSettingsLoaded as EventListener);
   window.addEventListener('ui-settings:changed', onUiSettingsLoaded as EventListener);
-  stopPowerSourceWatch = on<{ ac: boolean }>('power.sourceChanged', ({ ac }) => {
+  stopPowerSourceWatch = on<{ ac: boolean; generation?: number }>('power.sourceChanged', ({ ac, generation }) => {
+    fanHostLifecycle.setPowerGeneration(Number(generation) || 0);
+    fanHostLifecycle.notifyPowerSourceChanged('power.sourceChanged', Number(generation) || undefined);
     onVideoPowerSourceChanged(ac);
   });
   // AC/DC 插拔：刷新数据；自动模式由性能调度重新应用当前电源侧组合。
-  stopAcWatch = on('power.acChanged', async ({ ac }) => {
+  stopAcWatch = on<{ ac: boolean; generation?: number }>('power.acChanged', async ({ ac, generation }) => {
+    fanHostLifecycle.setPowerGeneration(Number(generation) || 0);
+    fanHostLifecycle.notifyPowerSourceChanged('power.acChanged', Number(generation) || undefined);
     onAcPower.value = Boolean(ac);
     onVideoPowerSourceChanged(Boolean(ac));
     globalRefreshKey.value++;

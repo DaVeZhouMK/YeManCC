@@ -7,7 +7,7 @@ import Dropdown from '@/components/Dropdown.vue';
 import { focusGamepadElement, getGamepadPopupPlacement } from '@/gamepad/focus';
 import { detectGame, detectedGameName, type DetectedGame } from '@/bridge/gamedetect';
 import { GameTrainerCancelledError, openOrSearchGameTrainer } from '@/bridge/gameTrainer';
-import { oneClickFrameGen, optiscalerStatus, oneClickOptiScaler } from '@/bridge/quickapp';
+import { oneClickFrameGen, oneClickOptiScaler, type OptiBackend } from '@/bridge/quickapp';
 import { SPEED_PRESETS, applyGameSpeed, clearGameSpeed, getGameSpeedState, isMinecraftTarget } from '@/bridge/speedhack';
 import {
   closeGame,
@@ -25,7 +25,7 @@ import {
   validateLockedGameTarget,
   type LockedGameTarget,
 } from '@/bridge/gameQuickSession';
-import { proc, shell } from '@/bridge/api';
+import { dialog, proc, shell } from '@/bridge/api';
 import { tryAcquireQuickAction } from '@/bridge/quickActionLock';
 import { isMouseModeSuppressed } from '@/gamepad/engine';
 
@@ -64,7 +64,11 @@ const fsrDialogAbove = ref(false);
 const fsrDialogStyle = ref<Record<string, string>>({ position: 'fixed' });
 const fsrDialogConfirmEl = ref<HTMLElement | null>(null);
 const fsrDialogPanelEl = ref<HTMLElement | null>(null);
-let fsrResolve: ((value: boolean) => void) | null = null;
+const fsrDialogMode = ref<'confirm' | 'backend'>('confirm');
+type OptiAction = OptiBackend | 'uninstall';
+const fsrBackendChoice = ref<OptiAction>('fsr');
+const OPTI_BACKEND_CHOICES: OptiBackend[] = ['fsr', 'xess'];
+let fsrResolve: ((value: boolean | OptiAction | null) => void) | null = null;
 
 const targetGame = computed(() => locked.value || props.game);
 const targetName = computed(() => targetGame.value
@@ -89,6 +93,11 @@ function sameTarget(
   b: Pick<DetectedGame, 'pid' | 'processCreated'> | null,
 ): boolean {
   return !!a && !!b && a.pid === b.pid && String(a.processCreated) === String(b.processCreated);
+}
+
+function fileNameFromPath(path: string): string {
+  const parts = path.trim().split(/[\\/]/);
+  return parts[parts.length - 1] || path.trim();
 }
 
 async function ensureTarget(): Promise<LockedGameTarget> {
@@ -329,6 +338,7 @@ async function runLosslessScaling(): Promise<void> {
 }
 
 function openDialog(title: string, description: string, confirmLabel = '确认', cancelLabel = '取消'): Promise<boolean> {
+  fsrDialogMode.value = 'confirm';
   fsrDialogTitle.value = title;
   fsrDialogDescription.value = description;
   fsrDialogConfirmLabel.value = confirmLabel;
@@ -339,16 +349,36 @@ function openDialog(title: string, description: string, confirmLabel = '确认',
   fsrDialogAbove.value = placement.above;
   fsrDialogStyle.value = placement.style;
   nextTick(() => focusGamepadElement(fsrDialogConfirmEl.value));
-  return new Promise<boolean>((resolve) => { fsrResolve = resolve; });
+  return new Promise<boolean>((resolve) => {
+    fsrResolve = (value) => resolve(value === true);
+  });
 }
 
-function closeDialog(value: boolean): void {
+function openBackendDialog(): Promise<OptiAction | null> {
+  fsrDialogMode.value = 'backend';
+  fsrBackendChoice.value = 'fsr';
+  fsrDialogTitle.value = '选择 OptiScaler 方案';
+  fsrDialogDescription.value = '请选择操作方案，点击“确认方案并继续”后才会执行。';
+  fsrDialogConfirmLabel.value = '确认方案并继续';
+  fsrDialogCancelLabel.value = '取消';
+  fsrDialogOpen.value = true;
+  const anchor = document.querySelector<HTMLElement>('[data-gp-game-quick-menu]')?.getBoundingClientRect() || null;
+  const placement = getGamepadPopupPlacement(anchor, Math.min(420, window.innerWidth - 16), 250, 8);
+  fsrDialogAbove.value = placement.above;
+  fsrDialogStyle.value = placement.style;
+  nextTick(() => focusGamepadElement(document.querySelector<HTMLElement>('[data-gp-game-quick-dialog] .quick-opti-option-btn')));
+  return new Promise<OptiAction | null>((resolve) => {
+    fsrResolve = (value) => resolve(value === 'fsr' || value === 'xess' || value === 'uninstall' ? value : null);
+  });
+}
+
+function closeDialog(value: boolean | OptiAction | null): void {
   if (!fsrDialogOpen.value && !fsrResolve) return;
   fsrDialogOpen.value = false;
   const resolve = fsrResolve;
   fsrResolve = null;
   resolve?.(value);
-  nextTick(() => focusGamepadElement(document.querySelector<HTMLElement>('[data-gp-game-quick-menu] button')));
+  nextTick(() => focusGamepadElement(document.querySelector<HTMLElement>('[data-gp-game-quick-menu] button:not([data-gp-ignore]):not(:disabled)')));
 }
 
 function onGamepadBack(e: Event): void {
@@ -362,36 +392,63 @@ async function runFsr(): Promise<void> {
   const release = tryAcquireQuickAction('top-fsr');
   if (!release) { status('', '已有其它快捷操作正在执行，请稍候'); return; }
   busy.value = true;
-  status('正在读取 FSR4.1 状态…');
+  status('请选择 OptiScaler 方案…');
   let target: LockedGameTarget | null = null;
+  let gamePath = '';
+  let selectedGameName = '';
   try {
-    target = await ensureTarget();
-    const state = await optiscalerStatus(target.path);
-    if (!state.ok) throw new Error(state.msgs?.filter(Boolean).join('；') || '无法读取 FSR4.1 状态');
-    const uninstall = state.installed;
+    if (targetGame.value) {
+      target = await ensureTarget();
+      gamePath = target.path;
+      selectedGameName = targetName.value;
+    } else {
+      // 无游戏识别时仍允许进入 OptiScaler 流程，直接手动选择目标 exe。
+      status('未识别到游戏，请手动选择可执行程序…');
+      const picked = await dialog.openFile([
+        { name: '可执行程序', extensions: ['exe'] },
+      ]).catch((error) => {
+        status('', `打开程序选择器失败：${(error as Error).message}`);
+        return null;
+      });
+      if (!picked) {
+        status('已取消 OptiScaler 操作');
+        return;
+      }
+      gamePath = picked.trim();
+      if (!gamePath || !/\.exe$/i.test(gamePath)) {
+        status('', '请选择 exe 可执行程序');
+        return;
+      }
+      selectedGameName = fileNameFromPath(gamePath);
+    }
+    const picked = await openBackendDialog();
+    if (!picked) {
+      status('已取消 OptiScaler 操作');
+      return;
+    }
+    const uninstall = picked === 'uninstall';
     const action = uninstall ? '卸载' : '安装';
-    if (!await openDialog(`确认${action} FSR4.1`, `当前游戏：${targetName.value}\n是否${action} OptiScaler (FSR4.1)？`, `确认${action}`)) {
-      status(`已取消${action}`);
-      return;
+    const selectedBackend: OptiBackend | 'auto' = uninstall ? 'auto' : picked;
+    if (target) {
+      if (!await openDialog('需要结束当前游戏', `OptiScaler ${action}前需要结束「${selectedGameName}」。\n是否立即结束游戏并继续？`, '结束游戏并继续')) {
+        status(`已取消${action}，游戏未结束`);
+        return;
+      }
+      const closed = await closeGame(target.pid, target.name, target.processCreated);
+      if (!closed.ok) throw new Error(closed.msgs?.join('；') || '关闭游戏失败');
+      if (!(await waitForProcessExit(target.pid, target.processCreated))) throw new Error('游戏进程仍未退出');
     }
-    if (!await openDialog('需要结束当前游戏', `FSR4.1 ${action}前需要结束「${targetName.value}」。\n是否立即结束游戏并继续？`, '结束游戏并继续')) {
-      status(`已取消${action}，游戏未结束`);
-      return;
-    }
-    const closed = await closeGame(target.pid, target.name, target.processCreated);
-    if (!closed.ok) throw new Error(closed.msgs?.join('；') || '关闭游戏失败');
-    if (!(await waitForProcessExit(target.pid, target.processCreated))) throw new Error('游戏进程仍未退出');
-    const result = await oneClickOptiScaler(target.path, uninstall);
+    const result = await oneClickOptiScaler(gamePath, uninstall, selectedBackend);
     if (!result.ok) throw new Error(result.msgs?.join('；') || `${action}失败`);
-    const completedName = targetName.value;
-    status(`FSR4.1 ${action}成功`);
-    onTargetLost();
+    const completedName = selectedGameName;
+    status(`OptiScaler ${action}成功（${result.backend === 'xess' ? 'XeSS' : result.backend === 'fsr' ? 'FSR' : '自动'}）`);
+    if (target) onTargetLost();
     if (!uninstall && await openDialog('是否启动游戏', `「${completedName}」已安装完成，是否现在启动游戏？`, '启动游戏')) {
-      await shell.execute(target.path, []);
+      await shell.execute(gamePath, []);
       status(`已启动：${completedName}，请按 Y 刷新`);
     }
   } catch (error) {
-    status('', `FSR4.1 操作失败：${(error as Error).message}`);
+    status('', `OptiScaler 操作失败：${(error as Error).message}`);
   } finally {
     busy.value = false;
     release();
@@ -467,24 +524,24 @@ onBeforeUnmount(() => {
     </div>
 
     <div class="quick-game-controls" data-gp-group="game-quick-game-controls" data-gp-game-row="controls">
-      <button ref="pauseButtonEl" type="button" :disabled="disabledForAction || !targetGame" @click="togglePause">
+      <button ref="pauseButtonEl" type="button" data-gp-ignore :disabled="disabledForAction || !targetGame" @click="togglePause">
         <AppIcon :name="paused ? 'play' : 'pause'" />{{ paused ? '继续游戏' : '暂停游戏' }}
       </button>
-      <button type="button" class="danger" :disabled="disabledForAction || !targetGame" @click="closeCurrentGame">
+      <button type="button" class="danger" data-gp-ignore :disabled="disabledForAction || !targetGame" @click="closeCurrentGame">
         <AppIcon name="close" />关闭游戏
       </button>
-      <button type="button" :disabled="disabledForAction" @click="openTaskView">
+      <button type="button" data-gp-ignore :disabled="disabledForAction" @click="openTaskView">
         <AppIcon name="monitor" />切换程序
       </button>
-      <button type="button" :class="{ active: mouseOn }" :disabled="disabledForAction" @click="toggleMouse">
+      <button type="button" data-gp-ignore :class="{ active: mouseOn }" :disabled="disabledForAction" @click="toggleMouse">
         <AppIcon name="mouse" />{{ mouseOn ? '模拟鼠标已开启' : '模拟鼠标已关闭' }}
       </button>
     </div>
     <div v-if="mouseNotice" class="quick-control-notice">{{ mouseNotice }}</div>
 
     <div class="game-quick-actions" data-gp-group="game-quick-actions">
-      <button type="button" class="quick-action" data-gp-game-row="actions-1" :disabled="disabledForAction || !targetGame" @click="runFsr">
-        <AppIcon name="bolt" /><span><strong>FSR4.1</strong><small>安装 / 卸载</small></span>
+      <button type="button" class="quick-action" data-gp-game-row="actions-1" :disabled="disabledForAction" @click="runFsr">
+        <AppIcon name="bolt" /><span><strong>FSR4.1/Xess-OPT自动导入</strong><small>{{ targetGame ? '识别、选择、安装 / 卸载' : '未识别时手动选择程序' }}</small></span>
       </button>
       <button type="button" class="quick-action" data-gp-game-row="actions-1" :disabled="disabledForAction || !targetGame" @click="runLosslessScaling">
         <AppIcon name="rocket" /><span><strong>Lossless Scaling</strong><small>小黄鸭一键插帧</small></span>
@@ -523,8 +580,28 @@ onBeforeUnmount(() => {
         <div v-if="fsrDialogOpen" ref="fsrDialogPanelEl" class="quick-dialog" :class="{ above: fsrDialogAbove }" :style="fsrDialogStyle" data-gp-modal data-gp-game-quick-dialog role="alertdialog" aria-modal="true">
           <div class="quick-dialog-title"><AppIcon name="bolt" />{{ fsrDialogTitle }}</div>
           <p>{{ fsrDialogDescription }}</p>
+          <template v-if="fsrDialogMode === 'backend'">
+            <div class="quick-opti-options" role="group" aria-label="OptiScaler 方案">
+              <button
+                v-for="backend in OPTI_BACKEND_CHOICES"
+                :key="backend"
+                type="button"
+                class="quick-opti-option-btn"
+                :class="{ selected: fsrBackendChoice === backend }"
+                :aria-pressed="fsrBackendChoice === backend"
+                @click="fsrBackendChoice = backend"
+              >{{ backend === 'xess' ? 'XeSS' : 'FSR' }}</button>
+              <button
+                type="button"
+                class="quick-opti-option-btn uninstall"
+                :class="{ selected: fsrBackendChoice === 'uninstall' }"
+                :aria-pressed="fsrBackendChoice === 'uninstall'"
+                @click="fsrBackendChoice = 'uninstall'"
+              >卸载</button>
+            </div>
+          </template>
           <div class="quick-dialog-actions">
-            <button ref="fsrDialogConfirmEl" type="button" @click="closeDialog(true)">{{ fsrDialogConfirmLabel }}</button>
+            <button ref="fsrDialogConfirmEl" type="button" @click="closeDialog(fsrDialogMode === 'backend' ? fsrBackendChoice : true)">{{ fsrDialogConfirmLabel }}</button>
             <button type="button" @click="closeDialog(false)">{{ fsrDialogCancelLabel }}</button>
           </div>
         </div>
@@ -586,5 +663,10 @@ onBeforeUnmount(() => {
 .quick-dialog-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
 .quick-dialog-actions button { min-height: 34px; border: 1px solid rgba(255,255,255,.08); border-radius: 7px; background: var(--bg-input); color: var(--text); cursor: pointer; }
 .quick-dialog-actions button:first-child { background: var(--accent); color: #07131d; font-weight: 700; }
+.quick-opti-options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; margin: 8px 0; }
+.quick-opti-option-btn { min-height: 38px; border: 1px solid rgba(255,255,255,.1); border-radius: 7px; background: var(--bg-input); color: var(--text); font-size: 11px; font-weight: 700; cursor: pointer; }
+.quick-opti-option-btn:hover, .quick-opti-option-btn.selected { border-color: var(--accent); background: rgba(46,166,255,.14); color: var(--accent); }
+.quick-opti-option-btn.uninstall { color: var(--danger); }
+.quick-opti-option-btn.uninstall:hover, .quick-opti-option-btn.uninstall.selected { border-color: var(--danger); background: color-mix(in srgb, var(--danger) 12%, var(--bg-input)); }
 button:disabled { opacity: .45; cursor: default; }
 </style>

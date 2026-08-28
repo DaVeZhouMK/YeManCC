@@ -31,8 +31,8 @@ export const FAN_FORCE_PREVIEW = false;
  * edited independently. */
 export const DEFAULT_FAN_PRESET_CURVES: Record<FanPreset, FanNode[]> = {
   soft: [
-    { tempC: 0, dutyPercent: 0 }, { tempC: 40, dutyPercent: 0 },
-    { tempC: 70, dutyPercent: 20 }, { tempC: 100, dutyPercent: 80 },
+    { tempC: 0, dutyPercent: 0 }, { tempC: 40, dutyPercent: 15 },
+    { tempC: 69, dutyPercent: 30 }, { tempC: 100, dutyPercent: 70 },
   ],
   balanced: [
     { tempC: 0, dutyPercent: 0 }, { tempC: 40, dutyPercent: 20 },
@@ -115,7 +115,7 @@ function normalizeNodes(value: unknown): FanNode[] {
   const valid = nodes.every((node) => Number.isFinite(node.tempC) && Number.isFinite(node.dutyPercent));
   // Node 1 temperature is anchored at 0°C, but its duty is editable. The
   // only curve invariant is monotonicity plus the node-4 minimum duty.
-  if (!valid || nodes[0].tempC !== 0 ||
+  if (!valid || nodes[0].tempC !== 0 || nodes[2].tempC > 85 ||
       nodes.some((node, index) => index > 0 &&
         (node.tempC < nodes[index - 1].tempC || node.dutyPercent < nodes[index - 1].dutyPercent)) ||
       nodes[3].dutyPercent < 50) {

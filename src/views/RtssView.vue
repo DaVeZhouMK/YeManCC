@@ -486,14 +486,6 @@ onUnmounted(() => {
     </section>
 
     <section class="card">
-      <Toggle
-        v-model="tasks.bootRtss"
-        label="开机启动 RTSS 监控"
-        description="登录后自动启动 RTSS"
-        color="accent"
-        :disabled="busy"
-        @update:model-value="(v: boolean) => toggleTaskSafe(BOOT_RTSS_TASK, v, 'bootRtss')"
-      />
       <div v-if="confirmingReset" class="confirm-bar">
         <span class="confirm-text">确认复位 RTSS 全部设置？将关闭 RTSS、清除锁帧与所有相关任务、关闭监控显示。</span>
         <div class="confirm-actions">

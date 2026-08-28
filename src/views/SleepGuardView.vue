@@ -24,11 +24,7 @@ import {
   setSleepTimeout,
   getSleepPowerPlanOptimizationEnabled,
   setSleepPowerPlanOptimizationEnabled,
-  sleepFactsGet,
-  sleepFactsSetEnabled,
-  sleepFactsOpenLog,
   type SleepGuardStatus,
-  type SleepFactStatus,
   type SleepTimeoutSettings,
   type PowerBtnIdx,
 } from '@/bridge/yeman';
@@ -145,7 +141,6 @@ const confirmOff = ref(false); // 关闭休眠二次确认（避免整行误触�
 const busy = ref(false);
 const msg = ref('');
 const activeSchemeGuid = ref('');
-const sleepFacts = ref<SleepFactStatus | null>(null);
 const isYemanScheme = computed(() => activeSchemeGuid.value === PW.YEMAN.toLowerCase());
 
 let msgTimer: number | null = null;
@@ -238,7 +233,6 @@ async function refresh() {
   if (memRes.status === 'fulfilled') memGB.value = memRes.value;
   if (timeoutRes.status === 'rejected') timeoutLoading.value = false;
   await hibernateRefresh;
-  await refreshSleepFacts();
 }
 
 async function onSleepTimeout(field: 'screen' | 'sleep' | 'hibernate', ac: boolean, value: string | number) {
@@ -256,35 +250,6 @@ async function onSleepTimeout(field: 'screen' | 'sleep' | 'hibernate', ac: boole
     msg.value = '屏幕、睡眠和休眠超时设置失败：' + (e as Error).message;
   } finally {
     busy.value = false;
-  }
-}
-
-async function refreshSleepFacts() {
-  try {
-    sleepFacts.value = await sleepFactsGet();
-  } catch {
-    // The monitor is diagnostic-only; it must not make the sleep settings page unusable.
-  }
-}
-
-async function onSleepFactMonitor(enabled: boolean) {
-  busy.value = true;
-  try {
-    sleepFacts.value = await sleepFactsSetEnabled(enabled);
-    msg.value = enabled ? '睡眠日志记录已开启' : '睡眠日志记录已关闭';
-  } catch (e) {
-    msg.value = '睡眠日志记录设置失败: ' + (e as Error).message;
-    await refreshSleepFacts();
-  } finally {
-    busy.value = false;
-  }
-}
-
-async function openSleepFactLog() {
-  try {
-    await sleepFactsOpenLog();
-  } catch (e) {
-    msg.value = '打开睡眠日志失败: ' + (e as Error).message;
   }
 }
 
@@ -694,17 +659,6 @@ refresh();
         :disabled="busy"
         @update:model-value="onNonUserWake"
       />
-      <Toggle
-        :model-value="sleepFacts?.enabled === true"
-        label="睡眠日志记录"
-        description="记录 Kernel-Power、AC/DC 与设备变化；开启后，任何状态的 device-change code=7 都会写入日志"
-        :disabled="busy"
-        @update:model-value="onSleepFactMonitor"
-      />
-      <div class="fact-actions">
-        <button class="mini-btn" :disabled="busy" @click="openSleepFactLog">显示日志</button>
-        <span class="fact-path">{{ sleepFacts?.logPath || 'C:\\SOFT\\YeMan\\PowerControl\\Sleep\\sleep-facts.log' }}</span>
-      </div>
     </div>
   </div>
 </template>
@@ -728,9 +682,6 @@ refresh();
   align-items: center;
   gap: 6px;
 }
-.fact-actions { display: flex; align-items: center; gap: 10px; padding-top: 8px; }
-.fact-path { min-width: 0; color: var(--text-dim); font-size: 10px; overflow-wrap: anywhere; }
-
 .msg {
   font-size: 12px;
   color: var(--danger);

@@ -36,6 +36,7 @@
 #include <WebView2.h>
 #include <WebView2EnvironmentOptions.h>
 #include <string>
+#include <array>
 #include <vector>
 #include <algorithm>
 #include <functional>
@@ -395,6 +396,12 @@ static std::atomic<unsigned long long>    g_webviewGeneration{1};
 static bool                               g_webviewRecoveryInProgress = false;
 static std::string                        g_webviewRecoveryAction;
 static WebViewDeferredRecovery            g_webviewDeferredRecovery = WebViewDeferredRecovery::None;
+static unsigned long long                  g_webviewEnvironmentGeneration = 0;
+static ComPtr<ICoreWebView2Environment5>   g_webviewEnvironment5;
+static EventRegistrationToken             g_webviewBrowserProcessExitedToken{};
+static bool                               g_webviewBrowserProcessExitedRegistered = false;
+static bool                               g_webviewRouteReady = false;
+static std::string                        g_webviewRouteStatus;
 static std::deque<ULONGLONG>              g_webviewRendererFailures;
 static std::deque<ULONGLONG>              g_webviewGpuFailures;
 static std::deque<ULONGLONG>              g_webviewUtilityFailures;
@@ -407,6 +414,9 @@ struct WebViewFailureInfo {
     std::wstring description;
     std::wstring modulePath;
     ULONGLONG tick = 0;
+    unsigned long long generation = 0;
+    DWORD browserProcessId = 0;
+    bool fromBrowserProcessExited = false;
 };
 
 // Config
@@ -533,7 +543,8 @@ static const COLORREF MENU_DIM    = RGB(0x8b,0x96,0xa8);
 static const COLORREF MENU_HOVER  = RGB(0x1a,0x22,0x30);
 static const COLORREF MENU_SEP     = RGB(0x2a,0x33,0x42);
 static const COLORREF MENU_DANGER = RGB(0xe5,0x48,0x4d);
-static const int MENU_RADIUS = 14; // +15% 气泡放大
+static const int MENU_RADIUS = 16; // 12 * 1.30：右键菜单圆角放大 30%
+static const int MENU_FONT_HEIGHT = 17; // 13 * 1.30：菜单字体放大 30%
 static bool            g_trayActive = false;
 static UINT            g_taskbarCreatedMsg = 0;
 static UINT            g_showExistingInstanceMsg = 0;
@@ -3748,6 +3759,7 @@ static DWORD WINAPI autoCloseThread(LPVOID) {
 #define SUMMON_FOCUS_TIMER_ID 0x5A31
 #define RETURN_GAME_FOCUS_TIMER_ID 0x5A32
 #define GP_HOLD_TIMER_ID 0x5A33  // 手柄快捷键"按住0.5s/连发"复检（仅按住期间运行）
+#define GP_HOLD_TIMER_INTERVAL_MS 10 // 支持曲线节点 30ms 起步的连发复检
 #define FOCUS_DISPLAY_TIMER_ID 0x5A34
 
 static void showWindowAnimated(HWND hwnd, int showCmd, bool activate);
@@ -4566,7 +4578,7 @@ static void queueSummonGameRegistration(
 // RIDEV_DEVNOTIFY 收插拔），OS 仅在手柄状态变化时投递 WM_INPUT，空闲=0 CPU。
 // 收到 WM_INPUT 后用 XInputGetState 读权威按键态（映射稳定，无需解析 HID 报表），
 // gamepadEval() 做边沿+计时器驱动的全局快捷键。所有"按住0.5s"用一次性计时器，
-// 仅按住期间运行（50ms 复检），松开即停 → 空闲零占用。
+// 仅按住期间运行（10ms 复检），松开即停 → 空闲零占用。
 // Native publishes gamepad.state for the renderer. WebView2 Gamepad API is
 // intentionally not part of the application input path after sleep recovery.
 static bool g_padConnected   = false;
@@ -4600,6 +4612,7 @@ static bool g_uiSummonShoulderHeld = false;
 static ULONGLONG g_uiShoulderSuppressUntil = 0;
 static int g_uiNavX = 0;
 static int g_uiNavY = 0;
+static ULONGLONG g_uiNavHoldStartTick = 0;
 static ULONGLONG g_uiNavLastEmitTick = 0;
 static int g_uiSliderTriggerDirection = 0;
 static ULONGLONG g_uiSliderTriggerLastEmitTick = 0;
@@ -4607,7 +4620,20 @@ static bool g_uiStartPending = false;
 static bool g_uiStartUsedAsModifier = false;
 static constexpr ULONGLONG GP_UI_SHOULDER_DECISION_MS = 50ULL;
 static constexpr ULONGLONG GP_UI_NAV_REPEAT_MS = 220ULL;
+static constexpr ULONGLONG GP_UI_NAV_REPEAT_INITIAL_MS = 30ULL;
+static constexpr ULONGLONG GP_UI_NAV_REPEAT_MIN_MS = 5ULL;
+static constexpr ULONGLONG GP_UI_NAV_ACCELERATION_WINDOW_MS = 600ULL;
 static constexpr SHORT GP_UI_THUMB_THRESHOLD = 16000;
+
+static ULONGLONG gamepadUiNavRepeatMs(ULONGLONG now) {
+    if (g_uiNavHoldStartTick == 0 || now <= g_uiNavHoldStartTick)
+        return GP_UI_NAV_REPEAT_INITIAL_MS;
+    const ULONGLONG elapsed = std::min(
+        now - g_uiNavHoldStartTick, GP_UI_NAV_ACCELERATION_WINDOW_MS);
+    const ULONGLONG range = GP_UI_NAV_REPEAT_INITIAL_MS - GP_UI_NAV_REPEAT_MIN_MS;
+    const ULONGLONG decrease = range * elapsed / GP_UI_NAV_ACCELERATION_WINDOW_MS;
+    return GP_UI_NAV_REPEAT_INITIAL_MS - decrease;
+}
 
 static void gamepadReadState() {
     bool live = false;
@@ -4685,6 +4711,7 @@ static void gamepadResetNativeState(bool requireRelease) {
     g_uiSummonShoulderHeld = false;
     g_uiShoulderSuppressUntil = 0;
     g_uiNavX = g_uiNavY = 0;
+    g_uiNavHoldStartTick = 0;
     g_uiNavLastEmitTick = 0;
     g_uiSliderTriggerDirection = 0;
     g_uiSliderTriggerLastEmitTick = 0;
@@ -4882,6 +4909,7 @@ static void gamepadProcessUiInput(WORD w, ULONGLONG now) {
         g_uiStartPending = false;
         g_uiStartUsedAsModifier = false;
         g_uiNavX = g_uiNavY = 0;
+        g_uiNavHoldStartTick = 0;
         return;
     }
 
@@ -4901,7 +4929,8 @@ static void gamepadProcessUiInput(WORD w, ULONGLONG now) {
     } else if (g_uiSummonShoulderHeld) {
         if (!lb && !rb) {
             g_uiSummonShoulderHeld = false;
-            g_uiShoulderSuppressUntil = now + 450ULL;
+            // 呼出组合松开后的肩键硬直减半，避免 RB/LB 切页被无谓地锁住。
+            g_uiShoulderSuppressUntil = now + 225ULL;
         }
         g_uiShoulderPending = 0;
     } else if (now < g_uiShoulderSuppressUntil) {
@@ -4942,6 +4971,7 @@ static void gamepadProcessUiInput(WORD w, ULONGLONG now) {
         }
         if (up || down || left || right) g_uiStartUsedAsModifier = true;
         g_uiNavX = g_uiNavY = 0;
+        g_uiNavHoldStartTick = 0;
         return;
     }
     if (g_uiStartPending && (g_prevW & XINPUT_GAMEPAD_START) != 0) {
@@ -4964,9 +4994,13 @@ static void gamepadProcessUiInput(WORD w, ULONGLONG now) {
     }
     if (navX == 0 && navY == 0) {
         g_uiNavX = g_uiNavY = 0;
+        g_uiNavHoldStartTick = 0;
         return;
     }
-    if (navX != g_uiNavX || navY != g_uiNavY || now - g_uiNavLastEmitTick >= GP_UI_NAV_REPEAT_MS) {
+    const bool directionChanged = navX != g_uiNavX || navY != g_uiNavY;
+    const ULONGLONG repeatMs = gamepadUiNavRepeatMs(now);
+    if (directionChanged || now - g_uiNavLastEmitTick >= repeatMs) {
+        if (directionChanged) g_uiNavHoldStartTick = now;
         if (navX != 0) gamepadEmitUiAction(navX > 0 ? "nav-right" : "nav-left");
         else gamepadEmitUiAction(navY > 0 ? "nav-down" : "nav-up");
         g_uiNavX = navX;
@@ -5044,7 +5078,7 @@ static void gamepadEval() {
         gamepadProcessUiInput(w, now);
         if (gpAnyShortcutHeld()) {
             if (!g_gpHoldTimerOn) {
-                SetTimer(g_hwnd, GP_HOLD_TIMER_ID, 50, nullptr);
+                SetTimer(g_hwnd, GP_HOLD_TIMER_ID, GP_HOLD_TIMER_INTERVAL_MS, nullptr);
                 g_gpHoldTimerOn = true;
             }
         } else if (g_gpHoldTimerOn) {
@@ -5197,7 +5231,7 @@ static void gamepadEval() {
 
     // 持有计时器：仅在有相关键按下时运行（空闲自动停 -> 0 CPU）
     if (gpAnyShortcutHeld()) {
-        if (!g_gpHoldTimerOn) { SetTimer(g_hwnd, GP_HOLD_TIMER_ID, 50, nullptr); g_gpHoldTimerOn = true; }
+        if (!g_gpHoldTimerOn) { SetTimer(g_hwnd, GP_HOLD_TIMER_ID, GP_HOLD_TIMER_INTERVAL_MS, nullptr); g_gpHoldTimerOn = true; }
     } else if (g_gpHoldTimerOn) {
         KillTimer(g_hwnd, GP_HOLD_TIMER_ID);
         g_gpHoldTimerOn = false;
@@ -7943,6 +7977,12 @@ static void closeWebViewControllers() {
     if (g_ctrl) g_ctrl->Close();
     g_view.Reset();
     g_ctrl.Reset();
+    if (g_webviewEnvironment5 && g_webviewBrowserProcessExitedRegistered) {
+        g_webviewEnvironment5->remove_BrowserProcessExited(g_webviewBrowserProcessExitedToken);
+    }
+    g_webviewBrowserProcessExitedRegistered = false;
+    g_webviewEnvironment5.Reset();
+    g_webviewEnvironmentGeneration = 0;
 }
 
 static void closeWebViewsForExit() {
@@ -7983,7 +8023,7 @@ static COLORREF g_bgClr   = 0;
 // client area the 1px DWM border is barely perceptible anyway.
 static void applyFramelessDwmAttrs();
 static bool configureAppHost(ICoreWebView2* view);
-static void setupWebView(ICoreWebView2Controller* ctrl);
+static void setupWebView(ICoreWebView2Controller* ctrl, unsigned long long generation = 0);
 static HRESULT finishCreateController(ICoreWebView2Environment* env, unsigned long long generation = 0);
 static void completeWebViewRecovery();
 static void failWebViewRecovery(const char* reason);
@@ -8017,6 +8057,24 @@ static std::vector<PakEntry> g_pakEntries;
 
 
 static std::wstring g_appDataDir;
+static std::wstring g_yemanccDataDir;
+
+// Product-stable per-user data root. Diagnostic paths must not follow the
+// configurable window title, otherwise older builds can split fan logs across
+// multiple LocalAppData directories.
+static std::wstring yemancc_data_dir() {
+    if (!g_yemanccDataDir.empty()) return g_yemanccDataDir;
+    PWSTR p = nullptr;
+    if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, nullptr, &p))) {
+        g_yemanccDataDir = std::wstring(p) + L"\\YeManCC";
+        CoTaskMemFree(p);
+    } else {
+        g_yemanccDataDir = exe_dir() + L"\\data\\YeManCC";
+    }
+    fspath::create_directories(g_yemanccDataDir);
+    return g_yemanccDataDir;
+}
+
 static std::wstring app_data_dir() {
     if (!g_appDataDir.empty()) return g_appDataDir;
     PWSTR p = nullptr;
@@ -8039,16 +8097,9 @@ static std::wstring app_data_dir() {
 static std::wstring g_fanHostStateDir;
 static std::wstring fan_host_state_dir() {
     if (!g_fanHostStateDir.empty()) return g_fanHostStateDir;
-    PWSTR p = nullptr;
-    if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, nullptr, &p))) {
-        g_fanHostStateDir = std::wstring(p) + L"\\YeManCC\\fan-host";
-        CoTaskMemFree(p);
-    } else {
-        // Keep the existing application-data fallback only when Windows cannot
-        // provide LocalAppData.  Both native and renderer still use this same
-        // helper through app.fanStateDir, so the session path remains shared.
-        g_fanHostStateDir = app_data_dir() + L"\\fan-host";
-    }
+    // Both native and renderer use this title-independent root through
+    // app.fanStateDir, so the session path remains shared across title changes.
+    g_fanHostStateDir = yemancc_data_dir() + L"\\fan-host";
     std::error_code ec;
     fspath::create_directories(g_fanHostStateDir, ec);
     return g_fanHostStateDir;
@@ -8218,6 +8269,8 @@ static const char* webViewGpuModeName(WebViewGpuMode mode) {
     return "default";
 }
 
+static void logWebViewEnvironmentVersion(ICoreWebView2Environment* env, unsigned long long generation);
+
 static std::wstring webview_data_dir() {
     if (g_webviewDataDirInitialized) return g_webviewDataDir;
     g_webviewDataDirInitialized = true;
@@ -8258,6 +8311,84 @@ static std::string webViewLocalTimestamp(bool compact) {
             st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond, st.wMilliseconds);
     }
     return value;
+}
+
+static fspath::path webview_gpu_state_path() {
+    // This file deliberately sits beside EBWebView, not inside it. A failed
+    // profile may be renamed to EBWebView.failed-* during recovery.
+    return fspath::path(webview_data_dir()) / L"webview-gpu-state.json";
+}
+
+static std::string available_webview_runtime_version() {
+    LPWSTR value = nullptr;
+    if (FAILED(GetAvailableCoreWebView2BrowserVersionString(nullptr, &value)) || !value)
+        return {};
+    const std::string result = W2U(value);
+    CoTaskMemFree(value);
+    return result;
+}
+
+static WebViewGpuMode persistedWebViewGpuMode() {
+    try {
+        const auto raw = sgReadFile(webview_gpu_state_path().wstring());
+        if (raw.empty()) return WebViewGpuMode::Default;
+        const auto state = json::parse(raw);
+        if (!state.is_object() || state.value("mode", std::string{}) != "software")
+            return WebViewGpuMode::Default;
+        const auto runtime = available_webview_runtime_version();
+        if (runtime.empty() || state.value("runtimeVersion", std::string{}) != runtime)
+            return WebViewGpuMode::Default;
+        if (state.value("healthyBoots", 0) >= 3) return WebViewGpuMode::Default;
+        return WebViewGpuMode::Software;
+    } catch (...) {
+        return WebViewGpuMode::Default;
+    }
+}
+
+static void persistSoftwareWebViewGpuMode(const char* reason) {
+    try {
+        const auto runtime = available_webview_runtime_version();
+        if (runtime.empty()) return;
+        auto state = json::object();
+        const auto raw = sgReadFile(webview_gpu_state_path().wstring());
+        if (!raw.empty()) {
+            try {
+                const auto old = json::parse(raw);
+                if (old.is_object() && old.value("runtimeVersion", std::string{}) == runtime)
+                    state = old;
+            } catch (...) {}
+        }
+        state["mode"] = "software";
+        state["runtimeVersion"] = runtime;
+        state["reason"] = std::string(reason ? reason : "WebView2 process failure").substr(0, 160);
+        state["failureCount"] = state.value("failureCount", 0) + 1;
+        state["healthyBoots"] = 0;
+        state["time"] = webViewLocalTimestamp(false);
+        sgWriteFileAtomic(webview_gpu_state_path().wstring(), state.dump(2));
+    } catch (...) {}
+}
+
+static void recordHealthyWebViewGpuBoot() {
+    try {
+        const auto runtime = available_webview_runtime_version();
+        if (runtime.empty()) return;
+        const auto path = webview_gpu_state_path();
+        const auto raw = sgReadFile(path.wstring());
+        if (raw.empty()) return;
+        auto state = json::parse(raw);
+        if (!state.is_object() || state.value("mode", std::string{}) != "software" ||
+            state.value("runtimeVersion", std::string{}) != runtime) {
+            return;
+        }
+        const int healthyBoots = state.value("healthyBoots", 0) + 1;
+        if (healthyBoots >= 3) {
+            std::error_code ec;
+            fspath::remove(path, ec);
+            return;
+        }
+        state["healthyBoots"] = healthyBoots;
+        sgWriteFileAtomic(path.wstring(), state.dump(2));
+    } catch (...) {}
 }
 
 static const char* webViewProcessKindName(COREWEBVIEW2_PROCESS_FAILED_KIND kind) {
@@ -8303,6 +8434,46 @@ static void appendWebViewDiagnostic(json entry) {
     } catch (...) {}
 }
 
+static std::string boundedJsonString(const json& value, const char* key, size_t limit) {
+    if (!value.is_object() || !key || !value.contains(key) || !value.at(key).is_string()) return {};
+    auto text = value.at(key).get<std::string>();
+    if (text.size() > limit) text.resize(limit);
+    return text;
+}
+
+static void appendFrontendDiagnostic(const json& input) {
+    try {
+        // The renderer is not trusted to choose arbitrary native log paths or
+        // write unbounded records. Keep only the correlation fields needed to
+        // diagnose route/WebView recovery and cap every user-controlled field.
+        json entry = {
+            {"event", "frontend-error"},
+            {"where", boundedJsonString(input, "where", 100)},
+            {"message", boundedJsonString(input, "message", 1000)},
+            {"stack", boundedJsonString(input, "stack", 4000)},
+            {"route", boundedJsonString(input, "route", 240)},
+            {"generation", boundedJsonString(input, "generation", 80)},
+            {"build", boundedJsonString(input, "build", 80)},
+            {"time", webViewLocalTimestamp(false)},
+            {"nativeGeneration", g_webviewGeneration.load(std::memory_order_acquire)},
+            {"gpuMode", webViewGpuModeName(g_webviewGpuMode)},
+            {"routeStatus", g_webviewRouteStatus}
+        };
+        const auto path = fspath::path(webview_data_dir()) / L"frontend-errors.log";
+        std::lock_guard<std::mutex> lock(g_webviewFailureLogMx);
+        std::error_code ec;
+        fspath::create_directories(path.parent_path(), ec);
+        const auto size = fspath::file_size(path, ec);
+        if (!ec && size > 1024 * 1024) {
+            const auto previous = fspath::path(path.wstring() + L".previous");
+            fspath::remove(previous, ec);
+            fspath::rename(path, previous, ec);
+        }
+        std::ofstream out(path, std::ios::binary | std::ios::app);
+        if (out) out << entry.dump() << '\n';
+    } catch (...) {}
+}
+
 static void appendWebViewFailureDiagnostic(const WebViewFailureInfo& info) {
     appendWebViewDiagnostic({
         {"event", "process-failed"},
@@ -8313,7 +8484,10 @@ static void appendWebViewFailureDiagnostic(const WebViewFailureInfo& info) {
         {"exitCode", info.exitCode},
         {"description", W2U(info.description)},
         {"module", W2U(info.modulePath)},
-        {"tick", info.tick}
+        {"tick", info.tick},
+        {"generation", info.generation},
+        {"browserProcessId", info.browserProcessId},
+        {"fromBrowserProcessExited", info.fromBrowserProcessExited}
     });
 }
 
@@ -8329,7 +8503,9 @@ static bool writeWebViewFailureMarker(const WebViewFailureInfo& info) {
             {"exitCode", info.exitCode},
             {"description", W2U(info.description)},
             {"module", W2U(info.modulePath)},
-            {"gpuMode", webViewGpuModeName(g_webviewGpuMode)}
+            {"gpuMode", webViewGpuModeName(g_webviewGpuMode)},
+            {"generation", info.generation},
+            {"browserProcessId", info.browserProcessId}
         };
         return sgWriteFileAtomic(webview_failure_marker_path().wstring(), marker.dump(2));
     } catch (...) {
@@ -10144,9 +10320,19 @@ static void reg_window() {
             {"navigationId", std::to_string(g_webviewNavigationId)}
         };
     });
+    ipc_on("diagnostics.frontendError", [](const json& a) -> json {
+        appendFrontendDiagnostic(a);
+        return json{{"ok", true}};
+    });
     ipc_on("window.renderReady", [](const json& a) -> json {
         unsigned long long generation = 0;
         UINT64 navigationId = 0;
+        const bool hasRouteSignal = a.contains("routeReady") || a.contains("routeStatus");
+        const bool routeReady = a.contains("routeReady") && a.at("routeReady").is_boolean()
+            ? a.at("routeReady").get<bool>() : true;
+        const std::string routeStatus = a.contains("routeStatus") && a.at("routeStatus").is_string()
+            ? a.at("routeStatus").get<std::string>() : "legacy";
+        const json routeEpoch = a.contains("routeEpoch") ? a.at("routeEpoch") : json(0);
         try {
             generation = std::stoull(a.value("generation", std::string{}));
             navigationId = static_cast<UINT64>(std::stoull(a.value("navigationId", std::string{})));
@@ -10168,11 +10354,16 @@ static void reg_window() {
 
         g_webviewRenderReadyGeneration = generation;
         g_webviewRenderReadyNavigationId = navigationId;
+        g_webviewRouteReady = !hasRouteSignal || routeReady || routeStatus == "route-degraded";
+        g_webviewRouteStatus = hasRouteSignal ? routeStatus : "legacy";
         appendWebViewDiagnostic({
             {"event", "render-ready-signal"},
             {"generation", generation},
             {"navigationId", std::to_string(navigationId)},
-            {"navigationComplete", g_webviewNavigationReady}
+            {"navigationComplete", g_webviewNavigationReady},
+            {"routeReady", g_webviewRouteReady},
+            {"routeStatus", g_webviewRouteStatus},
+            {"routeEpoch", routeEpoch}
         });
         if (g_webviewNavigationReady && g_webviewCompletedNavigationId == navigationId)
             finalizeWebViewRenderReady(generation, navigationId, "frontend");
@@ -11553,6 +11744,35 @@ static void reg_shell_app() {
             nullptr, L"open", SG_FACT_LOG.c_str(), nullptr, nullptr, SW_SHOWNORMAL));
         if (result <= 32) throw std::runtime_error("failed to open sleep fact log");
         return true;
+    });
+    ipc_on("sleepFacts.clearLog", [](const json&) -> json {
+        std::lock_guard<std::mutex> lock(g_sgFactMx);
+        std::error_code ec;
+        fspath::create_directories(fspath::path(SG_FACT_LOG).parent_path(), ec);
+        std::ofstream log(SG_FACT_LOG, std::ios::binary | std::ios::trunc);
+        if (!log.good()) throw std::runtime_error("failed to clear sleep fact log");
+        g_sgFacts.clear();
+        std::error_code previousEc;
+        fspath::remove(SG_FACT_LOG + L".previous", previousEc);
+        return json{{"ok", true}, {"path", W2U(SG_FACT_LOG)}};
+    });
+    ipc_on("sleepFacts.exportLog", [](const json&) -> json {
+        std::error_code sourceEc;
+        if (!fspath::is_regular_file(SG_FACT_LOG, sourceEc))
+            return json{{"ok", false}, {"reason", "暂无睡眠日志"}};
+        const std::wstring desktop = getKnownFolder(FOLDERID_Desktop);
+        if (desktop.empty()) throw std::runtime_error("无法定位桌面目录");
+        SYSTEMTIME now{};
+        GetLocalTime(&now);
+        wchar_t stamp[64]{};
+        swprintf_s(stamp, L"%04u%02u%02u-%02u%02u%02u-%03u",
+                   now.wYear, now.wMonth, now.wDay, now.wHour, now.wMinute,
+                   now.wSecond, now.wMilliseconds);
+        const std::wstring destination = desktop + L"\\YeMan-sleep-logs-" + stamp + L".log";
+        std::error_code copyEc;
+        fspath::copy_file(SG_FACT_LOG, destination, fspath::copy_options::overwrite_existing, copyEc);
+        if (copyEc) throw std::runtime_error("睡眠日志导出失败");
+        return json{{"ok", true}, {"path", W2U(destination)}, {"files", json::array({"sleep-facts.log"})}};
     });
     ipc_on("sleepGuard.setConfig", [](const json& a) -> json {
         // 仅在提供字段时覆盖，缺省保留当前值（前端始终发全量）
@@ -13001,7 +13221,7 @@ static void reg_log() {
     });
     ipc_on("fanLog.setEnabled", [](const json& a) -> json {
         const bool enabled = a.value("enabled", false);
-        g_fanLogFile = app_data_dir() + L"\\fan-api.log";
+        g_fanLogFile = yemancc_data_dir() + L"\\fan-api.log";
         auto parent = fspath::path(g_fanLogFile).parent_path();
         fspath::create_directories(parent);
         if (enabled) {
@@ -13021,10 +13241,10 @@ static void reg_log() {
         return true;
     });
     ipc_on("fanLog.getPath", [](const json&) -> json {
-        return json(W2U(g_fanLogFile.empty() ? app_data_dir() + L"\\fan-api.log" : g_fanLogFile));
+        return json(W2U(g_fanLogFile.empty() ? yemancc_data_dir() + L"\\fan-api.log" : g_fanLogFile));
     });
     ipc_on("fanLog.clear", [](const json&) -> json {
-        const std::wstring uiPath = g_fanLogFile.empty() ? app_data_dir() + L"\\fan-api.log" : g_fanLogFile;
+        const std::wstring uiPath = g_fanLogFile.empty() ? yemancc_data_dir() + L"\\fan-api.log" : g_fanLogFile;
         const std::wstring hostPath = fan_host_state_dir() + L"\\logs\\yeman-fan-host-runtime.log";
         bool ok = true;
         {
@@ -13039,7 +13259,7 @@ static void reg_log() {
         return json{{"ok", ok}, {"uiPath", W2U(uiPath)}, {"hostPath", W2U(hostPath)}};
     });
     ipc_on("fanLog.export", [](const json&) -> json {
-        const std::wstring uiPath = g_fanLogFile.empty() ? app_data_dir() + L"\\fan-api.log" : g_fanLogFile;
+        const std::wstring uiPath = g_fanLogFile.empty() ? yemancc_data_dir() + L"\\fan-api.log" : g_fanLogFile;
         const std::wstring hostPath = fan_host_state_dir() + L"\\logs\\yeman-fan-host-runtime.log";
         std::vector<std::wstring> files;
         for (const auto& path : { uiPath, hostPath }) {
@@ -13047,15 +13267,17 @@ static void reg_log() {
             if (fspath::is_regular_file(path, fileEc)) files.push_back(path);
         }
         if (files.empty()) return json{{"ok", false}, {"reason", "暂无风扇日志"}};
-        const std::wstring desktop = getKnownFolder(FOLDERID_Desktop);
-        if (desktop.empty()) throw std::runtime_error("无法定位桌面目录");
+        // 日志源文件仍固定保存在 %LOCALAPPDATA%\\YeManCC；压缩包按用户操作
+        // 约定导出到桌面，便于直接找到并发送给开发者。
+        const std::wstring exportRoot = getKnownFolder(FOLDERID_Desktop);
+        if (exportRoot.empty()) throw std::runtime_error("无法定位桌面目录");
         SYSTEMTIME now{};
         GetLocalTime(&now);
         wchar_t stamp[64]{};
         swprintf_s(stamp, L"%04u%02u%02u-%02u%02u%02u-%03u",
                    now.wYear, now.wMonth, now.wDay, now.wHour, now.wMinute,
                    now.wSecond, now.wMilliseconds);
-        const std::wstring zipPath = desktop + L"\\YeMan-fan-logs-" + stamp + L".zip";
+        const std::wstring zipPath = exportRoot + L"\\YeMan-fan-logs-" + stamp + L".zip";
         auto quote = [](const std::wstring& value) { return L"\"" + value + L"\""; };
         std::wstring command = L"\"C:\\Windows\\System32\\tar.exe\" -a -c -f " + quote(zipPath);
         for (const auto& path : files) {
@@ -14340,10 +14562,11 @@ static void reg_updater() {
         if (!fspath::exists(packagedPowerControl)) {
             failInstall("Update package missing PowerControl", "更新包缺少 PowerControl 目录");
         }
-        const auto packagedCustomSteamLibrary = staging + L"\\CustomSteamLibrary";
-        // CustomSteamLibrary is validated from update-manifest.json when it
-        // is declared. It remains optional here so the new updater can also
-        // install the legacy two-root package as a one-time bootstrap.
+        const auto packagedNestedCustomSteamLibrary = packagedYeManCC + L"\\CustomSteamLibrary";
+        const auto packagedLegacyCustomSteamLibrary = staging + L"\\CustomSteamLibrary";
+        // The canonical package embeds CustomSteamLibrary below YeManCC. Keep
+        // the old top-level path as a compatibility fallback for packages
+        // produced before the envelope was corrected.
         const auto packagedSupport = packagedYeManCC + L"\\YeMan-Support.html";
         if (!fspath::exists(packagedSupport)) {
             failInstall("Update package missing YeMan-Support.html", "更新包缺少支持页面");
@@ -14384,7 +14607,8 @@ static void reg_updater() {
              f << "$fanHostSource = Join-Path (Join-Path $staging 'PowerControl') 'fan-host'\n";
              f << "$layoutManifestPath = Join-Path $programSource 'update-manifest.json'\n";
             f << "$installRoot = " << psLiteral(installRoot) << "\n";
-            f << "$customSteamLibrarySource = " << psLiteral(packagedCustomSteamLibrary) << "\n";
+            f << "$customSteamLibrarySource = " << psLiteral(packagedNestedCustomSteamLibrary) << "\n";
+            f << "$legacyCustomSteamLibrarySource = " << psLiteral(packagedLegacyCustomSteamLibrary) << "\n";
             f << "$customSteamLibraryDir = " << psLiteral(customSteamLibraryDir) << "\n";
             f << "$customSteamLibraryManifest = Join-Path $customSteamLibrarySource 'package-manifest.json'\n";
             f << "$supportPath = " << psLiteral(supportPath) << "\n";
@@ -14819,10 +15043,17 @@ static void reg_updater() {
               f << "  }\n";
               f << "  $layoutRoots = @(Get-UpdateLayoutRoots)\n";
               f << "  $customRoot = $layoutRoots | Where-Object { $_.source -ieq 'CustomSteamLibrary' } | Select-Object -First 1\n";
+              f << "  $nestedCustomDirectoryPresent = Test-Path -LiteralPath (Join-Path $programSource 'CustomSteamLibrary') -PathType Container\n";
+              f << "  $nestedCustomPresent = Test-Path -LiteralPath (Join-Path $programSource 'CustomSteamLibrary\\package-manifest.json') -PathType Leaf\n";
+              f << "  $legacyCustomPresent = $null -ne $customRoot -and (Test-Path -LiteralPath (Join-Path $legacyCustomSteamLibrarySource 'package-manifest.json') -PathType Leaf)\n";
+              f << "  if (($nestedCustomDirectoryPresent -and !$nestedCustomPresent) -or ($null -ne $customRoot -and !$legacyCustomPresent)) { throw 'CustomSteamLibrary package directory is present but package-manifest.json is missing' }\n";
+              f << "  if ($nestedCustomPresent -and $legacyCustomPresent) { throw 'update package contains both canonical nested and legacy top-level CustomSteamLibrary roots' }\n";
+              f << "  if ($nestedCustomPresent) { $customSteamLibrarySource = Join-Path $programSource 'CustomSteamLibrary' } elseif ($legacyCustomPresent) { $customSteamLibrarySource = $legacyCustomSteamLibrarySource }\n";
+              f << "  $customSteamLibraryManifest = Join-Path $customSteamLibrarySource 'package-manifest.json'\n";
               f << "  if ($customRoot) { $customSteamLibraryDir = [IO.Path]::GetFullPath((Join-Path $installRoot ([string]$customRoot.target))) }\n";
               f << "  $customSteamLibraryRootPrefix = ([IO.Path]::GetFullPath($customSteamLibraryDir)).TrimEnd('\\') + '\\'\n";
               f << "  $fanHostPackagePresent = Test-Path -LiteralPath $fanHostSource -PathType Container\n";
-              f << "  $customRootPresent = @($layoutRoots | Where-Object { $_.source -ieq 'CustomSteamLibrary' }).Count -gt 0\n";
+              f << "  $customRootPresent = $nestedCustomPresent -or $legacyCustomPresent\n";
               f << "  if ($customRootPresent) { Stop-CustomSteamLibraryProcesses }\n";
               f << "  Stop-AdditionalLayoutRootProcesses\n";
               f << "  if ($fanHostPackagePresent -and (Test-Path -LiteralPath (Join-Path $pcDir 'fan-host') -PathType Container)) { Wait-FanHostExit }\n";
@@ -14832,7 +15063,7 @@ static void reg_updater() {
               f << "  Set-UpdateProgress 'installing' '正在复制更新文件'\n";
               f << "  New-Item -ItemType Directory -Path $rollbackFiles -Force | Out-Null\n";
               f << "  if ($customRootPresent) { $customManagedPaths = @(Get-CustomManagedPaths) }\n";
-              f << "  Register-TreeForRollback $programSource $exeDir 'YeManCC' @('YeManCC.exe','YeMan-Support.html')\n";
+              f << "  Register-TreeForRollback $programSource $exeDir 'YeManCC' @('YeManCC.exe','YeMan-Support.html','CustomSteamLibrary')\n";
               f << "  Register-FileForRollback $packageExe $programSource $exeDir 'YeManCC'\n";
               f << "  Register-TreeForRollback $powerControlSource $pcDir 'PowerControl' @('pawnio')\n";
               f << "  if ($customRootPresent) { Register-CustomManagedFilesForRollback $customManagedPaths }\n";
@@ -14886,7 +15117,7 @@ static void reg_updater() {
             f << "  if (Test-Path -LiteralPath $exePath -PathType Leaf) { Copy-Item -LiteralPath $exePath -Destination $backup -Force }\n";
             f << "  Copy-Item -LiteralPath $packageExe -Destination $newExe -Force\n";
             f << "  Move-Item -LiteralPath $newExe -Destination $exePath -Force\n";
-            f << "  Copy-TreeChecked $programSource $exeDir @('/XF','YeManCC.exe','YeMan-Support.html')\n";
+            f << "  Copy-TreeChecked $programSource $exeDir @('/XF','YeManCC.exe','YeMan-Support.html','/XD',(Join-Path $programSource 'CustomSteamLibrary'))\n";
             f << "  Copy-Item -LiteralPath (Join-Path $programSource 'YeMan-Support.html') -Destination $supportPath -Force\n";
             f << "  if ($customRootPresent) { Set-UpdateProgress 'installing' '正在验证 CustomSteamLibrary 独立启动健康'; Invoke-CustomSteamLibraryHealthCheck }\n";
             f << "  Set-UpdateProgress 'installing' '正在启动新版本'\n";
@@ -15932,7 +16163,9 @@ static LRESULT CALLBACK SplashProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         case WM_PAINT: {
             PAINTSTRUCT ps; HDC hdc = BeginPaint(h, &ps);
             RECT rc; GetClientRect(h, &rc);
-            int r = MENU_RADIUS;
+            const int dpi = (std::max)(96, static_cast<int>(GetDpiForWindow(h)));
+            const int dpiRadius = MulDiv(MENU_RADIUS, dpi, 96);
+            int r = dpiRadius;
             // 背景圆角
             HBRUSH bBg = CreateSolidBrush(MENU_BG);
             HPEN pen = CreatePen(PS_NULL, 0, 0);
@@ -15940,7 +16173,7 @@ static LRESULT CALLBACK SplashProc(HWND h, UINT m, WPARAM w, LPARAM l) {
             RoundRect(hdc, 0, 0, rc.right, rc.bottom, 2*r, 2*r);
             DeleteObject(pen); DeleteObject(bBg);
 
-            HFONT hFont = CreateFontW(17, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+            HFONT hFont = CreateFontW(MulDiv(MENU_FONT_HEIGHT, dpi, 96), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
                 DEFAULT_CHARSET, 0, 0, CLEARTYPE_QUALITY, 0, L"Segoe UI"); // +30% 字号
             auto old = SelectObject(hdc, hFont);
             SetBkMode(hdc, TRANSPARENT);
@@ -16043,21 +16276,23 @@ static LRESULT CALLBACK SplashProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         g_menuItems.push_back({ L"", ID_TRAY_SEP });
         g_menuItems.push_back({ L"退出", ID_TRAY_EXIT, true });
 
-        int scale = GetDpiForSystem() / 96;
-        int itemH = 39 * scale; // 34 * 1.15 ≈ 39（气泡 +15%）
-        int padY  = 7 * scale;  // 6 * 1.15 ≈ 7
-        int w = 196 * scale;    // 170 * 1.15 ≈ 196
+        const int dpi = (std::max)(96, static_cast<int>(GetDpiForWindow(g_hwnd)));
+        auto menuPx = [dpi](int logicalPx) { return MulDiv(logicalPx, dpi, 96); };
+        int itemH = menuPx(44); // 34 * 1.30 ≈ 44
+        int padY  = menuPx(8);  // 6 * 1.30 ≈ 8
+        int w = menuPx(221);    // 170 * 1.30 ≈ 221
+        int sepH = menuPx(10);  // 8 * 1.30 ≈ 10
         int seps = 0;
         for (auto& it : g_menuItems) if (it.cmd == ID_TRAY_SEP) seps++;
         int itemCount = (int)g_menuItems.size() - seps;
-        int h = padY * 2 + itemH * itemCount + 9 * scale * seps; // 分隔 8 * 1.15 ≈ 9
+        int h = padY * 2 + itemH * itemCount + sepH * seps;
 
         g_menuItemRects.assign(g_menuItems.size(), RECT{});
         int y = padY;
         for (size_t i = 0; i < g_menuItems.size(); i++) {
             if (g_menuItems[i].cmd == ID_TRAY_SEP) {
-                g_menuItemRects[i] = { 0, y, w, y + 9 * scale };
-                y += 9 * scale;
+                g_menuItemRects[i] = { 0, y, w, y + sepH };
+                y += sepH;
             } else {
                 g_menuItemRects[i] = { 0, y, w, y + itemH };
                 y += itemH;
@@ -16164,6 +16399,115 @@ static bool configureUserAssetsHost(ICoreWebView2* view) {
         COREWEBVIEW2_HOST_RESOURCE_ACCESS_KIND_ALLOW));
 }
 
+static std::wstring webViewFallbackMimeType(const std::string& path) {
+    const auto dot = path.rfind('.');
+    const auto ext = dot == std::string::npos ? std::string{} : ascii_lower(path.substr(dot + 1));
+    if (ext == "html" || ext == "htm") return L"text/html; charset=utf-8";
+    if (ext == "js" || ext == "mjs") return L"application/javascript; charset=utf-8";
+    if (ext == "css") return L"text/css; charset=utf-8";
+    if (ext == "json") return L"application/json; charset=utf-8";
+    if (ext == "svg") return L"image/svg+xml";
+    if (ext == "png") return L"image/png";
+    if (ext == "jpg" || ext == "jpeg") return L"image/jpeg";
+    if (ext == "gif") return L"image/gif";
+    if (ext == "ico") return L"image/x-icon";
+    if (ext == "woff2") return L"font/woff2";
+    if (ext == "woff") return L"font/woff";
+    if (ext == "ttf") return L"font/ttf";
+    return L"application/octet-stream";
+}
+
+static bool resolveFrontendFallbackAsset(
+    const std::wstring& rootDir, const std::string& uriPath, fspath::path& result) {
+    auto path = url_decode_path(uriPath);
+    while (!path.empty() && path.front() == '/') path.erase(path.begin());
+    if (path.empty()) path = "index.html";
+    if (path.find('\0') != std::string::npos) return false;
+
+    std::string normalized;
+    std::istringstream parts(path);
+    std::string segment;
+    while (std::getline(parts, segment, '/')) {
+        if (segment.empty() || segment == ".") continue;
+        if (segment == ".." || segment.find(':') != std::string::npos) return false;
+        if (!normalized.empty()) normalized.push_back('/');
+        normalized += segment;
+    }
+    if (normalized.empty()) normalized = "index.html";
+
+    std::error_code ec;
+    const auto root = fspath::weakly_canonical(fspath::path(rootDir), ec);
+    if (ec || root.empty()) return false;
+    ec.clear();
+    const auto candidate = fspath::weakly_canonical(root / fspath::path(U2W(normalized)), ec);
+    if (ec || candidate.empty() || !fspath::is_regular_file(candidate, ec) || ec) return false;
+
+    auto rootText = root.wstring();
+    auto candidateText = candidate.wstring();
+    while (rootText.size() > 1 && (rootText.back() == L'\\' || rootText.back() == L'/')) rootText.pop_back();
+    if (candidateText.size() <= rootText.size() ||
+        _wcsnicmp(candidateText.c_str(), rootText.c_str(), rootText.size()) != 0) return false;
+    const wchar_t boundary = candidateText[rootText.size()];
+    if (boundary != L'\\' && boundary != L'/') return false;
+    result = candidate;
+    return true;
+}
+
+static bool configureFrontendResourceFallback(ICoreWebView2* view, const std::wstring& rootDir) {
+    if (!view || rootDir.empty() || !file_exists(rootDir + L"\\index.html") || !g_env) return false;
+    const std::array<const wchar_t*, 4> filters = {
+        L"https://app.localhost/*", L"https://app.local/*",
+        L"http://app.localhost/*", L"http://app.local/*"
+    };
+    for (const auto* filter : filters) {
+        if (FAILED(view->AddWebResourceRequestedFilter(
+                filter, COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL))) return false;
+    }
+    const auto environment = g_env;
+    const auto handler = Callback<ICoreWebView2WebResourceRequestedEventHandler>(
+        [rootDir, environment](ICoreWebView2*, ICoreWebView2WebResourceRequestedEventArgs* args) -> HRESULT {
+            if (!args || !environment) return S_OK;
+            ComPtr<ICoreWebView2WebResourceRequest> request;
+            if (FAILED(args->get_Request(&request)) || !request) return S_OK;
+            LPWSTR rawUri = nullptr;
+            if (FAILED(request->get_Uri(&rawUri)) || !rawUri) return S_OK;
+            const std::wstring uri(rawUri);
+            CoTaskMemFree(rawUri);
+            const auto scheme = uri.find(L"://");
+            const auto slash = scheme == std::wstring::npos ? std::wstring::npos : uri.find(L'/', scheme + 3);
+            auto path = slash == std::wstring::npos ? std::string{} : W2U(uri.substr(slash));
+            const auto query = path.find('?');
+            if (query != std::string::npos) path.resize(query);
+            const auto fragment = path.find('#');
+            if (fragment != std::string::npos) path.resize(fragment);
+
+            fspath::path asset;
+            if (!resolveFrontendFallbackAsset(rootDir, path, asset)) {
+                static const char missing[] = "Frontend asset not found";
+                ComPtr<IStream> stream;
+                stream.Attach(SHCreateMemStream(
+                    reinterpret_cast<const BYTE*>(missing), sizeof(missing) - 1));
+                if (!stream) return S_OK;
+                ComPtr<ICoreWebView2WebResourceResponse> response;
+                if (SUCCEEDED(environment->CreateWebResourceResponse(
+                        stream.Get(), 404, L"Not Found", L"Content-Type: text/plain; charset=utf-8",
+                        &response))) args->put_Response(response.Get());
+                return S_OK;
+            }
+
+            ComPtr<IStream> stream;
+            if (FAILED(SHCreateStreamOnFileEx(asset.c_str(), STGM_READ | STGM_SHARE_DENY_NONE,
+                    STGM_READ, FALSE, nullptr, &stream)) || !stream) return S_OK;
+            ComPtr<ICoreWebView2WebResourceResponse> response;
+            const auto headers = L"Content-Type: " + webViewFallbackMimeType(path) + L"\r\nCache-Control: no-store";
+            if (SUCCEEDED(environment->CreateWebResourceResponse(
+                    stream.Get(), 200, L"OK", headers.c_str(), &response)))
+                args->put_Response(response.Get());
+            return S_OK;
+        });
+    return SUCCEEDED(view->add_WebResourceRequested(handler.Get(), nullptr));
+}
+
 static bool configureAppHost(ICoreWebView2* view) {
     if (!view) return false;
     // 自定义背景是可选功能；映射失败不得阻断 app.localhost 主界面启动。
@@ -16247,15 +16591,30 @@ static bool configureAppHost(ICoreWebView2* view) {
     if (dir.empty())
         return false;
     ComPtr<ICoreWebView2_3> v3;
-    if (FAILED(view->QueryInterface(IID_PPV_ARGS(&v3))))
-        return false;
-    if (FAILED(v3->SetVirtualHostNameToFolderMapping(
-            L"app.localhost", dir.c_str(),
-            COREWEBVIEW2_HOST_RESOURCE_ACCESS_KIND_ALLOW))) return false;
-    if (FAILED(v3->SetVirtualHostNameToFolderMapping(
-            L"app.local", dir.c_str(),
-            COREWEBVIEW2_HOST_RESOURCE_ACCESS_KIND_ALLOW))) return false;
-    return true;
+    if (SUCCEEDED(view->QueryInterface(IID_PPV_ARGS(&v3)))) {
+        const HRESULT localhostHr = v3->SetVirtualHostNameToFolderMapping(
+            L"app.localhost", dir.c_str(), COREWEBVIEW2_HOST_RESOURCE_ACCESS_KIND_ALLOW);
+        const HRESULT localHr = v3->SetVirtualHostNameToFolderMapping(
+            L"app.local", dir.c_str(), COREWEBVIEW2_HOST_RESOURCE_ACCESS_KIND_ALLOW);
+        if (SUCCEEDED(localhostHr) && SUCCEEDED(localHr)) return true;
+        appendWebViewDiagnostic({
+            {"event", "virtual-host-mapping-failed"},
+            {"appLocalhostHresult", static_cast<int64_t>(localhostHr)},
+            {"appLocalHresult", static_cast<int64_t>(localHr)}
+        });
+    } else {
+        appendWebViewDiagnostic({
+            {"event", "virtual-host-interface-unavailable"},
+            {"fallback", "web-resource-requested"}
+        });
+    }
+    const bool fallback = configureFrontendResourceFallback(view, dir);
+    appendWebViewDiagnostic({
+        {"event", "frontend-host-fallback"},
+        {"mode", "web-resource-requested"},
+        {"ok", fallback}
+    });
+    return fallback;
 }
 
 static bool isExpectedMainDocumentSource(const std::wstring& source) {
@@ -16284,6 +16643,8 @@ static void resetWebViewRenderState() {
     g_webviewCompletedNavigationId = 0;
     g_webviewRenderReadyGeneration = 0;
     g_webviewRenderReadyNavigationId = 0;
+    g_webviewRouteReady = false;
+    g_webviewRouteStatus.clear();
     g_webviewNeedsShowNudge = true;
 }
 
@@ -16305,10 +16666,13 @@ static void finalizeWebViewRenderReady(
         {"event", "render-ready-complete"},
         {"source", source ? source : "unknown"},
         {"generation", generation},
-        {"navigationId", std::to_string(navigationId)}
+        {"navigationId", std::to_string(navigationId)},
+        {"routeReady", g_webviewRouteReady},
+        {"routeStatus", g_webviewRouteStatus}
     });
 
     completeWebViewRecovery();
+    recordHealthyWebViewGpuBoot();
 
     if (g_deferFirstShow) {
         const int showCmd = g_firstShowCmd;
@@ -16402,8 +16766,10 @@ static void probeWebViewRenderState(unsigned long long generation, UINT64 naviga
     }
 }
 
-static void setupWebView(ICoreWebView2Controller* ctrl) {
+static void setupWebView(ICoreWebView2Controller* ctrl, unsigned long long generation) {
     traceLog("WEBVIEW controller-ready");
+    if (generation == 0)
+        generation = g_webviewGeneration.load(std::memory_order_acquire);
     resetWebViewRenderState();
     g_ctrl = ctrl;
     g_ctrl->get_CoreWebView2(&g_view);
@@ -16480,10 +16846,11 @@ static void setupWebView(ICoreWebView2Controller* ctrl) {
     // to the window thread so no exception or blocking operation crosses the COM callback.
     g_view->add_ProcessFailed(
         Callback<ICoreWebView2ProcessFailedEventHandler>(
-        [](ICoreWebView2*, ICoreWebView2ProcessFailedEventArgs* args) -> HRESULT {
+        [generation](ICoreWebView2*, ICoreWebView2ProcessFailedEventArgs* args) -> HRESULT {
             if (!args) return S_OK;
             auto* info = new (std::nothrow) WebViewFailureInfo();
             if (!info) return S_OK;
+            info->generation = generation;
 
             LPWSTR description = nullptr;
             LPWSTR modulePath = nullptr;
@@ -16698,8 +17065,17 @@ static void init_webview(unsigned long long generation = 0) {
     traceLog("WEBVIEW init-start generation=%llu", generation);
     if (generation == 0)
         generation = g_webviewGeneration.load(std::memory_order_acquire);
-    g_webviewGpuMode = configuredWebViewGpuMode();
+    const auto configuredGpuMode = configuredWebViewGpuMode();
+    g_webviewGpuMode = configuredGpuMode == WebViewGpuMode::Default
+        ? persistedWebViewGpuMode()
+        : configuredGpuMode;
     auto dataDir = webview_data_dir();
+    appendWebViewDiagnostic({
+        {"event", "environment-init"},
+        {"generation", generation},
+        {"gpuMode", webViewGpuModeName(g_webviewGpuMode)},
+        {"runtimeVersion", available_webview_runtime_version()}
+    });
 
     // Only an explicit marker written after BROWSER_PROCESS_EXITED triggers isolation.
     // Crashpad dumps alone are diagnostic evidence and must never delete user data.
@@ -16718,6 +17094,8 @@ static void init_webview(unsigned long long generation = 0) {
             // retry once with --disable-gpu for pure software rendering.
             if (FAILED(hr)) {
                 auto dataDir2 = webview_data_dir();
+                if (g_webviewGpuMode == WebViewGpuMode::Default)
+                    persistSoftwareWebViewGpuMode("environment-init-failure");
                 g_webviewGpuMode = WebViewGpuMode::Software;
                 appendWebViewDiagnostic({
                     {"event", "environment-init-fallback"},
@@ -16741,6 +17119,7 @@ static void init_webview(unsigned long long generation = 0) {
                             return hr2;
                         }
                         g_env = env2;
+                        logWebViewEnvironmentVersion(g_env.Get(), generation);
                         HRESULT controllerHr = finishCreateController(g_env.Get(), generation);
                         if (FAILED(controllerHr)) {
                             MessageBoxW(g_hwnd, L"WebView2 控制器创建失败，YeManCC 无法显示界面。",
@@ -16752,6 +17131,7 @@ static void init_webview(unsigned long long generation = 0) {
                     }).Get());
             }
             g_env = env;
+            logWebViewEnvironmentVersion(g_env.Get(), generation);
             HRESULT controllerHr = finishCreateController(g_env.Get(), generation);
             if (FAILED(controllerHr)) {
                 MessageBoxW(g_hwnd, L"WebView2 控制器创建失败，YeManCC 无法显示界面。",
@@ -16769,12 +17149,87 @@ static void init_webview(unsigned long long generation = 0) {
     }
 }
 
+static void registerWebViewEnvironmentEvents(ICoreWebView2Environment* env, unsigned long long generation) {
+    if (!env) return;
+    ComPtr<ICoreWebView2Environment5> env5;
+    if (FAILED(env->QueryInterface(IID_PPV_ARGS(&env5)))) {
+        appendWebViewDiagnostic({
+            {"event", "browser-process-exited-unavailable"},
+            {"generation", generation},
+            {"reason", "ICoreWebView2Environment5 unavailable"}
+        });
+        return;
+    }
+    if (g_webviewBrowserProcessExitedRegistered && g_webviewEnvironment5.Get() == env5.Get() &&
+        g_webviewEnvironmentGeneration == generation) return;
+
+    if (g_webviewEnvironment5 && g_webviewBrowserProcessExitedRegistered)
+        g_webviewEnvironment5->remove_BrowserProcessExited(g_webviewBrowserProcessExitedToken);
+    g_webviewEnvironment5 = env5;
+    g_webviewEnvironmentGeneration = generation;
+    g_webviewBrowserProcessExitedRegistered = false;
+
+    const HRESULT hr = g_webviewEnvironment5->add_BrowserProcessExited(
+        Callback<ICoreWebView2BrowserProcessExitedEventHandler>(
+        [generation](ICoreWebView2Environment*, ICoreWebView2BrowserProcessExitedEventArgs* args) -> HRESULT {
+            if (!args) return S_OK;
+            COREWEBVIEW2_BROWSER_PROCESS_EXIT_KIND exitKind = COREWEBVIEW2_BROWSER_PROCESS_EXIT_KIND_NORMAL;
+            UINT32 processId = 0;
+            args->get_BrowserProcessExitKind(&exitKind);
+            args->get_BrowserProcessId(&processId);
+            if (exitKind != COREWEBVIEW2_BROWSER_PROCESS_EXIT_KIND_FAILED) {
+                appendWebViewDiagnostic({
+                    {"event", "browser-process-exited-normal"},
+                    {"generation", generation},
+                    {"browserProcessId", processId}
+                });
+                return S_OK;
+            }
+
+            auto* info = new (std::nothrow) WebViewFailureInfo();
+            if (!info) return S_OK;
+            info->kind = COREWEBVIEW2_PROCESS_FAILED_KIND_BROWSER_PROCESS_EXITED;
+            info->reason = COREWEBVIEW2_PROCESS_FAILED_REASON_CRASHED;
+            info->tick = GetTickCount64();
+            info->generation = generation;
+            info->browserProcessId = processId;
+            info->fromBrowserProcessExited = true;
+            if (!g_hwnd || !PostMessageW(g_hwnd, WM_WEBVIEW_PROCESS_FAILED, 0,
+                    reinterpret_cast<LPARAM>(info)))
+                delete info;
+            return S_OK;
+        }).Get(), &g_webviewBrowserProcessExitedToken);
+    g_webviewBrowserProcessExitedRegistered = SUCCEEDED(hr);
+    appendWebViewDiagnostic({
+        {"event", "browser-process-exited-handler"},
+        {"generation", generation},
+        {"registered", g_webviewBrowserProcessExitedRegistered},
+        {"hresult", static_cast<int64_t>(hr)}
+    });
+}
+
+static void logWebViewEnvironmentVersion(ICoreWebView2Environment* env, unsigned long long generation) {
+    LPWSTR raw = nullptr;
+    std::string version;
+    if (env && SUCCEEDED(env->get_BrowserVersionString(&raw)) && raw) {
+        version = W2U(raw);
+        CoTaskMemFree(raw);
+    }
+    appendWebViewDiagnostic({
+        {"event", "environment-version"},
+        {"generation", generation},
+        {"browserVersion", version},
+        {"availableRuntime", available_webview_runtime_version()}
+    });
+}
+
 // Shared controller creation logic (used by both normal and GPU-fallback init paths).
 // Sets background color to avoid white flash, then creates the controller + calls setupWebView.
 static HRESULT finishCreateController(ICoreWebView2Environment* env, unsigned long long generation) {
     if (!env) return E_POINTER;
     if (generation == 0)
         generation = g_webviewGeneration.load(std::memory_order_acquire);
+    registerWebViewEnvironmentEvents(env, generation);
     ComPtr<ICoreWebView2Environment10> env10;
     auto handler = Callback<ICoreWebView2CreateCoreWebView2ControllerCompletedHandler>(
         [generation](HRESULT hr, ICoreWebView2Controller* ctrl) -> HRESULT {
@@ -16792,7 +17247,7 @@ static HRESULT finishCreateController(ICoreWebView2Environment* env, unsigned lo
                 else PostQuitMessage(1);
                 return hr;
             }
-            setupWebView(ctrl);
+            setupWebView(ctrl, generation);
             return S_OK;
         });
     if (SUCCEEDED(env->QueryInterface(IID_PPV_ARGS(&env10)))) {
@@ -16929,6 +17384,18 @@ static DWORD WINAPI browserProfileIsolationThread(LPVOID) {
 
 static void recoverWebViewProcess(const WebViewFailureInfo& info) {
     if (g_exitRequested.load(std::memory_order_acquire)) return;
+    const auto currentGeneration = g_webviewGeneration.load(std::memory_order_acquire);
+    if (info.generation != 0 && info.generation != currentGeneration) {
+        appendWebViewDiagnostic({
+            {"event", "process-failed-stale-generation"},
+            {"kind", webViewProcessKindName(info.kind)},
+            {"generation", info.generation},
+            {"currentGeneration", currentGeneration},
+            {"browserProcessId", info.browserProcessId},
+            {"fromBrowserProcessExited", info.fromBrowserProcessExited}
+        });
+        return;
+    }
     const auto kind = webViewProcessKindName(info.kind);
     const size_t attempt = recordWebViewFailureAttempt(info.kind);
 
@@ -16936,10 +17403,11 @@ static void recoverWebViewProcess(const WebViewFailureInfo& info) {
         appendWebViewDiagnostic({
             {"event", "recovery-overlap"},
             {"kind", kind},
-            {"attempt", attempt}
+            {"attempt", attempt},
+            {"generation", info.generation},
+            {"browserProcessId", info.browserProcessId},
+            {"fromBrowserProcessExited", info.fromBrowserProcessExited}
         });
-        if (info.kind == COREWEBVIEW2_PROCESS_FAILED_KIND_BROWSER_PROCESS_EXITED)
-            failWebViewRecovery("browser failed during recovery");
         return;
     }
 
@@ -16947,6 +17415,10 @@ static void recoverWebViewProcess(const WebViewFailureInfo& info) {
         appendNativeLifecycleLog("webview-browser-process-failed", {
             {"attempt", attempt}, {"exitCode", info.exitCode}
         });
+        if (g_webviewGpuMode != WebViewGpuMode::Legacy)
+            persistSoftwareWebViewGpuMode(info.fromBrowserProcessExited
+                ? "browser-process-exited"
+                : "browser-process-failed");
         if (attempt > 2) {
             appendWebViewDiagnostic({{"event", "recovery-exhausted"}, {"kind", kind}, {"attempt", attempt}});
             beginAsyncExit(g_hwnd, 1);
@@ -16967,6 +17439,11 @@ static void recoverWebViewProcess(const WebViewFailureInfo& info) {
         if (worker) CloseHandle(worker);
         else failWebViewRecovery("cannot create profile isolation worker");
         return;
+    }
+
+    if (info.kind == COREWEBVIEW2_PROCESS_FAILED_KIND_GPU_PROCESS_EXITED &&
+        g_webviewGpuMode != WebViewGpuMode::Legacy) {
+        persistSoftwareWebViewGpuMode("gpu-process-failed");
     }
 
     if (attempt > 2) {
