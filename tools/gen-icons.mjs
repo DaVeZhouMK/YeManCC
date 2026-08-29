@@ -110,7 +110,8 @@ const ICONS = {
   check: `<path d="M5 12l5 5 9-9"/>`,
   cross: `<path d="M6 6l12 12M18 6l-12 12"/>`,
   edit: `<path d="M14 3l5 5-10 10H4v-5z"/>`,
-  fan: `<path d="M12 2c2 3 2 6 0 9-2-3-2-6 0-9z"/><path d="M20 12c-3 2-6 2-9 0 3-2 6-2 9 0z"/><path d="M12 20c-2-3-2-6 0-9 2 3 2 6 0 9z"/><path d="M4 12c3-2 6-2 9 0-3 2-6 2-9 0z"/><circle cx="12" cy="12" r="2"/>`,
+  // 四片完全同源、同长度的扇叶，围绕同一中心旋转复制，避免导出后出现单叶偏长。
+  fan: `<defs><path id="fan-blade" d="M12 10c-1.6-1.6-1.8-3.9-.8-6.8.3-.9 1.3-.9 1.6 0 1 2.9.8 5.2-.8 6.8z"/></defs><use href="#fan-blade"/><use href="#fan-blade" transform="rotate(90 12 12)"/><use href="#fan-blade" transform="rotate(180 12 12)"/><use href="#fan-blade" transform="rotate(270 12 12)"/><circle cx="12" cy="12" r="2"/>`,
   core: `<rect x="4" y="4" width="16" height="16" rx="2"/><path d="M12 4v16M4 12h16"/>`,
   globe: `<circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a15 15 0 0 1 0 18 15 15 0 0 1 0-18"/>`,
   wrench: `<path d="M14.5 3.5a5 5 0 0 1 1.8 6.8L8.5 18.1a2.5 2.5 0 1 1-3.6-3.6l7.8-7.8a5 5 0 0 1 1.8-3.2z"/><circle cx="7" cy="17" r="1.5"/>`,
