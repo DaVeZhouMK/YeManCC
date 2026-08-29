@@ -512,33 +512,39 @@ onBeforeUnmount(() => {
     <section class="card addon-card">
       <h3 class="card-title addon-card-title"><InlineIcon name="link" /> 联动启动项</h3>
       <div id="steam-addon-list" class="addon-list">
-        <div v-for="l in STEAM_ADDONS" :key="l.key" class="addon-row">
-          <button class="addon-launch-btn" :disabled="busy" title="启动程序" @click="launchFixedAddon(l.exe)">
+        <div v-for="(l, index) in STEAM_ADDONS" :key="l.key" class="addon-row" :data-gp-row="index">
+          <button class="addon-launch-btn" :data-gp-row="index" data-gp-col="0" :disabled="busy" title="启动程序" @click="launchFixedAddon(l.exe)">
             <InlineIcon name="play" /> 启动
           </button>
           <Toggle
             v-model="states[l.key]"
             :label="l.name"
             color="accent"
+            :gp-row="index"
+            :gp-col="1"
             :disabled="busy"
             @update:model-value="(v: boolean) => onAddon(l.key, v)"
           />
         </div>
         <div class="custom-addon-divider">自选联动启动项</div>
         <div v-if="customAddons.length === 0" class="empty-addon">暂无自选程序</div>
-        <div v-for="addon in customAddons" :key="addon.id" class="custom-addon-row">
-          <button class="addon-launch-btn" :disabled="busy" title="启动程序" @click="launchCustomAddon(addon)">
+        <div v-for="(addon, index) in customAddons" :key="addon.id" class="custom-addon-row" :data-gp-row="STEAM_ADDONS.length + index">
+          <button class="addon-launch-btn" :data-gp-row="STEAM_ADDONS.length + index" data-gp-col="0" :disabled="busy" title="启动程序" @click="launchCustomAddon(addon)">
             <InlineIcon name="play" /> 启动
           </button>
           <Toggle
             :model-value="addon.enabled"
             :label="addon.name"
             color="accent"
+            :gp-row="STEAM_ADDONS.length + index"
+            :gp-col="1"
             :disabled="busy"
             @update:model-value="(v: boolean) => onCustomAddon(addon, v)"
           />
           <button
             class="custom-addon-delete"
+            :data-gp-row="STEAM_ADDONS.length + index"
+            data-gp-col="2"
             :disabled="busy"
             title="删除联动启动项"
             @click="removeCustomAddon(addon)"

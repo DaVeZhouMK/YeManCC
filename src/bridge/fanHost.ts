@@ -29,6 +29,13 @@ const RECOVERY_RETRY_DELAYS_MS = [0, 250, 750];
 const NORMAL_SESSION_CHECK_INTERVAL_MS = 30_000;
 const RECOVERY_OBSERVATION_INTERVAL_MS = 2_000;
 const RECOVERY_OBSERVATION_MAX_ATTEMPTS = 30;
+// Windows resume notification and HC's asynchronous device rebuild are
+// separate timelines. Keep the wake path alive long enough for the Host to
+// finish Open/OpenEvents/Enable before asking it to handshake again.
+const RESUME_WAIT_WINDOW_MS = 45_000;
+const RESUME_OBSERVATION_INTERVAL_MS = 500;
+const RESUME_STATE_REQUEST_TIMEOUT_MS = 20_000;
+const RESUME_HANDSHAKE_TIMEOUT_MS = 20_000;
 const RECOVERY_WINDOW_MS = 60_000;
 const RECOVERY_MAX_ATTEMPTS = 3;
 // A real Host owns the serialized HC recovery timer.  The UI must observe that
@@ -1078,6 +1085,37 @@ export class FanHostLifecycle {
   }
 
   /**
+   * The resident Host returns Resuming before its asynchronous HC rebuild has
+   * completed. Observe that state until it settles; a handshake during this
+   * interval can block behind the HC lock and exceed the normal 5s API
+   * deadline, even though the Host will recover successfully a moment later.
+   */
+  private async waitForResumeHostState(
+    initial: FanState,
+    deadline: number,
+  ): Promise<FanState> {
+    let remote = initial;
+    while (String(remote.state ?? '').toLowerCase() === 'resuming') {
+      const remainingMs = deadline - Date.now();
+      if (remainingMs <= 0) throw new Error('FAN_RESUME_WAIT_TIMEOUT');
+      await new Promise<void>((resolve) => setTimeout(
+        resolve,
+        Math.min(RESUME_OBSERVATION_INTERVAL_MS, remainingMs),
+      ));
+      const requestTimeoutMs = Math.min(
+        RESUME_STATE_REQUEST_TIMEOUT_MS,
+        Math.max(500, deadline - Date.now()),
+      );
+      remote = await this.adapter.getState(requestTimeoutMs);
+      fanDiagnosticLog('lifecycle.resume-waiting', {
+        state: remote.state,
+        remainingMs: Math.max(0, deadline - Date.now()),
+      });
+    }
+    return remote;
+  }
+
+  /**
    * Wait for the resident Host's own serialized recovery timer.  This method
    * deliberately performs read-only state polls; it never sends another
    * restore, close, release, or shutdown request while HC may still be inside
@@ -1532,14 +1570,31 @@ export class FanHostLifecycle {
       if (this.state !== 'suspended') return;
       let lastError: unknown;
       let conflictLocked = false;
-      for (let attempt = 0; attempt < RECOVERY_RETRY_DELAYS_MS.length; attempt += 1) {
+      const deadline = Date.now() + RESUME_WAIT_WINDOW_MS;
+      let attempt = 0;
+      let resumeRequested = false;
+      let terminalFailure = false;
+      while (Date.now() < deadline) {
         try {
-          if (attempt > 0) await waitForRecoveryRetry(attempt);
-          const resumedState = await this.adapter.resume();
-          const handshake = await this.adapter.handshake();
+          const remainingBeforeRequestMs = deadline - Date.now();
+          if (remainingBeforeRequestMs <= 0) break;
+          // The resident Host already owns the automatic rebuild after the
+          // power notification. Only post /api/resume once; subsequent
+          // iterations observe it and retry the read-only handshake.
+          const resumedState = resumeRequested
+            ? await this.adapter.getState(Math.min(RESUME_STATE_REQUEST_TIMEOUT_MS, Math.max(500, remainingBeforeRequestMs)))
+            : await this.adapter.resume();
+          resumeRequested = true;
+          const stableState = await this.waitForResumeHostState(resumedState, deadline);
+          const remainingBeforeHandshakeMs = deadline - Date.now();
+          if (remainingBeforeHandshakeMs <= 0) throw new Error('FAN_RESUME_WAIT_TIMEOUT');
+          const handshake = await this.adapter.handshake(
+            Math.min(RESUME_HANDSHAKE_TIMEOUT_MS, Math.max(500, remainingBeforeHandshakeMs)),
+          );
           const gate = evaluateFanDeviceGate(handshake, this.savedIdentity);
           if (!gate.allowed) {
             conflictLocked = true;
+            terminalFailure = true;
             this.setState('conflict-locked');
             throw new Error(gate.reason);
           }
@@ -1557,20 +1612,12 @@ export class FanHostLifecycle {
           // issue a second Enable/curve write against an already-live HC
           // session, which is not an HC lifecycle transition.
           let remoteAfterResume: FanState | null = null;
-          if (resumedState.state === 'Resuming') {
-            for (let poll = 0; poll < RECOVERY_OBSERVATION_MAX_ATTEMPTS; poll += 1) {
-              const remote = await this.adapter.getState();
-              if (remote.state !== 'Resuming') {
-                remoteAfterResume = remote;
-                break;
-              }
-              if (poll + 1 < RECOVERY_OBSERVATION_MAX_ATTEMPTS) {
-                await new Promise<void>((resolve) => setTimeout(resolve, RECOVERY_OBSERVATION_INTERVAL_MS));
-              }
-            }
-            if (!remoteAfterResume) throw new Error('FAN_RESUME_OBSERVATION_TIMEOUT');
-          } else if (resumedState.state === 'Ready') {
-            remoteAfterResume = await this.adapter.getState().catch(() => null);
+          if (stableState.state === 'Ready' || resumedState.state === 'Ready') {
+            remoteAfterResume = await this.adapter.getState(
+              Math.min(RESUME_STATE_REQUEST_TIMEOUT_MS, Math.max(500, deadline - Date.now())),
+            ).catch(() => stableState);
+          } else {
+            remoteAfterResume = stableState;
           }
           if (remoteAfterResume) {
             if (remoteAfterResume.state === 'FaultLocked' || remoteAfterResume.state === 'Unknown') {
@@ -1603,7 +1650,13 @@ export class FanHostLifecycle {
           this.setState('awaiting-control');
           const curveToResume = this.resumeCurve;
           if (!curveToResume) return;
-          if (!this.writeReady) throw new Error('唤醒后风扇数据路线未通过真实写入/恢复验证');
+          if (!this.writeReady) {
+            // This is a completed handshake with a known but non-write-ready
+            // route, not a transport delay. Fail closed immediately and do
+            // not turn a permission downgrade into repeated resume requests.
+            terminalFailure = true;
+            throw new Error('唤醒后风扇数据路线未通过真实写入/恢复验证');
+          }
           await this.applyMutation(curveToResume);
           this.resumeCurve = null;
           return;
@@ -1612,6 +1665,7 @@ export class FanHostLifecycle {
           fanDiagnosticLog('lifecycle.resume-failure', {
             attempt,
             state: this.state,
+            remainingMs: Math.max(0, deadline - Date.now()),
             error: error instanceof Error ? error.message : String(error),
           });
           if (isExternalFanControlConflict(error)) {
@@ -1619,6 +1673,11 @@ export class FanHostLifecycle {
             this.setState('conflict-locked');
             break;
           }
+          if (terminalFailure) break;
+          if (Date.now() >= deadline) break;
+          const retryDelayMs = Math.min(1000, Math.max(100, deadline - Date.now()));
+          await new Promise<void>((resolve) => setTimeout(resolve, retryDelayMs));
+          attempt += 1;
         }
       }
       this.activeCurve = null;

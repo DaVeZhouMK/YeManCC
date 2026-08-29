@@ -7,6 +7,8 @@ const props = withDefaults(
     color?: 'ac' | 'dc' | 'accent' | 'danger';
     disabled?: boolean;
     compact?: boolean; // 紧凑模式：用于标题行内（隐藏描述、更小间距）
+    gpRow?: number;
+    gpCol?: number;
   }>(),
   { color: 'accent', disabled: false, compact: false }
 );
@@ -28,6 +30,8 @@ const onColor = props.color === 'dc' ? 'var(--dc-accent)' : props.color === 'dan
       type="button"
       class="switch"
       :class="{ on: modelValue, compact }"
+      :data-gp-row="gpRow"
+      :data-gp-col="gpCol"
       :style="modelValue ? { background: onColor, borderColor: onColor } : {}"
       @click.stop="toggle"
     >

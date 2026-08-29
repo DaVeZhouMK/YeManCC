@@ -42,12 +42,8 @@ let lastNav = 0;
 let lastPageSwitch = -Infinity; // 切页冷却（防止连按卡顿）
 const PAGE_SWITCH_COOLDOWN = 100; // ms，原 400ms 过严致连按 LB/RB 丢按；降到 100ms 使快速切页（含切到 TDP）每次都生效
 const NAV_REPEAT_BASE = 220; // ms：普通空间导航重复间隔
-const INLINE_EDIT_REPEAT = Math.round(NAV_REPEAT_BASE / 3); // 节点编辑专用：约为普通导航的 1/3
-const INLINE_EDIT_REPEAT_INITIAL = Math.max(5, Math.round(INLINE_EDIT_REPEAT / 3)); // ms：图形节点起始连发约为原来的 3 倍
-const INLINE_EDIT_REPEAT_MIN = 5; // ms：图形节点线性加速后的最快连发间隔
-const INLINE_EDIT_ACCELERATION_WINDOW = 600; // ms：从起始速度线性加速到最快速度
+const FAN_NODE_EDIT_REPEAT = Math.max(5, Math.round(NAV_REPEAT_BASE / 4)); // ms：风扇节点固定为全局导航的 4 倍速度（220 / 4 = 55）
 // 滑块线性加速：按住越久步长越大、间隔越短
-// ⚠️ 速度参数需与 native 手柄 Start+方向 自动连发保持一致（见 main.cpp 注释），修改时两边同步。
 let sliderAccelStart = 0;  // 本次按住起始时间（用于线性加速）
 let sliderLastApply = 0;   // 上次应用加速步进的时间
 const SLIDER_REPEAT_BASE = 150; // ms：基础重复间隔（原 45，放慢 30%+，短按只调 1 次）
@@ -91,10 +87,25 @@ function resetInlineEditCadence(): void {
   inlineEditLastRepeatAt = 0;
 }
 
-function inlineEditRepeatInterval(element: HTMLElement | null, now: number, directionKey: string): number {
+function activeFanNodeEditor(): HTMLElement | null {
+  const active = document.activeElement as HTMLElement | null;
+  const activeEditor = active?.closest<HTMLElement>(
+    '[data-gp-inline-edit-active="true"][data-gp-inline-edit-scope="fan-curve-node"]',
+  );
+  if (activeEditor) return activeEditor;
+  // Vue updates aria/class state one render turn after HTMLElement.click().
+  // Keep the armed node usable during that turn, even if WebView2 reports a
+  // transient focus target outside the graph button.
+  return document.querySelector<HTMLElement>(
+    '[data-gp-inline-edit-scope="fan-curve-node"][data-gp-inline-edit-active="true"], ' +
+    '[data-gp-inline-edit-scope="fan-curve-node"][aria-pressed="true"]',
+  );
+}
+
+function fanNodeEditRepeatInterval(element: HTMLElement | null, now: number, directionKey: string): number {
   if (!element || directionKey === '') {
     resetInlineEditCadence();
-    return INLINE_EDIT_REPEAT;
+    return FAN_NODE_EDIT_REPEAT;
   }
   if (directionKey !== inlineEditDirectionKey) {
     inlineEditDirectionKey = directionKey;
@@ -102,12 +113,9 @@ function inlineEditRepeatInterval(element: HTMLElement | null, now: number, dire
     inlineEditLastRepeatAt = now;
   }
   const configured = Number(element.dataset.gpInlineEditRepeatMs);
-  const minimum = Number.isFinite(configured)
-    ? Math.max(INLINE_EDIT_REPEAT_MIN, Math.floor(configured))
-    : INLINE_EDIT_REPEAT_MIN;
-  const progress = Math.min(1, Math.max(0, (now - inlineEditStartedAt) / INLINE_EDIT_ACCELERATION_WINDOW));
-  return Math.max(minimum, Math.round(INLINE_EDIT_REPEAT_INITIAL -
-    (INLINE_EDIT_REPEAT_INITIAL - minimum) * progress));
+  return Number.isFinite(configured)
+    ? Math.max(5, Math.floor(configured))
+    : FAN_NODE_EDIT_REPEAT;
 }
 
 // ── LB/RB 切页防误触（LB+RB 呼出组合）──
@@ -118,7 +126,7 @@ let lbNavPending = false; // LB 按下边沿待裁决
 let rbNavPending = false; // RB 按下边沿待裁决
 let summonSuppress = false; // 呼出后直到 LB/RB 全释放前抑制切页（呼出动作本身不产生页面移动）
 let shoulderReleaseLockUntil = 0; // 组合键松开后的防抖窗口，丢弃释放抖动产生的单键边沿
-const SUMMON_POST_RELEASE_LOCKOUT_MS = 225;
+const SUMMON_POST_RELEASE_LOCKOUT_MS = 100;
 // Native focus and WebView2 compositor visibility settle independently. Keep
 // a short, cancellable focus session so a summon that races a restore/repaint
 // cannot leave the DOM without a gamepad focus target.
@@ -496,6 +504,15 @@ function moveGameRuleFocus(menu: HTMLElement, base: HTMLElement, dy: number): HT
   });
   const hasEditorDropdown = !!body.querySelector<HTMLElement>('[data-gp-rule-editor-kind]');
 
+  // “编辑黑名单/编辑白名单” is one horizontal row. When neither editor is
+  // expanded, Down must stop here instead of using the next DOM control
+  // (which is the other button in this same row).
+  if (dy > 0 &&
+      (marker === 'editor-blacklist' || marker === 'editor-whitelist') &&
+      !hasEditorDropdown) {
+    return null;
+  }
+
   // 未识别游戏时不显示“排除当前游戏”这一行。编辑黑/白名单仍然是同一
   // 个水平行；编辑器已展开时，向下仍须进入名单内容，未展开时则不能
   // 把另一列误判成下一层，垂直移动落到“关闭页面”。
@@ -539,7 +556,6 @@ function moveGameRuleFocus(menu: HTMLElement, base: HTMLElement, dy: number): HT
   if (dy > 0 && (marker === 'editor-blacklist' || marker === 'editor-whitelist')) {
     return controls.find((el) => el.dataset.gpRuleFocus === 'rule-item')
       || body.querySelector<HTMLElement>('[data-gp-rule-focus="manual-input"]')
-      || controls[activeIndex + 1]
       || null;
   }
 
@@ -634,7 +650,7 @@ function moveFocus(dx: number, dy: number) {
   // 可见的入口和可见的独立气泡内容都是真实焦点目标；只有 v-if 已移除、
   // inert/aria-hidden 或不可见的内容才由 focusables() 排除。
   const navEls = els;
-  const cur = document.activeElement as HTMLElement | null;
+  const cur = activeFanNodeEditor() || document.activeElement as HTMLElement | null;
   // 当前焦点元素必须在列表中，否则从第一个开始
   const baseIdx = cur ? navEls.indexOf(cur) : -1;
   const base = baseIdx >= 0 ? navEls[baseIdx] : navEls[0];
@@ -1072,6 +1088,10 @@ function dispatchNativeUiAction(opts: GamepadEngineOptions, action: NativeUiActi
 
   const dx = action === 'nav-right' ? 1 : action === 'nav-left' ? -1 : 0;
   const dy = action === 'nav-down' ? 1 : action === 'nav-up' ? -1 : 0;
+  // Fan curve editing is handled by the renderer's node-local cadence below.
+  // Drop the slower native repeat for this one focused node so it cannot add
+  // duplicate steps on top of the 30ms -> 5ms fan-node path.
+  if (nativeUiInputActive && (dx !== 0 || dy !== 0) && activeFanNodeEditor()) return;
   if (sliderEditMode && isRangeInput(document.activeElement as HTMLElement)) {
     if (dx !== 0) adjustSlider(dx);
     else if (dy !== 0) sliderEditMode = false;
@@ -1152,7 +1172,29 @@ function tick(opts: GamepadEngineOptions) {
 
     // Native Raw Input is the primary path after it has delivered one UI
     // action. Keep the browser API as a fallback for non-XInput devices.
-    if (nativeChildInputOwned || nativeUiInputActive) {
+    const fanNodeEditor = activeFanNodeEditor();
+    if (nativeChildInputOwned || (nativeUiInputActive && !fanNodeEditor)) {
+      prevButtons = b;
+      prevAxes = a;
+      rafId = requestAnimationFrame(() => tick(opts));
+      return;
+    }
+
+    // Native navigation remains global and conservative. Only an armed fan
+    // curve node gets the renderer-side accelerated repeat, and only for
+    // directional input; A/B/LB/RB remain on the native path.
+    if (nativeUiInputActive && fanNodeEditor) {
+      const dirX = heldRight ? 1 : heldLeft ? -1 : 0;
+      const dirY = heldDown ? 1 : heldUp ? -1 : 0;
+      const editDirectionKey = dirX !== 0 ? `x:${dirX}` : dirY !== 0 ? `y:${dirY}` : '';
+      const directionChanged = editDirectionKey !== '' && editDirectionKey !== inlineEditDirectionKey;
+      const repeatInterval = fanNodeEditRepeatInterval(fanNodeEditor, now, editDirectionKey);
+      if ((dirX !== 0 || dirY !== 0) && (directionChanged || now - inlineEditLastRepeatAt > repeatInterval)) {
+        if (dirX !== 0) moveFocus(dirX, 0);
+        else moveFocus(0, dirY);
+        inlineEditLastRepeatAt = now;
+      }
+      if (dirX === 0 && dirY === 0) resetInlineEditCadence();
       prevButtons = b;
       prevAxes = a;
       rafId = requestAnimationFrame(() => tick(opts));
@@ -1248,19 +1290,20 @@ function tick(opts: GamepadEngineOptions) {
         // （见上方 sliderEditMode 分支）。这修复了“焦点一上滑块、左右就被吃掉、无法选后续元素”。
         const dirX = heldRight ? 1 : heldLeft ? -1 : 0;
         const dirY = heldDown ? 1 : heldUp ? -1 : 0;
-        const inlineEditActive = (document.activeElement as HTMLElement | null)
-          ?.closest<HTMLElement>('[data-gp-inline-edit-active="true"]');
+        const inlineEditActive = activeFanNodeEditor();
         // A diagonal input is dispatched as one horizontal move by moveFocus;
         // use the same effective direction for the graph editor's acceleration
         // clock so changing axes never inherits the previous hold speed.
         const editDirectionKey = inlineEditActive
           ? (dirX !== 0 ? `x:${dirX}` : dirY !== 0 ? `y:${dirY}` : '')
           : '';
+        const editDirectionChanged = inlineEditActive && editDirectionKey !== inlineEditDirectionKey;
         const repeatInterval = inlineEditActive
-          ? inlineEditRepeatInterval(inlineEditActive, now, editDirectionKey)
+          ? fanNodeEditRepeatInterval(inlineEditActive, now, editDirectionKey)
           : NAV_REPEAT_BASE;
         const repeatClock = inlineEditActive ? inlineEditLastRepeatAt : lastNav;
-        if ((dirX !== 0 || dirY !== 0) && now - repeatClock > repeatInterval) {
+        if ((dirX !== 0 || dirY !== 0) &&
+          (editDirectionChanged || now - repeatClock > repeatInterval)) {
           // ── 下拉菜单打开（teleport 到 body）时：只上下在菜单项内移动高亮，
           //    焦点严格限制在菜单内，不穿透到下层页面（修复手柄上下选出菜单外内容）；
           //    左右方向键不做事（与鼠标菜单一致，不再循环档位）──

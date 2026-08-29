@@ -3759,7 +3759,6 @@ static DWORD WINAPI autoCloseThread(LPVOID) {
 #define SUMMON_FOCUS_TIMER_ID 0x5A31
 #define RETURN_GAME_FOCUS_TIMER_ID 0x5A32
 #define GP_HOLD_TIMER_ID 0x5A33  // 手柄快捷键"按住0.5s/连发"复检（仅按住期间运行）
-#define GP_HOLD_TIMER_INTERVAL_MS 10 // 支持曲线节点 30ms 起步的连发复检
 #define FOCUS_DISPLAY_TIMER_ID 0x5A34
 
 static void showWindowAnimated(HWND hwnd, int showCmd, bool activate);
@@ -4116,14 +4115,21 @@ static FocusTargetSnapshot focusCaptureForegroundTarget() {
 
 static bool focusMainWindowIsForeground() {
     HWND foreground = GetForegroundWindow();
-    if (!foreground) return false;
-    DWORD pid = 0;
-    GetWindowThreadProcessId(foreground, &pid);
-    return pid == GetCurrentProcessId();
+    if (!foreground || !g_hwnd || !IsWindow(g_hwnd)) return false;
+    // A PID-only check can report success for another popup/child window in
+    // this process while the actual WebView host is not foreground.  Compare
+    // the root-owner window so retries stop only after YMCC itself is active.
+    const HWND mainRoot = GetAncestor(g_hwnd, GA_ROOTOWNER);
+    const HWND foregroundRoot = GetAncestor(foreground, GA_ROOTOWNER);
+    return foreground == g_hwnd || (mainRoot && foregroundRoot == mainRoot);
 }
 
 static bool refocusWebView(bool allowAltFallback = false) {
     if (!g_hwnd || !IsWindow(g_hwnd)) return false;
+    // Do not bypass showWindowAnimated()'s first-frame gate.  Focusing the
+    // transparent native shell before WebView2/Vue is ready can consume the
+    // summon retry and leave the controller without a DOM focus target.
+    if (!g_webviewReady) return false;
     if (IsIconic(g_hwnd) || !IsWindowVisible(g_hwnd)) ShowWindow(g_hwnd, SW_RESTORE);
     auto attempt = []() -> bool {
         HWND foreground = GetForegroundWindow();
@@ -4249,9 +4255,12 @@ static HWND resolvePreviousFocusWindow(bool allowGameFallback = false) {
 static bool focusForegroundMatchesTarget() {
     if (!g_focusSession.target.valid) return false;
     HWND foreground = GetForegroundWindow();
-    DWORD pid = 0;
-    if (foreground) GetWindowThreadProcessId(foreground, &pid);
-    return pid != 0 && pid == g_focusSession.target.pid;
+    if (!foreground || !g_focusSession.target.hwnd || !IsWindow(g_focusSession.target.hwnd))
+        return false;
+    const HWND targetRoot = GetAncestor(g_focusSession.target.hwnd, GA_ROOTOWNER);
+    const HWND foregroundRoot = GetAncestor(foreground, GA_ROOTOWNER);
+    return foreground == g_focusSession.target.hwnd ||
+           (targetRoot && foregroundRoot == targetRoot);
 }
 
 static bool refocusPreviousWindow() {
@@ -4578,7 +4587,7 @@ static void queueSummonGameRegistration(
 // RIDEV_DEVNOTIFY 收插拔），OS 仅在手柄状态变化时投递 WM_INPUT，空闲=0 CPU。
 // 收到 WM_INPUT 后用 XInputGetState 读权威按键态（映射稳定，无需解析 HID 报表），
 // gamepadEval() 做边沿+计时器驱动的全局快捷键。所有"按住0.5s"用一次性计时器，
-// 仅按住期间运行（10ms 复检），松开即停 → 空闲零占用。
+// 仅按住期间运行（50ms 复检），松开即停 → 空闲零占用。
 // Native publishes gamepad.state for the renderer. WebView2 Gamepad API is
 // intentionally not part of the application input path after sleep recovery.
 static bool g_padConnected   = false;
@@ -4612,7 +4621,6 @@ static bool g_uiSummonShoulderHeld = false;
 static ULONGLONG g_uiShoulderSuppressUntil = 0;
 static int g_uiNavX = 0;
 static int g_uiNavY = 0;
-static ULONGLONG g_uiNavHoldStartTick = 0;
 static ULONGLONG g_uiNavLastEmitTick = 0;
 static int g_uiSliderTriggerDirection = 0;
 static ULONGLONG g_uiSliderTriggerLastEmitTick = 0;
@@ -4620,20 +4628,7 @@ static bool g_uiStartPending = false;
 static bool g_uiStartUsedAsModifier = false;
 static constexpr ULONGLONG GP_UI_SHOULDER_DECISION_MS = 50ULL;
 static constexpr ULONGLONG GP_UI_NAV_REPEAT_MS = 220ULL;
-static constexpr ULONGLONG GP_UI_NAV_REPEAT_INITIAL_MS = 30ULL;
-static constexpr ULONGLONG GP_UI_NAV_REPEAT_MIN_MS = 5ULL;
-static constexpr ULONGLONG GP_UI_NAV_ACCELERATION_WINDOW_MS = 600ULL;
 static constexpr SHORT GP_UI_THUMB_THRESHOLD = 16000;
-
-static ULONGLONG gamepadUiNavRepeatMs(ULONGLONG now) {
-    if (g_uiNavHoldStartTick == 0 || now <= g_uiNavHoldStartTick)
-        return GP_UI_NAV_REPEAT_INITIAL_MS;
-    const ULONGLONG elapsed = std::min(
-        now - g_uiNavHoldStartTick, GP_UI_NAV_ACCELERATION_WINDOW_MS);
-    const ULONGLONG range = GP_UI_NAV_REPEAT_INITIAL_MS - GP_UI_NAV_REPEAT_MIN_MS;
-    const ULONGLONG decrease = range * elapsed / GP_UI_NAV_ACCELERATION_WINDOW_MS;
-    return GP_UI_NAV_REPEAT_INITIAL_MS - decrease;
-}
 
 static void gamepadReadState() {
     bool live = false;
@@ -4711,7 +4706,6 @@ static void gamepadResetNativeState(bool requireRelease) {
     g_uiSummonShoulderHeld = false;
     g_uiShoulderSuppressUntil = 0;
     g_uiNavX = g_uiNavY = 0;
-    g_uiNavHoldStartTick = 0;
     g_uiNavLastEmitTick = 0;
     g_uiSliderTriggerDirection = 0;
     g_uiSliderTriggerLastEmitTick = 0;
@@ -4909,7 +4903,6 @@ static void gamepadProcessUiInput(WORD w, ULONGLONG now) {
         g_uiStartPending = false;
         g_uiStartUsedAsModifier = false;
         g_uiNavX = g_uiNavY = 0;
-        g_uiNavHoldStartTick = 0;
         return;
     }
 
@@ -4929,8 +4922,8 @@ static void gamepadProcessUiInput(WORD w, ULONGLONG now) {
     } else if (g_uiSummonShoulderHeld) {
         if (!lb && !rb) {
             g_uiSummonShoulderHeld = false;
-            // 呼出组合松开后的肩键硬直减半，避免 RB/LB 切页被无谓地锁住。
-            g_uiShoulderSuppressUntil = now + 225ULL;
+            // 呼出组合松开后的短暂防抖，避免释放抖动误触切页。
+            g_uiShoulderSuppressUntil = now + 100ULL;
         }
         g_uiShoulderPending = 0;
     } else if (now < g_uiShoulderSuppressUntil) {
@@ -4971,7 +4964,6 @@ static void gamepadProcessUiInput(WORD w, ULONGLONG now) {
         }
         if (up || down || left || right) g_uiStartUsedAsModifier = true;
         g_uiNavX = g_uiNavY = 0;
-        g_uiNavHoldStartTick = 0;
         return;
     }
     if (g_uiStartPending && (g_prevW & XINPUT_GAMEPAD_START) != 0) {
@@ -4994,13 +4986,9 @@ static void gamepadProcessUiInput(WORD w, ULONGLONG now) {
     }
     if (navX == 0 && navY == 0) {
         g_uiNavX = g_uiNavY = 0;
-        g_uiNavHoldStartTick = 0;
         return;
     }
-    const bool directionChanged = navX != g_uiNavX || navY != g_uiNavY;
-    const ULONGLONG repeatMs = gamepadUiNavRepeatMs(now);
-    if (directionChanged || now - g_uiNavLastEmitTick >= repeatMs) {
-        if (directionChanged) g_uiNavHoldStartTick = now;
+    if (navX != g_uiNavX || navY != g_uiNavY || now - g_uiNavLastEmitTick >= GP_UI_NAV_REPEAT_MS) {
         if (navX != 0) gamepadEmitUiAction(navX > 0 ? "nav-right" : "nav-left");
         else gamepadEmitUiAction(navY > 0 ? "nav-down" : "nav-up");
         g_uiNavX = navX;
@@ -5078,7 +5066,7 @@ static void gamepadEval() {
         gamepadProcessUiInput(w, now);
         if (gpAnyShortcutHeld()) {
             if (!g_gpHoldTimerOn) {
-                SetTimer(g_hwnd, GP_HOLD_TIMER_ID, GP_HOLD_TIMER_INTERVAL_MS, nullptr);
+                SetTimer(g_hwnd, GP_HOLD_TIMER_ID, 50, nullptr);
                 g_gpHoldTimerOn = true;
             }
         } else if (g_gpHoldTimerOn) {
@@ -5231,7 +5219,7 @@ static void gamepadEval() {
 
     // 持有计时器：仅在有相关键按下时运行（空闲自动停 -> 0 CPU）
     if (gpAnyShortcutHeld()) {
-        if (!g_gpHoldTimerOn) { SetTimer(g_hwnd, GP_HOLD_TIMER_ID, GP_HOLD_TIMER_INTERVAL_MS, nullptr); g_gpHoldTimerOn = true; }
+        if (!g_gpHoldTimerOn) { SetTimer(g_hwnd, GP_HOLD_TIMER_ID, 50, nullptr); g_gpHoldTimerOn = true; }
     } else if (g_gpHoldTimerOn) {
         KillTimer(g_hwnd, GP_HOLD_TIMER_ID);
         g_gpHoldTimerOn = false;
@@ -16680,6 +16668,21 @@ static void finalizeWebViewRenderReady(
         showWindowAnimated(g_hwnd, showCmd, true);
         UpdateWindow(g_hwnd);
     }
+
+    // The summon may have requested focus while the first frame was still
+    // pending.  Now that WebView2 is ready, give the native focus state
+    // machine one immediate attempt and retain its bounded retry as fallback.
+    if (g_focusSession.active && !g_focusSession.returning &&
+        IsWindowVisible(g_hwnd) && !IsIconic(g_hwnd)) {
+        if (refocusWebView(true)) {
+            KillTimer(g_hwnd, SUMMON_FOCUS_TIMER_ID);
+            g_summonFocusRetries = 0;
+            g_summonAltTried = false;
+        } else {
+            SetTimer(g_hwnd, SUMMON_FOCUS_TIMER_ID, 80, nullptr);
+        }
+    }
+
     // 主界面已经完成首帧并显示后立刻关闭启动页；不设置最短展示时长。
     closeSplash();
 

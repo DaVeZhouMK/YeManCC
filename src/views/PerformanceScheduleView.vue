@@ -111,6 +111,8 @@ let stopMonitorChart: (() => void) | null = null;
 let offFloatUpdate: (() => void) | null = null;
 let offScheduleWarning: (() => void) | null = null;
 let statusHideTimer: ReturnType<typeof setTimeout> | null = null;
+let warningHideTimer: ReturnType<typeof setTimeout> | null = null;
+const SCHEDULE_WARNING_VISIBLE_MS = 5_000;
 type ModeApplyRequest = { side: PowerSide; mode: ScheduleMode; revision: number };
 const pendingModeApply: Record<PowerSide, ModeApplyRequest | null> = { ac: null, dc: null };
 let modeApplyRunning = false;
@@ -365,6 +367,19 @@ watch([statusMsg, errMsg], ([status, error]) => {
     statusHideTimer = null;
   }, 10_000);
 });
+
+function showScheduleWarning(message: string): void {
+  if (warningHideTimer !== null) {
+    clearTimeout(warningHideTimer);
+    warningHideTimer = null;
+  }
+  warningMsg.value = message;
+  if (!message) return;
+  warningHideTimer = setTimeout(() => {
+    warningMsg.value = '';
+    warningHideTimer = null;
+  }, SCHEDULE_WARNING_VISIBLE_MS);
+}
 
 // 滑块拖动超出当前上限时，自动抬升上限下拉（避免上限卡住导致滑块不能再往右拖）
 watch(() => editingDraft.value?.tdpMax, (val) => {
@@ -740,9 +755,9 @@ onMounted(async () => {
   offFloatUpdate = onFloatUpdate((info) => {
     floatInfo.value = info;
   });
-  warningMsg.value = getPerformanceScheduleWarning()?.message ?? '';
+  showScheduleWarning(getPerformanceScheduleWarning()?.message ?? '');
   offScheduleWarning = onPerformanceScheduleWarning((warning) => {
-    warningMsg.value = warning.message;
+    showScheduleWarning(warning.message);
   });
   sampleMonitor();
 });
@@ -824,6 +839,7 @@ onUnmounted(() => {
   window.removeEventListener('gamepad:performance-mode-changed', onGamepadPerformanceModeChanged);
   document.removeEventListener('pointerdown', onResetDocPointer);
   if (statusHideTimer !== null) clearTimeout(statusHideTimer);
+  if (warningHideTimer !== null) clearTimeout(warningHideTimer);
 });
 </script>
 

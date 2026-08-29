@@ -287,6 +287,9 @@ export function setGamepadFocused(el: HTMLElement | null): void {
 /** Programmatic focus entry point for controller navigation and modal restore. */
 export function focusGamepadElement(el: HTMLElement | null): boolean {
   if (!el || !el.isConnected || el.hasAttribute('disabled')) return false;
+  // data-gp-ignore is an explicit product decision: the control may remain
+  // clickable by mouse/touch, but controller focus must never land on it.
+  if (el.matches('[data-gp-ignore]') || el.closest('[data-gp-ignore]')) return false;
   if (el.getAttribute('aria-hidden') === 'true' || el.closest('[hidden], [inert], [aria-hidden="true"]')) return false;
   const style = getComputedStyle(el);
   if (style.display === 'none' || style.visibility === 'hidden') return false;

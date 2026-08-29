@@ -70,8 +70,8 @@ export interface FanState {
 }
 export interface FanApiAdapter {
   readonly enabled: boolean;
-  handshake(): Promise<FanHandshake>;
-  getState(): Promise<FanState>;
+  handshake(timeoutMs?: number): Promise<FanHandshake>;
+  getState(timeoutMs?: number): Promise<FanState>;
   enable(nodes: readonly FanNode[], leaseId?: string): Promise<FanState>;
   applyPreset(name: FanPreset, leaseId?: string, nodes?: readonly FanNode[]): Promise<FanState>;
   disable(leaseId?: string): Promise<FanState>;
@@ -191,7 +191,10 @@ export class HttpFanApiAdapter implements FanApiAdapter {
   private sessionToken?: string;
   constructor(private readonly baseUrl: string, sessionToken?: string) { this.sessionToken = sessionToken; }
   setSessionToken(token: string): void { this.sessionToken = token; }
-  private timeoutFor(path: string): number {
+  private timeoutFor(path: string, overrideMs?: number): number {
+    if (Number.isFinite(overrideMs) && overrideMs !== undefined && overrideMs > 0) {
+      return Math.max(500, Math.floor(overrideMs));
+    }
     if (path === '/api/shutdown') return 1500;
     // HC Window_Closed waits without a finite deadline for ManagerFactory
     // initialization, then owns one virtual Close. Keep the transport open
@@ -201,7 +204,7 @@ export class HttpFanApiAdapter implements FanApiAdapter {
     if (path === '/api/restore' || path === '/api/suspend') return 10000;
     return 5000;
   }
-  private async request(path: string, method: 'GET' | 'POST', body?: unknown): Promise<any> {
+  private async request(path: string, method: 'GET' | 'POST', body?: unknown, timeoutMs?: number): Promise<any> {
     const startedAt = Date.now();
     const bodyText = body === undefined ? undefined : JSON.stringify(body);
     let responseReceived = false;
@@ -213,7 +216,7 @@ export class HttpFanApiAdapter implements FanApiAdapter {
           ...(this.sessionToken ? { 'X-YeMan-Fan-Session': this.sessionToken } : {}),
         },
         body: bodyText,
-        timeoutMs: this.timeoutFor(path),
+        timeoutMs: this.timeoutFor(path, timeoutMs),
       });
       responseReceived = true;
       const parsed = JSON.parse(response.body || '{}');
@@ -254,8 +257,8 @@ export class HttpFanApiAdapter implements FanApiAdapter {
     const parsed = await this.request(path, 'POST', body);
     return (parsed.state ?? parsed) as FanState;
   }
-  handshake(): Promise<FanHandshake> { return this.request('/api/handshake', 'POST'); }
-  async getState(): Promise<FanState> { return (await this.request('/api/state', 'GET')).state as FanState; }
+  handshake(timeoutMs?: number): Promise<FanHandshake> { return this.request('/api/handshake', 'POST', undefined, timeoutMs); }
+  async getState(timeoutMs?: number): Promise<FanState> { return (await this.request('/api/state', 'GET', undefined, timeoutMs)).state as FanState; }
   async enable(nodes: readonly FanNode[], leaseId?: string): Promise<FanState> {
     return (await this.request('/api/enable', 'POST', { nodes, ...(leaseId ? { leaseId } : {}) })).state as FanState;
   }

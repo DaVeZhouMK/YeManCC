@@ -10,7 +10,7 @@ import {
   type DetectedGame,
 } from '@/bridge/gamedetect';
 import { on as onIpc } from '@/bridge/ipc';
-import { focusGamepadElement } from '@/gamepad/focus';
+import { focusGamepadElement, setGamepadFocused } from '@/gamepad/focus';
 import { getLockedGameTarget, isGameTargetSame, unlockGameTarget } from '@/bridge/gameQuickSession';
 
 type SummonCandidate = {
@@ -149,12 +149,20 @@ function openGameRuleRoot(): void {
 
 function closeQuickMenu(): void {
   gameRuleMenu.value = null;
-  nextTick(() => focusGamepadElement(gameRuleTriggerEl.value));
+  // 顶部识别入口只保留鼠标/触屏点击；Y 是它的手柄入口，因此关闭后也
+  // 不把 DOM/视觉焦点恢复到这里，避免再次出现“手柄可选中”的假象。
+  nextTick(() => {
+    gameRuleTriggerEl.value?.blur();
+    setGamepadFocused(null);
+  });
 }
 
 function closeGameRuleMenus(): void {
   gameRuleMenu.value = null;
-  nextTick(() => focusGamepadElement(gameRuleTriggerEl.value));
+  nextTick(() => {
+    gameRuleTriggerEl.value?.blur();
+    setGamepadFocused(null);
+  });
 }
 
 function beginSummonIdentification(detail: SummonCandidate): void {
@@ -323,6 +331,7 @@ onUnmounted(() => {
       :disabled="false"
       data-gp-group="game-recognition"
       data-gp-global-y
+      data-gp-ignore
       :title="recognitionTitle"
       @click="openGameRuleRoot"
     >
