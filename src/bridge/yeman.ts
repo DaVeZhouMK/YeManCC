@@ -1308,6 +1308,13 @@ function cpuProfileSideValues(p: PowerParams, side: 'ac' | 'dc') {
     : { freq: p.dcFreq, turbo: p.dcTurbo, aggr: p.dcAggr };
 }
 
+class CpuProfileReadbackMismatchError extends Error {
+  constructor(side: 'ac' | 'dc', detail: string) {
+    super(`CPU 挡位回读不一致（${side.toUpperCase()}）：${detail}`);
+    this.name = 'CpuProfileReadbackMismatchError';
+  }
+}
+
 async function verifyCpuProfilePowerParams(p: PowerParams, side: 'ac' | 'dc'): Promise<void> {
   const expected = cpuProfileSideValues(p, side);
   const ac = side === 'ac';
@@ -1330,9 +1337,14 @@ async function verifyCpuProfilePowerParams(p: PowerParams, side: 'ac' | 'dc'): P
     mismatches.push(`节流 ${throttle}/${expectedThrottle}`);
   }
   if (mismatches.length > 0) {
-    throw new Error(`CPU 挡位回读不一致（${side.toUpperCase()}）：${mismatches.join('，')}`);
+    throw new CpuProfileReadbackMismatchError(side, mismatches.join('，'));
   }
 }
+
+// Windows/OEM 在 /setactive 后可能需要一个很短的时间把新 CPU 参数装载到
+// 活动策略。固定档位保存只对“写入成功但回读暂时不一致”做有限重试，避免把
+// 浮动控制器的尾随写入误报成硬件故障；其他写入错误仍立即向上抛出。
+const CPU_PROFILE_READBACK_RETRY_DELAYS_MS = [0, 160, 360] as const;
 
 // 自动模式的固定 CPU 挡位必须与 CPU 页面保存值完全一致。这里只写当前供电侧，
 // 避免 AC 档位覆盖尚未激活的 DC 组合（反之亦然）；模板脚本仅由“重置挡位”调用。
@@ -1354,9 +1366,24 @@ export async function applyCpuProfilePowerParams(p: PowerParams, side: 'ac' | 'd
     [PW.G_MIN2, minState],
     [PW.G_MIN3, minState],
   ];
-  await applyPowerValueBatchStrict(side === 'ac', entries);
-  await setActiveScheme(PW.YEMAN);
-  await verifyCpuProfilePowerParams(p, side);
+  for (let attempt = 0; attempt < CPU_PROFILE_READBACK_RETRY_DELAYS_MS.length; attempt += 1) {
+    if (attempt > 0) {
+      await new Promise<void>((resolve) => {
+        window.setTimeout(resolve, CPU_PROFILE_READBACK_RETRY_DELAYS_MS[attempt]);
+      });
+    }
+    try {
+      await applyPowerValueBatchStrict(side === 'ac', entries);
+      await setActiveScheme(PW.YEMAN);
+      await verifyCpuProfilePowerParams(p, side);
+      return;
+    } catch (error) {
+      if (!(error instanceof CpuProfileReadbackMismatchError) ||
+          attempt === CPU_PROFILE_READBACK_RETRY_DELAYS_MS.length - 1) {
+        throw error;
+      }
+    }
+  }
 }
 
 // 应用 CPU 调度参数（对齐 HTA pw_applyNow：setac/dcvalueindex 全量下发）
