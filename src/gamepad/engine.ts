@@ -511,6 +511,12 @@ function moveGameRuleFocus(menu: HTMLElement, base: HTMLElement, dy: number): HT
     if (effectiveKind !== 'blacklist' && effectiveKind !== 'whitelist') return null;
     return controls.find((el) => el.dataset.gpRuleFocus === `${prefix}-${effectiveKind}`) || null;
   };
+  const lastRuleItem = (): HTMLElement | null => {
+    for (let index = controls.length - 1; index >= 0; index -= 1) {
+      if (controls[index].dataset.gpRuleFocus === 'rule-item') return controls[index];
+    }
+    return null;
+  };
 
   const hasCurrentActions = controls.some((el) => {
     const value = el.dataset.gpRuleFocus || '';
@@ -549,13 +555,19 @@ function moveGameRuleFocus(menu: HTMLElement, base: HTMLElement, dy: number): HT
     return controls.find((el) => el.dataset.gpRuleFocus === 'manual-input') || null;
   }
 
+  // The input and its confirmation button are the final row of the active
+  // editor. Their Up direction must enter the last actual rule item in this
+  // same blacklist/whitelist, including when no current game is recognized;
+  // otherwise the outer menu fallback can incorrectly jump back to FSR.
+  if (dy < 0 && (marker === 'manual-input' || marker === 'manual-confirm')) {
+    return lastRuleItem() || sameKindTarget('editor') || null;
+  }
+
   // The list belongs to the matching add action, not to the first button in
   // the two-column action row. This keeps blacklist and whitelist aligned when
   // moving back up from any item, the manual input, or +添加.
   if (dy < 0 && (
     marker === 'rule-item' ||
-    marker === 'manual-input' ||
-    marker === 'manual-confirm' ||
     marker === 'file-add' ||
     marker === 'editor-blacklist' ||
     marker === 'editor-whitelist'
