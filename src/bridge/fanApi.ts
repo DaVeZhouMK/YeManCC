@@ -1,5 +1,5 @@
 import { http } from './api';
-import { fanDiagnosticLog } from './fanDiagnostics';
+import { fanDiagnosticLog, getFanDiagnosticPowerGeneration } from './fanDiagnostics';
 
 /** Main-program boundary for the imported Fan API. Disabled by default. */
 export type FanPreset = 'soft' | 'balanced' | 'aggressive';
@@ -70,8 +70,8 @@ export interface FanState {
 }
 export interface FanApiAdapter {
   readonly enabled: boolean;
-  handshake(): Promise<FanHandshake>;
-  getState(): Promise<FanState>;
+  handshake(timeoutMs?: number): Promise<FanHandshake>;
+  getState(timeoutMs?: number): Promise<FanState>;
   enable(nodes: readonly FanNode[], leaseId?: string): Promise<FanState>;
   applyPreset(name: FanPreset, leaseId?: string, nodes?: readonly FanNode[]): Promise<FanState>;
   disable(leaseId?: string): Promise<FanState>;
@@ -88,6 +88,22 @@ export interface FanApiAdapter {
   /** Request the resident Host to exit only after close/restore succeeds. */
   shutdown(): Promise<void>;
   setSessionToken?(token: string): void;
+}
+
+/** Structured transport/HTTP failure consumed by lifecycle and UI gates.
+ * `message` remains compatible with existing localized error handling. */
+export class FanApiError extends Error {
+  readonly status: number;
+  readonly errorCode?: string;
+  readonly generation: number;
+
+  constructor(message: string, status: number, errorCode?: string) {
+    super(message);
+    this.name = 'FanApiError';
+    this.status = status;
+    this.errorCode = errorCode;
+    this.generation = getFanDiagnosticPowerGeneration();
+  }
 }
 
 function responseHeader(headers: string, name: string): string | undefined {
@@ -175,7 +191,10 @@ export class HttpFanApiAdapter implements FanApiAdapter {
   private sessionToken?: string;
   constructor(private readonly baseUrl: string, sessionToken?: string) { this.sessionToken = sessionToken; }
   setSessionToken(token: string): void { this.sessionToken = token; }
-  private timeoutFor(path: string): number {
+  private timeoutFor(path: string, overrideMs?: number): number {
+    if (Number.isFinite(overrideMs) && overrideMs !== undefined && overrideMs > 0) {
+      return Math.max(500, Math.floor(overrideMs));
+    }
     if (path === '/api/shutdown') return 1500;
     // HC Window_Closed waits without a finite deadline for ManagerFactory
     // initialization, then owns one virtual Close. Keep the transport open
@@ -185,7 +204,7 @@ export class HttpFanApiAdapter implements FanApiAdapter {
     if (path === '/api/restore' || path === '/api/suspend') return 10000;
     return 5000;
   }
-  private async request(path: string, method: 'GET' | 'POST', body?: unknown): Promise<any> {
+  private async request(path: string, method: 'GET' | 'POST', body?: unknown, timeoutMs?: number): Promise<any> {
     const startedAt = Date.now();
     const bodyText = body === undefined ? undefined : JSON.stringify(body);
     let responseReceived = false;
@@ -197,7 +216,7 @@ export class HttpFanApiAdapter implements FanApiAdapter {
           ...(this.sessionToken ? { 'X-YeMan-Fan-Session': this.sessionToken } : {}),
         },
         body: bodyText,
-        timeoutMs: this.timeoutFor(path),
+        timeoutMs: this.timeoutFor(path, timeoutMs),
       });
       responseReceived = true;
       const parsed = JSON.parse(response.body || '{}');
@@ -209,6 +228,7 @@ export class HttpFanApiAdapter implements FanApiAdapter {
         ok: response.status >= 200 && response.status < 300 && parsed.ok !== false,
         durationMs: Date.now() - startedAt,
         requestId: responseHeader(response.headers, 'X-YeMan-Fan-Request-Id'),
+        generation: getFanDiagnosticPowerGeneration(),
         errorCode: code,
         request: summarizeRequestBody(bodyText),
         response: summarizeFanState(parsed.state ?? parsed),
@@ -218,7 +238,7 @@ export class HttpFanApiAdapter implements FanApiAdapter {
         // translates it for users, while the lifecycle can distinguish a known
         // external-controller conflict from a retryable transport failure.
         const message = parsed?.error?.message || `Fan API 请求失败 (${response.status})`;
-        throw new Error(code ? `${code}: ${message}` : message);
+        throw new FanApiError(code ? `${code}: ${message}` : message, response.status, code);
       }
       return parsed;
     } catch (error) {
@@ -226,6 +246,7 @@ export class HttpFanApiAdapter implements FanApiAdapter {
         method,
         path,
         durationMs: Date.now() - startedAt,
+        generation: getFanDiagnosticPowerGeneration(),
         request: summarizeRequestBody(bodyText),
         error: error instanceof Error ? error.message : String(error),
       });
@@ -236,8 +257,8 @@ export class HttpFanApiAdapter implements FanApiAdapter {
     const parsed = await this.request(path, 'POST', body);
     return (parsed.state ?? parsed) as FanState;
   }
-  handshake(): Promise<FanHandshake> { return this.request('/api/handshake', 'POST'); }
-  async getState(): Promise<FanState> { return (await this.request('/api/state', 'GET')).state as FanState; }
+  handshake(timeoutMs?: number): Promise<FanHandshake> { return this.request('/api/handshake', 'POST', undefined, timeoutMs); }
+  async getState(timeoutMs?: number): Promise<FanState> { return (await this.request('/api/state', 'GET', undefined, timeoutMs)).state as FanState; }
   async enable(nodes: readonly FanNode[], leaseId?: string): Promise<FanState> {
     return (await this.request('/api/enable', 'POST', { nodes, ...(leaseId ? { leaseId } : {}) })).state as FanState;
   }

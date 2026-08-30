@@ -337,13 +337,13 @@ function toggleCorePolicy(value: boolean): void {
     : corePolicyMode.value;
   void saveCorePolicyPatch(
     { corePolicyEnabled: value, corePolicyMode: nextMode },
-    value ? '已开启当前游戏大小核心控制（大核为主）' : '已关闭当前游戏大小核心控制',
+    value ? '已开启当前游戏分配核心（大核为主）' : '已关闭当前游戏分配核心',
   );
 }
 
 function selectCorePolicyMode(value: string | number): void {
   if (!isCorePolicyMode(value)) return;
-  void saveCorePolicyPatch({ corePolicyMode: value }, `已选择大小核心：${corePolicyModeOptions.value.find((item) => item.value === value)?.label || value}`);
+  void saveCorePolicyPatch({ corePolicyMode: value }, `已选择核心分配：${corePolicyModeOptions.value.find((item) => item.value === value)?.label || value}`);
 }
 
 function toggleHyperThreadPolicy(value: boolean): void {
@@ -723,18 +723,20 @@ onUnmounted(() => {
         v-if="corePolicyVisible"
         class="game-core-policy-list"
         :class="corePolicyCardClass"
-        data-gp-game-row="custom-core-policy"
+        data-gp-group="custom-core-policy"
       >
         <div v-if="corePolicyCapabilities?.heterogeneous" class="game-core-policy-card">
-          <Toggle
-            :model-value="corePolicyEnabled"
-            label="大小核心控制"
-            description="CPU Set + 进程亲和性 · 当前游戏"
-            color="accent"
-            :disabled="busy"
-            @update:model-value="toggleCorePolicy"
-          />
-          <div class="game-core-policy-picker">
+          <div class="game-core-policy-control" data-gp-game-row="custom-core-big-toggle">
+            <Toggle
+              :model-value="corePolicyEnabled"
+              label="分配核心"
+              description="CPU Set + 进程亲和性"
+              color="accent"
+              :disabled="busy"
+              @update:model-value="toggleCorePolicy"
+            />
+          </div>
+          <div class="game-core-policy-picker game-core-policy-control" data-gp-game-row="custom-core-big-picker">
             <small>核心组合</small>
             <Dropdown
               :model-value="corePolicyMode"
@@ -748,15 +750,17 @@ onUnmounted(() => {
         </div>
 
         <div v-if="corePolicyCapabilities?.smtAvailable" class="game-core-policy-card">
-          <Toggle
-            :model-value="hyperThreadPolicyEnabled"
-            label="超线程控制"
-            description="当前游戏进程 · 不改系统"
-            color="dc"
-            :disabled="busy"
-            @update:model-value="toggleHyperThreadPolicy"
-          />
-          <div class="game-core-policy-picker">
+          <div class="game-core-policy-control" data-gp-game-row="custom-core-smt-toggle">
+            <Toggle
+              :model-value="hyperThreadPolicyEnabled"
+              label="超线程控制"
+              description="游戏超线程亲和性"
+              color="dc"
+              :disabled="busy"
+              @update:model-value="toggleHyperThreadPolicy"
+            />
+          </div>
+          <div class="game-core-policy-picker game-core-policy-control" data-gp-game-row="custom-core-smt-picker">
             <small>超线程组合</small>
             <Dropdown
               :model-value="hyperThreadPolicy"
@@ -771,8 +775,6 @@ onUnmounted(() => {
       </div>
 
       <small v-if="corePolicyStatus" class="custom-top-hint core-policy-status">{{ corePolicyStatus }}</small>
-      <small v-if="corePolicyVisible" class="custom-top-hint">只作用于当前识别游戏，不改变系统核心分类，不需要重启。</small>
-
       <div v-if="hasConfiguration" class="custom-top-actions" data-gp-custom-actions data-gp-game-row="custom-actions">
         <button
           type="button"
@@ -925,26 +927,31 @@ onUnmounted(() => {
 .game-core-policy-list {
   display: grid;
   gap: 8px;
+  align-items: stretch;
 }
-.game-core-policy-list.double { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.game-core-policy-list.double { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: stretch; }
 .game-core-policy-list.single { grid-template-columns: minmax(0, 1fr); }
 .game-core-policy-card {
   min-width: 0;
   display: grid;
+  grid-template-rows: minmax(54px, auto) auto;
+  align-content: start;
   gap: 5px;
   padding: 9px 10px 10px;
   border: 1px solid rgba(255,255,255,.055);
   border-radius: 9px;
   background: var(--bg-input);
 }
-.game-core-policy-card :deep(.toggle-row) { padding: 0 0 5px; }
+.game-core-policy-control { min-width: 0; }
+.game-core-policy-card :deep(.toggle-row) { min-height: 54px; box-sizing: border-box; padding: 0 0 5px; align-items: center; }
 .game-core-policy-card :deep(.toggle-label) { font-size: 12px; }
 .game-core-policy-card :deep(.toggle-desc) {
   white-space: normal;
   line-height: 1.25;
 }
-.game-core-policy-picker { display: grid; gap: 4px; min-width: 0; }
+.game-core-policy-picker { display: grid; grid-template-rows: auto minmax(34px, auto); align-content: end; gap: 4px; min-width: 0; width: 100%; }
 .game-core-policy-picker > small { color: var(--text-dim); font-size: 10px; }
+.game-core-policy-picker :deep(.dd), .game-core-policy-picker :deep(.dd-trigger) { width: 100%; }
 .core-policy-status { overflow: hidden; text-overflow: ellipsis; }
 .custom-top-hint { display: block; }
 .custom-delete-confirm {

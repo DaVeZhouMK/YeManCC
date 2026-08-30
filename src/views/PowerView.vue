@@ -33,6 +33,7 @@ import InlineIcon from '@/components/InlineIcon.vue';
 const BOOT_TASK = BOOT_CONTROL_CENTER_TASK;
 const BOOT_CFG = 'C:\\SOFT\\YeMan\\PowerControl\\boot_config.json';
 const bootOn = ref(false);
+const fanControlOnBoot = ref(false);
 const rtssBootOn = ref(false);
 
 const tasks = reactive({ desktopMode: false, xboxMode: false, energyStar: false, cleanMem: false });
@@ -156,7 +157,7 @@ async function refresh() {
   // 清理旧版本遗留的 AMD395 任务，避免它继续在开机时执行。
   await toggleTask('Bug修复-AMD-395', false).catch(() => {});
   // 并行异步加载（不串行等待，不阻塞渲染）
-  const [dmRes, steamEarlyStartRes, xbRes, esRes, cmRes, fxRes, steamCommunityRes, joyRes, searchRes, bootRes, rtssBootRes] = await Promise.allSettled([
+  const [dmRes, steamEarlyStartRes, xbRes, esRes, cmRes, fxRes, steamCommunityRes, joyRes, searchRes, bootRes, rtssBootRes, fanBootRes] = await Promise.allSettled([
     safeExists('桌面模式-开机设置为桌面模式'),
     steamMasterOn(),
     safeExists('Xbox大屏游戏模式'),
@@ -168,6 +169,7 @@ async function refresh() {
     searchState(),
     readBootState(),
     readBootRtssState(),
+    readSettingsSection<{ fanControl?: boolean }>('startupDesired'),
   ]);
   if (dmRes.status === 'fulfilled') tasks.desktopMode = dmRes.value;
   if (steamEarlyStartRes.status === 'fulfilled') steamEarlyStart.value = steamEarlyStartRes.value;
@@ -180,6 +182,7 @@ async function refresh() {
   if (searchRes.status === 'fulfilled') searchSt.value = searchRes.value;
   if (bootRes.status === 'fulfilled') bootOn.value = bootRes.value;
   if (rtssBootRes.status === 'fulfilled') rtssBootOn.value = rtssBootRes.value;
+  if (fanBootRes.status === 'fulfilled') fanControlOnBoot.value = fanBootRes.value.fanControl === true;
   trayResident.value = await readTrayResident().catch(() => false);
   hardwareGpuSchedule.value = await readHardwareGpuSchedule().catch(() => false);
   // Xbox 未开启时，注册表启动联动和任务栏常驻都强制关闭，不能留下独立状态。
@@ -208,6 +211,21 @@ async function onBootToggle(v: boolean) {
   } catch (e) {
     bootOn.value = prev; // 失败回滚
     errMsg.value = '设置失败：' + (e as Error).message + '（创建开机任务需管理员权限，请右键以管理员身份运行 YeManCC）';
+  } finally {
+    busy.value = false;
+  }
+}
+
+async function onFanControlBootToggle(v: boolean): Promise<void> {
+  errMsg.value = '';
+  const prev = fanControlOnBoot.value;
+  fanControlOnBoot.value = v;
+  busy.value = true;
+  try {
+    await saveSettingsSection('startupDesired', { fanControl: v });
+  } catch (e) {
+    fanControlOnBoot.value = prev;
+    errMsg.value = '风扇控制开机启动设置失败：' + (e as Error).message;
   } finally {
     busy.value = false;
   }
@@ -489,6 +507,14 @@ onActivated(() => {
         color="accent"
         :disabled="busy"
         @update:model-value="onBootToggle"
+      />
+      <Toggle
+        v-model="fanControlOnBoot"
+        label="风扇控制"
+        description="在支持的设备上启用风扇控制"
+        color="accent"
+        :disabled="busy"
+        @update:model-value="onFanControlBootToggle"
       />
       <Toggle v-model="tasks.desktopMode" label="桌面模式" description="开机设置为桌面模式" color="accent" :disabled="busy" @update:model-value="(v: boolean) => toggleTaskSafe('桌面模式-开机设置为桌面模式', v, 'desktopMode')" />
       <Toggle

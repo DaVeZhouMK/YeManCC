@@ -3,10 +3,10 @@ import { ref, computed, nextTick, onMounted, onUnmounted, onActivated, onDeactiv
 import { focusGamepadElement, getGamepadPopupPlacement } from '@/gamepad/focus';
 import {
   oneClickFrameGen,
-  optiscalerStatus,
   oneClickOptiScaler,
   dirnameOf,
   LS_PRIMARY,
+  type OptiBackend,
 } from '@/bridge/quickapp';
 import {
   subscribeGameStatus,
@@ -86,6 +86,19 @@ const fsrMessageActionEl = ref<HTMLElement | null>(null);
 const fsrConfirmEl = ref<HTMLElement | null>(null);
 const fsrCancelEl = ref<HTMLElement | null>(null);
 let fsrDialogResolve: ((value: boolean) => void) | null = null;
+
+// OptiScaler 方案选择器：按钮只改变待提交方案，必须点击“确认方案并继续”才执行。
+const optiPickerOpen = ref(false);
+const optiPickerChoice = ref<OptiBackend | 'uninstall'>('fsr');
+const optiPickerStyle = ref<Record<string, string>>({ position: 'fixed' });
+const optiPickerAbove = ref(false);
+const optiPickerPanelEl = ref<HTMLElement | null>(null);
+let optiPickerResolve: ((value: OptiBackend | 'uninstall' | null) => void) | null = null;
+const OPTI_BACKEND_CHOICES: OptiBackend[] = ['fsr', 'xess'];
+
+function backendLabel(value: OptiBackend | null | undefined): string {
+  return value === 'xess' ? 'XeSS' : value === 'fsr' ? 'FSR' : '未知';
+}
 const fsrDialogIcon = computed(() => {
   if (fsrDialogTone.value === 'error') return 'warning';
   if (fsrDialogTone.value === 'success') return 'check';
@@ -108,6 +121,35 @@ function positionFsrDialog() {
   const placement = getGamepadPopupPlacement(r ?? null, POP_W, POP_H, 8);
   fsrDialogAbove.value = placement.above;
   fsrDialogStyle.value = placement.style;
+}
+
+function positionOptiPicker() {
+  const trigger = fsrTriggerEl.value;
+  const r = trigger?.getBoundingClientRect();
+  const placement = getGamepadPopupPlacement(r ?? null, Math.min(420, window.innerWidth - 16), 250, 8);
+  optiPickerAbove.value = placement.above;
+  optiPickerStyle.value = placement.style;
+}
+
+function showOptiBackendPicker(): Promise<OptiBackend | 'uninstall' | null> {
+  if (optiPickerResolve) optiPickerResolve(null);
+  optiPickerChoice.value = 'fsr';
+  positionOptiPicker();
+  optiPickerOpen.value = true;
+  nextTick(() => {
+    positionOptiPicker();
+    focusGamepadElement(document.querySelector<HTMLElement>('.opti-picker .opti-option-btn'));
+  });
+  return new Promise<OptiBackend | 'uninstall' | null>((resolve) => { optiPickerResolve = resolve; });
+}
+
+function closeOptiBackendPicker(value: OptiBackend | 'uninstall' | null) {
+  if (!optiPickerOpen.value && !optiPickerResolve) return;
+  optiPickerOpen.value = false;
+  const resolve = optiPickerResolve;
+  optiPickerResolve = null;
+  resolve?.(value);
+  focusFsrTrigger();
 }
 
 function openFsrDialog(options: FsrDialogOptions): Promise<boolean> {
@@ -151,9 +193,14 @@ function confirmFsrDialog() {
 }
 
 function onFsrDialogPointer(e: PointerEvent) {
-  if (!fsrDialogOpen.value) return;
+  if (!fsrDialogOpen.value && !optiPickerOpen.value) return;
   const target = e.target as Node;
   if (fsrPanelEl.value?.contains(target)) return;
+  if (optiPickerPanelEl.value?.contains(target)) return;
+  if (optiPickerOpen.value) {
+    closeOptiBackendPicker(null);
+    return;
+  }
   cancelFsrDialog();
 }
 
@@ -509,13 +556,13 @@ async function onOptiScalerCurrent() {
     errMsg.value = '';
     const chooseManual = await showFsrConfirm(
       '未识别到当前游戏',
-      '请选择手动安装或卸载 OptiScaler (FSR4.1) 的程序。',
+      '请选择手动安装或卸载 OptiScaler（支持 FSR / XeSS）。',
       '手动选择',
       '按 B 取消',
       true,
     );
     if (!chooseManual) {
-      statusMsg.value = '已取消 FSR4.1 操作。';
+      statusMsg.value = '已取消 OptiScaler 操作。';
       busy.value = false;
       release();
       focusFsrTrigger();
@@ -528,7 +575,7 @@ async function onOptiScalerCurrent() {
       return null;
     });
     if (!picked) {
-      if (!errMsg.value) statusMsg.value = '已取消 FSR4.1 操作。';
+      if (!errMsg.value) statusMsg.value = '已取消 OptiScaler 操作。';
       busy.value = false;
       release();
       focusFsrTrigger();
@@ -547,27 +594,15 @@ async function onOptiScalerCurrent() {
     gameName = basename(gamePath);
   }
   try {
-    const state = await optiscalerStatus(gamePath);
-    if (!state.ok) {
-      const detail = state.msgs?.filter(Boolean).join('；');
-      errMsg.value = '无法读取当前游戏的 FSR4.1 状态' + (detail ? '：' + detail : '。');
-      await showFsrMessage('FSR4.1 操作失败', errMsg.value, 'error');
+    const picked = await showOptiBackendPicker();
+    if (!picked) {
+      statusMsg.value = '已取消 OptiScaler 操作。';
       return;
     }
-
-    const uninstall = state.installed;
+    const uninstall = picked === 'uninstall';
     const action = uninstall ? '卸载' : '安装';
-    const confirmed = await showFsrConfirm(
-      `确认${action} FSR4.1`,
-      uninstall
-        ? `当前游戏为「${gameName}」。\n确定卸载 OptiScaler (FSR4.1) 吗？\n原始文件将按安装清单还原。`
-        : `当前游戏为「${gameName}」。\n确定安装 OptiScaler (FSR4.1) 吗？`,
-      `确认${action}`,
-    );
-    if (!confirmed) {
-      statusMsg.value = `已取消${action}。`;
-      return;
-    }
+    const selectedBackend: OptiBackend | 'auto' = uninstall ? 'auto' : picked;
+    const selectedBackendLabel = selectedBackend === 'auto' ? '当前配置' : backendLabel(selectedBackend);
 
     if (current && gamePid > 0) {
       const terminate = await showFsrConfirm(
@@ -584,12 +619,12 @@ async function onOptiScalerCurrent() {
       const closed = await closeGame(gamePid, gameName, current.processCreated);
       if (!closed.ok) {
         errMsg.value = '关闭游戏失败：' + (closed.msgs?.join('；') || '未知错误');
-        await showFsrMessage('FSR4.1 操作失败', errMsg.value, 'error');
+        await showFsrMessage('OptiScaler 操作失败', errMsg.value, 'error');
         return;
       }
       if (!(await waitForProcessExit(gamePid, current.processCreated))) {
         errMsg.value = `已发送结束命令，但原游戏 PID ${gamePid} 仍在运行，已终止${action}。`;
-        await showFsrMessage('FSR4.1 操作失败', errMsg.value, 'error');
+        await showFsrMessage('OptiScaler 操作失败', errMsg.value, 'error');
         return;
       }
     }
@@ -597,18 +632,18 @@ async function onOptiScalerCurrent() {
     if (gamePid > 0 && game.value?.pid === gamePid) game.value = null;
 
     statusMsg.value = `${action}中，请稍候…`;
-    const result = await oneClickOptiScaler(gamePath, uninstall);
+    const result = await oneClickOptiScaler(gamePath, uninstall, selectedBackend);
     if (!result.ok) {
       errMsg.value = `${action}失败：${result.msgs?.join('；') || '未知错误'}`;
-      await showFsrMessage(`FSR4.1 ${action}失败`, errMsg.value, 'error');
+      await showFsrMessage(`OptiScaler ${action}失败`, errMsg.value, 'error');
       return;
     }
 
     const detail = uninstall
-      ? `已卸载当前游戏的 OptiScaler (FSR4.1)。${result.restored ? `\n还原 ${result.restored} 个原文件。` : ''}${result.removed ? `\n清理 ${result.removed} 个文件。` : ''}`
-      : `已为当前游戏安装 OptiScaler (FSR4.1)。${result.written ? `\n写入 ${result.written} 个文件。` : ''}`;
+      ? `已卸载当前游戏的 OptiScaler。${result.restored ? `\n还原 ${result.restored} 个原文件。` : ''}${result.removed ? `\n清理 ${result.removed} 个文件。` : ''}`
+      : `已为当前游戏安装 OptiScaler（${result.backend ? backendLabel(result.backend) : selectedBackendLabel}）。${result.written ? `\n写入 ${result.written} 个文件。` : ''}`;
     statusMsg.value = detail.replace(/\n/g, '');
-    await showFsrMessage(`FSR4.1 ${action}成功`, detail, 'success');
+    await showFsrMessage(`OptiScaler ${action}成功`, detail, 'success');
 
     if (!uninstall) {
       const restart = await showFsrConfirm(
@@ -629,8 +664,8 @@ async function onOptiScalerCurrent() {
       }
     }
   } catch (e) {
-    errMsg.value = 'FSR4.1 操作失败：' + (e as Error).message;
-    await showFsrMessage('FSR4.1 操作失败', errMsg.value, 'error').catch(() => {});
+    errMsg.value = 'OptiScaler 操作失败：' + (e as Error).message;
+    await showFsrMessage('OptiScaler 操作失败', errMsg.value, 'error').catch(() => {});
   } finally {
     busy.value = false;
     release();
@@ -760,6 +795,11 @@ function closeMenu(restoreFocus = false, event?: MouseEvent) {
 }
 
 function onGamepadBack(e: Event) {
+  if (optiPickerOpen.value) {
+    closeOptiBackendPicker(null);
+    e.preventDefault();
+    return;
+  }
   if (fsrDialogOpen.value) {
     cancelFsrDialog();
     e.preventDefault();
@@ -857,6 +897,7 @@ onDeactivated(() => {
   }
   closeMenu();
   if (fsrDialogOpen.value) cancelFsrDialog();
+  if (optiPickerOpen.value) closeOptiBackendPicker(null);
 });
 
 onUnmounted(() => {
@@ -960,9 +1001,8 @@ onUnmounted(() => {
         <button ref="fsrTriggerEl" class="quick-btn opti-btn opti-any" :disabled="busy" @click="onOptiScalerCurrent">
           <InlineIcon name="bolt" />
           <span class="quick-btn-copy opti-copy">
-            <span class="quick-main">安装/卸载</span>
-            <span class="quick-product">FSR4.1</span>
-            <span class="quick-sub">自动识别安装OPT缩放</span>
+            <span class="quick-main">FSR4.1/Xess-OPT自动导入</span>
+            <span class="quick-sub">识别游戏特征并选择后端</span>
           </span>
         </button>
       </div>
@@ -1025,6 +1065,49 @@ onUnmounted(() => {
     <Teleport to="body">
       <Transition name="fsr-pop">
         <div
+          v-if="optiPickerOpen"
+          ref="optiPickerPanelEl"
+          class="reset-confirm fsr-confirm opti-picker"
+          :class="{ above: optiPickerAbove }"
+          :style="optiPickerStyle"
+          role="dialog"
+          aria-modal="true"
+          aria-label="选择 OptiScaler 方案"
+          data-gp-modal
+          @pointerdown.stop
+          @keydown.esc.prevent="closeOptiBackendPicker(null)"
+        >
+          <div class="rc-title"><InlineIcon name="bolt" />选择 OptiScaler 方案</div>
+          <p class="rc-desc opti-picker-desc">请选择操作方案，点击“确认方案并继续”后才会执行。</p>
+          <div class="opti-picker-options" role="group" aria-label="OptiScaler 方案">
+            <button
+              v-for="backend in OPTI_BACKEND_CHOICES"
+              :key="backend"
+              type="button"
+              class="opti-option-btn"
+              :class="{ selected: optiPickerChoice === backend }"
+              :aria-pressed="optiPickerChoice === backend"
+              @click="optiPickerChoice = backend"
+            >{{ backendLabel(backend) }}</button>
+            <button
+              type="button"
+              class="opti-option-btn uninstall"
+              :class="{ selected: optiPickerChoice === 'uninstall' }"
+              :aria-pressed="optiPickerChoice === 'uninstall'"
+              @click="optiPickerChoice = 'uninstall'"
+            >卸载</button>
+          </div>
+          <div class="rc-actions" data-gp-group="fsr-dialog">
+            <button type="button" data-gp-group="fsr-dialog" @click="closeOptiBackendPicker(optiPickerChoice)">确认方案并继续</button>
+            <button type="button" data-gp-group="fsr-dialog" @click="closeOptiBackendPicker(null)">取消</button>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
+
+    <Teleport to="body">
+      <Transition name="fsr-pop">
+        <div
           v-if="fsrDialogOpen"
           ref="fsrPanelEl"
           class="reset-confirm fsr-confirm"
@@ -1032,7 +1115,7 @@ onUnmounted(() => {
           :style="fsrDialogStyle"
           role="alertdialog"
           aria-modal="true"
-          aria-label="FSR4.1 操作确认"
+          aria-label="FSR4.1/Xess-OPT 自动导入操作确认"
           data-gp-modal
           @pointerdown.stop
           @keydown.esc.prevent="cancelFsrDialog"
@@ -1483,6 +1566,45 @@ onUnmounted(() => {
 .fsr-confirm .rc-actions button.danger:hover {
   background: color-mix(in srgb, var(--danger) 16%, var(--bg-input));
   border-color: var(--danger);
+}
+.opti-picker {
+  width: min(420px, calc(100vw - 16px));
+  max-height: calc(100vh - 16px);
+  overflow: auto;
+}
+.opti-picker-desc {
+  margin-bottom: 10px;
+  font-size: 12px;
+}
+.opti-picker-options {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.opti-option-btn {
+  min-height: 44px;
+  border: 1px solid rgba(255,255,255,.1);
+  border-radius: 8px;
+  background: var(--bg-input);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.opti-option-btn:hover,
+.opti-option-btn.selected {
+  border-color: var(--accent);
+  background: rgba(46, 166, 255, 0.14);
+  color: var(--accent);
+}
+.opti-option-btn.uninstall {
+  color: var(--danger);
+}
+.opti-option-btn.uninstall:hover,
+.opti-option-btn.uninstall.selected {
+  border-color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, var(--bg-input));
 }
 .fsr-pop-enter-active,
 .fsr-pop-leave-active {

@@ -1,5 +1,8 @@
 const DEFAULT_SAFE_TOP = 24;
 const DEFAULT_SAFE_BOTTOM = 24;
+// 手柄回滚时给当前控件上方的页面标题/卡片标题留一点上下文，
+// 避免焦点虽然可见，但同一页顶部内容被贴出滚动视口。
+const FOCUS_CONTEXT_TOP = 16;
 // 只在控件靠近底部时做小幅回收，避免一次方向键把整页大幅拉到中间。
 const GENTLE_BOTTOM_ZONE = 64;
 const GENTLE_REPOSITION_MAX = 72;
@@ -202,7 +205,7 @@ export function scrollElementIntoSafeArea(el: HTMLElement): void {
     for (let attempt = 0; attempt < 4; attempt++) {
       const visibleRect = getVisibleScrollRect(container);
       const elementRect = el.getBoundingClientRect();
-      const safeTop = safeTopCss * visualPerScrollUnit;
+      const safeTop = (safeTopCss + FOCUS_CONTEXT_TOP) * visualPerScrollUnit;
       const safeBottom = safeBottomCss * visualPerScrollUnit;
       const viewportTop = visibleRect.top + safeTop;
       const viewportBottom = visibleRect.bottom - safeBottom;
@@ -287,6 +290,9 @@ export function setGamepadFocused(el: HTMLElement | null): void {
 /** Programmatic focus entry point for controller navigation and modal restore. */
 export function focusGamepadElement(el: HTMLElement | null): boolean {
   if (!el || !el.isConnected || el.hasAttribute('disabled')) return false;
+  // data-gp-ignore is an explicit product decision: the control may remain
+  // clickable by mouse/touch, but controller focus must never land on it.
+  if (el.matches('[data-gp-ignore]') || el.closest('[data-gp-ignore]')) return false;
   if (el.getAttribute('aria-hidden') === 'true' || el.closest('[hidden], [inert], [aria-hidden="true"]')) return false;
   const style = getComputedStyle(el);
   if (style.display === 'none' || style.visibility === 'hidden') return false;

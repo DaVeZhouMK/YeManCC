@@ -290,12 +290,46 @@ export async function oneClickFrameGen(
   return { exe: ls.exe, source: ls.source, alreadyHadProfile: already };
 }
 
-// ───────────────────────── OptiScaler 一键 FSR4.1 安装/卸载 ─────────────────────────
+// ───────────────────────── OptiScaler 一键安装/卸载 ─────────────────────────
 // 复用 detectForegroundGame 识别到的 exe 真实路径 -> dirname 作为游戏目录，
 // 调用 YeManTdpCtl.exe optiscaler 命令族（纯文件复制，不依赖 OptiScalerClient.exe）。
 // 安装前自动备份被覆盖的原文件到 %APPDATA%/YeManCC/optiscaler_backups/。
 
 const TDPCTL_EXE_OPTI = 'C:\\SOFT\\YeMan\\PowerControl\\pawnio\\YeManTdpCtl.exe';
+let optiCtlExeCache: string | null | undefined;
+
+// A complete release/test package keeps PowerControl beside YeManCC. Resolve
+// that local copy first so an exported test build does not accidentally call
+// the older controller from the installed product. Production still falls
+// back to the canonical C:\\SOFT\\YeMan path.
+async function resolveOptiCtlExe(): Promise<string> {
+  if (optiCtlExeCache) return optiCtlExeCache;
+  const candidates = [TDPCTL_EXE_OPTI];
+  try {
+    const cwdResult = await shell.run('powershell', [
+      '-NoProfile',
+      '-Command',
+      '(Get-Location).Path',
+    ], 5000);
+    const cwd = (cwdResult.stdout || '').trim();
+    if (cwd) {
+      candidates.unshift(
+        joinPath(cwd, 'PowerControl', 'pawnio', 'YeManTdpCtl.exe'),
+        joinPath(cwd, '..', 'PowerControl', 'pawnio', 'YeManTdpCtl.exe'),
+        joinPath(cwd, '..', '..', 'PowerControl', 'pawnio', 'YeManTdpCtl.exe'),
+      );
+    }
+  } catch {
+    /* use the production fallback */
+  }
+  for (const candidate of candidates) {
+    if (await fs.exists(candidate).catch(() => false)) {
+      optiCtlExeCache = candidate;
+      return candidate;
+    }
+  }
+  return TDPCTL_EXE_OPTI;
+}
 
 export function dirnameOf(p: string): string {
   const i = Math.max(p.lastIndexOf('\\'), p.lastIndexOf('/'));
@@ -310,14 +344,38 @@ export interface OptiStatus {
   msgs?: string[];
   source?: string;
   version?: string;
+  backend?: OptiBackend | null;
+  availableBackends?: OptiBackend[];
+}
+
+export type OptiBackend = 'fsr' | 'xess';
+
+export interface OptiAnalysis {
+  ok: boolean;
+  gameDir?: string;
+  api?: 'dx11' | 'dx12' | 'vulkan' | 'unknown' | string;
+  engine?: 'unity' | 'unreal' | 're' | 'unknown' | string;
+  features?: string[];
+  evidence?: string[];
+  existing?: string[];
+  availableBackends?: OptiBackend[];
+  recommendedBackend?: OptiBackend | null;
+  reasons?: string[];
+  source?: string;
+  version?: string;
+  missing?: string[];
+}
+
+function parseOptiBackend(value: unknown): OptiBackend | null {
+  return value === 'fsr' || value === 'xess' ? value : null;
 }
 
 export async function optiscalerStatus(gamePath: string): Promise<OptiStatus> {
   const gameDir = dirnameOf(gamePath);
   try {
-    const r = await shell.run(TDPCTL_EXE_OPTI, ['optiscaler', 'status', gameDir], 20000);
+    const r = await shell.run(await resolveOptiCtlExe(), ['optiscaler', 'status', gameDir], 20000);
     const txt = (r.stdout || '').trim();
-    if (!txt) return { ok: false, installed: false, msgs: [(r.stderr || 'FSR4.1 状态读取无输出').trim()] };
+    if (!txt) return { ok: false, installed: false, msgs: [(r.stderr || 'OptiScaler 状态读取无输出').trim()] };
     const obj = JSON.parse(txt);
     return {
       ok: obj?.ok !== false,
@@ -326,9 +384,42 @@ export async function optiscalerStatus(gamePath: string): Promise<OptiStatus> {
       msgs: Array.isArray(obj?.msgs) ? obj.msgs.map(String) : undefined,
       source: typeof obj?.source === 'string' ? obj.source : undefined,
       version: typeof obj?.version === 'string' ? obj.version : undefined,
+      backend: parseOptiBackend(obj?.backend),
+      availableBackends: Array.isArray(obj?.available_backends)
+        ? obj.available_backends.map(parseOptiBackend).filter((v): v is OptiBackend => !!v)
+        : undefined,
     };
   } catch {
-    return { ok: false, installed: false, msgs: ['无法启动 YeManTdpCtl.exe 读取 FSR4.1 状态'] };
+    return { ok: false, installed: false, msgs: ['无法启动 YeManTdpCtl.exe 读取 OptiScaler 状态'] };
+  }
+}
+
+export async function optiscalerAnalyze(gamePath: string): Promise<OptiAnalysis> {
+  const gameDir = dirnameOf(gamePath);
+  try {
+    const r = await shell.run(await resolveOptiCtlExe(), ['optiscaler', 'analyze', gameDir], 20000);
+    const txt = (r.stdout || '').trim();
+    if (!txt) return { ok: false, missing: [(r.stderr || 'OptiScaler 分析无输出').trim()] };
+    const obj = JSON.parse(txt);
+    return {
+      ok: obj?.ok !== false,
+      gameDir: typeof obj?.game_dir === 'string' ? obj.game_dir : gameDir,
+      api: typeof obj?.api === 'string' ? obj.api : 'unknown',
+      engine: typeof obj?.engine === 'string' ? obj.engine : 'unknown',
+      features: Array.isArray(obj?.features) ? obj.features.map(String) : [],
+      evidence: Array.isArray(obj?.evidence) ? obj.evidence.map(String) : [],
+      existing: Array.isArray(obj?.existing) ? obj.existing.map(String) : [],
+      availableBackends: Array.isArray(obj?.available_backends)
+        ? obj.available_backends.map(parseOptiBackend).filter((v): v is OptiBackend => !!v)
+        : [],
+      recommendedBackend: parseOptiBackend(obj?.recommended_backend),
+      reasons: Array.isArray(obj?.reasons) ? obj.reasons.map(String) : [],
+      source: typeof obj?.source === 'string' ? obj.source : undefined,
+      version: typeof obj?.version === 'string' ? obj.version : undefined,
+      missing: Array.isArray(obj?.missing) ? obj.missing.map(String) : [],
+    };
+  } catch (e) {
+    return { ok: false, missing: [(e as Error).message] };
   }
 }
 
@@ -341,17 +432,23 @@ export interface OptiResult {
   written?: number;
   removed?: number;
   restored?: number;
+  backend?: OptiBackend;
+  analysis?: OptiAnalysis;
 }
 
-// uninstall=true 卸载（还原原文件），false 安装。结果由调用方写入页面消息栏。
+// uninstall=true 卸载（还原原文件），false 安装。安装时 backend 必须由界面
+// 明确选择或传入 auto；后端选择会同时写入 OptiScaler.ini。
 export async function oneClickOptiScaler(
   gamePath: string,
-  uninstall: boolean
+  uninstall: boolean,
+  backend: OptiBackend | 'auto' = 'auto',
 ): Promise<OptiResult> {
   const gameDir = dirnameOf(gamePath);
   const sub = uninstall ? 'uninstall' : 'install';
   try {
-    const r = await shell.run(TDPCTL_EXE_OPTI, ['optiscaler', sub, gameDir], 60000);
+    const args = ['optiscaler', sub, gameDir];
+    if (!uninstall) args.push('--backend', backend);
+    const r = await shell.run(await resolveOptiCtlExe(), args, 60000);
     const txt = (r.stdout || '').trim();
     if (!txt) {
       return { ok: false, msgs: (r.stderr || '无输出').split('\n').slice(0, 3) };
@@ -366,6 +463,8 @@ export async function oneClickOptiScaler(
       written: obj.written,
       removed: obj.removed,
       restored: obj.restored,
+      backend: parseOptiBackend(obj?.backend) || undefined,
+      analysis: obj?.analysis,
     };
   } catch (e) {
     return { ok: false, msgs: [(e as Error).message] };

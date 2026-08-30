@@ -7,7 +7,7 @@ import {
   type FanNode,
   type FanState,
 } from './fanApi';
-import { fanDiagnosticLog } from './fanDiagnostics';
+import { fanDiagnosticLog, setFanDiagnosticPowerGeneration } from './fanDiagnostics';
 
 /**
  * Real-host integration boundary.
@@ -18,17 +18,21 @@ import { fanDiagnosticLog } from './fanDiagnostics';
 export const FAN_REAL_HOST_ENABLED = true;
 export const FAN_HOST_PROTOCOL_VERSION = 2;
 export const FAN_HOST_DEFAULT_PORT = 8765;
+const FAN_HOST_V3_ADAPTER_FILE = 'YeManFanHcAdapter.dll';
 // YeManFanHost currently expires leases after 15 seconds. Renew well before
 // that boundary so a visible UI pause, HC call, or WebView timer jitter cannot
 // turn the next curve operation into a stale-lease failure.
 const DEFAULT_LEASE_RENEWAL_INTERVAL_MS = 5000;
 const RECOVERY_RETRY_DELAYS_MS = [0, 250, 750];
-// A real Host owns the serialized HC recovery timer.  The UI must observe that
-// owner instead of issuing a second restore/close request while its ACPI/HID
-// call is still unwinding.  Thirty seconds covers the Host's 1/2/4/8/16 sec
-// backoff window without making a failed lifecycle operation spin the WebView.
-const HOST_RECOVERY_POLL_INTERVAL_MS = 500;
-const HOST_RECOVERY_TIMEOUT_MS = 30_000;
+// Fan control is guarded by one resident, unbounded retry loop.  The lease
+// heartbeat remains separate because the Host lease expires after 15 seconds;
+// the guard is a route/curve repair check, not a lease-renewal replacement.
+const FAN_GUARD_INTERVAL_MS = 10_000;
+const FAN_GUARD_MAX_CONSECUTIVE_ENABLE_FAILURES = 5;
+// Close/restore confirmation is a safety boundary, not the fan guard. It may
+// wait for a HC Close already in flight, but it never schedules fan writes.
+const HOST_CLEANUP_OBSERVATION_INTERVAL_MS = 2_000;
+const HOST_CLEANUP_OBSERVATION_MAX_ATTEMPTS = 30;
 
 async function waitForRecoveryRetry(attempt: number): Promise<void> {
   const delay = RECOVERY_RETRY_DELAYS_MS[Math.min(attempt, RECOVERY_RETRY_DELAYS_MS.length - 1)];
@@ -82,6 +86,9 @@ export const HC_FAN_DEPENDENCY_MANIFEST: readonly FanHostDependency[] = [
     sha256: '70e27fd4d73a5ca3e3e750de2736b5e1c3b126d716dd9f4f5794c84da88c6415',
   },
   { file: 'GamepadMotion.dll' },
+  // HC loads LibreHardwareMonitor through OpenLibSys on EC-based devices
+  // such as GPD Win5. Preflight it so handshake cannot hide an Open failure.
+  { file: 'LibreHardwareMonitorLib.dll', sha256: 'f7ed30f07ea636c0ddcc5764c15c0a25ae8a0aca02ded77e4af24439955487cf' },
   { file: 'hidapi.net.dll', sha256: 'adc343b824405081a1b3ec69b06b4808734fc448ee757d0ea7b723acddca3182' },
   { file: 'hidapi.dll', sha256: 'ebeb835e2b4530ed68843f19d6a2604c51772e3c26e7f542fde194075f82d9b4' },
   // HC IDevice.GetCurrent references the full device factory. These files
@@ -205,11 +212,49 @@ export function resolveFanHostConfig(
   };
 }
 
+type FanHostPayloadManifest = {
+  schemaVersion?: unknown;
+  files?: unknown;
+};
+
+/**
+ * V3 carries its authoritative closure beside the payload.  The old
+ * hard-coded list remains the fallback for legacy packages, but must not
+ * reject a valid V3 package merely because V3 intentionally removed HC's UI
+ * and WinRT-only files.
+ */
+async function readPayloadDependencies(config: FanHostConfig): Promise<readonly FanHostDependency[] | null> {
+  const manifestPath = joinWindowsPath(config.hostDirectory, 'YeManFanHost.payload.json');
+  try {
+    const raw = await fs.readTextFile(manifestPath, 2 * 1024 * 1024);
+    const manifest = JSON.parse(raw) as FanHostPayloadManifest;
+    if (manifest.schemaVersion !== 1 || !Array.isArray(manifest.files) || manifest.files.length === 0) return null;
+
+    const dependencies: FanHostDependency[] = [];
+    const seen = new Set<string>();
+    for (const entry of manifest.files) {
+      if (!entry || typeof entry !== 'object') return null;
+      const candidate = entry as { path?: unknown; sha256?: unknown };
+      const file = typeof candidate.path === 'string' ? candidate.path.trim() : '';
+      const sha256 = typeof candidate.sha256 === 'string' ? candidate.sha256.trim().toLowerCase() : '';
+      if (!file || file.includes('\\') || file.includes('/') || !/^[0-9a-f]{64}$/i.test(sha256)) return null;
+      const key = file.toLowerCase();
+      if (seen.has(key)) return null;
+      seen.add(key);
+      dependencies.push({ file, sha256 });
+    }
+    return dependencies;
+  } catch {
+    return null;
+  }
+}
+
 /** Validate the pinned runtime before any HC assembly can be loaded. */
 export async function validateFanHostDependencies(config: FanHostConfig): Promise<FanHostDependencyCheck> {
   const missing: string[] = [];
   const hashMismatches: string[] = [];
-  for (const dependency of config.dependencies) {
+  const dependencies = (await readPayloadDependencies(config)) ?? config.dependencies;
+  for (const dependency of dependencies) {
     const path = joinWindowsPath(config.hostDirectory, dependency.file);
     if (!(await fs.exists(path))) {
       missing.push(dependency.file);
@@ -297,6 +342,12 @@ export class NativeFanHostLauncher implements FanHostLauncher {
       const details = [...dependencies.missing.map((name) => `缺失:${name}`), ...dependencies.hashMismatches.map((name) => `哈希不匹配:${name}`)];
       throw new Error(`Fan Host 依赖校验失败: ${details.join(', ')}`);
     }
+    // V3 keeps HandheldCompanion.dll as the frozen HC compatibility bridge,
+    // while YeManFanHcAdapter.dll is the actual source-rebuilt fan route
+    // assembly. Select it only after the authoritative V3 manifest has passed;
+    // legacy packages continue using their original HC entry point.
+    const v3AdapterPath = joinWindowsPath(config.hostDirectory, FAN_HOST_V3_ADAPTER_FILE);
+    if (await fs.exists(v3AdapterPath)) config.hcAssemblyPath = v3AdapterPath;
     // YeManFanHost accepts real writes only when this invocation proves
     // possession of the random session token. This value never enters HTTP
     // payloads and is regenerated whenever the protected sidecar is absent.
@@ -381,8 +432,11 @@ export class NativeFanHostLauncher implements FanHostLauncher {
   private async installAndVerifyPayload(config: FanHostConfig, fanStateDirectory: string): Promise<void> {
     const installer = joinWindowsPath(config.hostDirectory, 'install-fan-host-payload.ps1');
     const manifest = joinWindowsPath(config.hostDirectory, 'YeManFanHost.payload.json');
-    if (!(await fs.exists(installer)) || !(await fs.exists(manifest))) {
-      throw new Error('Fan Host 部署不完整：缺少受保护载荷清单或安装器');
+    const missingFiles: string[] = [];
+    if (!(await fs.exists(installer))) missingFiles.push('install-fan-host-payload.ps1');
+    if (!(await fs.exists(manifest))) missingFiles.push('YeManFanHost.payload.json');
+    if (missingFiles.length > 0) {
+      throw new Error(`Fan Host 部署不完整：缺少 ${missingFiles.join('、')}`);
     }
     const result = await shell.run('powershell.exe', [
       '-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass',
@@ -865,6 +919,18 @@ function isExternalFanControlConflict(error: unknown): boolean {
   return /\b(?:FAN_ROUTE_CONFLICT|HC_OPENLIB_CONFLICT|EXTERNAL_FAN_OWNER)\b/i.test(message);
 }
 
+/**
+ * A route-loss response is different from a normal lease expiry or write
+ * rejection. The native Host has already stopped its temperature source and
+ * owns the one HC Close/unbind boundary; the bridge must observe that boundary
+ * and then rebuild the same curve on a newly stable HC route. This classifier
+ * is used only by the heartbeat path, never by a user mutation or HTTP layer.
+ */
+function isHidRouteLoss(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /\b(?:HC_SESSION_ROUTE_LOST|HC_SESSION_UNAVAILABLE|hc-device-is-open-false|route-marker-lost)\b/i.test(message);
+}
+
 function isHcCloseCleanupPending(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
   return /\bHC_CLOSE_PENDING\b|HC Close 资源清理/i.test(message);
@@ -907,6 +973,8 @@ export interface FanHostLifecycleOptions {
   launcher?: FanHostLauncher;
   savedIdentity?: Record<string, unknown> | null;
   heartbeatIntervalMs?: number;
+  /** Test override; production remains the fixed ten-second guard cadence. */
+  fanGuardIntervalMs?: number;
   onDeviceIdentity?: (identity: Record<string, unknown>) => void;
   onState?: (state: FanHostLifecycleState) => void;
 }
@@ -924,6 +992,7 @@ export class FanHostLifecycle {
   private readonly onState?: (state: FanHostLifecycleState) => void;
   private onDeviceIdentity?: (identity: Record<string, unknown>) => void;
   private readonly heartbeatIntervalMs: number;
+  private readonly fanGuardIntervalMs: number;
   private savedIdentity: Record<string, unknown> | null;
   private stateValue: FanHostLifecycleState;
   private process: FanHostProcess | null = null;
@@ -931,8 +1000,25 @@ export class FanHostLifecycle {
   private opened = false;
   private eventsOpened = false;
   private operation: Promise<unknown> = Promise.resolve();
+  // App startup and FanView mount can request the same start in one turn.
+  // Serialize those requests and share the in-flight result; otherwise a
+  // failed deployment can produce repeated shutdown/retry cycles and obscure
+  // the first actionable error.
+  private startPromise: Promise<FanDeviceGateResult> | null = null;
   private heartbeatTimer: ReturnType<typeof setTimeout> | null = null;
+  private fanGuardTimer: ReturnType<typeof setTimeout> | null = null;
+  private fanGuardInFlight = false;
+  private fanGuardArmed = false;
+  private consecutiveFanGuardEnableFailures = 0;
+  private lastEnableAttemptFailed = false;
+  private desiredCurve: FanNode[] | null = null;
+  private sessionGeneration = 0;
+  private powerGeneration = 0;
   private writeReady = false;
+  // The resident Host owns Close/unbind. This bridge marker only prevents a
+  // second route-rebuild waiter from being created if a timer and an explicit
+  // heartbeat observe the same HID removal in one lifecycle turn.
+  private recoveryOwner: 'none' | 'hid-route' = 'none';
   // The globally-owned lifecycle, not a mounted FanView, remembers the last
   // acknowledged curve. This keeps a full OEM -> fresh HC session -> replay
   // transaction possible after KeepAlive evicts the fan page during sleep.
@@ -946,6 +1032,7 @@ export class FanHostLifecycle {
     this.launcher = options.launcher ?? new NativeFanHostLauncher();
     this.savedIdentity = options.savedIdentity ?? null;
     this.heartbeatIntervalMs = Math.max(0, options.heartbeatIntervalMs ?? DEFAULT_LEASE_RENEWAL_INTERVAL_MS);
+    this.fanGuardIntervalMs = Math.max(1, options.fanGuardIntervalMs ?? FAN_GUARD_INTERVAL_MS);
     this.onDeviceIdentity = options.onDeviceIdentity;
     this.onState = options.onState;
     this.stateValue = this.enabled ? 'stopped' : 'disabled';
@@ -955,6 +1042,17 @@ export class FanHostLifecycle {
   get controlReady(): boolean { return this.writeReady; }
   get currentLease(): FanLease | null { return this.lease ? { ...this.lease } : null; }
   get processId(): number | null { return this.process?.pid ?? null; }
+
+  /** Bind lifecycle diagnostics to the native power transaction currently
+   * being consumed.  Older WebView events may omit generation; those events
+   * must not erase a newer value. */
+  setPowerGeneration(generation: number): void {
+    if (Number.isFinite(generation) && generation > this.powerGeneration) {
+      this.powerGeneration = generation;
+      setFanDiagnosticPowerGeneration(generation);
+      fanDiagnosticLog('lifecycle.power-generation', { generation });
+    }
+  }
 
   /** Read host telemetry without changing ownership or hardware state. */
   async getState(): Promise<FanState> {
@@ -977,8 +1075,13 @@ export class FanHostLifecycle {
 
   private setState(next: FanHostLifecycleState): void {
     this.stateValue = next;
-    fanDiagnosticLog('lifecycle.state', { state: next });
+    fanDiagnosticLog('lifecycle.state', { state: next, generation: this.powerGeneration });
     this.onState?.(next);
+  }
+
+  private advanceSessionGeneration(): number {
+    this.sessionGeneration += 1;
+    return this.sessionGeneration;
   }
 
   /**
@@ -995,6 +1098,10 @@ export class FanHostLifecycle {
     }
     if (typeof remote.openCalled === 'boolean') this.opened = remote.openCalled;
     if (typeof remote.openEventsCalled === 'boolean') this.eventsOpened = remote.openEventsCalled;
+    const remoteLease = remote.lease;
+    if (remoteLease && typeof remoteLease.leaseId === 'string' && remoteLease.leaseId.length > 0) {
+      this.lease = { ...remoteLease };
+    }
   }
 
   /**
@@ -1006,18 +1113,18 @@ export class FanHostLifecycle {
    */
   private async waitForHostRecovery(
     requireStopped = false,
-    timeoutMs = HOST_RECOVERY_TIMEOUT_MS,
   ): Promise<FanState> {
-    const deadline = Date.now() + timeoutMs;
     let last: FanState | null = null;
-    while (Date.now() < deadline) {
+    for (let attempt = 0; attempt < HOST_CLEANUP_OBSERVATION_MAX_ATTEMPTS; attempt += 1) {
       const remote = await this.adapter.getState().catch(() => null);
       if (remote) {
         last = remote;
         this.syncRemoteSessionState(remote);
         if (isSafeHostRecoveryState(remote, requireStopped)) return remote;
       }
-      await new Promise<void>((resolve) => setTimeout(resolve, HOST_RECOVERY_POLL_INTERVAL_MS));
+      if (attempt + 1 < HOST_CLEANUP_OBSERVATION_MAX_ATTEMPTS) {
+        await new Promise<void>((resolve) => setTimeout(resolve, HOST_CLEANUP_OBSERVATION_INTERVAL_MS));
+      }
     }
     const suffix = last ? `（最后状态：${String(last.state ?? 'unknown')}）` : '';
     throw new Error(`Fan Host 安全恢复在等待窗口内未确认${suffix}`);
@@ -1064,7 +1171,8 @@ export class FanHostLifecycle {
   }
 
   async start(): Promise<FanDeviceGateResult> {
-    return this.enqueue(async () => {
+    if (this.startPromise) return this.startPromise;
+    const pending = this.enqueue(async () => {
       fanDiagnosticLog('lifecycle.start-begin', { state: this.state });
       let lastError: unknown;
       for (let attempt = 0; attempt < RECOVERY_RETRY_DELAYS_MS.length; attempt += 1) {
@@ -1078,6 +1186,12 @@ export class FanHostLifecycle {
       }
       throw lastError instanceof Error ? lastError : new Error('Fan Host 启动失败');
     });
+    this.startPromise = pending;
+    try {
+      return await pending;
+    } finally {
+      if (this.startPromise === pending) this.startPromise = null;
+    }
   }
 
   private async startInternal(): Promise<FanDeviceGateResult> {
@@ -1098,6 +1212,7 @@ export class FanHostLifecycle {
     this.setState('starting');
     try {
       this.process = await this.launcher.start(this.config);
+      this.advanceSessionGeneration();
       if ('setSessionToken' in this.adapter && typeof this.adapter.setSessionToken === 'function') {
         this.adapter.setSessionToken(this.config.sessionToken);
       }
@@ -1140,6 +1255,7 @@ export class FanHostLifecycle {
 
   async apply(nodes: readonly FanNode[]): Promise<FanState> {
     return this.enqueue(async () => {
+      this.armFanGuard(nodes);
       fanDiagnosticLog('lifecycle.apply-begin', { state: this.state, nodeCount: nodes.length });
       let lastError: unknown;
       for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -1147,6 +1263,12 @@ export class FanHostLifecycle {
         catch (error) {
           fanDiagnosticLog('lifecycle.apply-failure', { attempt, state: this.state, error: error instanceof Error ? error.message : String(error) });
           lastError = error;
+          // If the actual Enable callback was entered and its recovery
+          // transaction failed, do not leave a background guard armed to
+          // replay the same failed curve while the Host is fault-locked.
+          // Startup/Open/handshake failures retain the guard: those are the
+          // existing resident retry path and never issued a fan write.
+          if (this.lastEnableAttemptFailed) this.disarmFanGuard();
           if (isExternalFanControlConflict(error)) {
             if (this.state !== 'fault-locked' && this.state !== 'unknown') this.setState('conflict-locked');
             throw error;
@@ -1160,6 +1282,7 @@ export class FanHostLifecycle {
 
   async applyPreset(name: 'soft' | 'balanced' | 'aggressive', nodes?: readonly FanNode[]): Promise<FanState> {
     return this.enqueue(async () => {
+      if (nodes) this.armFanGuard(nodes);
       fanDiagnosticLog('lifecycle.preset-begin', { state: this.state, preset: name });
       let lastError: unknown;
       for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -1167,6 +1290,7 @@ export class FanHostLifecycle {
         catch (error) {
           fanDiagnosticLog('lifecycle.preset-failure', { attempt, state: this.state, preset: name, error: error instanceof Error ? error.message : String(error) });
           lastError = error;
+          if (this.lastEnableAttemptFailed) this.disarmFanGuard();
           if (isExternalFanControlConflict(error)) {
             if (this.state !== 'fault-locked' && this.state !== 'unknown') this.setState('conflict-locked');
             throw error;
@@ -1187,8 +1311,11 @@ export class FanHostLifecycle {
       throw new Error(`Fan Host 当前不可控制: ${this.state}`);
     }
     if (!this.writeReady) throw new Error('当前风扇数据路线已识别，但真实写入/恢复尚未验证');
+    let enableAttempted = false;
+    this.lastEnableAttemptFailed = false;
     try {
       if (!this.opened) {
+        this.advanceSessionGeneration();
         // Mark the session before the call. HC/Open can touch EC and then
         // throw; recovery must therefore attempt OEM restore even when the
         // promise rejects before the normal success assignment.
@@ -1203,15 +1330,23 @@ export class FanHostLifecycle {
       }
       await this.ensureLeaseForMutation();
       this.setState('ready');
+      enableAttempted = true;
       const applied = await this.adapter.enable(nodes, this.lease?.leaseId);
       // The initial acquisition begins in awaiting-control. Scheduling before
       // the first successful write silently skips the timer, allowing the
       // Host lease to expire and correctly restore OEM after its timeout.
       // Start renewal only once this control session is actually active.
       this.activeCurve = cloneFanNodes(nodes);
+      this.desiredCurve = cloneFanNodes(nodes);
+      this.fanGuardArmed = true;
+      this.lastEnableAttemptFailed = false;
+      this.consecutiveFanGuardEnableFailures = 0;
       this.scheduleHeartbeat();
+      this.scheduleFanGuard();
+      this.emitFanGuardState(true);
       return applied;
     } catch (error) {
+      this.lastEnableAttemptFailed = enableAttempted;
       try { await this.recoverAfterMutationFailure(); }
       catch (recoveryError) {
         const original = error instanceof Error ? error.message : String(error);
@@ -1231,8 +1366,10 @@ export class FanHostLifecycle {
       throw new Error(`Fan Host 当前不可控制: ${this.state}`);
     }
     if (!this.writeReady) throw new Error('当前风扇数据路线已识别，但真实写入/恢复尚未验证');
+    let enableAttempted = false;
     try {
       if (!this.opened) {
+        this.advanceSessionGeneration();
         this.opened = true;
         const opened = await this.adapter.open();
         this.syncRemoteSessionState(opened);
@@ -1244,13 +1381,21 @@ export class FanHostLifecycle {
       }
       await this.ensureLeaseForMutation();
       this.setState('ready');
+      enableAttempted = true;
       const applied = await this.adapter.applyPreset(name, this.lease?.leaseId, nodes);
       // Keep the first preset path identical to a manual curve apply: the
       // lease watchdog starts only after the initial write has succeeded.
-      if (nodes) this.activeCurve = cloneFanNodes(nodes);
+      if (nodes) {
+        this.activeCurve = cloneFanNodes(nodes);
+        this.desiredCurve = cloneFanNodes(nodes);
+        this.fanGuardArmed = true;
+      }
       this.scheduleHeartbeat();
+      this.scheduleFanGuard();
+      this.emitFanGuardState(true);
       return applied;
     } catch (error) {
+      this.lastEnableAttemptFailed = enableAttempted;
       try { await this.recoverAfterMutationFailure(); }
       catch (recoveryError) {
         const original = error instanceof Error ? error.message : String(error);
@@ -1265,12 +1410,14 @@ export class FanHostLifecycle {
   async disable(): Promise<FanState> {
     return this.enqueue(async () => {
       fanDiagnosticLog('lifecycle.disable-begin', { state: this.state });
+      this.disarmFanGuard();
       if (this.state === 'disabled' || this.state === 'stopped' || this.state === 'suspended') {
         // A disable click is also an explicit cancellation of any deferred
         // post-sleep replay. Do not retain a curve that the user has already
         // asked to return to OEM control.
         this.activeCurve = null;
         this.resumeCurve = null;
+        this.desiredCurve = null;
         return { state: this.state, powerState: 'Unknown', hardwareWrites: false, hardwareWritesObserved: false };
       }
       if (this.state === 'fault-locked' || this.state === 'conflict-locked' || this.state === 'unknown') {
@@ -1314,6 +1461,7 @@ export class FanHostLifecycle {
       }
       this.activeCurve = null;
       this.resumeCurve = null;
+      this.desiredCurve = null;
       this.setState('awaiting-control');
       return this.adapter.getState();
     });
@@ -1322,12 +1470,34 @@ export class FanHostLifecycle {
   async heartbeat(): Promise<FanLease> {
     return this.enqueue(async () => {
       if (this.state !== 'ready' || !this.lease) throw new Error('Fan lease 不可用');
+      const curveBeforeRouteLoss = this.activeCurve ? cloneFanNodes(this.activeCurve) : null;
       try {
         this.lease = await this.adapter.heartbeat(this.lease.leaseId);
         fanDiagnosticLog('lifecycle.heartbeat-success', { state: this.state });
         return { ...this.lease };
       } catch (error) {
         fanDiagnosticLog('lifecycle.heartbeat-failure', { state: this.state, error: error instanceof Error ? error.message : String(error) });
+        this.stopHeartbeat();
+        this.advanceSessionGeneration();
+        if (curveBeforeRouteLoss && isHidRouteLoss(error)) {
+          try {
+            // The C# Host has already claimed and serialized the HC
+            // Close/unbind boundary. Do not send restore/close from this
+            // layer; wait for its terminal AwaitingControl evidence, probe a
+            // stable route, and then issue exactly Open -> OpenEvents -> lease
+            // -> curve through the existing mutation transaction.
+            return await this.recoverAfterHidRemoval(curveBeforeRouteLoss);
+          } catch (recoveryError) {
+            // Keep the desired curve available for an explicit later retry,
+            // but never keep a lease or a heartbeat alive after a failed
+            // rebuild.
+            this.lease = null;
+            this.activeCurve = cloneFanNodes(curveBeforeRouteLoss);
+            const recoveryMessage = recoveryError instanceof Error ? recoveryError.message : String(recoveryError);
+            this.setState('fault-locked');
+            throw new Error(`HC 路线丢失后自动重建失败：${recoveryMessage}`);
+          }
+        }
         await this.recoverAfterMutationFailure();
         if (isExternalFanControlConflict(error) && this.stateValue !== 'fault-locked' && this.stateValue !== 'unknown') {
           this.setState('conflict-locked');
@@ -1358,14 +1528,15 @@ export class FanHostLifecycle {
           this.state !== 'ready' && this.state !== 'awaiting-control' &&
           this.state !== 'fault-locked' && this.state !== 'conflict-locked' &&
           this.state !== 'unknown') return;
-      const curveToResume = this.state === 'ready' && this.activeCurve
-        ? cloneFanNodes(this.activeCurve)
+      const curveToResume = this.desiredCurve
+        ? cloneFanNodes(this.desiredCurve)
         : null;
       try {
         // Match HC SystemPending: the power boundary owns the one virtual
         // CurrentDevice.Close() call. Profile Hardware handoff belongs only
         // to an explicit control disable, not to suspend.
         this.stopHeartbeat();
+        this.advanceSessionGeneration();
         const suspended = await this.adapter.suspend();
         assertHcSessionSuspended(suspended, 'Fan Host suspend');
         // The Host has completed the HC Close boundary. A lease is scoped to
@@ -1375,6 +1546,9 @@ export class FanHostLifecycle {
         this.eventsOpened = false;
         this.activeCurve = null;
         this.resumeCurve = curveToResume;
+        if (curveToResume) this.desiredCurve = cloneFanNodes(curveToResume);
+        this.emitFanGuardState(false);
+        this.scheduleFanGuard();
         this.setState('suspended');
       } catch (error) {
         fanDiagnosticLog('lifecycle.suspend-failure', { state: this.state, error: error instanceof Error ? error.message : String(error) });
@@ -1414,106 +1588,15 @@ export class FanHostLifecycle {
   async resume(): Promise<void> {
     return this.enqueue(async () => {
       fanDiagnosticLog('lifecycle.resume-begin', { state: this.state });
-      if (!this.enabled || this.state === 'disabled' || this.state === 'stopped') return;
-      if (this.state !== 'suspended') return;
-      let lastError: unknown;
-      let conflictLocked = false;
-      for (let attempt = 0; attempt < RECOVERY_RETRY_DELAYS_MS.length; attempt += 1) {
-        try {
-          if (attempt > 0) await waitForRecoveryRetry(attempt);
-          const resumedState = await this.adapter.resume();
-          const handshake = await this.adapter.handshake();
-          const gate = evaluateFanDeviceGate(handshake, this.savedIdentity);
-          if (!gate.allowed) {
-            conflictLocked = true;
-            this.setState('conflict-locked');
-            throw new Error(gate.reason);
-          }
-          this.savedIdentity = handshake.deviceIdentity ?? this.savedIdentity;
-          this.writeReady = gate.writeReady;
-          if (handshake.deviceIdentity) this.onDeviceIdentity?.(handshake.deviceIdentity);
-          // The resident Host now rebuilds HC Open/OpenEvents/lease/curve on
-          // its own power notification. Do not race that task by immediately
-          // issuing a second UI-side enable; wait for its authoritative state
-          // and adopt the curve it acknowledged when available.
-          // The Host may finish its automatic HC rebuild between the native
-          // resume event and this UI request. In that case /api/resume returns
-          // Ready rather than Resuming. Always perform one read-only state
-          // adoption check for both responses; otherwise the renderer would
-          // issue a second Enable/curve write against an already-live HC
-          // session, which is not an HC lifecycle transition.
-          let remoteAfterResume: FanState | null = null;
-          if (resumedState.state === 'Resuming') {
-            for (let poll = 0; poll < 180; poll += 1) {
-              const remote = await this.adapter.getState();
-              if (remote.state !== 'Resuming') {
-                remoteAfterResume = remote;
-                break;
-              }
-              await new Promise<void>((resolve) => setTimeout(resolve, 250));
-            }
-          } else if (resumedState.state === 'Ready') {
-            remoteAfterResume = await this.adapter.getState().catch(() => null);
-          }
-          if (remoteAfterResume) {
-            if (remoteAfterResume.state === 'FaultLocked' || remoteAfterResume.state === 'Unknown') {
-              throw new Error('唤醒后 Fan Host 自动重建失败');
-            }
-            if (remoteAfterResume.state === 'Ready' && remoteAfterResume.hardwareWritesEnabled === true) {
-              this.syncRemoteSessionState(remoteAfterResume);
-              const remoteCurve = Array.isArray(remoteAfterResume.activeCurve)
-                ? remoteAfterResume.activeCurve as FanNode[]
-                : null;
-              if (remoteCurve) this.activeCurve = cloneFanNodes(remoteCurve);
-              // If the Host omits activeCurve from a compatible older snapshot,
-              // the remembered curve still identifies the exact replay that
-              // was being rebuilt; adopting it is safer than writing twice.
-              if (!this.activeCurve && this.resumeCurve) this.activeCurve = cloneFanNodes(this.resumeCurve);
-              if (this.activeCurve) this.resumeCurve = null;
-              this.lease = null;
-              this.setState('ready');
-              fanDiagnosticLog('lifecycle.resume-host-auto-rebuild-adopted', {
-                state: remoteAfterResume.state,
-                hasCurve: Boolean(remoteCurve || this.activeCurve),
-                responseState: resumedState.state,
-              });
-              return;
-            }
-          }
-          // HC never retains a pre-sleep device session. Recreate the normal
-          // enable boundary on a fresh handshake: Open -> OpenEvents -> lease
-          // -> the same curve that was acknowledged before suspend.
-          this.setState('awaiting-control');
-          const curveToResume = this.resumeCurve;
-          if (!curveToResume) return;
-          if (!this.writeReady) throw new Error('唤醒后风扇数据路线未通过真实写入/恢复验证');
-          await this.applyMutation(curveToResume);
-          this.resumeCurve = null;
-          return;
-        } catch (error) {
-          lastError = error;
-          fanDiagnosticLog('lifecycle.resume-failure', {
-            attempt,
-            state: this.state,
-            error: error instanceof Error ? error.message : String(error),
-          });
-          if (isExternalFanControlConflict(error)) {
-            conflictLocked = true;
-            this.setState('conflict-locked');
-            break;
-          }
-        }
-      }
-      this.activeCurve = null;
-      this.resumeCurve = null;
-      if (!conflictLocked) this.setState('fault-locked');
-      throw lastError instanceof Error ? lastError : new Error('唤醒后 Fan Host 恢复失败');
+      if (!this.enabled || this.state === 'disabled' || !this.fanGuardArmed) return;
+      await this.runFanGuardOnce('explicit-resume');
     });
   }
 
   async close(): Promise<void> {
     return this.enqueue(async () => {
       fanDiagnosticLog('lifecycle.close-begin', { state: this.state });
+      this.disarmFanGuard();
       if (!this.enabled || this.state === 'disabled' || this.state === 'stopped') return;
       try {
         this.stopHeartbeat();
@@ -1526,6 +1609,7 @@ export class FanHostLifecycle {
         this.eventsOpened = false;
         this.activeCurve = null;
         this.resumeCurve = null;
+        this.desiredCurve = null;
         this.setState('stopped');
         this.writeReady = false;
         } catch (error) {
@@ -1654,6 +1738,72 @@ export class FanHostLifecycle {
     }
   }
 
+  /**
+   * Rebuild one control session after the resident Host has closed a lost HID
+   * route. All calls remain inside the lifecycle queue; no second Close or
+   * profile restore is sent while HC's original owner is unwinding.
+   */
+  private async recoverAfterHidRemoval(curve: readonly FanNode[]): Promise<FanLease> {
+    if (this.recoveryOwner !== 'none') throw new Error('HC_RECOVERY_OWNER_BUSY');
+    this.recoveryOwner = 'hid-route';
+    try {
+      const remote = await this.waitForHostRecovery(false);
+      this.syncRemoteSessionState(remote);
+      if (String(remote.state ?? '').toLowerCase() !== 'awaitingcontrol') {
+        throw new Error(`HC_ROUTE_RECOVERY_NOT_CLOSED: ${String(remote.state ?? 'unknown')}`);
+      }
+
+      // Handshake is read-only route admission. Do not call Open until the
+      // route identity and explicit write/recovery gate are stable again.
+      let handshake: FanHandshake | null = null;
+      let gate: FanDeviceGateResult | null = null;
+      let lastError: unknown;
+      for (let attempt = 0; attempt < RECOVERY_RETRY_DELAYS_MS.length; attempt += 1) {
+        try {
+          if (attempt > 0) await waitForRecoveryRetry(attempt);
+          handshake = await this.adapter.handshake();
+          gate = evaluateFanDeviceGate(handshake, this.savedIdentity);
+          if (gate.allowed && gate.writeReady) break;
+          throw new Error(gate.reason);
+        } catch (error) {
+          lastError = error;
+          handshake = null;
+          gate = null;
+        }
+      }
+      if (!handshake || !gate?.allowed || !gate.writeReady) {
+        throw lastError instanceof Error ? lastError : new Error('HC_ROUTE_NOT_STABLE');
+      }
+      this.savedIdentity = handshake.deviceIdentity ?? this.savedIdentity;
+      this.writeReady = gate.writeReady;
+
+      // A completed HC Close invalidates the old Open/OpenEvents and lease;
+      // never trust a stale local flag when a compatible adapter omitted the
+      // optional telemetry fields.
+      this.opened = remote.openCalled === true;
+      this.eventsOpened = remote.openEventsCalled === true;
+      this.lease = null;
+      this.activeCurve = cloneFanNodes(curve);
+      this.setState('awaiting-control');
+      await this.applyMutation(curve);
+      if (!this.lease) throw new Error('HC_ROUTE_REBUILD_LEASE_MISSING');
+      return { ...this.lease };
+    } finally {
+      this.recoveryOwner = 'none';
+    }
+  }
+
+  private isObservedRouteLoss(remote: FanState): boolean {
+    const remoteState = String(remote.state ?? '').toLowerCase();
+    // A confirmed sleep/process boundary is not an external takeover. The
+    // existing SystemPending/SystemReady owner handles those states and must
+    // not be raced by the route observer.
+    if (remoteState === 'suspended' || remoteState === 'stopped') return false;
+    if (remoteState === 'awaitingcontrol' && remote.hardwareWritesEnabled !== true) return true;
+    if (remote.openCalled === false || remote.openEventsCalled === false) return true;
+    return remoteState === 'faultlocked' || remoteState === 'unknown';
+  }
+
   private async restoreAndRelease(): Promise<void> {
     if (this.lease) {
       try {
@@ -1766,6 +1916,206 @@ export class FanHostLifecycle {
     if (this.heartbeatTimer !== null) {
       clearTimeout(this.heartbeatTimer);
       this.heartbeatTimer = null;
+    }
+  }
+
+  private armFanGuard(nodes: readonly FanNode[]): void {
+    this.desiredCurve = cloneFanNodes(nodes);
+    this.fanGuardArmed = true;
+    this.consecutiveFanGuardEnableFailures = 0;
+    this.scheduleFanGuard();
+  }
+
+  private disarmFanGuard(): void {
+    this.fanGuardArmed = false;
+    this.desiredCurve = null;
+    this.stopFanGuard();
+  }
+
+  private emitFanGuardState(active: boolean, error?: unknown): void {
+    if (typeof window === 'undefined') return;
+    window.dispatchEvent(new CustomEvent('fan:guard-state', {
+      detail: {
+        active,
+        state: this.state,
+        error: error instanceof Error ? error.message : error === undefined ? undefined : String(error),
+      },
+    }));
+  }
+
+  private remoteFanControlHealthy(remote: FanState): boolean {
+    const state = String(remote.state ?? '').toLowerCase();
+    if (state !== 'ready' && state !== 'open') return false;
+    if (remote.hardwareWritesEnabled !== true || remote.unknownState === true ||
+        remote.oemRestoreConfirmed === true || remote.hcCloseCleanupPending === true) return false;
+    if (remote.openCalled === false || remote.openEventsCalled === false) return false;
+    return true;
+  }
+
+  /** Recheck a missing write gate as one guard attempt.  This is deliberately
+   * one handshake only; a timeout/error leaves the guard armed for the next
+   * ten-second tick instead of creating an inner retry loop. */
+  private async refreshFanGuardWriteGate(force = false): Promise<void> {
+    if (!force && this.writeReady) return;
+    if (force) this.writeReady = false;
+    if (!this.process) {
+      this.setState('stopped');
+      const gate = await this.startInternal();
+      if (!gate.allowed || !gate.writeReady) throw new Error(gate.reason);
+      return;
+    }
+    this.setState('handshaking');
+    const handshake = await this.adapter.handshake();
+    const gate = evaluateFanDeviceGate(handshake, this.savedIdentity);
+    if (!gate.allowed) {
+      this.setState('conflict-locked');
+      throw new Error(gate.reason);
+    }
+    this.savedIdentity = handshake.deviceIdentity ?? this.savedIdentity;
+    this.writeReady = gate.writeReady;
+    if (handshake.deviceIdentity) this.onDeviceIdentity?.(handshake.deviceIdentity);
+    this.setState('awaiting-control');
+    if (!gate.writeReady) throw new Error(gate.reason);
+  }
+
+  /**
+   * One unbounded guard attempt. A delayed handshake or a failed rebuild ends
+   * only this attempt; the timer is re-armed in scheduleFanGuard's finally
+   * path and tries again ten seconds later. No wake/AC/DC event owns this loop.
+   */
+  private async runFanGuardOnce(source = 'timer'): Promise<void> {
+    const curve = this.desiredCurve ? cloneFanNodes(this.desiredCurve) : null;
+    if (!this.enabled || !this.fanGuardArmed || !curve) return;
+    fanDiagnosticLog('lifecycle.fan-guard-attempt', { source, state: this.state });
+    this.lastEnableAttemptFailed = false;
+    try {
+      if (this.state === 'fault-locked' || this.state === 'conflict-locked' || this.state === 'unknown') {
+        await this.recoverLockedHostBeforeStart();
+      }
+      await this.refreshFanGuardWriteGate();
+      if (this.state === 'stopped') {
+        const gate = await this.startInternal();
+        if (!gate.allowed || !gate.writeReady) throw new Error(gate.reason);
+      }
+
+      let remote = await this.adapter.getState();
+      this.syncRemoteSessionState(remote);
+      if (this.remoteFanControlHealthy(remote) && this.lease) {
+        this.activeCurve = cloneFanNodes(curve);
+        this.resumeCurve = null;
+        this.setState('ready');
+        this.scheduleHeartbeat();
+        this.emitFanGuardState(true);
+        fanDiagnosticLog('lifecycle.fan-guard-healthy', { source, state: remote.state });
+        return;
+      }
+
+      // A suspended Host is not a special terminal state. Ask the same Host
+      // boundary once; if it is still resuming, this attempt fails quickly and
+      // the next ten-second guard tick will try again.
+      if (this.state === 'suspended' ||
+          String(remote.state ?? '').toLowerCase() === 'suspended' ||
+          String(remote.powerState ?? '').toLowerCase() === 'suspended') {
+        remote = await this.adapter.resume();
+        this.syncRemoteSessionState(remote);
+        if (String(remote.state ?? '').toLowerCase() === 'resuming') {
+          throw new Error('FAN_GUARD_RESUME_PENDING');
+        }
+        // Sleep invalidates the old HC capability/readiness proof. Recheck
+        // it once after the resume response; a failed probe is just this
+        // attempt's failure and is retried by the next guard tick.
+        await this.refreshFanGuardWriteGate(true);
+      }
+
+      if (this.remoteFanControlHealthy(remote) && this.lease) {
+        this.activeCurve = cloneFanNodes(curve);
+        this.resumeCurve = null;
+        this.setState('ready');
+        this.scheduleHeartbeat();
+        this.emitFanGuardState(true);
+        fanDiagnosticLog('lifecycle.fan-guard-restored-by-host', { source, state: remote.state });
+        return;
+      }
+
+      const remoteState = String(remote.state ?? '').toLowerCase();
+      if (remoteState === 'stopped') {
+        await this.adoptRecoveredHost(remote);
+        const gate = await this.startInternal();
+        if (!gate.allowed || !gate.writeReady) throw new Error(gate.reason);
+      } else if (remoteState === 'faultlocked' || remoteState === 'unknown') {
+        this.setState(remoteState === 'unknown' ? 'unknown' : 'fault-locked');
+        await this.recoverLockedHostBeforeStart();
+        const gate = await this.startInternal();
+        if (!gate.allowed || !gate.writeReady) throw new Error(gate.reason);
+      } else if (remoteState === 'resumed' || remoteState === 'awaitingcontrol' || remoteState === 'open' || remoteState === 'ready') {
+        this.setState('awaiting-control');
+      }
+
+      if (this.state !== 'ready' && this.state !== 'awaiting-control') {
+        throw new Error(`FAN_GUARD_STATE_NOT_READY: ${this.state}`);
+      }
+      if (!this.writeReady) throw new Error('FAN_GUARD_WRITE_ROUTE_NOT_READY');
+      await this.applyMutation(curve);
+      this.consecutiveFanGuardEnableFailures = 0;
+      this.desiredCurve = cloneFanNodes(curve);
+      this.resumeCurve = null;
+      this.emitFanGuardState(true);
+      fanDiagnosticLog('lifecycle.fan-guard-rebuild-success', { source, state: this.state });
+    } catch (error) {
+      if (this.lastEnableAttemptFailed) {
+        this.consecutiveFanGuardEnableFailures += 1;
+        if (this.consecutiveFanGuardEnableFailures >= FAN_GUARD_MAX_CONSECUTIVE_ENABLE_FAILURES) {
+          this.fanGuardArmed = false;
+          this.stopFanGuard();
+          fanDiagnosticLog('lifecycle.fan-guard-give-up', {
+            source,
+            state: this.state,
+            consecutiveEnableFailures: this.consecutiveFanGuardEnableFailures,
+          });
+        }
+      }
+      fanDiagnosticLog('lifecycle.fan-guard-failure', {
+        source,
+        state: this.state,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      this.emitFanGuardState(false, error);
+      throw error;
+    }
+  }
+
+  private scheduleFanGuard(): void {
+    this.stopFanGuard();
+    if (!this.enabled || !this.fanGuardArmed || !this.desiredCurve) return;
+    this.fanGuardTimer = setTimeout(() => {
+      this.fanGuardTimer = null;
+      if (!this.fanGuardArmed || this.fanGuardInFlight) {
+        if (this.fanGuardArmed) this.scheduleFanGuard();
+        return;
+      }
+      this.fanGuardInFlight = true;
+      void this.enqueue(async () => {
+        try { await this.runFanGuardOnce(); }
+        catch { /* Failure is retried by the finally path below. */ }
+        finally {
+          this.fanGuardInFlight = false;
+          this.scheduleFanGuard();
+        }
+      }).catch(() => {
+        this.fanGuardInFlight = false;
+        this.scheduleFanGuard();
+      });
+    }, this.fanGuardIntervalMs);
+  }
+
+  private recoveryOwnerIsBusy(): boolean {
+    return this.recoveryOwner !== 'none';
+  }
+
+  private stopFanGuard(): void {
+    if (this.fanGuardTimer !== null) {
+      clearTimeout(this.fanGuardTimer);
+      this.fanGuardTimer = null;
     }
   }
 }

@@ -138,8 +138,8 @@ foreach ($token in @('TjHysteresisC','TjCooldown','TjReleaseSamples','tjLatch','
 }
 if ((Has $text.hcFan 'SetTemperature\(double temp\)') -and (Has $text.hcFan 'GetFanSpeed\(double temp\)') -and
     (Has $text.hcFan 'Math\.Clamp\(y,\s*0\.0,\s*100\.0\)') -and
-    (Has $text.host 'CopyFanRuntimeState') -and (Has $text.host 'DirectCpuTemperatureMonitor')) {
-  Pass 'R2-F01' 'HC FanProfile algorithm/runtime state is retained; YeMan uses the permitted HW temperature adapter' "FanProfile.cs and Program.cs:CopyFanRuntimeState/DirectCpuTemperatureMonitor"
+    (Has $text.host 'CopyFanRuntimeState') -and (Has $text.host 'HWiNFOTemperatureMonitor')) {
+  Pass 'R2-F01' 'HC FanProfile algorithm/runtime state is retained; YeMan uses the HWiNFO snapshot adapter' "FanProfile.cs and Program.cs:CopyFanRuntimeState/HWiNFOTemperatureMonitor"
 } else { Fail 'R2-F01' 'FanProfile callback/runtime parity' 'algorithm, runtime copy or HW adapter boundary was not proven' }
 
 # 5. Retry/lease/close safety boundaries discovered from prior incident logs.

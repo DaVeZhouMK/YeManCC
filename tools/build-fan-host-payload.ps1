@@ -14,6 +14,9 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+if ($env:YEMAN_ALLOW_R5V9_HOST_REBUILD -ne '1') {
+  throw 'Fan Host rebuild is disabled: R5-v9 is the frozen mainline payload. Set YEMAN_ALLOW_R5V9_HOST_REBUILD=1 only for an explicitly authorized re-baseline.'
+}
 
 function Get-FullPath([string]$Path) {
   return [IO.Path]::GetFullPath($Path).TrimEnd('\')
@@ -158,6 +161,32 @@ $hcDeviceNativeFiles = @(
   'GamepadMotion.dll', 'hidapi.dll', 'IGCL_Wrapper.dll', 'JoyShockLibrary.dll',
   'libVIIPER.dll', 'SapientiaUsb.dll', 'SDL3.dll', 'UEFIVaribleDll.dll', 'Xinput1_4.dll'
 )
+$fanHostV2ExcludedFiles = @(
+  'ColorPicker.dll', 'ColorPicker.Models.dll', 'Crc32.NET.dll', 'Fastenshtein.dll',
+  'FluentResults.dll', 'GameFinder.Common.dll', 'GameFinder.Launcher.Heroic.dll',
+  'GameFinder.RegistryUtils.dll', 'GameFinder.StoreHandlers.EADesktop.dll',
+  'GameFinder.StoreHandlers.EGS.dll', 'GameFinder.StoreHandlers.GOG.dll',
+  'GameFinder.StoreHandlers.Origin.dll', 'GameFinder.StoreHandlers.Steam.dll',
+  'GameFinder.StoreHandlers.Xbox.dll', 'GameFinder.Wine.dll', 'GameLib.Core.dll',
+  'GameLib.dll', 'GameLib.Plugin.BattleNet.dll', 'GameLib.Plugin.EA.dll',
+  'GameLib.Plugin.Epic.dll', 'GameLib.Plugin.Gog.dll', 'GameLib.Plugin.Origin.dll',
+  'GameLib.Plugin.RiotGames.dll', 'GameLib.Plugin.Rockstar.dll', 'GameLib.Plugin.Steam.dll',
+  'GameLib.Plugin.Ubisoft.dll', 'GongSolutions.WPF.DragDrop.dll', 'HelixToolkit.Core.Wpf.dll',
+  'IGCL_Wrapper.dll', 'iNKORE.UI.WPF.dll', 'iNKORE.UI.WPF.Emojis.dll',
+  'iNKORE.UI.WPF.Modern.dll', 'JoyShockLibrary.dll', 'libVIIPER.dll', 'LiveCharts.dll',
+  'LiveCharts.Wpf.dll', 'MathConverter.dll', 'Microsoft.Expression.Effects.dll',
+  'Microsoft.Toolkit.Uwp.Notifications.dll', 'Microsoft.Xaml.Behaviors.dll',
+  'NexusMods.Paths.dll', 'NJsonSchema.Annotations.dll', 'OneOf.dll',
+  'Polly.Extensions.Http.dll', 'RTSSSharedMemoryNET.dll', 'SapientiaUsb.dll',
+  'SDL3-CS.dll', 'SDL3.dll', 'SHA3.Net.dll', 'TransparentValueObjects.Abstractions.dll',
+  'ValveKeyValue.dll', 'WindowsDisplayAPI.dll', 'WpfScreenHelper.dll', 'Xinput1_4.dll'
+)
+$missingV2Excluded = @($fanHostV2ExcludedFiles | Where-Object {
+  -not (Test-Path -LiteralPath (Join-Path $hcRuntimeSourceRoot $_) -PathType Leaf)
+})
+if ($missingV2Excluded.Count -gt 0) {
+  throw "Fan Host V2 exclusion list is not present in frozen HC source: $($missingV2Excluded -join ', ')"
+}
 foreach ($name in $hcDeviceNativeFiles) {
   $source = Join-Path $hcRuntimeSourceRoot $name
   if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
@@ -173,7 +202,9 @@ foreach ($name in $hcFactoryBootstrapFiles) {
   $hcRuntimeSources[$name] = $source
 }
 
-$hcRuntimeFiles = @($hcRuntimeSources.Keys | Sort-Object)
+$hcRuntimeFiles = @($hcRuntimeSources.Keys | Where-Object {
+  $_ -notin $fanHostV2ExcludedFiles
+} | Sort-Object)
 
 # HC's deps file contains both generic compile-time assemblies and Windows
 # runtime targets for these three platform APIs. YeManFanHost loads HC through
@@ -272,7 +303,7 @@ if ($files.Count -eq 0) { throw 'Fan Host payload manifest would be empty' }
 
 $closureAudit = Join-Path $PSScriptRoot 'fan_hc_device_closure_selftest.ps1'
 $metadataPowerShell = Get-Command pwsh.exe -ErrorAction Stop
-& $metadataPowerShell.Source -NoLogo -NoProfile -ExecutionPolicy Bypass -File $closureAudit -HcRuntimeRoot $hcRuntimeSourceRoot -PayloadRoot $payloadRoot
+& $metadataPowerShell.Source -NoLogo -NoProfile -ExecutionPolicy Bypass -File $closureAudit -HcRuntimeRoot $hcRuntimeSourceRoot -PayloadRoot $payloadRoot -ExcludedRuntimeFiles ($fanHostV2ExcludedFiles -join ',')
 if ($LASTEXITCODE -ne 0) { throw "Fan Host HC device closure audit failed: exit=$LASTEXITCODE" }
 
 Write-Output "FAN_HOST_PAYLOAD_OK"

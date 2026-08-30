@@ -67,15 +67,17 @@ New-Item -ItemType Directory -Force -Path $WebBuild, $NativeBuild | Out-Null
 $env:YEMAN_WORKSPACE_ROOT = $WorkspaceRoot
 $env:YEMAN_BUILD_WEB_DIR = $WebBuild
 
-# Fan Host is intentionally frozen for the current release. Keep an explicit
-# opt-in for later fan releases, but do not make the unfinished module a build
-# or package prerequisite for the main application and CustomSteamLibrary.
+# Fan Host V2 is the only Fan Host source payload. Host compilation is
+# intentionally disabled here: rebuilding from a different checkout would
+# silently create a second mainline. Its HC runtime baseline remains the
+# separately locked R5-v9 build and is verified before every app build.
 if ($env:YEMAN_BUILD_FAN_HOST -eq '1') {
-  & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File (Join-Path $ProjectRoot 'tools\build-fan-host-payload.ps1') -WorkspaceRoot $WorkspaceRoot
-  if ($LASTEXITCODE -ne 0) { throw "Fan Host payload build failed: exit=$LASTEXITCODE" }
-} else {
-  Write-Output 'FAN_HOST_BUILD=SKIPPED (release policy: preserve-existing)'
+  throw 'Fan Host rebuild is disabled: Fan Host V2 is the frozen mainline payload.'
 }
+$fanHostVerifier = Join-Path $ProjectRoot 'tools\verify-r5v9-fan-host-payload.ps1'
+& powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File $fanHostVerifier -PayloadRoot (Join-Path $ProjectRoot 'PowerControl\fan-host')
+if ($LASTEXITCODE -ne 0) { throw "Fan Host V2 payload verification failed: exit=$LASTEXITCODE" }
+Write-Output 'FAN_HOST_BUILD=V2_PINNED (source payload verified; HC baseline R5-v9)'
 
 Push-Location $ProjectRoot
 try {

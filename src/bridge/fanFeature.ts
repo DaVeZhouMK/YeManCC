@@ -31,8 +31,8 @@ export const FAN_FORCE_PREVIEW = false;
  * edited independently. */
 export const DEFAULT_FAN_PRESET_CURVES: Record<FanPreset, FanNode[]> = {
   soft: [
-    { tempC: 0, dutyPercent: 0 }, { tempC: 40, dutyPercent: 0 },
-    { tempC: 70, dutyPercent: 20 }, { tempC: 100, dutyPercent: 80 },
+    { tempC: 0, dutyPercent: 0 }, { tempC: 40, dutyPercent: 15 },
+    { tempC: 69, dutyPercent: 30 }, { tempC: 100, dutyPercent: 70 },
   ],
   balanced: [
     { tempC: 0, dutyPercent: 0 }, { tempC: 40, dutyPercent: 20 },
@@ -46,7 +46,8 @@ export const DEFAULT_FAN_PRESET_CURVES: Record<FanPreset, FanNode[]> = {
 
 const DEFAULT_FAN_SETTINGS: FanFeatureSettings = {
   // New installations are eligible by default. The navigation remains hidden
-  // until a successful HC handshake (or a remembered device configuration).
+  // until the current process completes a successful HC handshake. A remembered
+  // device is retained for retry/profile context, but never grants visibility.
   featureEnabled: true, configured: false, deviceIdentity: null,
   preset: 'balanced', motionEnabled: true,
   diagnosticLoggingEnabled: false,
@@ -74,7 +75,7 @@ export function setFanNavigationDuty(duty: number): void {
 }
 let initialization: Promise<FanFeatureSettings> | null = null;
 export const fanFeatureEnabled = computed(() => initialized.value && FAN_IMPORT_ENABLED &&
-  settings.value.featureEnabled && (FAN_FORCE_PREVIEW || settings.value.configured || handshakeSupported.value));
+  settings.value.featureEnabled && (FAN_FORCE_PREVIEW || handshakeSupported.value));
 
 /**
  * Return a deep plain-data snapshot.  A shallow spread of a Vue reactive
@@ -115,7 +116,7 @@ function normalizeNodes(value: unknown): FanNode[] {
   const valid = nodes.every((node) => Number.isFinite(node.tempC) && Number.isFinite(node.dutyPercent));
   // Node 1 temperature is anchored at 0°C, but its duty is editable. The
   // only curve invariant is monotonicity plus the node-4 minimum duty.
-  if (!valid || nodes[0].tempC !== 0 ||
+  if (!valid || nodes[0].tempC !== 0 || nodes[2].tempC > 85 ||
       nodes.some((node, index) => index > 0 &&
         (node.tempC < nodes[index - 1].tempC || node.dutyPercent < nodes[index - 1].dutyPercent)) ||
       nodes[3].dutyPercent < 50) {
@@ -171,6 +172,7 @@ export function getFanPresetCurve(preset: FanPreset): FanNode[] {
 export async function initializeFanFeature(): Promise<FanFeatureSettings> {
   if (!initialization) {
     initialization = (async () => {
+      handshakeSupported.value = false;
       try {
         if (FAN_FORCE_PREVIEW) {
           settings.value = structuredClone(DEFAULT_FAN_SETTINGS);
@@ -184,9 +186,9 @@ export async function initializeFanFeature(): Promise<FanFeatureSettings> {
         settings.value = {
           ...DEFAULT_FAN_SETTINGS, ...saved,
           // `featureEnabled:false` was written by the old preview build. Once
-          // the formal fan integration gate is enabled, that legacy value
-          // must not hide the navigation on a supported device. Eligibility
-          // is still gated by the HC handshake/remembered identity below;
+          // the formal fan integration gate is enabled, that legacy value is
+          // retained only for retry/profile context. Navigation eligibility
+          // is still gated by the current HC handshake below;
           // the reversible global rollback remains the formal build Gate.
           featureEnabled: FAN_IMPORT_ENABLED,
           configured: saved.configured === true,

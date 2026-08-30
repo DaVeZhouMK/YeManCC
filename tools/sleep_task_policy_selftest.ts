@@ -91,8 +91,8 @@ assert.ok(retryDispatch.includes('if (request.accepted) return;'),
   'accepted SetSuspendState must wait for real Windows evidence');
 rejectNative('retry-confirm-timeout');
 
-// Physical path 1: 506 Reason=1/3 then 507 Reason=7/8 within 2 seconds.
-requireNative('SG_S0_REASON7_FAILURE_WINDOW_MS = 2000ULL');
+// Physical path 1: 506 Reason=1/3 then 507 Reason=7/8 within 5 seconds.
+requireNative('SG_S0_REASON7_FAILURE_WINDOW_MS = 5000ULL');
 requireNative('if (wakeReason != 7 && wakeReason != 8) return false;');
 requireNative('const bool userIntent506 = sleepReason == 1 || sleepReason == 3;');
 requireNative('sgStartSleepRetry(SgRetryKind::EntryFailure, "s0-kernel-entry-failure")');
@@ -162,7 +162,8 @@ const userSleep = (s: Model, at: number): void => {
   s.unexpectedConsumed = false;
 };
 const entryExit = (s: Model, at: number, reason: number): boolean => {
-  if ((reason !== 7 && reason !== 8) || at - s.userIntentAt > 2000) return false;
+  if (s.userIntentAt < 0 || (reason !== 7 && reason !== 8) ||
+      at - s.userIntentAt > 5000) return false;
   s.retryKind = 'entry-failure';
   return true;
 };
@@ -202,6 +203,10 @@ assert.equal(usb4.paused, false);
 assert.equal(usb4.resumeCount, 1);
 
 assert.equal(entryExit(createModel(), 2001, 7), false);
+const fiveSecondBoundary = createModel();
+userSleep(fiveSecondBoundary, 0);
+assert.equal(entryExit(fiveSecondBoundary, 5000, 7), true);
+assert.equal(entryExit(fiveSecondBoundary, 5001, 7), false);
 const tooEarly = createModel();
 userSleep(tooEarly, 0);
 assert.equal(unexpectedWake(tooEarly, 119999, true, -1), false);
