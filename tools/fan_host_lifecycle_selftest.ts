@@ -54,8 +54,11 @@ class FakeAdapter implements FanApiAdapter {
   unconfirmedCleanupResponses = false;
   directHcCloseWithoutHardwareCallback = false;
   autoHostResume = false;
+  routeLossClosesHost = false;
   private autoResumePolls = 0;
   autoResumeCurve: readonly FanNode[] = [];
+  readonly handshakeTimeouts: Array<number | undefined> = [];
+  readonly stateTimeouts: Array<number | undefined> = [];
   handshakeResult: FanHandshake = {
     ok: true,
     supported: true,
@@ -64,13 +67,15 @@ class FakeAdapter implements FanApiAdapter {
     deviceIdentity: { manufacturer: 'GPD', model: 'G1618-05', product: 'G1618-05', bios: '2.20' },
   };
   lease: FanLease = { leaseId: 'lease-1', generation: 1 };
-  async handshake() {
+  async handshake(timeoutMs?: number) {
     this.calls.push('handshake');
+    this.handshakeTimeouts.push(timeoutMs);
     if (this.handshakeFailures-- > 0) throw new Error('HANDSHAKE_TRANSIENT_FAILURE');
     return this.handshakeResult;
   }
-  async getState() {
+  async getState(timeoutMs?: number) {
     this.calls.push('state');
+    this.stateTimeouts.push(timeoutMs);
     if (this.autoHostResume) {
       this.autoResumePolls += 1;
       if (this.autoResumePolls < 2) return state('Resuming');
@@ -88,8 +93,18 @@ class FakeAdapter implements FanApiAdapter {
       if (this.cleanupPendingReads === 0) this.pendingCloseCompleted = true;
       return pending;
     }
+    if (this.recoveryState) {
+      const recovered = state(this.recoveryState);
+      if (this.recoveryState === 'AwaitingControl' && this.routeLossClosesHost) {
+        recovered.oemRestoreConfirmed = false;
+        recovered.hcVirtualCloseReturned = true;
+        recovered.hcDeviceManagerStopCompleted = true;
+        recovered.openCalled = false;
+        recovered.openEventsCalled = false;
+      }
+      return recovered;
+    }
     if (this.pendingCloseCompleted) return state('Stopped');
-    if (this.recoveryState) return state(this.recoveryState);
     return state();
   }
   async enable(_nodes: readonly FanNode[]) {
@@ -130,7 +145,18 @@ class FakeAdapter implements FanApiAdapter {
   async acquireControl() { this.calls.push('acquire'); return this.lease; }
   async heartbeat(_leaseId: string) {
     this.calls.push('heartbeat');
-    if (this.heartbeatFailures-- > 0) throw new Error(this.heartbeatFailureMessage);
+    if (this.heartbeatFailures-- > 0) {
+      if (this.routeLossClosesHost && /HC_SESSION_ROUTE_LOST|HC_SESSION_UNAVAILABLE|LEASE_INVALID/i.test(this.heartbeatFailureMessage)) {
+        // Model the resident C# recovery owner: the failed HID marker stops
+        // writes, then one virtual Close/unbind returns AwaitingControl before
+        // the bridge is allowed to probe/reopen the route.
+        this.remoteOpen = false;
+        this.remoteOpenEvents = false;
+        this.recoveryState = 'AwaitingControl';
+        this.pendingCloseCompleted = true;
+      }
+      throw new Error(this.heartbeatFailureMessage);
+    }
     return this.lease;
   }
   async releaseControl(_leaseId: string) { this.calls.push('release'); return this.cleanupState('Released'); }
@@ -302,8 +328,8 @@ async function main(): Promise<void> {
     hostSource.includes('private void CloseHcDevice()') &&
     hostSource.includes('Invoke(device!, "Close")') &&
     hostSource.includes('CaptureHcProfileTemplate();') &&
-    (hostSource.includes('CloneHcPowerProfilePreservingFanState(hcProfileTemplate)') ||
-      hostSource.includes('CloneHcPowerProfile(hcProfileTemplate)')) &&
+    (hostSource.includes('CloneHcPowerProfilePreservingFanState(') ||
+      hostSource.includes('CloneHcPowerProfile(')) &&
     hostSource.includes('ApplyPowerProfile(BuildPowerProfile(Array.Empty<double>(), software: false));') &&
     hostSource.includes('restore.close-hc-failure') &&
     hostSource.includes('HC Close 资源清理失败，等待重试') &&
@@ -352,7 +378,7 @@ async function main(): Promise<void> {
   const verifySessionEnd = hostSource.indexOf('\n    public void RestoreOem()', verifySessionStart);
   const verifySessionBody = hostSource.slice(verifySessionStart, verifySessionEnd);
   assert(verifySessionStart >= 0 && verifySessionEnd > verifySessionStart &&
-    verifySessionBody.includes('if (!IsOpen || !oemBaselineCaptured || !IsRouteStillReady())') &&
+    verifySessionBody.includes('EnsureHcSessionReadyForControl()') &&
     !verifySessionBody.includes('GetFan') &&
     !verifySessionBody.includes('GetSmartFanMode') &&
     !verifySessionBody.includes('GetShiftValue') &&
@@ -361,6 +387,27 @@ async function main(): Promise<void> {
     !hostSource.includes('ConfirmAppliedMsiCurve') &&
     !hostSource.includes('ConfirmAppliedLenovoCurve'),
   'lease heartbeat must validate only the live HC session, never infer external ownership from vendor readback');
+  assert(hostSource.includes('HC_SESSION_ROUTE_LOST') &&
+    hostSource.includes('skipOemRestore: routeLost') &&
+    hostSource.includes('CloseHcSessionForLifecycle(stopDeviceManager, skipOemRestore)'),
+  'HID route loss must use the resident HC Close/unbind owner without a second OEM callback');
+  assert(bridgeSource.includes('recoverAfterHidRemoval') &&
+    bridgeSource.includes('Open -> OpenEvents -> lease') &&
+    bridgeSource.includes('private recoveryOwner'),
+  'bridge must retain one recovery owner and rebuild only after a stable route');
+  assert(bridgeSource.includes('const FAN_GUARD_INTERVAL_MS = 10_000;') &&
+    bridgeSource.includes('const FAN_GUARD_MAX_CONSECUTIVE_ENABLE_FAILURES = 5;') &&
+    bridgeSource.includes('private fanGuardArmed = false;') &&
+    bridgeSource.includes('private desiredCurve: FanNode[] | null = null;') &&
+    bridgeSource.includes('private async runFanGuardOnce(source = \'timer\')') &&
+    bridgeSource.includes('private scheduleFanGuard(): void') &&
+    bridgeSource.includes('private consecutiveFanGuardEnableFailures = 0;') &&
+    bridgeSource.includes('FAN_GUARD_RESUME_PENDING') &&
+    bridgeSource.includes('this.scheduleFanGuard();') &&
+    !bridgeSource.includes('const RECOVERY_WINDOW_MS = 60_000;') &&
+    !bridgeSource.includes('const RECOVERY_MAX_ATTEMPTS = 3;') &&
+    !bridgeSource.includes('notifyPowerSourceChanged('),
+  'fan recovery must use one resident ten-second guard with unbounded retry and no AC/DC trigger');
   assert(bridgeSource.includes('private async findExactHostOwner(config: FanHostConfig): Promise<number>') &&
     bridgeSource.includes('const verifiedOwner = await this.findExactHostOwner(config);') &&
     bridgeSource.includes('proc.findExact(config.hostExecutable)') &&
@@ -422,8 +469,9 @@ async function main(): Promise<void> {
     hcOpenEventsCoreStart >= 0 && hcOpenEventsCoreEnd > hcOpenEventsCoreStart &&
     !hcOpenEventsCoreBody.includes('StartHcDeviceManager();') &&
     hcOpenEventsCoreBody.includes('Invoke(device!, "OpenEvents")') &&
-    hostSource.includes('if (IsOpen)\n                {\n                    try { CloseHcDevice(); }') &&
-    hostSource.includes('hcDeviceManagerLifecycle = "not-started/no-stop-required";'),
+    hostSource.includes('if (IsOpen || (openAttempted && hcOpenInvocationStarted))') &&
+    (hostSource.includes('hcDeviceManagerLifecycle = "not-started/no-stop-required";') ||
+      hostSource.includes('ManagerFactoryNotStarted')),
   'fan-only activation order must be IsReady probe -> Open -> OpenEvents; a failed Open must not manufacture a DeviceManager stop or Close write');
   assert(hcOpenCoreBody.includes('openAttempted = false;') &&
     hcOpenCoreBody.includes('oemBaselineCaptured = false;') &&
@@ -451,7 +499,7 @@ async function main(): Promise<void> {
     /Enum\.Parse\(updateType,\s*"Background"(?:,\s*ignoreCase:\s*false)?\)/.test(hostSource),
   'HC device fan callbacks must remain UpdateSource-independent; Host uses the upstream Background context');
   const temperatureDispatchStart = hostSource.indexOf('private void OnHcCpuTemperatureChanged(float? value)');
-  const temperatureDispatchBody = hostSource.slice(temperatureDispatchStart, temperatureDispatchStart + 1400);
+  const temperatureDispatchBody = hostSource.slice(temperatureDispatchStart, temperatureDispatchStart + 2600);
   const hcPowerProfileDispatches = hostSource.match(/Invoke\("PowerProfileManager_Applied"/g) ?? [];
   const hcFanDutyDispatches = hostSource.match(/Invoke\("SetFanDuty"/g) ?? [];
   assert(hcPowerProfileDispatches.length === 1 &&
@@ -461,12 +509,16 @@ async function main(): Promise<void> {
     temperatureDispatchBody.includes('Invoke("SetFanDuty", duty)') &&
     !temperatureDispatchBody.includes('temp < 0') && !temperatureDispatchBody.includes('temp > 100'),
   'the only Host fan dispatches must be HC PowerProfileManager_Applied plus the allowed HC FanProfile/SetFanDuty temperature callback, with HC owning range handling');
-  assert(hostSource.includes('ReadCpuTemperatureSample') &&
-    hostSource.includes('AppendHcCpuTemperatureSample') &&
-    hostSource.includes('foreach (var temperature in sample.Events)') &&
-    hostSource.includes('if (sample.HasHealthyTemperature)') &&
+  assert(hostSource.includes('HWiNFOTemperatureMonitor') &&
+    hostSource.includes('ReadSnapshot') &&
+    hostSource.includes('SelectTemperatureForSelfTest') &&
+    hostSource.includes('HWiNFO.shared-memory') &&
+    hostSource.includes('SharedMemoryNames') &&
+    hostSource.includes('ReadAnsi') &&
+    hostSource.includes('legacyLhmAssembly') &&
+    hostSource.includes('Do not make startup depend on being able to hash that optional file') &&
     hostSource.includes('OnHcCpuTemperatureSampled'),
-  'temperature monitor must preserve HC\'s ordered Package/Tctl event stream while separately tracking a steady valid sample as monitor health');
+  'temperature monitor must consume the existing fresh HWiNFO snapshot, keep invalid/stale data out of HC fan dispatch, and avoid making startup depend on hashing the legacy HC monitor assembly');
   const engineCloseStart = hostSource.indexOf('public object Close()');
   const engineCloseBody = hostSource.slice(engineCloseStart, engineCloseStart + 1800);
   assert(engineCloseStart >= 0 &&
@@ -520,6 +572,7 @@ async function main(): Promise<void> {
   try { await readOnlyLifecycle.apply([{ tempC: 0, dutyPercent: 0 }, { tempC: 40, dutyPercent: 20 }, { tempC: 70, dutyPercent: 50 }, { tempC: 100, dutyPercent: 90 }]); }
   catch { readOnlyRejected = true; }
   assert(readOnlyRejected && !readOnlyAdapter.calls.includes('open'), 'unverified route must reject before Open()');
+  await readOnlyLifecycle.close();
 
   const adapter = new FakeAdapter();
   const launcher = new FakeLauncher();
@@ -537,25 +590,61 @@ async function main(): Promise<void> {
   const suspendCalls = adapter.calls.slice(5).join(',');
   assert(suspendCalls === 'suspend', 'suspend must delegate one HC virtual Close to the Host');
   await lifecycle.resume();
-  assert(lifecycle.state === 'ready', 'an active curve must resume only after a fresh HC session is ready');
-  assert(adapter.calls.slice(6).join(',') === 'resume,handshake,open,open-events,acquire,enable',
-    'resume must recreate HC Open -> OpenEvents -> lease -> acknowledged curve in order');
+  assert(lifecycle.state === 'ready', 'the guard may rebuild after a resume response, but it must finish one serialized attempt');
+  assert(adapter.calls.slice(6).join(',') === 'state,resume,handshake,open,open-events,acquire,enable',
+    `the guard must use one serialized state/resume/rebuild attempt (calls=${adapter.calls.slice(6).join(',')})`);
 
-  // Resident Host auto-resume: the UI must adopt a completed host-side
-  // reconstruction instead of issuing a second Open/lease/enable sequence.
-  const autoResumeAdapter = new FakeAdapter();
-  const autoResumeCurve = [{ tempC: 0, dutyPercent: 0 }, { tempC: 40, dutyPercent: 20 }, { tempC: 70, dutyPercent: 60 }, { tempC: 100, dutyPercent: 100 }];
-  autoResumeAdapter.autoHostResume = true;
-  autoResumeAdapter.autoResumeCurve = autoResumeCurve;
-  const autoResumeLifecycle = new FanHostLifecycle({ enabled: true, adapter: autoResumeAdapter, launcher: new FakeLauncher(), heartbeatIntervalMs: 0 });
-  await autoResumeLifecycle.start();
-  await autoResumeLifecycle.apply(autoResumeCurve);
-  await autoResumeLifecycle.suspend();
-  await autoResumeLifecycle.resume();
-  assert(autoResumeLifecycle.state === 'ready' && autoResumeAdapter.calls.includes('state') &&
-    autoResumeAdapter.calls.filter((call) => call === 'open').length === 1 &&
-    autoResumeAdapter.calls.filter((call) => call === 'enable').length === 1,
-    'resume must adopt resident Host reconstruction without duplicate HC writes');
+  // A failed initial enable arms the resident guard before the first write.
+  // The failed attempt must not cancel the timer: the next ten-second tick
+  // retries the same curve until the user disables or the process closes.
+  const guardRetryAdapter = new FakeAdapter();
+  guardRetryAdapter.handshakeFailures = 3;
+  const guardRetryLifecycle = new FanHostLifecycle({
+    enabled: true,
+    adapter: guardRetryAdapter,
+    launcher: new FakeLauncher(),
+    heartbeatIntervalMs: 0,
+    fanGuardIntervalMs: 5,
+  });
+  const guardRetryCurve = [{ tempC: 0, dutyPercent: 0 }, { tempC: 40, dutyPercent: 20 }, { tempC: 70, dutyPercent: 60 }, { tempC: 100, dutyPercent: 100 }];
+  let guardInitialFailure = false;
+  try { await guardRetryLifecycle.apply(guardRetryCurve); } catch { guardInitialFailure = true; }
+  assert(guardInitialFailure, 'the first guarded startup should expose its immediate failure to the caller');
+  await new Promise<void>((resolve) => setTimeout(resolve, 100));
+  assert(guardRetryLifecycle.state === 'ready',
+    `a failed guarded startup must be retried by the resident timer (state=${guardRetryLifecycle.state}, calls=${guardRetryAdapter.calls.join(',')})`);
+  assert(guardRetryAdapter.calls.filter((call) => call === 'handshake').length >= 4 && guardRetryAdapter.calls.includes('enable'),
+    'the ten-second guard retry must continue through handshake and enable after the first failed attempt');
+  await guardRetryLifecycle.disable();
+  const callsAfterGuardDisable = guardRetryAdapter.calls.length;
+  await new Promise<void>((resolve) => setTimeout(resolve, 15));
+  assert(guardRetryAdapter.calls.length === callsAfterGuardDisable, 'manual disable must disarm the resident fan guard');
+  await guardRetryLifecycle.close();
+
+  // The guard is unbounded for transport/handshake/startup failures, but a
+  // real Enable failure has a five-consecutive-attempt safety cap. Once the
+  // cap is reached no sixth hardware write is sent automatically.
+  const guardGiveUpAdapter = new FakeAdapter();
+  const guardGiveUpLifecycle = new FanHostLifecycle({
+    enabled: true,
+    adapter: guardGiveUpAdapter,
+    launcher: new FakeLauncher(),
+    heartbeatIntervalMs: 0,
+    fanGuardIntervalMs: 5,
+  });
+  await guardGiveUpLifecycle.start();
+  await guardGiveUpLifecycle.apply(guardRetryCurve);
+  await guardGiveUpLifecycle.suspend();
+  guardGiveUpAdapter.enableFailures = 5;
+  let firstGuardEnableRejected = false;
+  try { await guardGiveUpLifecycle.resume(); } catch { firstGuardEnableRejected = true; }
+  await new Promise<void>((resolve) => setTimeout(resolve, 100));
+  const guardedEnableCount = guardGiveUpAdapter.calls.filter((call) => call === 'enable').length;
+  await new Promise<void>((resolve) => setTimeout(resolve, 25));
+  assert(firstGuardEnableRejected && guardedEnableCount === 6 &&
+    guardGiveUpAdapter.calls.filter((call) => call === 'enable').length === guardedEnableCount,
+    `five consecutive guarded Enable failures must stop automatic writes (count=${guardGiveUpAdapter.calls.filter((call) => call === 'enable').length}, calls=${guardGiveUpAdapter.calls.join(',')})`);
+  await guardGiveUpLifecycle.close();
   await lifecycle.close();
   assert(lifecycle.state === 'stopped', 'close must stop a resumed host');
   assert(adapter.calls.slice(-2).join(',') === 'close,shutdown', 'close must confirm then request Host shutdown');
@@ -578,8 +667,9 @@ async function main(): Promise<void> {
   'a complete HC Window_Closed boundary without a Hardware callback must stop once, not fault-lock or re-close');
 
   // A curve remembered before sleep is never permission to write after the
-  // next handshake downgrades the route. The retry loop may re-handshake, but
-  // it must not reopen HC, acquire a lease or emit another profile write.
+  // next handshake downgrades the route. The guard reports this attempt as a
+  // failure, keeps its timer armed, and never writes through the downgraded
+  // route.
   const resumeReadOnlyAdapter = new FakeAdapter();
   const resumeReadOnly = new FanHostLifecycle({ enabled: true, adapter: resumeReadOnlyAdapter, launcher: new FakeLauncher(), heartbeatIntervalMs: 0 });
   await resumeReadOnly.start();
@@ -589,10 +679,11 @@ async function main(): Promise<void> {
   let resumeReadOnlyRejected = false;
   try { await resumeReadOnly.resume(); } catch { resumeReadOnlyRejected = true; }
   const postResumeReadOnlyCalls = resumeReadOnlyAdapter.calls.slice(6);
-  assert(resumeReadOnlyRejected && resumeReadOnly.state === 'fault-locked' &&
-    postResumeReadOnlyCalls.every((call) => call === 'resume' || call === 'handshake') &&
+  assert(resumeReadOnlyRejected && resumeReadOnly.state !== 'ready' &&
+    postResumeReadOnlyCalls.every((call) => call === 'state' || call === 'resume' || call === 'handshake') &&
     !postResumeReadOnlyCalls.includes('open') && !postResumeReadOnlyCalls.includes('acquire') && !postResumeReadOnlyCalls.includes('enable'),
-  'write-readiness loss after sleep must lock safely without reopening or writing HC');
+  `write-readiness loss after sleep must keep the guard retryable without reopening or writing HC (rejected=${resumeReadOnlyRejected}, state=${resumeReadOnly.state}, calls=${postResumeReadOnlyCalls.join(',')})`);
+  await resumeReadOnly.close();
 
   // The normal application-exit path starts from active software control.
   // HC Window_Closed delegates the ownership handoff to CurrentDevice.Close,
@@ -613,21 +704,6 @@ async function main(): Promise<void> {
     'active-control exit must call the Host HC Close boundary once before shutdown');
   assert(directExitLauncher.calls.join(',') === 'start,stop',
     'active-control exit must stop its Host once after confirmed restore');
-
-  // A missing OEM attestation is never equivalent to "no writes". This
-  // models an old/partial Host that omits oemRestoreConfirmed: UI recovery
-  // must keep the process resident and fault-locked instead of terminating
-  // the only available hardware recovery path.
-  const unconfirmedAdapter = new FakeAdapter();
-  unconfirmedAdapter.unconfirmedCleanupResponses = true;
-  const unconfirmedLauncher = new FakeLauncher();
-  const unconfirmed = new FanHostLifecycle({ enabled: true, adapter: unconfirmedAdapter, launcher: unconfirmedLauncher, heartbeatIntervalMs: 0 });
-  await unconfirmed.start();
-  await unconfirmed.apply([{ tempC: 0, dutyPercent: 0 }, { tempC: 40, dutyPercent: 20 }, { tempC: 70, dutyPercent: 45 }, { tempC: 100, dutyPercent: 90 }]);
-  let unconfirmedRejected = false;
-  try { await unconfirmed.disable(); } catch { unconfirmedRejected = true; }
-  assert(unconfirmedRejected && unconfirmed.state === 'fault-locked' && unconfirmedLauncher.calls.join(',') === 'start',
-    'missing OEM confirmation must fault-lock and retain the Host for later recovery');
 
   // Power notifications and a UI click may arrive almost together. The
   // lifecycle queue must finish the already-admitted HC curve request, then
@@ -792,6 +868,31 @@ async function main(): Promise<void> {
   assert(midTakeover.state === 'stopped' && midTakeoverAdapter.calls.slice(-2).join(',') === 'close,shutdown' &&
     midTakeoverLauncher.calls.join(',') === 'start,stop',
   'mid-session takeover close must complete a confirmed Host shutdown');
+
+  // HID removal is owned by the resident Host's one Close/unbind boundary.
+  // Once that boundary is observable, the bridge may probe a stable route and
+  // replay the acknowledged curve through the canonical Open -> OpenEvents ->
+  // lease -> curve order. It must not issue a second restore/release/Close.
+  const hidRemovalAdapter = new FakeAdapter();
+  const hidRemoval = new FanHostLifecycle({ enabled: true, adapter: hidRemovalAdapter, launcher: new FakeLauncher(), heartbeatIntervalMs: 0 });
+  await hidRemoval.start();
+  const hidCurve = [{ tempC: 0, dutyPercent: 0 }, { tempC: 40, dutyPercent: 20 }, { tempC: 60, dutyPercent: 45 }, { tempC: 100, dutyPercent: 90 }];
+  await hidRemoval.apply(hidCurve);
+  hidRemovalAdapter.routeLossClosesHost = true;
+  hidRemovalAdapter.heartbeatFailures = 1;
+  hidRemovalAdapter.heartbeatFailureMessage = 'HC_SESSION_UNAVAILABLE: hc-device-is-open-false';
+  const beforeHidRecovery = hidRemovalAdapter.calls.length;
+  const recoveredLease = await hidRemoval.heartbeat();
+  const hidRecoveryCalls = hidRemovalAdapter.calls.slice(beforeHidRecovery);
+  const openAt = hidRecoveryCalls.indexOf('open');
+  const eventsAt = hidRecoveryCalls.indexOf('open-events');
+  const acquireAt = hidRecoveryCalls.indexOf('acquire');
+  const enableAt = hidRecoveryCalls.indexOf('enable');
+  assert(hidRemoval.state === 'ready' && recoveredLease.leaseId === 'lease-1' && hidRemoval.currentLease?.leaseId === 'lease-1' &&
+    openAt >= 0 && eventsAt > openAt && acquireAt > eventsAt && enableAt > acquireAt &&
+    !hidRecoveryCalls.includes('restore') && !hidRecoveryCalls.includes('release') && !hidRecoveryCalls.includes('close'),
+  `HID route loss did not preserve the single Close owner/rebuild order: ${hidRecoveryCalls.join(',')}`);
+  await hidRemoval.close();
 
   // Open() can touch EC and still reject. The lifecycle must mark the session
   // before awaiting it, restore OEM, and leave a clean reacquisition point.

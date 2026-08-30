@@ -8,6 +8,7 @@
 import { fs, shell, registry, rtss, tdpDaemon, powerLifecycle, systemHibernate, type RunResult, type HibernateState } from './api';
 import { invoke } from './ipc';
 import { readSettingsSection, saveSettingsSection, setSettingsDirectory } from './settingsRepository';
+import { runTdpHardwareWrite } from './tdpCircuitBreaker';
 
 // ── 可配置根目录（自测时可指向临时目录） ──
 let PC_DIR = 'C:\\SOFT\\YeMan\\PowerControl';
@@ -955,7 +956,7 @@ export async function setTdp(
   mode: 'ac' | 'dc',
   watts: number,
   opts: SetTdpOpts = {}
-): Promise<void> {
+): Promise<boolean> {
   // 两个独立动作：save=记录程序配置；apply=实时下发硬件。
   // 顶部「快速切换」/手柄用 { apply:true, save:true }；
   // 自动浮动临时值用 { apply:true, save:false }，不覆盖用户设定的 TDP 最大值。
@@ -963,12 +964,13 @@ export async function setTdp(
   if (opts.save !== false) {
     await saveTdp(mode, w); // 记录程序控制配置
   }
-  if (opts.apply) {
+  if (!opts.apply) return true;
+
+  const result = await runTdpHardwareWrite(async () => {
     await assertHardwareWriteAllowed();
     const vendor = opts.vendor && opts.vendor !== 'unknown' ? opts.vendor : await detectVendor();
     // vendor 检测失败（AMD.txt/intel.txt 缺失且注册表读不到）时不能静默跳过：
     // 用户以为 TDP 已下发实际没动，且 YeManTdpCtl 也需要 vendor 才能选对 SMU 通道。
-    // 抛错让 UI 显示「TDP 下发失败」而不是假装成功（2026-08-05 修复）。
     if (vendor === 'unknown') {
       throw new Error('无法识别 CPU 厂商（AMD.txt/intel.txt 与注册表均不可用），TDP 下发已跳过');
     }
@@ -992,7 +994,12 @@ export async function setTdp(
       const direct = await shell.run(TDPCTL_EXE(), ['set', String(w), '--vendor', vendor]);
       if (direct.exitCode !== 0) throw new Error(direct.stderr || direct.stdout || 'TDP 直连下发失败');
     }
-  }
+  });
+  // Keep the diagnostic visible to optional schedule callers. Their wrapper
+  // converts this into a warning and continues the CPU axis; direct UI calls
+  // still receive a real failure instead of displaying a false success.
+  if (!result.applied) throw new Error(result.error || 'TDP hardware write skipped');
+  return true;
 }
 
 export async function stopTdpDaemon(): Promise<void> {
@@ -2083,6 +2090,14 @@ export const sleepFactsGet = () => invoke<SleepFactStatus>('sleepFacts.get');
 export const sleepFactsSetEnabled = (enabled: boolean) =>
   invoke<SleepFactStatus>('sleepFacts.setEnabled', { enabled });
 export const sleepFactsOpenLog = () => invoke<boolean>('sleepFacts.openLog');
+export const sleepFactsClearLog = () => invoke<{ ok?: boolean; path?: string }>('sleepFacts.clearLog');
+export interface SleepFactExportResult {
+  ok: boolean;
+  path?: string;
+  files?: string[];
+  reason?: string;
+}
+export const sleepFactsExportLog = () => invoke<SleepFactExportResult>('sleepFacts.exportLog');
 export async function sleepGuardRecoverAll(): Promise<{ resumed: number }> {
   return await invoke<{ resumed: number }>('sleepGuard.recoverAll');
 }

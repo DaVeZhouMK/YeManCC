@@ -4,6 +4,14 @@ import { invoke, isNativeRuntime } from './ipc';
 /** Fan-only diagnostics. Disabled by default and isolated from app.log. */
 export const fanDiagnosticLoggingEnabled = ref(false);
 export const fanDiagnosticLogPath = ref<string | null>(null);
+let activePowerGeneration = 0;
+
+/** Current native power generation used to correlate fan API/lifecycle logs. */
+export function setFanDiagnosticPowerGeneration(generation: number): void {
+  if (Number.isFinite(generation) && generation > activePowerGeneration) activePowerGeneration = generation;
+}
+
+export function getFanDiagnosticPowerGeneration(): number { return activePowerGeneration; }
 
 /** Read the current native log path without changing the logging switch. */
 export async function getFanDiagnosticLogPath(): Promise<string | null> {

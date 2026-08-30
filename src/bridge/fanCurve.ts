@@ -26,7 +26,11 @@ export function normalizeFanNodes(
       return next;
     }
     const lower = next[index - 1].tempC;
-    const upper = index < next.length - 1 ? next[index + 1].tempC : 100;
+    // Node 3 must leave a safety margin before the final 100°C point. This
+    // prevents a curve such as 99°C/0% from remaining idle until the thermal
+    // limit; node 3's temperature menu and drag path share this same cap.
+    const safetyUpper = index === 2 ? 85 : 100;
+    const upper = Math.min(index < next.length - 1 ? next[index + 1].tempC : 100, safetyUpper);
     next[index].tempC = Math.max(lower, Math.min(upper, rawValue));
     return next;
   }
@@ -54,7 +58,8 @@ export function validateFanNodes(nodes: readonly FanNode[]): boolean {
   if (nodes.length !== 4 || nodes[0].tempC !== 0) return false;
   return nodes.every((node, index) => {
     if (![node.tempC, node.dutyPercent].every(Number.isFinite)) return false;
-    if (node.tempC < 0 || node.tempC > 100 || node.dutyPercent < 0 || node.dutyPercent > 100) return false;
+    if (node.tempC < 0 || node.tempC > 100 || (index === 2 && node.tempC > 85) ||
+        node.dutyPercent < 0 || node.dutyPercent > 100) return false;
     if (index === 0) return true;
     return node.tempC >= nodes[index - 1].tempC && node.dutyPercent >= nodes[index - 1].dutyPercent;
   }) && nodes[3].dutyPercent >= 50;

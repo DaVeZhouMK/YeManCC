@@ -1,145 +1,145 @@
-{
-  "schemaVersion": 2,
-  "packageId": "custom-steam-library",
-  "packageType": "green-child",
-  "packageVersion": "0.0.24",
-  "productName": "Steam自定义游戏库",
-  "productNameEnglish": "Custom Steam Library",
-  "entryPoint": "CustomSteamLibrary.exe",
-  "worker": "SteamArtworkLab.exe",
-  "dataRootPolicy": "D:\\YeMan\\CustomSteamLibrary\\data; fallback to appRoot\\data when D: is unavailable",
-  "dataRoot": {
-    "durable": "D:\\YeMan\\CustomSteamLibrary\\data",
-    "fallback": "<appRoot>\\data",
-    "precedence": [
-      "durable",
-      "fallback"
-    ],
-    "legacy": [
-      "D:\\YeMan\\Steam大屏"
-    ]
-  },
-  "mainProgramIntegration": true,
-  "inputOwner": "parent (integration) / host (standalone)",
-  "hostProtocol": {
-    "min": "1.0.0",
-    "max": "1.x",
-    "integrationEnabled": true
-  },
-  "updater": {
-    "adapter": "YeManCC.child-package.v1",
-    "currentMainUpdaterSupported": true,
-    "installMode": "child-overlay",
-    "targetRoot": "C:\\SOFT\\YeMan\\YeManCC\\CustomSteamLibrary",
-    "stagingRoot": ".upgrade\\staging",
-    "rollbackRoot": "backups\\upgrades",
-    "requiredStoppedProcesses": [
-      "CustomSteamLibrary.exe",
-      "SteamArtworkLab.exe"
-    ],
-    "healthHandshake": {
-      "protocol": 1,
-      "mode": "independent-hidden-startup",
-      "requiredBeforeCommit": true,
-      "timeoutSeconds": 60
-    },
-    "unknownPaths": "preserve"
-  },
-  "managedPaths": [
-    "CustomSteamLibrary.exe",
-    "SteamArtworkLab.exe",
-    "run-workspace.bat",
-    "assets/custom-steam-library.ico",
-    "workspace-ui/index.html",
-    "workspace-ui/app.js",
-    "workspace-ui/styles.css",
-    "CUSTOM-STEAM-LIBRARY-INTEGRATION-CONTRACT.md",
-    "SEPARATION-TASK-CUSTOM-STEAM-LIBRARY.md",
-    "CUSTOM-STEAM-LIBRARY-UPGRADE-CONTRACT.md"
-  ],
-  "preservePaths": [
-    "data/config",
-    "data/games",
-    "data/artwork",
-    "data/cache",
-    "data/state",
-    "data/backups",
-    "logs/scrape-history",
-    "logs/host-crash",
-    "logs/host-exit",
-    "backups/upgrades",
-    ".upgrade"
-  ],
-  "legacyPaths": [
-    "D:\\YeMan\\Steam大屏"
-  ],
-  "generatedAt": "2026-08-28",
-  "sourceBuild": {
-    "host": "a76b9d719c817239000387416898b1b9e5c5a425ee0456848054c11e0b2a18d3",
-    "worker": "a63963a7e7d0469123349614ba9b89c582053b1c22b8e24e8c2ecca5fe605771"
-  },
-  "files": [
-    "CustomSteamLibrary.exe",
-    "SteamArtworkLab.exe",
-    "run-workspace.bat",
-    "assets\\custom-steam-library.ico",
-    "workspace-ui\\index.html",
-    "workspace-ui\\app.js",
-    "workspace-ui\\styles.css",
-    "CUSTOM-STEAM-LIBRARY-INTEGRATION-CONTRACT.md",
-    "SEPARATION-TASK-CUSTOM-STEAM-LIBRARY.md",
-    "CUSTOM-STEAM-LIBRARY-UPGRADE-CONTRACT.md"
-  ],
-  "fileIndex": [
-    {
-      "path": "CustomSteamLibrary.exe",
-      "bytes": 1377280,
-      "sha256": "a76b9d719c817239000387416898b1b9e5c5a425ee0456848054c11e0b2a18d3"
-    },
-    {
-      "path": "SteamArtworkLab.exe",
-      "bytes": 2585088,
-      "sha256": "a63963a7e7d0469123349614ba9b89c582053b1c22b8e24e8c2ecca5fe605771"
-    },
-    {
-      "path": "run-workspace.bat",
-      "bytes": 597,
-      "sha256": "8de9f08333a6748df5812f8b8f2f54cf305741773e7ee8246a44a2f2ab7784ce"
-    },
-    {
-      "path": "assets\\custom-steam-library.ico",
-      "bytes": 125864,
-      "sha256": "6bdea618684f30f5ec1d0b53bdab854aa3cbba00fd32ea551ba580d24cbc76af"
-    },
-    {
-      "path": "workspace-ui\\index.html",
-      "bytes": 11852,
-      "sha256": "3fb893d78e391a3f80a7e471b1b14abd693857b08cfa366a3b4d178eac4f770d"
-    },
-    {
-      "path": "workspace-ui\\app.js",
-      "bytes": 167523,
-      "sha256": "c04a81495985db3ed9c4987345a757b13de11d02a0ed5f49d7f35f5d16e689f6"
-    },
-    {
-      "path": "workspace-ui\\styles.css",
-      "bytes": 64619,
-      "sha256": "9a849ce5d96fc2f2b289ea753b01dee2c3a85464741636bddf0cdadd75900776"
-    },
-    {
-      "path": "CUSTOM-STEAM-LIBRARY-INTEGRATION-CONTRACT.md",
-      "bytes": 5143,
-      "sha256": "be1b90e0f4eaf34110682a4f9324442676414a1cfc2db031f86640e38873766c"
-    },
-    {
-      "path": "SEPARATION-TASK-CUSTOM-STEAM-LIBRARY.md",
-      "bytes": 55818,
-      "sha256": "b7a624d7640e2490f754cbf321a200cca69631d637fae7303c3c8bf5c1c2ebcb"
-    },
-    {
-      "path": "CUSTOM-STEAM-LIBRARY-UPGRADE-CONTRACT.md",
-      "bytes": 9921,
-      "sha256": "02962519cc2a91eb62fedaf314250d916cebdb8cdf8c59c9817347cc47ef15ff"
-    }
-  ]
+﻿{
+    "schemaVersion":  2,
+    "packageId":  "custom-steam-library",
+    "packageType":  "green-child",
+    "packageVersion":  "0.0.25",
+    "productName":  "Steam自定义游戏库",
+    "productNameEnglish":  "Custom Steam Library",
+    "entryPoint":  "CustomSteamLibrary.exe",
+    "worker":  "SteamArtworkLab.exe",
+    "dataRootPolicy":  "D:\\YeMan\\CustomSteamLibrary\\data; fallback to appRoot\\data when D: is unavailable",
+    "dataRoot":  {
+                     "durable":  "D:\\YeMan\\CustomSteamLibrary\\data",
+                     "fallback":  "\u003cappRoot\u003e\\data",
+                     "precedence":  [
+                                        "durable",
+                                        "fallback"
+                                    ],
+                     "legacy":  [
+                                    "D:\\YeMan\\Steam大屏"
+                                ]
+                 },
+    "mainProgramIntegration":  true,
+    "inputOwner":  "parent (integration) / host (standalone)",
+    "hostProtocol":  {
+                         "min":  "1.0.0",
+                         "max":  "1.x",
+                         "integrationEnabled":  true
+                     },
+    "updater":  {
+                    "adapter":  "YeManCC.child-package.v1",
+                    "currentMainUpdaterSupported":  true,
+                    "installMode":  "child-overlay",
+                    "targetRoot":  "C:\\SOFT\\YeMan\\YeManCC\\CustomSteamLibrary",
+                    "stagingRoot":  ".upgrade\\staging",
+                    "rollbackRoot":  "backups\\upgrades",
+                    "requiredStoppedProcesses":  [
+                                                     "CustomSteamLibrary.exe",
+                                                     "SteamArtworkLab.exe"
+                                                 ],
+                    "healthHandshake":  {
+                                            "protocol":  1,
+                                            "mode":  "independent-hidden-startup",
+                                            "requiredBeforeCommit":  true,
+                                            "timeoutSeconds":  60
+                                        },
+                    "unknownPaths":  "preserve"
+                },
+    "managedPaths":  [
+                         "CustomSteamLibrary.exe",
+                         "SteamArtworkLab.exe",
+                         "run-workspace.bat",
+                         "assets/custom-steam-library.ico",
+                         "workspace-ui/index.html",
+                         "workspace-ui/app.js",
+                         "workspace-ui/styles.css",
+                         "CUSTOM-STEAM-LIBRARY-INTEGRATION-CONTRACT.md",
+                         "SEPARATION-TASK-CUSTOM-STEAM-LIBRARY.md",
+                         "CUSTOM-STEAM-LIBRARY-UPGRADE-CONTRACT.md"
+                     ],
+    "preservePaths":  [
+                          "data/config",
+                          "data/games",
+                          "data/artwork",
+                          "data/cache",
+                          "data/state",
+                          "data/backups",
+                          "logs/scrape-history",
+                          "logs/host-crash",
+                          "logs/host-exit",
+                          "backups/upgrades",
+                          ".upgrade"
+                      ],
+    "legacyPaths":  [
+                        "D:\\YeMan\\Steam大屏"
+                    ],
+    "generatedAt":  "2026-08-30T08:22:25.1118492+00:00",
+    "sourceBuild":  {
+                        "host":  "a76b9d719c817239000387416898b1b9e5c5a425ee0456848054c11e0b2a18d3",
+                        "worker":  "a63963a7e7d0469123349614ba9b89c582053b1c22b8e24e8c2ecca5fe605771"
+                    },
+    "files":  [
+                  "CustomSteamLibrary.exe",
+                  "SteamArtworkLab.exe",
+                  "run-workspace.bat",
+                  "assets\\custom-steam-library.ico",
+                  "workspace-ui\\index.html",
+                  "workspace-ui\\app.js",
+                  "workspace-ui\\styles.css",
+                  "CUSTOM-STEAM-LIBRARY-INTEGRATION-CONTRACT.md",
+                  "SEPARATION-TASK-CUSTOM-STEAM-LIBRARY.md",
+                  "CUSTOM-STEAM-LIBRARY-UPGRADE-CONTRACT.md"
+              ],
+    "fileIndex":  [
+                      {
+                          "path":  "CustomSteamLibrary.exe",
+                          "bytes":  1377280,
+                          "sha256":  "a76b9d719c817239000387416898b1b9e5c5a425ee0456848054c11e0b2a18d3"
+                      },
+                      {
+                          "path":  "SteamArtworkLab.exe",
+                          "bytes":  2585088,
+                          "sha256":  "a63963a7e7d0469123349614ba9b89c582053b1c22b8e24e8c2ecca5fe605771"
+                      },
+                      {
+                          "path":  "run-workspace.bat",
+                          "bytes":  578,
+                          "sha256":  "50a9c7374073c77d0952742b61d653193da7d0f9617a6d25cbc639d855ba0860"
+                      },
+                      {
+                          "path":  "assets/custom-steam-library.ico",
+                          "bytes":  125864,
+                          "sha256":  "6bdea618684f30f5ec1d0b53bdab854aa3cbba00fd32ea551ba580d24cbc76af"
+                      },
+                      {
+                          "path":  "workspace-ui/index.html",
+                          "bytes":  11852,
+                          "sha256":  "3fb893d78e391a3f80a7e471b1b14abd693857b08cfa366a3b4d178eac4f770d"
+                      },
+                      {
+                          "path":  "workspace-ui/app.js",
+                          "bytes":  167938,
+                          "sha256":  "8745063c740b01421ca43cb82e45053f9bc3cfa512ddd016825b269f5b4a6e2f"
+                      },
+                      {
+                          "path":  "workspace-ui/styles.css",
+                          "bytes":  64674,
+                          "sha256":  "056d0424f500f7f3fa8421e745fe281df69cae9064401dde6f89ade68daf790b"
+                      },
+                      {
+                          "path":  "CUSTOM-STEAM-LIBRARY-INTEGRATION-CONTRACT.md",
+                          "bytes":  6306,
+                          "sha256":  "9dc62f94e6b44b493e8499b854578fb5bd62e8b198f3b658c646eda5b73a983e"
+                      },
+                      {
+                          "path":  "SEPARATION-TASK-CUSTOM-STEAM-LIBRARY.md",
+                          "bytes":  55818,
+                          "sha256":  "b7a624d7640e2490f754cbf321a200cca69631d637fae7303c3c8bf5c1c2ebcb"
+                      },
+                      {
+                          "path":  "CUSTOM-STEAM-LIBRARY-UPGRADE-CONTRACT.md",
+                          "bytes":  11787,
+                          "sha256":  "3881bc74fbd28d7ac7f615a7199f49ece822e82c0d5732452e1c79783244e744"
+                      }
+                  ]
 }

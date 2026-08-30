@@ -2,9 +2,17 @@
 param()
 
 $ErrorActionPreference = 'Stop'
+$expectedFanHostV2ManifestSha256 = '334FB177323FBE8A04306684676211DC822B4F71661823774EB8CCBDD6110D08'
+$expectedFanHostV2ManifestFileCount = 102
+$expectedFanHostV2LhmSha256 = 'F7ED30F07EA636C0DDCC5764C15C0A25AE8A0ACA02DED77E4AF24439955487CF'
 
 function Get-Sha256([string]$Path) {
-  return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash
+  $sha = [Security.Cryptography.SHA256]::Create()
+  try {
+    $stream = [IO.File]::OpenRead($Path)
+    try { return ([BitConverter]::ToString($sha.ComputeHash($stream))).Replace('-', '') }
+    finally { $stream.Dispose() }
+  } finally { $sha.Dispose() }
 }
 
 function Assert-Equal([object]$Actual, [object]$Expected, [string]$Label) {
@@ -253,7 +261,7 @@ function New-OldInstall(
 ) {
   Copy-TreeChecked (Join-Path $PackageRoot 'YeManCC') $ExeDir
   Copy-TreeChecked (Join-Path $PackageRoot 'PowerControl') $PcDir
-  Copy-TreeChecked (Join-Path $PackageRoot 'CustomSteamLibrary') $CustomDir
+  Copy-TreeChecked (Join-Path $PackageRoot 'YeManCC\CustomSteamLibrary') $CustomDir
   Set-Content -LiteralPath (Join-Path $ExeDir 'version.json') -Value '{"version":"0.0.10","notes":"old"}' -Encoding UTF8
   Set-Content -LiteralPath (Join-Path $ExeDir 'index.html') -Value 'old-index' -Encoding UTF8
   Set-Content -LiteralPath (Join-Path $ExeDir 'YeMan-Support.html') -Value 'old-support' -Encoding UTF8
@@ -296,7 +304,7 @@ function Invoke-InstallRound(
   $supportPath = Join-Path $exeDir 'YeMan-Support.html'
   $programSource = Join-Path $staging 'YeManCC'
   $powerControlSource = Join-Path $staging 'PowerControl'
-  $customSource = Join-Path $staging 'CustomSteamLibrary'
+  $customSource = Join-Path $staging 'YeManCC\CustomSteamLibrary'
   $customManagedPaths = @(Get-CustomManagedPaths $customSource)
   $packageExe = Join-Path $programSource 'YeManCC.exe'
   $systemBlacklistSource = Join-Path $powerControlSource 'Sleep\system-blacklist.txt'
@@ -318,7 +326,7 @@ function Invoke-InstallRound(
     Write-Utf8Atomic $statePath '{"phase":"copying"}'
     Write-Utf8Atomic $progressPath '{"phase":"installing","stage":"install"}'
     New-Item -ItemType Directory -Path $rollbackFiles -Force | Out-Null
-    Register-TreeForRollback $programSource $exeDir $rollbackFiles 'YeManCC' @('YeManCC.exe','YeMan-Support.html') $addedFiles
+    Register-TreeForRollback $programSource $exeDir $rollbackFiles 'YeManCC' @('YeManCC.exe','YeMan-Support.html','CustomSteamLibrary') $addedFiles
     Register-FileForRollback $packageExe $programSource $exeDir $rollbackFiles 'YeManCC' $addedFiles
     Register-TreeForRollback $powerControlSource $pcDir $rollbackFiles 'PowerControl' @('pawnio') $addedFiles
     Register-CustomManagedFilesForRollback $customSource $customDir $rollbackFiles $customManagedPaths $addedFiles
@@ -359,7 +367,7 @@ function Invoke-InstallRound(
     }
     Copy-Item -LiteralPath $packageExe -Destination $newExe -Force
     Move-Item -LiteralPath $newExe -Destination (Join-Path $exeDir 'YeManCC.exe') -Force
-    Copy-TreeChecked $programSource $exeDir @() @('YeManCC.exe','YeMan-Support.html')
+    Copy-TreeChecked $programSource $exeDir @() @('YeManCC.exe','YeMan-Support.html','CustomSteamLibrary')
     Copy-Item -LiteralPath (Join-Path $programSource 'YeMan-Support.html') -Destination $supportPath -Force
 
     $customHealthPath = Join-Path $ScenarioRoot 'custom-health-test.json'
@@ -398,6 +406,11 @@ function Invoke-InstallRound(
     Remove-Item -LiteralPath $customHealthPath -Force -ErrorAction SilentlyContinue
 
     if ($FailureStage -eq 'main-health') { throw 'simulated YeManCC startup handshake failure' }
+
+    $fanHostTarget = Join-Path $pcDir 'fan-host'
+    $oldFanMarker = Join-Path $fanHostTarget 'old-host-marker.txt'
+    if (Test-Path -LiteralPath $oldFanMarker -PathType Leaf) { Remove-Item -LiteralPath $oldFanMarker -Force }
+    Assert-FileMatch (Join-Path $powerControlSource 'fan-host\YeManFanHost.dll') (Join-Path $fanHostTarget 'YeManFanHost.dll') 'Fan Host V2 replacement'
 
     $handshakePath = Join-Path $ScenarioRoot 'update-handshake-test.json'
     $handshakeToken = 'test-handshake-token'
@@ -492,6 +505,8 @@ try {
   $topLevel = @(Get-ChildItem -LiteralPath $packageRoot -Directory | Select-Object -ExpandProperty Name | Sort-Object)
   $layoutManifestPath = Join-Path $packageRoot 'YeManCC\update-manifest.json'
   $hasLayoutManifest = Test-Path -LiteralPath $layoutManifestPath -PathType Leaf
+  $nestedCustomManifestPath = Join-Path $packageRoot 'YeManCC\CustomSteamLibrary\package-manifest.json'
+  $hasNestedCustom = Test-Path -LiteralPath $nestedCustomManifestPath -PathType Leaf
   if ($hasLayoutManifest) {
     $layoutManifest = (Get-Content -LiteralPath $layoutManifestPath -Raw -Encoding UTF8).TrimStart([char]0xFEFF) | ConvertFrom-Json
     if ([int]$layoutManifest.schemaVersion -ne 1 -or [string]$layoutManifest.packageId -ne 'yemancc-update' -or [string]$layoutManifest.packageVersion -ne [string]$manifest.version) {
@@ -513,10 +528,22 @@ try {
     throw "package roots do not match update-manifest.json; missing: $($missingRoots -join ', '); unexpected: $($unexpectedRoots -join ', '); got: $($topLevel -join ', ')"
   }
   if ($hasLayoutManifest) {
-    Assert-Equal ([string]$layoutManifest.rules.fanHost) 'preserve-existing' 'Fan Host update policy'
+    Assert-Equal ([string]$layoutManifest.rules.fanHost) 'replace' 'Fan Host update policy'
   }
-  if (Test-Path -LiteralPath (Join-Path $packageRoot 'PowerControl\fan-host')) {
-    throw 'PowerControl\fan-host unexpectedly entered the update package'
+  $fanHostPackageRoot = Join-Path $packageRoot 'PowerControl\fan-host'
+  $fanHostManifestPath = Join-Path $fanHostPackageRoot 'YeManFanHost.payload.json'
+  if (!(Test-Path -LiteralPath $fanHostManifestPath -PathType Leaf)) {
+    throw 'PowerControl\fan-host V2 payload manifest is missing from the update package'
+  }
+  Assert-Equal (Get-Sha256 $fanHostManifestPath) $expectedFanHostV2ManifestSha256 'Fan Host V2 manifest SHA256'
+  $fanHostManifest = (Get-Content -LiteralPath $fanHostManifestPath -Raw -Encoding UTF8).TrimStart([char]0xFEFF) | ConvertFrom-Json
+  Assert-Equal ([int]$fanHostManifest.schemaVersion) 1 'Fan Host V2 manifest schema'
+  Assert-Equal (@($fanHostManifest.files).Count) $expectedFanHostV2ManifestFileCount 'Fan Host V2 manifest file count'
+  $fanHostLhm = @($fanHostManifest.files | Where-Object { [string]$_.path -eq 'LibreHardwareMonitorLib.dll' })
+  Assert-Equal $fanHostLhm.Count 1 'Fan Host V2 LHM manifest entry count'
+  Assert-Equal ([string]$fanHostLhm[0].sha256).ToUpperInvariant() $expectedFanHostV2LhmSha256 'Fan Host V2 LHM SHA256'
+  if (!(Test-Path -LiteralPath (Join-Path $fanHostPackageRoot 'YeManFanHost.dll') -PathType Leaf)) {
+    throw 'PowerControl\fan-host V2 payload is missing from the update package'
   }
   if (Get-ChildItem -LiteralPath $packageRoot -Recurse -File -Filter 'exclude.txt') {
     throw 'obsolete exclude.txt entered the update package'
@@ -531,22 +558,22 @@ try {
     'PowerControl\pawnio\_internal'
   )
   if ($hasLayoutManifest) { $requiredPackageItems += 'YeManCC\update-manifest.json' }
-  if ('CustomSteamLibrary' -in $declaredRoots) {
+  $requiredPackageItems += 'PowerControl\fan-host\YeManFanHost.dll'
+  if ($hasNestedCustom) {
     $requiredPackageItems += @(
-      'CustomSteamLibrary\CustomSteamLibrary.exe',
-      'CustomSteamLibrary\SteamArtworkLab.exe',
-      'CustomSteamLibrary\package-manifest.json',
-      'CustomSteamLibrary\workspace-ui\index.html'
+      'YeManCC\CustomSteamLibrary\CustomSteamLibrary.exe',
+      'YeManCC\CustomSteamLibrary\SteamArtworkLab.exe',
+      'YeManCC\CustomSteamLibrary\package-manifest.json',
+      'YeManCC\CustomSteamLibrary\workspace-ui\index.html'
     )
   }
   foreach ($required in $requiredPackageItems) {
     if (!(Test-Path -LiteralPath (Join-Path $packageRoot $required))) { throw "required package item missing: $required" }
   }
 
-  # v0.0.22 is the compatibility bridge: it updates YeManCC and
-  # PowerControl, embeds CustomSteamLibrary under YeManCC, and deliberately
-  # does not create a third ZIP root or a legacy sibling path.
-  if ('CustomSteamLibrary' -notin $declaredRoots) {
+  # A no-manifest package is the compatibility bridge/bootstrap path. It may
+  # embed the child under YeManCC, but it must never create a third root.
+  if (-not $hasLayoutManifest) {
     $bridgeRoot = Join-Path $testRoot 'bridge-installed'
     $bridgeExe = Join-Path $bridgeRoot 'YeManCC'
     $bridgePowerControl = Join-Path $bridgeRoot 'PowerControl'
@@ -554,7 +581,9 @@ try {
     New-Item -ItemType Directory -Path $bridgeExe, $bridgePowerControl, $bridgeCustom -Force | Out-Null
     Copy-TreeChecked (Join-Path $packageRoot 'YeManCC') $bridgeExe
     Copy-TreeChecked (Join-Path $packageRoot 'PowerControl') $bridgePowerControl
-    Assert-FileMatch (Join-Path $packageRoot 'YeManCC\CustomSteamLibrary\CustomSteamLibrary.exe') (Join-Path $bridgeCustom 'CustomSteamLibrary.exe') 'bridge nested CustomSteamLibrary entry point'
+    if ($hasNestedCustom) {
+      Assert-FileMatch (Join-Path $packageRoot 'YeManCC\CustomSteamLibrary\CustomSteamLibrary.exe') (Join-Path $bridgeCustom 'CustomSteamLibrary.exe') 'bridge nested CustomSteamLibrary entry point'
+    }
     Set-Content -LiteralPath (Join-Path $bridgeCustom 'existing-child.marker') -Value 'nested-child-preserved' -Encoding UTF8
     if (!(Test-Path -LiteralPath (Join-Path $bridgeCustom 'existing-child.marker') -PathType Leaf)) {
       throw 'nested CustomSteamLibrary child was not preserved by bridge install'
@@ -602,11 +631,12 @@ try {
   Assert-Equal (Get-Content -LiteralPath (Join-Path $successResult.PcDir 'Sleep\player-blacklist.txt') -Raw).Trim() 'player-owned-rule' 'success player blacklist'
   Assert-Equal (Get-Content -LiteralPath (Join-Path $successResult.PcDir 'Sleep\player-owned.json') -Raw).Trim() 'keep-player-data' 'success player data'
   if (!(Test-Path -LiteralPath (Join-Path $successResult.PcDir 'exclude.txt') -PathType Leaf)) { throw 'existing user exclude.txt was unexpectedly deleted' }
-  Assert-Equal (Get-Content -LiteralPath (Join-Path $successResult.PcDir 'fan-host\old-host-marker.txt') -Raw).Trim() 'keep-old-fan-host' 'success existing Fan Host preservation'
+  if (Test-Path -LiteralPath (Join-Path $successResult.PcDir 'fan-host\old-host-marker.txt') -PathType Leaf) { throw 'stale Phase2 Fan Host marker survived R5-v9 replacement' }
+  Assert-FileMatch (Join-Path $packageRoot 'PowerControl\fan-host\YeManFanHost.dll') (Join-Path $successResult.PcDir 'fan-host\YeManFanHost.dll') 'success Fan Host V2'
   Assert-Equal (Get-Content -LiteralPath (Join-Path $successResult.CustomDir 'data\config\user.json') -Raw).Trim() 'keep-custom-data' 'success CustomSteamLibrary data'
   Assert-Equal (Get-Content -LiteralPath (Join-Path $successResult.CustomDir 'user-owned.txt') -Raw).Trim() 'keep-custom-unknown' 'success CustomSteamLibrary unknown file'
-  Assert-FileMatch (Join-Path $packageRoot 'CustomSteamLibrary\CustomSteamLibrary.exe') (Join-Path $successResult.CustomDir 'CustomSteamLibrary.exe') 'success CustomSteamLibrary entry point'
-  Assert-FileMatch (Join-Path $packageRoot 'CustomSteamLibrary\SteamArtworkLab.exe') (Join-Path $successResult.CustomDir 'SteamArtworkLab.exe') 'success CustomSteamLibrary worker'
+  Assert-FileMatch (Join-Path $packageRoot 'YeManCC\CustomSteamLibrary\CustomSteamLibrary.exe') (Join-Path $successResult.CustomDir 'CustomSteamLibrary.exe') 'success CustomSteamLibrary entry point'
+  Assert-FileMatch (Join-Path $packageRoot 'YeManCC\CustomSteamLibrary\SteamArtworkLab.exe') (Join-Path $successResult.CustomDir 'SteamArtworkLab.exe') 'success CustomSteamLibrary worker'
   if (Test-Path -LiteralPath (Join-Path $successResult.PcDir 'pawnio\old-runtime-marker.txt')) { throw 'old PawnIO runtime leaked into successful update' }
   Assert-TreeMatch (Join-Path $packageRoot 'PowerControl\pawnio') (Join-Path $successResult.PcDir 'pawnio') 'success PawnIO runtime'
   if (Test-Path -LiteralPath $successResult.Staging) { throw 'success staging directory was not cleaned' }
@@ -635,7 +665,7 @@ try {
   Assert-Equal (Get-Content -LiteralPath (Join-Path $failureResult.PcDir 'Sleep\player-owned.json') -Raw).Trim() 'keep-player-data' 'rollback player data'
   Assert-Equal (Get-Content -LiteralPath (Join-Path $failureResult.CustomDir 'data\config\user.json') -Raw).Trim() 'keep-custom-data' 'rollback CustomSteamLibrary data'
   Assert-Equal (Get-Content -LiteralPath (Join-Path $failureResult.CustomDir 'user-owned.txt') -Raw).Trim() 'keep-custom-unknown' 'rollback CustomSteamLibrary unknown file'
-  Assert-FileMatch (Join-Path $packageRoot 'CustomSteamLibrary\CustomSteamLibrary.exe') (Join-Path $failureResult.CustomDir 'CustomSteamLibrary.exe') 'rollback CustomSteamLibrary entry point'
+  Assert-FileMatch (Join-Path $packageRoot 'YeManCC\CustomSteamLibrary\CustomSteamLibrary.exe') (Join-Path $failureResult.CustomDir 'CustomSteamLibrary.exe') 'rollback CustomSteamLibrary entry point'
   Assert-TreeMatch $oldPawnioSnapshot (Join-Path $failureResult.PcDir 'pawnio') 'rollback PawnIO runtime'
   Assert-Equal (Get-Content -LiteralPath (Join-Path $failureResult.PcDir 'fan-host\old-host-marker.txt') -Raw).Trim() 'keep-old-fan-host' 'rollback existing Fan Host preservation'
   if (Test-Path -LiteralPath (Join-Path $failureResult.ExeDir $failureBaseline.RemovedProgramFile)) { throw 'rollback did not remove package-only program file' }

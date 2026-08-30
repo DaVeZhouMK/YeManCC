@@ -67,7 +67,11 @@ async function saveRule(kind: GameRuleList, rawValue: string, allowPath = false)
   busy.value = true;
   try {
     const trimmed = value.trim();
-    if (!trimmed || /[\\/]/.test(trimmed) || /[*?]/.test(trimmed)) return;
+    // 手动输入只接受进程名；文件选择器会传入完整路径，先取文件名再规范化。
+    if (!trimmed || (!allowPath && /[\\/]/.test(trimmed)) || /[*?]/.test(trimmed)) {
+      status('', '请输入有效的进程名');
+      return;
+    }
     const baseName = trimmed.split(/[\\/]/).pop() || trimmed;
     const rule = gameRuleNameFromPath(baseName);
     if (!rule || rule.includes('*')) return;
@@ -122,6 +126,7 @@ async function chooseRuleExecutable(): Promise<void> {
 
 async function removeRule(kind: GameRuleList, value: string): Promise<void> {
   if (busy.value) return;
+  const removedIndex = rules.value[kind].indexOf(value);
   const release = tryAcquireQuickAction(`top-game-rule-remove-${kind}`);
   if (!release) {
     status('', '已有其它快捷操作正在执行，请稍候');
@@ -130,6 +135,15 @@ async function removeRule(kind: GameRuleList, value: string): Promise<void> {
   busy.value = true;
   try {
     rules.value = await setGameRuleList(kind, rules.value[kind].filter((item) => item !== value));
+    nextTick(() => {
+      const editor = document.querySelector<HTMLElement>(`[data-gp-rule-editor-kind="${kind}"]`);
+      const items = editor
+        ? Array.from(editor.querySelectorAll<HTMLElement>('[data-gp-rule-focus="rule-item"]'))
+        : [];
+      const next = items[Math.min(Math.max(removedIndex, 0), Math.max(items.length - 1, 0))]
+        || editor?.querySelector<HTMLElement>('[data-gp-rule-focus="manual-input"]');
+      if (next) focusGamepadElement(next);
+    });
     status(`已移除${kind === 'blacklist' ? '黑名单' : '白名单'}：${displayRuleName(value)}`);
     emit('changed', { kind, value });
   } catch (e) {
@@ -224,54 +238,56 @@ onBeforeUnmount(() => {
     <!-- 与专属配置使用同一套二级气泡展开动画，避免打开时突然跳出。 -->
     <Transition name="custom-submenu-pop" @before-leave="disableLeavingBody">
       <div v-if="open" class="game-rules-body" data-gp-game-rules-body>
-      <div class="game-rule-actions game-rule-current-actions" data-gp-group="game-rule-current-actions" data-gp-game-row="rules-current">
-        <button type="button" class="danger" :disabled="busy || !currentRule" @click="addCurrentToBlacklist">
+      <div v-if="currentRule" class="game-rule-actions game-rule-current-actions" data-gp-group="game-rule-current-actions">
+        <button type="button" class="danger" data-gp-game-row="rules-current" data-gp-rule-focus="current-blacklist" :disabled="busy || !currentRule" @click="addCurrentToBlacklist">
           <AppIcon name="close" />排除到黑名单
         </button>
-        <button type="button" class="allow" :disabled="busy || !currentRule" @click="addCurrentToWhitelist">
+        <button type="button" class="allow" data-gp-game-row="rules-current" data-gp-rule-focus="current-whitelist" :disabled="busy || !currentRule" @click="addCurrentToWhitelist">
           <AppIcon name="check" />添加到白名单
         </button>
       </div>
 
-      <div class="game-rule-actions game-rule-editor-actions" data-gp-group="game-rule-editor-actions" data-gp-game-row="rules-editor">
-        <button type="button" :class="{ active: editorOpen === 'blacklist' }" :disabled="busy" @click="openEditor('blacklist')">
+      <div class="game-rule-actions game-rule-editor-actions" data-gp-group="game-rule-editor-actions">
+        <button type="button" data-gp-game-row="rules-editor" data-gp-rule-focus="editor-blacklist" :class="{ active: editorOpen === 'blacklist' }" :disabled="busy" @click="openEditor('blacklist')">
           <AppIcon name="list" />编辑黑名单
         </button>
-        <button type="button" :class="{ active: editorOpen === 'whitelist' }" :disabled="busy" @click="openEditor('whitelist')">
+        <button type="button" data-gp-game-row="rules-editor" data-gp-rule-focus="editor-whitelist" :class="{ active: editorOpen === 'whitelist' }" :disabled="busy" @click="openEditor('whitelist')">
           <AppIcon name="list" />编辑白名单
         </button>
       </div>
 
-      <div v-if="editorOpen" class="game-rule-dropdown" data-gp-group="game-rule-dropdown" data-gp-game-row="rules-dropdown">
+      <div v-if="editorOpen" class="game-rule-dropdown" data-gp-group="game-rule-dropdown" data-gp-game-row="rules-dropdown" :data-gp-rule-editor-kind="editorOpen">
         <div class="game-rule-dropdown-head">
-          <strong>{{ editorOpen === 'blacklist' ? '编辑用户黑名单' : '编辑白名单' }}</strong>
+          <strong>编辑名单</strong>
           <small>{{ rules[editorOpen].length }} 项</small>
         </div>
         <div v-if="rules[editorOpen].length" class="game-rule-list">
-          <div v-for="item in rules[editorOpen]" :key="`${editorOpen}-${item}`" class="game-rule-item">
+          <button v-for="item in rules[editorOpen]" :key="`${editorOpen}-${item}`" type="button" class="game-rule-item" data-gp-game-row="rules-dropdown" data-gp-rule-focus="rule-item" :aria-label="`移除${editorOpen === 'blacklist' ? '黑名单' : '白名单'}规则 ${displayRuleName(item)}`" :disabled="busy" @click="removeRule(editorOpen!, item)">
             <span>{{ displayRuleName(item) }}</span>
-            <button type="button" :aria-label="`移除${editorOpen === 'blacklist' ? '黑名单' : '白名单'}规则`" :disabled="busy" @click="removeRule(editorOpen!, item)">
-              <AppIcon name="trash" />
-            </button>
-          </div>
+            <AppIcon name="trash" />
+          </button>
         </div>
         <div v-else class="game-rule-empty">暂无{{ editorOpen === 'blacklist' ? '用户黑名单' : '白名单' }}规则</div>
         <div class="game-rule-add-row">
           <input
             v-model="draft"
+            data-gp-rule-focus="manual-input"
+            data-gp-row="4"
+            data-gp-col="0"
             type="text"
             placeholder="手动输入进程名按回车确认"
             @focus="void summonTouchKeyboard()"
-            @keyup.enter="saveRule(editorOpen!, draft)"
+            @keydown.enter.prevent="saveRule(editorOpen!, draft)"
           />
-          <button type="button" class="game-rule-pick" :disabled="busy" @click="chooseRuleExecutable"><AppIcon name="plus" />添加</button>
+          <button type="button" class="game-rule-confirm" data-gp-rule-focus="manual-confirm" data-gp-row="4" data-gp-col="1" :disabled="busy" @click="saveRule(editorOpen!, draft)">确认</button>
         </div>
+        <button type="button" class="game-rule-pick" data-gp-rule-focus="file-add" data-gp-row="5" data-gp-col="0" :disabled="busy" @click="chooseRuleExecutable"><AppIcon name="plus" />添加</button>
       </div>
 
       <div v-if="message || error" class="game-rules-message" :class="{ error: !!error }">{{ error || message }}</div>
 
       <div class="game-rules-bottom-actions" data-gp-group="game-rules-bottom-actions" data-gp-game-row="rules-footer">
-        <button type="button" class="rules-close-bottom" @click="emit('close')"><strong>B</strong>关闭页面</button>
+        <button type="button" class="rules-close-bottom" data-gp-rule-focus="rules-close" @click="emit('close')"><strong>B</strong>关闭页面</button>
       </div>
       </div>
     </Transition>
@@ -360,7 +376,9 @@ onBeforeUnmount(() => {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
+  align-items: stretch;
 }
+.game-rule-actions button { width: 100%; min-width: 0; box-sizing: border-box; }
 .game-rule-current-actions button,
 .game-rule-editor-actions button {
   display: inline-flex;
@@ -376,18 +394,21 @@ onBeforeUnmount(() => {
 .game-rule-actions button.allow { color: var(--ok); }
 .game-rule-actions button.active { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
 .game-rule-actions button :deep(svg) { width: 14px; height: 14px; flex: 0 0 auto; margin: 0; vertical-align: initial; }
-.game-rule-dropdown { display: grid; gap: 6px; padding: 8px; border: 1px solid rgba(255,255,255,.08); border-radius: 8px; background: var(--bg-input); }
+.game-rule-dropdown { display: grid; gap: 9px; padding: 13px; border: 1px solid rgba(255,255,255,.10); border-radius: 13px; background: color-mix(in srgb, var(--bg-solid) 34%, var(--bg-input)); box-shadow: inset 0 1px 0 rgba(255,255,255,.035); }
 .game-rule-dropdown-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
-.game-rule-dropdown-head strong { font-size: 11px; }
-.game-rule-list { display: grid; gap: 4px; max-height: 150px; overflow-y: auto; }
-.game-rule-item { display: flex; align-items: center; gap: 8px; min-height: 28px; padding: 4px 7px; border-radius: 6px; background: var(--bg-input); font-size: 10px; }
+.game-rule-dropdown-head strong { font-size: 14px; font-weight: 800; letter-spacing: .01em; }
+.game-rule-list { display: grid; gap: 3px; max-height: 170px; overflow-y: auto; padding: 2px 0; }
+.game-rule-item { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; min-height: 37px; padding: 6px 11px; border: 1px solid transparent; border-radius: 8px; background: color-mix(in srgb, var(--bg-input) 72%, transparent); color: var(--text); font: inherit; font-size: 11px; text-align: left; cursor: pointer; }
 .game-rule-item span { min-width: 0; flex: 1; overflow-wrap: anywhere; }
-.game-rule-item button { width: 26px; height: 26px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--danger); cursor: pointer; }
-.game-rule-item button :deep(svg) { width: 14px; height: 14px; }
-.game-rule-add-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; }
-.game-rule-add-row input { min-width: 0; height: 30px; padding: 5px 8px; border: 1px solid #2a3342; border-radius: 7px; background: var(--bg-input); color: var(--text); font-size: 10px; }
-.game-rule-add-row button { display: inline-flex; align-items: center; justify-content: center; gap: 4px; }
-.game-rule-pick { min-width: 58px; }
+.game-rule-item :deep(svg) { width: 14px; height: 14px; color: var(--danger); flex: 0 0 auto; }
+.game-rule-add-row { display: grid; grid-template-columns: minmax(0, 1fr) 66px; gap: 6px; align-items: stretch; }
+.game-rule-add-row input { min-width: 0; width: 100%; height: 38px; min-height: 38px; box-sizing: border-box; padding: 7px 11px; border: 1px solid #2a3342; border-radius: 9px; background: var(--bg-input); color: var(--text); font-size: 11px; }
+.game-rule-add-row button { display: inline-flex; align-items: center; justify-content: center; gap: 4px; box-sizing: border-box; height: 38px; min-height: 38px; }
+.game-rule-confirm { width: 66px; min-width: 66px; height: 38px; min-height: 38px; border-radius: 9px; font-size: 11px; font-weight: 700; }
+.game-rule-pick { display: inline-flex; align-items: center; justify-content: center; gap: 7px; width: 100%; min-height: 38px; padding: 7px 11px; border: 1px solid color-mix(in srgb, var(--accent) 48%, rgba(255,255,255,.10)); border-radius: 9px; background: color-mix(in srgb, var(--accent) 16%, var(--bg-input)); color: var(--accent); font: inherit; font-size: 12px; font-weight: 800; cursor: pointer; }
+.game-rule-pick :deep(svg) { width: 15px; height: 15px; }
+.game-rule-item.focused { border-color: color-mix(in srgb, var(--accent) 78%, transparent); background: color-mix(in srgb, var(--accent) 12%, var(--bg-input)); box-shadow: inset 0 2px 0 var(--accent), inset 0 -2px 0 var(--accent); }
+.game-rule-item:focus-visible, .game-rule-pick:focus-visible, .game-rule-confirm:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 .game-rules-message { color: var(--ok); font-size: 10px; line-height: 1.35; white-space: pre-line; }
 .game-rules-message.error { color: var(--danger); }
 button:disabled { opacity: .45; cursor: default; }

@@ -160,9 +160,9 @@ if ((Has $text.host 'CopyFanRuntimeState') -and (Has $text.host 'avgTemp') -and 
     (Has $text.host 'tjLatch') -and (Has $text.host 'tjLastHitUtc') -and (Has $text.host 'belowCount')) {
   Pass 'YM-F01' 'Host preserves HC private FanProfile runtime state when cloning' 'Program.cs:1380-1413'
 } else { Fail 'YM-F01' 'Host runtime-state preservation' 'private HC runtime state copy incomplete' }
-if ((Has $text.host 'DirectCpuTemperatureMonitor') -and (Has $text.host 'AreTemperatureWritesBlocked\(\)') -and
+if ((Has $text.host 'HWiNFOTemperatureMonitor') -and (Has $text.host 'AreTemperatureWritesBlocked\(\)') -and
     (Has $text.host 'Invoke\(activeFanProfile, "SetTemperature", temp\)') -and (Has $text.host 'Invoke\("SetFanDuty", duty\)')) {
-  Pass 'YM-F02' 'Host uses the permitted HW temperature source and HC fan callback body' 'Program.cs:1007-1103'
+  Pass 'YM-F02' 'Host uses the existing HWiNFO temperature source and HC fan callback body' 'Program.cs:EnsureCpuTemperatureLoop/OnHcCpuTemperatureChanged'
 } else { Fail 'YM-F02' 'Host temperature gate' 'HW source or write gate not proven' }
 if ((Has $text.host 'ApplyPowerProfile\(BuildPowerProfile\(Array\.Empty<double>\(\), software: false\)\)') -and
     (Has $text.host 'BlockWritesForSuspend') -and (Has $text.host 'BlockWritesForClose')) {

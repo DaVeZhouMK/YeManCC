@@ -13,7 +13,8 @@
 [CmdletBinding()]
 param(
   [Parameter(Mandatory = $true)][string]$HcRuntimeRoot,
-  [Parameter(Mandatory = $true)][string]$PayloadRoot
+  [Parameter(Mandatory = $true)][string]$PayloadRoot,
+  [string[]]$ExcludedRuntimeFiles = @()
 )
 
 $ErrorActionPreference = 'Stop'
@@ -84,6 +85,19 @@ function Get-Sha256([string]$Path) {
 $hcAssembly = Join-Path $HcRuntimeRoot 'HandheldCompanion.dll'
 if (-not (Test-Path -LiteralPath $hcAssembly -PathType Leaf)) { throw "HC assembly missing: $hcAssembly" }
 if (-not (Test-Path -LiteralPath $PayloadRoot -PathType Container)) { throw "Fan Host payload missing: $PayloadRoot" }
+$excludedRuntime = @{}
+$normalizedExcludedRuntimeFiles = @($ExcludedRuntimeFiles | ForEach-Object {
+  ([string]$_ -split ',') | ForEach-Object { $_.Trim() }
+} | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+foreach ($name in $normalizedExcludedRuntimeFiles) {
+  if ([string]::IsNullOrWhiteSpace($name) -or [IO.Path]::GetFileName($name) -ne $name) {
+    throw "Excluded HC runtime file name is unsafe: $name"
+  }
+  if (-not (Test-Path -LiteralPath (Join-Path $HcRuntimeRoot $name) -PathType Leaf)) {
+    throw "Excluded HC runtime file is absent from frozen source: $name"
+  }
+  $excludedRuntime[$name] = $true
+}
 
 $payloadAssemblies = @{}
 Get-ChildItem -LiteralPath $PayloadRoot -File -Filter '*.dll' | ForEach-Object { $payloadAssemblies[$_.BaseName] = $true }
@@ -106,12 +120,12 @@ foreach ($library in $targets[0].PSObject.Properties.Value) {
   foreach ($asset in @($library.runtime.PSObject.Properties.Name)) {
     $name = [IO.Path]::GetFileName([string]$asset)
     $source = Join-Path $HcRuntimeRoot $name
-    if ($name -match '\.dll$' -and (Test-Path -LiteralPath $source -PathType Leaf)) { $runtimeClosure[$name] = $source }
+    if (-not $excludedRuntime.ContainsKey($name) -and $name -match '\.dll$' -and (Test-Path -LiteralPath $source -PathType Leaf)) { $runtimeClosure[$name] = $source }
   }
   foreach ($asset in @($library.runtimeTargets.PSObject.Properties.Name)) {
     $relative = ([string]$asset).Replace('/', '\')
     $source = Join-Path $HcRuntimeRoot $relative
-    if ($relative -match '(?i)^runtimes\\win(?:-|\\)' -and (Test-Path -LiteralPath $source -PathType Leaf)) {
+    if (-not $excludedRuntime.ContainsKey([IO.Path]::GetFileName($relative)) -and $relative -match '(?i)^runtimes\\win(?:-|\\)' -and (Test-Path -LiteralPath $source -PathType Leaf)) {
       $runtimeClosure[[IO.Path]::GetFileName($relative)] = $source
     }
   }
@@ -119,6 +133,7 @@ foreach ($library in $targets[0].PSObject.Properties.Value) {
 foreach ($name in @('GamepadMotion.dll', 'hidapi.dll', 'IGCL_Wrapper.dll', 'JoyShockLibrary.dll', 'libVIIPER.dll', 'SapientiaUsb.dll', 'SDL3.dll', 'UEFIVaribleDll.dll', 'Xinput1_4.dll')) {
   $source = Join-Path $HcRuntimeRoot $name
   if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { throw "HC native device dependency missing: $name" }
+  if ($excludedRuntime.ContainsKey($name)) { continue }
   $runtimeClosure[$name] = $source
 }
 $runtimeMissing = @()

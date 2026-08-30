@@ -46,6 +46,7 @@ import {
   rememberFanDevice,
   setFanControlActive,
 } from '@/bridge/fanFeature';
+import { fanDiagnosticLog } from '@/bridge/fanDiagnostics';
 import { FAN_REAL_HOST_ENABLED, fanHostLifecycle, resolveFanHostConfig } from '@/bridge/fanHost';
 
 applyTheme(
@@ -647,13 +648,9 @@ function onPowerResuming(e: Event): void {
 }
 function onPowerResumed(e: Event): void {
   const generation = powerEventGeneration(e);
-  // The global lifecycle owns the remembered, already-acknowledged curve.
-  // This stays alive when KeepAlive evicts FanView during suspend. The
-  // lifecycle itself re-handshakes, reopens HC and gets a fresh lease before
-  // it can replay anything; a failure leaves OEM ownership in place.
-  void fanHostLifecycle.resume()
-    .then(() => setFanControlActive(fanHostLifecycle.state === 'ready'))
-    .catch(() => setFanControlActive(false));
+  // Fan recovery is intentionally not owned by wake or AC/DC notifications.
+  // Once armed, FanHostLifecycle keeps its ten-second guard alive and retries
+  // the same curve until the user disables it or the application exits.
   if (generation > committedResumeGeneration) scheduleResumeTransaction(generation);
   scheduleSleepPowerPlanOptimization();
   if (resumeVideoTimer !== null) window.clearTimeout(resumeVideoTimer);
@@ -773,6 +770,10 @@ function onGamepadMouseToggle(e: Event) {
   window.dispatchEvent(new CustomEvent('gp:mouse-mode', {
     detail: { on: Boolean(detail.on), backend: detail.backend },
   }));
+}
+function onFanGuardState(e: Event): void {
+  const detail = (e as CustomEvent<{ active?: boolean }>).detail ?? {};
+  setFanControlActive(detail.active === true);
 }
 
 async function applyProgramControls() {
@@ -1119,6 +1120,7 @@ onMounted(async () => {
   window.addEventListener('ipc:power.suspending', onPowerSuspending as EventListener);
   window.addEventListener('ipc:power.resuming', onPowerResuming as EventListener);
   window.addEventListener('ipc:power.resumed', onPowerResumed as EventListener);
+  window.addEventListener('fan:guard-state', onFanGuardState as EventListener);
   stopResumeWatch = on<{ generation?: number }>('power.resume-ready', ({ generation }) => {
     scheduleResumeTransaction(Number(generation));
   });
@@ -1141,24 +1143,20 @@ onMounted(async () => {
   // installed; otherwise a child NavRail mount could write defaults to the
   // compatibility path before native startup finishes resolving directories.
   await initializeFanFeature();
-  // Configure and start the resident Fan Host against the same
-  // native-resolved PowerControl directory used by the rest of the app. The
-  // Host itself performs a read-only handshake first; HC Open/lease/write is
-  // still deferred until the user enables a curve or preset in FanView.
-  try {
-    const configuredFan = getFanFeatureSettings();
-    if (nativePowerControlDir) fanHostLifecycle.setConfig(resolveFanHostConfig(nativePowerControlDir));
-    fanHostLifecycle.setSavedIdentity(configuredFan.deviceIdentity ?? null);
-    let handshakeIdentity = configuredFan.deviceIdentity ?? null;
-    fanHostLifecycle.setDeviceIdentitySink((identity) => {
-      handshakeIdentity = identity;
-      void rememberFanDevice(identity).catch(() => {});
-    });
-    if (FAN_REAL_HOST_ENABLED && !FAN_FORCE_PREVIEW) {
-      const gate = await fanHostLifecycle.start();
-      await recordFanHandshake(gate.allowed, handshakeIdentity);
-    }
-  } catch { /* unavailable/unsupported devices remain fail-closed */ }
+
+  // FanHost handshake is optional hardware discovery and must not delay the
+  // controller receiver. The page can already be visible/clickable while the
+  // handshake is in progress, so register Native UI actions first.
+  window.addEventListener('ipc:gamepad-start', onGamepadStart as EventListener);
+  window.addEventListener('ipc:gamepad.refresh', onGamepadRefresh as EventListener);
+  window.addEventListener('ipc:gamepad.tdp-delta', onGamepadTdpDelta as EventListener);
+  window.addEventListener('ipc:gamepad.brightness', onGamepadBrightness as EventListener);
+  window.addEventListener('ipc:gamepad.mouse-toggle', onGamepadMouseToggle as EventListener);
+  stopGamepad = startGamepad({ router, onAction: (l) => store.pushGamepad(l) });
+
+  // Finish settings and background initialization before the optional
+  // FanHost handshake. The native splash waits for this signal, so the first
+  // visible frame is already in its normal background state.
   await loadUiSettings();
   backgroundOpacity.value = getBackgroundOpacity();
   backgroundBlur.value = getBackgroundBlur();
@@ -1166,10 +1164,6 @@ onMounted(async () => {
   window.addEventListener('background:changed', onBackgroundChanged as EventListener);
   window.addEventListener('background:opacity-changed', onBackgroundOpacityChanged as EventListener);
   window.addEventListener('background:blur-changed', onBackgroundBlurChanged as EventListener);
-  // Register native lifecycle listeners before the first background read. The
-  // initial WebView2 navigation can reveal the native window while this setup
-  // is still running; missing that first shown event would leave a video
-  // background suspended forever.
   window.addEventListener('ipc:window.minimized', onBackgroundWindowHidden as EventListener);
   window.addEventListener('ipc:window.hidden', onBackgroundWindowHidden as EventListener);
   window.addEventListener('ipc:window.restored', onBackgroundWindowShown as EventListener);
@@ -1186,7 +1180,7 @@ onMounted(async () => {
   lastFixedBackgroundState = initialBackgroundState;
   applyBackgroundState(initialBackgroundState, 'fixed');
   startDynamicBackgroundWatch();
-stopUiVisibility = onUiVisibilityChange(({ visible }) => {
+  stopUiVisibility = onUiVisibilityChange(({ visible }) => {
     if (visible) {
       startDynamicBackgroundWatch();
       resumeBackgroundVideo();
@@ -1202,22 +1196,61 @@ stopUiVisibility = onUiVisibilityChange(({ visible }) => {
   if (initialPowerMode) applyVideoPowerMode(initialPowerMode, true);
   else onAcPower.value = (await detectPowerMode().catch(() => 'dc')) === 'ac';
   await reconcileBackgroundVideo();
-  window.addEventListener('ipc:gamepad-start', onGamepadStart as EventListener);
-  window.addEventListener('ipc:gamepad.refresh', onGamepadRefresh as EventListener);
-  window.addEventListener('ipc:gamepad.tdp-delta', onGamepadTdpDelta as EventListener);
-  window.addEventListener('ipc:gamepad.brightness', onGamepadBrightness as EventListener);
-  window.addEventListener('ipc:gamepad.mouse-toggle', onGamepadMouseToggle as EventListener);
-  stopGamepad = startGamepad({ router, onAction: (l) => store.pushGamepad(l) });
+  window.dispatchEvent(new CustomEvent('app-startup-ready'));
+
+  // Configure and start the resident Fan Host against the same
+  // native-resolved PowerControl directory used by the rest of the app. The
+  // Host itself performs a read-only handshake first; HC Open/lease/write is
+  // still deferred until the user enables a curve or preset in FanView.
+  try {
+    const configuredFan = getFanFeatureSettings();
+    if (nativePowerControlDir) fanHostLifecycle.setConfig(resolveFanHostConfig(nativePowerControlDir));
+    fanHostLifecycle.setSavedIdentity(configuredFan.deviceIdentity ?? null);
+    let handshakeIdentity = configuredFan.deviceIdentity ?? null;
+    fanHostLifecycle.setDeviceIdentitySink((identity) => {
+      handshakeIdentity = identity;
+      void rememberFanDevice(identity).catch(() => {});
+    });
+    if (FAN_REAL_HOST_ENABLED && !FAN_FORCE_PREVIEW) {
+      const gate = await fanHostLifecycle.start();
+      await recordFanHandshake(gate.allowed, handshakeIdentity);
+      window.dispatchEvent(new CustomEvent('fan-feature:visibility'));
+      const startup = await readSettingsSection<{ fanControl?: boolean }>('startupDesired')
+        .catch((): { fanControl?: boolean } => ({ fanControl: false }));
+      if (startup.fanControl === true && gate.allowed && gate.writeReady) {
+        fanDiagnosticLog('lifecycle.startup-control-begin', { preset: configuredFan.preset });
+        try {
+          const state = await fanHostLifecycle.apply(configuredFan.nodes);
+          const active = state.hardwareWritesEnabled === true && state.hardwareWritesObserved === true;
+          setFanControlActive(active);
+          fanDiagnosticLog('lifecycle.startup-control-success', { active, preset: configuredFan.preset });
+        } catch (error) {
+          setFanControlActive(false);
+          fanDiagnosticLog('lifecycle.startup-control-failure', {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+    }
+  } catch (error) {
+    // A remembered device must not make the Fan route visible after this
+    // process failed before completing its current-session handshake.
+    await recordFanHandshake(false);
+    window.dispatchEvent(new CustomEvent('fan-feature:visibility'));
+    fanDiagnosticLog('lifecycle.start-failure', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
   // 程序启动只同步一次；之后仅在模拟鼠标真实开/关时更新内页锁定。
   void syncMouseModeAtStartup();
   window.addEventListener('background:video-battery-pause-changed', onBackgroundVideoPauseChanged as EventListener);
   window.addEventListener('ui-settings:loaded', onUiSettingsLoaded as EventListener);
   window.addEventListener('ui-settings:changed', onUiSettingsLoaded as EventListener);
-  stopPowerSourceWatch = on<{ ac: boolean }>('power.sourceChanged', ({ ac }) => {
+  stopPowerSourceWatch = on<{ ac: boolean; generation?: number }>('power.sourceChanged', ({ ac }) => {
     onVideoPowerSourceChanged(ac);
   });
   // AC/DC 插拔：刷新数据；自动模式由性能调度重新应用当前电源侧组合。
-  stopAcWatch = on('power.acChanged', async ({ ac }) => {
+  stopAcWatch = on<{ ac: boolean; generation?: number }>('power.acChanged', async ({ ac }) => {
     onAcPower.value = Boolean(ac);
     onVideoPowerSourceChanged(Boolean(ac));
     globalRefreshKey.value++;
@@ -1340,6 +1373,7 @@ onUnmounted(() => {
   window.removeEventListener('ipc:power.suspending', onPowerSuspending as EventListener);
   window.removeEventListener('ipc:power.resuming', onPowerResuming as EventListener);
   window.removeEventListener('ipc:power.resumed', onPowerResumed as EventListener);
+  window.removeEventListener('fan:guard-state', onFanGuardState as EventListener);
   window.removeEventListener('ui-settings:loaded', onUiSettingsLoaded as EventListener);
   window.removeEventListener('ui-settings:changed', onUiSettingsLoaded as EventListener);
   window.removeEventListener('dynamic-background:settings-changed', onDynamicBackgroundSettingChanged);
@@ -1484,6 +1518,10 @@ onUnmounted(() => {
   height: calc(100% - 52px); /* 8px 顶部留白 + 34px 监控条 + 10px 下间距 */
   min-height: 0;
   overflow-y: auto;
+  /* Keep the layout viewport width identical before/after a zoom-induced
+     height change. Gamepad spatial coordinates must not shift when the
+     vertical scrollbar is introduced or removed. */
+  scrollbar-gutter: stable;
   /* Leave room for the gamepad focus ring and the final control itself. */
   padding: 12px 12px calc(var(--gamepad-safe-bottom, 24px) + var(--gamepad-clip-bottom, 0px));
   scroll-padding: 24px 0 var(--gamepad-safe-bottom, 24px);

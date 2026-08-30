@@ -194,20 +194,18 @@ function sourceChecks(): number {
     'duplicate resume must never clear an active Host session unless a completed suspend boundary exists');
   const app = readFileSync('C:\\SOFT\\YeManCC-Work\\YeManCC-source\\YeManCC3\\src\\App.vue', 'utf8');
   const fanView = readFileSync('C:\\SOFT\\YeManCC-Work\\YeManCC-source\\YeManCC3\\src\\views\\FanView.vue', 'utf8');
-  const fanViewResumeStart = fanView.indexOf('async function resumeFanControlAfterWake');
-  const fanViewResumeEnd = fanView.indexOf('\nfunction onFanPowerSuspending', fanViewResumeStart);
-  const fanViewResumeBody = fanView.slice(fanViewResumeStart, fanViewResumeEnd);
   assert(lifecycle.includes('private activeCurve: FanNode[] | null') &&
     lifecycle.includes('private resumeCurve: FanNode[] | null') &&
-    lifecycle.includes('await this.applyMutation(curveToResume)') &&
-    lifecycle.includes('唤醒后风扇数据路线未通过真实写入/恢复验证') &&
-    app.includes('fanHostLifecycle.resume()') &&
-    app.includes("setFanControlActive(fanHostLifecycle.state === 'ready')") &&
-    fanViewResumeStart >= 0 && fanViewResumeEnd > fanViewResumeStart &&
-    !fanViewResumeBody.includes('await requestCurveApply()') &&
-    lifecycle.includes('Always perform one read-only state') &&
-    lifecycle.includes('responseState: resumedState.state'),
-    'wake replay must be owned by the global lifecycle and must not issue a duplicate FanView curve write');
+    lifecycle.includes('private desiredCurve: FanNode[] | null = null') &&
+    lifecycle.includes('private async runFanGuardOnce(source = \'timer\')') &&
+    lifecycle.includes('await this.adapter.resume()') &&
+    !app.includes('fanHostLifecycle.resume()') &&
+    !app.includes('fanHostLifecycle.notifyPowerSourceChanged(') &&
+    fanView.includes('function onFanGuardState') &&
+    fanView.includes("window.addEventListener('fan:guard-state'") &&
+    !fanView.includes("window.addEventListener('fan:lifecycle-resumed'") &&
+    !fanView.includes('recoverFanSession('),
+    'fan control recovery must be owned by one resident ten-second guard without wake/AC/DC triggers');
   return 16;
 }
 

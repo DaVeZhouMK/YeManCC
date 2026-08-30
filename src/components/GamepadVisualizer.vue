@@ -321,7 +321,7 @@ function cls(i: number): Record<string, boolean> {
       <Toggle
         v-model="testMode"
         :label="connected ? '手柄测试模式' : '未检测'"
-        :description="connected ? (testMode ? '【B】按住以退出（实际按住 3 秒）' : '开启后可视化显示摇杆方向，但手柄不再控制程序界面') : '未检测到手柄，无法进入测试'"}}
+        :description="connected ? (testMode ? '【B】按住以退出（实际按住 3 秒）' : '开启后可视化显示摇杆方向，但手柄不再控制程序界面') : '未检测到手柄，无法进入测试'"
         :disabled="!connected"
         color="accent"
         @update:model-value="setTestMode"

@@ -10,7 +10,7 @@ import {
   type DetectedGame,
 } from '@/bridge/gamedetect';
 import { on as onIpc } from '@/bridge/ipc';
-import { focusGamepadElement } from '@/gamepad/focus';
+import { focusGamepadElement, setGamepadFocused } from '@/gamepad/focus';
 import { getLockedGameTarget, isGameTargetSame, unlockGameTarget } from '@/bridge/gameQuickSession';
 
 type SummonCandidate = {
@@ -69,6 +69,8 @@ const gameButtonStatus = computed(() => gameIdentifying.value
 
 function syncGame(next: DetectedGame | null, preserveRuleMenu = false): void {
   const locked = getLockedGameTarget();
+  const previous = game.value;
+  const menuWasOpen = gameRuleMenu.value !== null;
   // A locked top-menu target owns the quick-action session. Background polls
   // must not replace it with a newly detected foreground game.
   if (locked && !next) {
@@ -83,13 +85,26 @@ function syncGame(next: DetectedGame | null, preserveRuleMenu = false): void {
   if (gameIdentifying.value) return;
   if (next) {
     summonCandidate.value = null;
-    if (!preserveRuleMenu) gameRuleMenu.value = null;
+    // Background recognition publishes the same PID repeatedly. Keeping the
+    // menu open across those snapshots is essential for controller users:
+    // otherwise a normal poll races the Y-open animation and folds the menu
+    // back up. A genuinely different game still invalidates the old menu.
+    const sameTarget = isGameTargetSame(previous, next);
+    if (!preserveRuleMenu && menuWasOpen && previous && !sameTarget) {
+      gameRuleMenu.value = null;
+    }
   }
 }
 
 function focusGameRulePanel(): void {
   nextTick(() => {
-    const first = gameRulePanelEl.value?.querySelector<HTMLElement>('button:not(:disabled), input:not(:disabled)');
+    const candidates = gameRulePanelEl.value
+      ? Array.from(gameRulePanelEl.value.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled)'))
+      : [];
+    const first = candidates.find((el) =>
+      !el.hasAttribute('data-gp-ignore') &&
+      !el.closest('[data-gp-group="game-quick-game-controls"]'),
+    );
     if (first) focusGamepadElement(first);
   });
 }
@@ -134,12 +149,20 @@ function openGameRuleRoot(): void {
 
 function closeQuickMenu(): void {
   gameRuleMenu.value = null;
-  nextTick(() => focusGamepadElement(gameRuleTriggerEl.value));
+  // 顶部识别入口只保留鼠标/触屏点击；Y 是它的手柄入口，因此关闭后也
+  // 不把 DOM/视觉焦点恢复到这里，避免再次出现“手柄可选中”的假象。
+  nextTick(() => {
+    gameRuleTriggerEl.value?.blur();
+    setGamepadFocused(null);
+  });
 }
 
 function closeGameRuleMenus(): void {
   gameRuleMenu.value = null;
-  nextTick(() => focusGamepadElement(gameRuleTriggerEl.value));
+  nextTick(() => {
+    gameRuleTriggerEl.value?.blur();
+    setGamepadFocused(null);
+  });
 }
 
 function beginSummonIdentification(detail: SummonCandidate): void {
@@ -308,6 +331,7 @@ onUnmounted(() => {
       :disabled="false"
       data-gp-group="game-recognition"
       data-gp-global-y
+      data-gp-ignore
       :title="recognitionTitle"
       @click="openGameRuleRoot"
     >
@@ -436,6 +460,5 @@ onUnmounted(() => {
 .game-recognition-message.error { color: var(--danger); }
 @media (max-width: 620px) {
   .game-recognition-status { width: 188px; min-width: 120px; }
-  .game-rule-actions, .game-rule-tabs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 </style>

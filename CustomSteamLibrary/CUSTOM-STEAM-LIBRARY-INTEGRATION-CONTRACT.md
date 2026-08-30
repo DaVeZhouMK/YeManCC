@@ -1,8 +1,30 @@
 # Custom Steam Library 接入契约（YeManCC protocol 1）
 
-状态（2026-08-25）：protocol 1 运行时接入、三目录升级适配和 CustomSteamLibrary 独立隐藏启动健康握手已完成源码与临时包回归；正式安装目录和实体手柄窗口级验收仍未完成。独立发行目录为 `C:\SOFT\YeMan\YeManCC\CustomSteamLibrary`；YeManCC 已增加一级菜单 `自定义游戏库`、异步启动/关闭 IPC 和唯一手柄输入转发。本次只迁移 CustomSteamLibrary 包自身，YeManCC 现有固定桥接路径和升级器未在本轮修改。
+状态（2026-08-30）：protocol 1 运行时接入、三目录升级适配、CustomSteamLibrary 独立隐藏启动健康握手和主线同步打包已完成源码与临时包回归；正式安装目录和实体手柄窗口级验收仍未完成。独立正式目录为 `C:\SOFT\YeMan\YeManCC\CustomSteamLibrary`；YeManCC 已增加一级菜单 `自定义游戏库`、异步启动/关闭 IPC 和唯一手柄输入转发。CustomSteamLibrary 已是 YeManCC 正式主线的一部分，主线打包器会在发布前同步当前构建产物并拒绝旧子包回退。
 
 ## 1. 角色
+
+## 0. 主线身份和发布边界
+
+CustomSteamLibrary 的入口、Worker、UI 和包清单属于 YeManCC 主线的同一发布事务。唯一有效发布关系为：
+
+```text
+SteamArtworkLab\build
+  -> YeManCC3\CustomSteamLibrary
+  -> Build\Package\UpdateRoot\YeManCC\CustomSteamLibrary
+  -> Release\YeManCC\CustomSteamLibrary
+  -> Release\Packages\YeManCC.zip
+  -> C:\SOFT\YeMan\YeManCC\CustomSteamLibrary
+```
+
+`Release\CustomSteamLibrary`、旧版正式预览目录、用户安装目录和历史压缩包均不是主线输入。升级器只安装 ZIP 中的 `YeManCC\CustomSteamLibrary`，不会从目标机反向取文件；目标机旧版本只能通过新的主线升级包更新。
+
+主线版本号必须同时满足以下条件：
+
+- `CustomSteamLibrary\package-manifest.json.packageVersion` 等于 YeManCC `version.json.version`；
+- `CustomSteamLibrary.exe`、`SteamArtworkLab.exe` 和 UI 的清单哈希与构建输出一致；
+- UpdateRoot、Release 和 ZIP 内的子包逐文件一致；
+- 任一版本、路径、入口、Worker 或哈希不一致时，打包必须中止，不得发布旧子包。
 
 - `CustomSteamLibrary.exe`：面向用户的窗口宿主、WebView2 界面、键盘和独立运行时的手柄适配。开发目录仍保留 `SteamLibraryWorkspace.exe` 作为兼容构建名；独立入口已嵌入多尺寸产品图标和 PE 产品信息。
 - `SteamArtworkLab.exe`：后台 Worker，只接受命令行任务并输出扫描、识别、素材和配置结果；不是用户界面，直接双击不能作为 Custom Steam Library 打开。

@@ -42,9 +42,8 @@ let lastNav = 0;
 let lastPageSwitch = -Infinity; // 切页冷却（防止连按卡顿）
 const PAGE_SWITCH_COOLDOWN = 100; // ms，原 400ms 过严致连按 LB/RB 丢按；降到 100ms 使快速切页（含切到 TDP）每次都生效
 const NAV_REPEAT_BASE = 220; // ms：普通空间导航重复间隔
-const INLINE_EDIT_REPEAT = Math.round(NAV_REPEAT_BASE / 3); // 节点编辑专用：约为普通导航的 1/3
+const FAN_NODE_EDIT_REPEAT = Math.max(5, Math.round(NAV_REPEAT_BASE / 4)); // ms：风扇节点固定为全局导航的 4 倍速度（220 / 4 = 55）
 // 滑块线性加速：按住越久步长越大、间隔越短
-// ⚠️ 速度参数需与 native 手柄 Start+方向 自动连发保持一致（见 main.cpp 注释），修改时两边同步。
 let sliderAccelStart = 0;  // 本次按住起始时间（用于线性加速）
 let sliderLastApply = 0;   // 上次应用加速步进的时间
 const SLIDER_REPEAT_BASE = 150; // ms：基础重复间隔（原 45，放慢 30%+，短按只调 1 次）
@@ -78,6 +77,55 @@ export function isMouseModeSuppressed(): boolean {
 }
 let startUsedAsModifier = false; // Start 键是否在本轮按住中被用作快捷调节修饰键
 
+let inlineEditDirectionKey = '';
+let inlineEditStartedAt = 0;
+let inlineEditLastRepeatAt = 0;
+
+function resetInlineEditCadence(): void {
+  inlineEditDirectionKey = '';
+  inlineEditStartedAt = 0;
+  inlineEditLastRepeatAt = 0;
+}
+
+function activeFanNodeEditor(): HTMLElement | null {
+  const active = document.activeElement as HTMLElement | null;
+  const activeEditor = active?.closest<HTMLElement>(
+    '[data-gp-inline-edit-scope="fan-curve-node"].edit-armed, ' +
+    '[data-gp-inline-edit-active="true"][data-gp-inline-edit-scope="fan-curve-node"]',
+  );
+  if (activeEditor) return activeEditor;
+  // Vue updates aria/class state one render turn after HTMLElement.click().
+  // Keep the armed node usable during that turn, even if WebView2 reports a
+  // transient focus target outside the graph button.
+  const candidates = document.querySelectorAll<HTMLElement>(
+    '[data-gp-inline-edit-scope="fan-curve-node"][data-gp-inline-edit-active="true"], ' +
+    '[data-gp-inline-edit-scope="fan-curve-node"][aria-pressed="true"], ' +
+    '[data-gp-inline-edit-scope="fan-curve-node"].edit-armed',
+  );
+  return Array.from(candidates).find((el) => {
+    const style = getComputedStyle(el);
+    const rect = el.getBoundingClientRect();
+    return style.display !== 'none' && style.visibility !== 'hidden' &&
+      rect.width > 0 && rect.height > 0 && !el.closest('[hidden], [inert]');
+  }) || null;
+}
+
+function fanNodeEditRepeatInterval(element: HTMLElement | null, now: number, directionKey: string): number {
+  if (!element || directionKey === '') {
+    resetInlineEditCadence();
+    return FAN_NODE_EDIT_REPEAT;
+  }
+  if (directionKey !== inlineEditDirectionKey) {
+    inlineEditDirectionKey = directionKey;
+    inlineEditStartedAt = now;
+    inlineEditLastRepeatAt = now;
+  }
+  const configured = Number(element.dataset.gpInlineEditRepeatMs);
+  return Number.isFinite(configured)
+    ? Math.max(5, Math.floor(configured))
+    : FAN_NODE_EDIT_REPEAT;
+}
+
 // ── LB/RB 切页防误触（LB+RB 呼出组合）──
 // 切页由按下边沿触发，而呼出是“按住 LB+RB 0.5s”。若按下瞬间直接切页，
 // 呼出组合按住期间会把页面切走。因此改为挂起一帧裁决：
@@ -86,7 +134,7 @@ let lbNavPending = false; // LB 按下边沿待裁决
 let rbNavPending = false; // RB 按下边沿待裁决
 let summonSuppress = false; // 呼出后直到 LB/RB 全释放前抑制切页（呼出动作本身不产生页面移动）
 let shoulderReleaseLockUntil = 0; // 组合键松开后的防抖窗口，丢弃释放抖动产生的单键边沿
-const SUMMON_POST_RELEASE_LOCKOUT_MS = 450;
+const SUMMON_POST_RELEASE_LOCKOUT_MS = 100;
 // Native focus and WebView2 compositor visibility settle independently. Keep
 // a short, cancellable focus session so a summon that races a restore/repaint
 // cannot leave the DOM without a gamepad focus target.
@@ -147,6 +195,12 @@ if (typeof window !== 'undefined') {
   window.addEventListener('performance-schedule:visibility', (e: Event) => {
     const enabled = Boolean((e as CustomEvent<{ detail?: { enabled?: boolean }; enabled?: boolean }>).detail?.enabled);
     setVisibleRoutes(enabled);
+  });
+  // Fan visibility is capability-gated by the asynchronous startup handshake.
+  // Refresh the route order after that result without delaying controller
+  // startup or changing the current route.
+  window.addEventListener('fan-feature:visibility', () => {
+    void refreshVisibleRoutes();
   });
   // 睡眠守护唤醒后，native 通知重启手柄引擎：重置边沿/时间戳状态，并尝试重启循环
   window.addEventListener('ipc:gamepad.restart', () => {
@@ -422,6 +476,146 @@ function gameMenuControlForRow(menu: HTMLElement, rowKey: string): HTMLElement |
     : target;
 }
 
+function moveGameRuleFocus(menu: HTMLElement, base: HTMLElement, dy: number): HTMLElement | null {
+  const body = base.closest<HTMLElement>('[data-gp-game-rules-body]');
+  if (!body || dy === 0) return null;
+
+  const controls = Array.from(body.querySelectorAll<HTMLElement>('[data-gp-rule-focus]'))
+    .filter((el) => {
+      if (el.hasAttribute('disabled') || el.getAttribute('aria-disabled') === 'true') return false;
+      if (el.closest('[hidden], [inert], [aria-hidden="true"]')) return false;
+      const style = getComputedStyle(el);
+      const rect = el.getBoundingClientRect();
+      return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0;
+    });
+  const activeIndex = controls.indexOf(base);
+  if (activeIndex < 0) return null;
+
+  const marker = base.dataset.gpRuleFocus || '';
+  const editorKind = body.querySelector<HTMLElement>('[data-gp-rule-editor-kind]')?.dataset.gpRuleEditorKind;
+  const markerKind = marker.endsWith('blacklist')
+    ? 'blacklist'
+    : marker.endsWith('whitelist')
+      ? 'whitelist'
+      : undefined;
+  // When the focused action itself names a list, that marker is authoritative.
+  // The editor container can still be one render tick behind while Vue is
+  // switching from blacklist to whitelist; consulting it first would send
+  // “编辑白名单” back to “添加到黑名单”.
+  const effectiveKind = markerKind || (
+    editorKind === 'blacklist' || editorKind === 'whitelist'
+      ? editorKind
+      : undefined
+  );
+  const sameKindTarget = (prefix: 'current' | 'editor'): HTMLElement | null => {
+    if (effectiveKind !== 'blacklist' && effectiveKind !== 'whitelist') return null;
+    return controls.find((el) => el.dataset.gpRuleFocus === `${prefix}-${effectiveKind}`) || null;
+  };
+
+  const hasCurrentActions = controls.some((el) => {
+    const value = el.dataset.gpRuleFocus || '';
+    return value === 'current-blacklist' || value === 'current-whitelist';
+  });
+  const hasEditorDropdown = !!body.querySelector<HTMLElement>('[data-gp-rule-editor-kind]');
+
+  // “编辑黑名单/编辑白名单” is one horizontal row. When neither editor is
+  // expanded, Down must stop here instead of using the next DOM control
+  // (which is the other button in this same row).
+  if (dy > 0 &&
+      (marker === 'editor-blacklist' || marker === 'editor-whitelist') &&
+      !hasEditorDropdown) {
+    return null;
+  }
+
+  // Manual process input and its confirmation button are one horizontal row.
+  // Down from either control must skip the sibling confirmation button and
+  // enter the next row, the file picker.
+  if (dy > 0 && (marker === 'manual-input' || marker === 'manual-confirm')) {
+    return controls.find((el) => el.dataset.gpRuleFocus === 'file-add') || null;
+  }
+
+  // 未识别游戏时不显示“排除当前游戏”这一行。编辑黑/白名单仍然是同一
+  // 个水平行；编辑器已展开时，向下仍须进入名单内容，未展开时则不能
+  // 把另一列误判成下一层，垂直移动落到“关闭页面”。
+  if (!hasCurrentActions &&
+      (marker === 'editor-blacklist' || marker === 'editor-whitelist') &&
+      (dy < 0 || (!hasEditorDropdown && dy > 0))) {
+    return controls.find((el) => el.dataset.gpRuleFocus === 'rules-close') || null;
+  }
+
+  // “添加”属于当前编辑器的最后一项；向上只回到同一编辑器的手动输入，
+  // 不能跳回外层的“编辑黑名单/编辑白名单”或当前游戏操作行。
+  if (dy < 0 && marker === 'file-add') {
+    return controls.find((el) => el.dataset.gpRuleFocus === 'manual-input') || null;
+  }
+
+  // The list belongs to the matching add action, not to the first button in
+  // the two-column action row. This keeps blacklist and whitelist aligned when
+  // moving back up from any item, the manual input, or +添加.
+  if (dy < 0 && (
+    marker === 'rule-item' ||
+    marker === 'manual-input' ||
+    marker === 'manual-confirm' ||
+    marker === 'file-add' ||
+    marker === 'editor-blacklist' ||
+    marker === 'editor-whitelist'
+  )) {
+    return sameKindTarget('current');
+  }
+  // The two "add current" buttons share one visual row. Let the outer menu
+  // navigation handle Up from that row so it returns to the rules entry
+  // instead of moving sideways to the other list type.
+  if (dy < 0 && (marker === 'current-blacklist' || marker === 'current-whitelist')) {
+    return null;
+  }
+  if (dy > 0 && (marker === 'current-blacklist' || marker === 'current-whitelist')) {
+    const kind = marker.endsWith('blacklist') ? 'blacklist' : 'whitelist';
+    return body.querySelector<HTMLElement>(`[data-gp-rule-focus="editor-${kind}"]`)
+      || controls[activeIndex + 1]
+      || null;
+  }
+  if (dy > 0 && (marker === 'editor-blacklist' || marker === 'editor-whitelist')) {
+    return controls.find((el) => el.dataset.gpRuleFocus === 'rule-item')
+      || body.querySelector<HTMLElement>('[data-gp-rule-focus="manual-input"]')
+      || null;
+  }
+
+  return controls[activeIndex + (dy > 0 ? 1 : -1)] || null;
+}
+
+function moveGameCorePolicyFocus(menu: HTMLElement, base: HTMLElement, dx: number, dy: number): HTMLElement | null | undefined {
+  const body = base.closest<HTMLElement>('[data-gp-custom-body]');
+  const row = base.closest<HTMLElement>('[data-gp-game-row]');
+  const rowKey = row?.dataset.gpGameRow || '';
+  const coreRows = [
+    'custom-core-big-toggle',
+    'custom-core-big-picker',
+    'custom-core-smt-toggle',
+    'custom-core-smt-picker',
+  ];
+  if (!body || !coreRows.includes(rowKey)) return undefined;
+
+  const targets = coreRows
+    .map((key) => ({ key, target: gameMenuControlForRow(menu, key) }))
+    .filter((item): item is { key: string; target: HTMLElement } => !!item.target);
+  const index = targets.findIndex((item) => item.key === rowKey && item.target === base);
+  if (index < 0) return null;
+
+  if (dy !== 0) return targets[index + (dy > 0 ? 1 : -1)]?.target || null;
+
+  // A right/left press is also a valid way to reach the paired selector.
+  // The vertical layout remains the primary order, but this removes dependence
+  // on card width or the spatial-geometry heuristic.
+  if (dx !== 0) {
+    const pairedKey = rowKey.endsWith('-toggle')
+      ? rowKey.replace('-toggle', '-picker')
+      : rowKey.replace('-picker', '-toggle');
+    const paired = targets.find((item) => item.key === pairedKey)?.target;
+    if (paired) return paired;
+  }
+  return null;
+}
+
 function moveGameMenuFocus(menu: HTMLElement, base: HTMLElement, dy: number): HTMLElement | null {
   const currentRow = base.closest<HTMLElement>('[data-gp-game-row]')?.dataset.gpGameRow || '';
   const rows = [
@@ -442,11 +636,23 @@ function moveGameMenuFocus(menu: HTMLElement, base: HTMLElement, dy: number): HT
   const customPanel = menu.querySelector<HTMLElement>('[data-gp-custom-panel][data-gp-expanded="true"]');
   if (customPanel) {
     const footerIndex = rows.indexOf('footer');
-    rows.splice(footerIndex, 0, 'custom-ac', 'custom-dc');
-    if (customPanel.querySelector('[data-gp-game-row="custom-actions"]')) rows.splice(footerIndex + 2, 0, 'custom-actions');
+    const customRows = ['custom-ac', 'custom-dc'];
+    if (customPanel.querySelector('[data-gp-game-row="custom-core-big-toggle"]')) customRows.push('custom-core-big-toggle');
+    if (customPanel.querySelector('[data-gp-game-row="custom-core-big-picker"]')) customRows.push('custom-core-big-picker');
+    if (customPanel.querySelector('[data-gp-game-row="custom-core-smt-toggle"]')) customRows.push('custom-core-smt-toggle');
+    if (customPanel.querySelector('[data-gp-game-row="custom-core-smt-picker"]')) customRows.push('custom-core-smt-picker');
+    if (customPanel.querySelector('[data-gp-game-row="custom-actions"]')) customRows.push('custom-actions');
+    rows.splice(footerIndex, 0, ...customRows);
   }
   const index = rows.indexOf(currentRow);
   if (index < 0) return null;
+
+  // FSR import intentionally returns to the third control in the first row:
+  // “切换程序”. Keep this route semantic instead of relying on visual nearest
+  // distance, which changes under high UI zoom.
+  if (dy < 0 && base.dataset.gpGameControl === 'fsr-import') {
+    return menu.querySelector<HTMLElement>('[data-gp-game-control="switch-program"]') || null;
+  }
   for (let i = index + (dy > 0 ? 1 : -1); i >= 0 && i < rows.length; i += dy > 0 ? 1 : -1) {
     const target = gameMenuControlForRow(menu, rows[i]);
     if (target && target !== base) return target;
@@ -472,10 +678,20 @@ function moveFocus(dx: number, dy: number) {
   // 可见的入口和可见的独立气泡内容都是真实焦点目标；只有 v-if 已移除、
   // inert/aria-hidden 或不可见的内容才由 focusables() 排除。
   const navEls = els;
-  const cur = document.activeElement as HTMLElement | null;
+  const cur = activeFanNodeEditor() || document.activeElement as HTMLElement | null;
   // 当前焦点元素必须在列表中，否则从第一个开始
   const baseIdx = cur ? navEls.indexOf(cur) : -1;
   const base = baseIdx >= 0 ? navEls[baseIdx] : navEls[0];
+
+  const coreTarget = moveGameCorePolicyFocus(activeGameMenu || document.body, base, dx, dy);
+  if (coreTarget) {
+    try {
+      focusGamepadElement(coreTarget);
+    } catch {
+      // Ignore transient DOM changes during Vue transitions.
+    }
+    return;
+  }
 
   // A graph point may opt into in-place editing while focused (for example,
   // Fan temperature with left/right and duty with up/down). The page handles
@@ -513,6 +729,20 @@ function moveFocus(dx: number, dy: number) {
     return;
   }
   if (activeGameMenu && dy !== 0 && activeGameMenu.contains(base)) {
+    const ruleTarget = moveGameRuleFocus(activeGameMenu, base, dy);
+    if (ruleTarget) {
+      try {
+        focusGamepadElement(ruleTarget);
+      } catch {
+        // Ignore transient DOM changes during Vue transitions.
+      }
+      return;
+    }
+    // All controls in the rules body use the explicit list above. Do not let
+    // the generic row heuristic collapse them back to the first list button.
+    const ruleMarker = base.dataset.gpRuleFocus || '';
+    if (base.closest('[data-gp-game-rules-body]') &&
+      ruleMarker !== 'current-blacklist' && ruleMarker !== 'current-whitelist') return;
     const currentGameRow = base.closest<HTMLElement>('[data-gp-game-row]')?.dataset.gpGameRow || '';
     const target = moveGameMenuFocus(activeGameMenu, base, dy);
     if (target) {
@@ -886,6 +1116,19 @@ function dispatchNativeUiAction(opts: GamepadEngineOptions, action: NativeUiActi
 
   const dx = action === 'nav-right' ? 1 : action === 'nav-left' ? -1 : 0;
   const dy = action === 'nav-down' ? 1 : action === 'nav-up' ? -1 : 0;
+  // Native Raw Input is the authoritative controller path. When a fan node
+  // is armed, forward the direction to the node's existing spatial-edit
+  // handler instead of dropping the action and waiting for the disabled
+  // browser Gamepad API loop.
+  const fanNodeEditor = (dx !== 0 || dy !== 0) ? activeFanNodeEditor() : null;
+  if (fanNodeEditor) {
+    fanNodeEditor.dispatchEvent(new CustomEvent('gp:spatial-edit', {
+      bubbles: true,
+      cancelable: true,
+      detail: { dx, dy },
+    }));
+    return;
+  }
   if (sliderEditMode && isRangeInput(document.activeElement as HTMLElement)) {
     if (dx !== 0) adjustSlider(dx);
     else if (dy !== 0) sliderEditMode = false;
@@ -964,8 +1207,9 @@ function tick(opts: GamepadEngineOptions) {
     const heldUp = b[12] || a[1] < -0.5;
     const heldDown = b[13] || a[1] > 0.5;
 
-    // Native Raw Input is the primary path after it has delivered one UI
-    // action. Keep the browser API as a fallback for non-XInput devices.
+    // Native Raw Input is the authoritative path after it has delivered UI
+    // actions. Browser Gamepad API input is intentionally not mixed with it,
+    // otherwise one direction can edit the node twice.
     if (nativeChildInputOwned || nativeUiInputActive) {
       prevButtons = b;
       prevAxes = a;
@@ -1062,10 +1306,20 @@ function tick(opts: GamepadEngineOptions) {
         // （见上方 sliderEditMode 分支）。这修复了“焦点一上滑块、左右就被吃掉、无法选后续元素”。
         const dirX = heldRight ? 1 : heldLeft ? -1 : 0;
         const dirY = heldDown ? 1 : heldUp ? -1 : 0;
-        const inlineEditActive = !!(document.activeElement as HTMLElement | null)
-          ?.closest<HTMLElement>('[data-gp-inline-edit-active="true"]');
-        const repeatInterval = inlineEditActive ? INLINE_EDIT_REPEAT : NAV_REPEAT_BASE;
-        if ((dirX !== 0 || dirY !== 0) && now - lastNav > repeatInterval) {
+        const inlineEditActive = activeFanNodeEditor();
+        // A diagonal input is dispatched as one horizontal move by moveFocus;
+        // use the same effective direction for the graph editor's acceleration
+        // clock so changing axes never inherits the previous hold speed.
+        const editDirectionKey = inlineEditActive
+          ? (dirX !== 0 ? `x:${dirX}` : dirY !== 0 ? `y:${dirY}` : '')
+          : '';
+        const editDirectionChanged = inlineEditActive && editDirectionKey !== inlineEditDirectionKey;
+        const repeatInterval = inlineEditActive
+          ? fanNodeEditRepeatInterval(inlineEditActive, now, editDirectionKey)
+          : NAV_REPEAT_BASE;
+        const repeatClock = inlineEditActive ? inlineEditLastRepeatAt : lastNav;
+        if ((dirX !== 0 || dirY !== 0) &&
+          (editDirectionChanged || now - repeatClock > repeatInterval)) {
           // ── 下拉菜单打开（teleport 到 body）时：只上下在菜单项内移动高亮，
           //    焦点严格限制在菜单内，不穿透到下层页面（修复手柄上下选出菜单外内容）；
           //    左右方向键不做事（与鼠标菜单一致，不再循环档位）──
@@ -1086,8 +1340,10 @@ function tick(opts: GamepadEngineOptions) {
             // 对角线优先水平
             enqueueGamepadTaskDetached(() => moveFocus(dirX, 0));
           }
-          lastNav = now;
+          if (inlineEditActive) inlineEditLastRepeatAt = now;
+          else lastNav = now;
         }
+        if (!inlineEditActive || (dirX === 0 && dirY === 0)) resetInlineEditCadence();
       }
 
     prevButtons = b;

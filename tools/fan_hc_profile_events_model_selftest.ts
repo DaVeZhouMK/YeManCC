@@ -53,6 +53,62 @@ class HostBoundaryModel {
   }
 }
 
+/** R1 queue model: failure keeps the detached Applied snapshot until the
+ * bounded retry budget is exhausted, while lifecycle generations reject late
+ * callbacks from a closed/suspended session. */
+class SessionRetryModel {
+  private generation = 0;
+  private accepting = false;
+  private pending: { id: string; generation: number; attempts: number } | null = null;
+  private writes: string[] = [];
+  private readonly maxAttempts = 3;
+
+  beginSession(): number {
+    this.generation += 1;
+    this.accepting = false;
+    this.pending = null;
+    return this.generation;
+  }
+
+  activate(generation: number): boolean {
+    if (generation !== this.generation) return false;
+    this.accepting = true;
+    return true;
+  }
+
+  invalidate(): void {
+    this.generation += 1;
+    this.accepting = false;
+    this.pending = null;
+  }
+
+  applied(id: string, generation: number): boolean {
+    if (!this.accepting || generation !== this.generation) return false;
+    this.pending = { id, generation, attempts: 0 };
+    return true;
+  }
+
+  discarded(generation: number): boolean {
+    if (!this.accepting || generation !== this.generation) return false;
+    this.pending = null;
+    return true;
+  }
+
+  tick(curve: string, fail = false): void {
+    if (!this.pending || !this.accepting) return;
+    if (fail) {
+      this.pending.attempts += 1;
+      if (this.pending.attempts >= this.maxAttempts) this.pending = null;
+      return;
+    }
+    this.writes.push(`${this.pending.id}:${curve}`);
+    this.pending = null;
+  }
+
+  hasPending(): boolean { return this.pending !== null; }
+  getWriteCount(): number { return this.writes.length; }
+}
+
 function assert(condition: unknown, message: string): void {
   if (!condition) throw new Error(message);
 }
@@ -110,6 +166,35 @@ const checks: string[] = [];
   model.tick('curve');
   assert(model.snapshot().writes.length === 1, 'profile event was lost across a temporary write gate');
   checks.push('sleep-close-gate-suppresses-queued-write');
+}
+
+{
+  const model = new SessionRetryModel();
+  const generation = model.beginSession();
+  assert(model.activate(generation) && model.applied('Applied-A', generation), 'R1 Applied snapshot was not accepted');
+  model.tick('curve', true);
+  assert(model.hasPending(), 'R1 clone/apply failure consumed Applied before retry');
+  model.tick('curve', true);
+  assert(model.hasPending(), 'R1 second failure consumed Applied before retry budget exhausted');
+  model.tick('curve', true);
+  assert(!model.hasPending() && model.getWriteCount() === 0, 'R1 retry budget did not terminate without a false write');
+  checks.push('applied-failure-bounded-retry');
+}
+
+{
+  const model = new SessionRetryModel();
+  const oldGeneration = model.beginSession();
+  assert(model.activate(oldGeneration) && model.applied('stale', oldGeneration), 'R1 old session was not established');
+  model.invalidate();
+  const newGeneration = model.beginSession();
+  assert(model.activate(newGeneration), 'R1 new session was not activated');
+  assert(!model.applied('late-old', oldGeneration), 'R1 late Applied crossed Close/Resume generation boundary');
+  assert(!model.discarded(oldGeneration), 'R1 late Discarded crossed Close/Resume generation boundary');
+  assert(!model.hasPending(), 'R1 stale profile remained pending after lifecycle invalidation');
+  assert(model.applied('current', newGeneration), 'R1 current session Applied was rejected');
+  model.tick('curve');
+  assert(model.getWriteCount() === 1, 'R1 current session profile was not applied');
+  checks.push('session-generation-rejects-late-profile');
 }
 
 console.log(JSON.stringify({ ok: true, checks, hardwareWrites: false }));

@@ -105,6 +105,40 @@ function Assert-CustomSteamLibraryPackage([string]$Source) {
   return $manifest
 }
 
+function Sync-CustomSteamLibraryMainline([string]$Source, [string]$Version) {
+  # CustomSteamLibrary is a separately compiled child, but its release input
+  # must follow the same mainline package run.  Previously the packager copied
+  # whatever stale child directory happened to be on disk, which allowed an
+  # older child manifest and executable to enter a newer YeManCC update.
+  $labRoot = Join-Path $WorkspaceRoot 'SteamArtworkLab'
+  $publishScript = Join-Path $labRoot 'publish-custom-steam-library.ps1'
+  $buildRoot = Join-Path $labRoot 'build'
+  $required = @(
+    $publishScript,
+    (Join-Path $buildRoot 'SteamLibraryWorkspace.exe'),
+    (Join-Path $buildRoot 'SteamArtworkLab.exe'),
+    (Join-Path $labRoot 'workspace-ui\index.html'),
+    (Join-Path $labRoot 'workspace-ui\app.js'),
+    (Join-Path $labRoot 'workspace-ui\styles.css')
+  )
+  foreach ($path in $required) {
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+      throw "CustomSteamLibrary mainline build is incomplete: $path"
+    }
+  }
+  & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File $publishScript `
+    -TargetRoot $Source -UpdateExisting -PackageVersion $Version
+  if ($LASTEXITCODE -ne 0) {
+    throw "CustomSteamLibrary mainline synchronization failed: exit=$LASTEXITCODE"
+  }
+  $manifestPath = Join-Path $Source 'package-manifest.json'
+  $manifest = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
+  if ([string]$manifest.packageVersion -ne $Version) {
+    throw "CustomSteamLibrary version did not follow mainline: child=$($manifest.packageVersion), main=$Version"
+  }
+  return $manifest
+}
+
 function Get-RelativePath([string]$Root, [string]$Path) {
   $rootFull = Get-FullPath $Root
   $pathFull = Get-FullPath $Path
@@ -113,16 +147,11 @@ function Get-RelativePath([string]$Root, [string]$Path) {
 
 function Test-IsExcludedPowerControlPath([string]$Relative, [bool]$IsDirectory) {
   $r = $Relative.Replace('/', '\')
-  # Fan Host is deliberately frozen for this release. It is not part of the
-  # update payload, and an existing installed copy must remain untouched.
-  if ($r -match '^fan-host(?:\\|$)') {
-    return $true
-  }
   if ($r -match '(^|\\)(\.git|build|dist|__pycache__|KX\.bak_removed|product-old-files-[^\\]+)(\\|$)') { return $true }
   if ($r -match '^(TPD|intel|ryzenadj|tools|pawnio|OpenSpeedy|RTSS-Overlays)(\\|$)') { return $true }
   if ($IsDirectory) { return $false }
   if ($r -match '\.bak(?:_|$)' -or $r -match '\.(obj|pdb|ilk|log|pid|hb|tmp)$') { return $true }
-  if ($r -match '\.(md|py|spec)$') { return $true }
+  if ($r -match '\.(md|py|spec)$' -and $r -ine 'fan-host\YeManFanHost.authorization.md') { return $true }
   if ($r -in @('.gitignore', 'AUTOFLOAT_SPEC.md', 'Test-AutoRotation-Repair.bat', 'Test-AutoRotation-Repair.vbs', 'physpanel.exe')) { return $true }
   if ($r -match '^MG-AUTO\\(memreduct\.exe|memreduct\.exe\.sig|memreduct\.ini|memreduct\.lng|memreduct\.sig|portable\.dat)$') { return $true }
   if ($r -in @(
@@ -143,7 +172,7 @@ function Test-IsExcludedPowerControlPath([string]$Relative, [bool]$IsDirectory) 
   if ($r -match '^Sleep\\controlled-sleep') { return $true }
   if ($r -match '^(float-active|fps-monitor\.(hb|pid|log)|hwinfo-ok|hwinfo-recovery\.ts|speedhack\.log|startup_trace\.txt|topmon\.json)$') { return $true }
   if ($r -match '^(FPS-|tdp-).+\.txt$' -or $r -match '^yeman-gcm-search-result.*\.json$') { return $true }
-  if ($r -match '\.json$') {
+  if ($r -match '\.json$' -and $r -notmatch '^fan-host\\') {
     throw "Unclassified PowerControl JSON must be added to the release policy: $r"
   }
   return $false
@@ -200,22 +229,29 @@ $PackageBuildRoot = Join-Path $BuildRoot 'Package'
 $StagingRoot = Join-Path $PackageBuildRoot 'Staging'
 $StagingYeManCC = Join-Path $StagingRoot 'YeManCC'
 $StagingPowerControl = Join-Path $StagingRoot 'PowerControl'
-$StagingCustomSteamLibrary = Join-Path $StagingRoot 'CustomSteamLibrary'
+$StagingCustomSteamLibrary = Join-Path $StagingYeManCC 'CustomSteamLibrary'
 $UpdateRoot = Join-Path $PackageBuildRoot 'UpdateRoot'
 $ReleaseYeManCC = Join-Path $ReleaseRoot 'YeManCC'
 $ReleasePowerControl = Join-Path $ReleaseRoot 'PowerControl'
-$ReleaseCustomSteamLibrary = Join-Path $ReleaseRoot 'CustomSteamLibrary'
+$ReleaseCustomSteamLibrary = Join-Path $ReleaseYeManCC 'CustomSteamLibrary'
+$LegacyReleaseCustomSteamLibrary = Join-Path $ReleaseRoot 'CustomSteamLibrary'
 $ReleasePackages = Join-Path $ReleaseRoot 'Packages'
 
 $customSteamLibrarySourceFromEnv = [string]$env:YEMAN_CUSTOM_STEAM_LIBRARY_SOURCE
 if (-not [string]::IsNullOrWhiteSpace($customSteamLibrarySourceFromEnv) -and [string]::IsNullOrWhiteSpace($CustomSteamLibrarySource)) {
   throw 'CustomSteamLibrary source override requires the explicit -CustomSteamLibrarySource parameter; refusing a stale environment override.'
 }
+$canonicalCustomSteamLibrarySource = Get-FullPath (Join-Path $ProjectRoot 'CustomSteamLibrary')
 $CustomSteamLibrarySource = if ([string]::IsNullOrWhiteSpace($CustomSteamLibrarySource)) {
-  Join-Path $ProjectRoot 'CustomSteamLibrary'
+  $canonicalCustomSteamLibrarySource
 } else {
   Get-FullPath $CustomSteamLibrarySource
 }
+if ($CustomSteamLibrarySource -ne $canonicalCustomSteamLibrarySource) {
+  throw "CustomSteamLibrary source must be the formal mainline directory: $canonicalCustomSteamLibrarySource"
+}
+
+Sync-CustomSteamLibraryMainline $CustomSteamLibrarySource $version | Out-Null
 
 # The ZIP envelope is manifest-driven. The legacy bridge keeps the old
 # YeManCC + PowerControl envelope so a pre-manifest updater can install the
@@ -240,18 +276,16 @@ $updateLayoutRoots = @(
   [ordered]@{ source = 'YeManCC'; target = 'YeManCC'; mode = 'program' },
   [ordered]@{ source = 'PowerControl'; target = 'PowerControl'; mode = 'power-control' }
 )
-if (-not $isLegacyBridge) {
-  $updateLayoutRoots += [ordered]@{ source = 'CustomSteamLibrary'; target = 'YeManCC\CustomSteamLibrary'; mode = 'green-child'; packageManifest = 'package-manifest.json'; stopProcesses = @('CustomSteamLibrary.exe', 'SteamArtworkLab.exe') }
-}
+$embedCustomSteamLibrary = -not $isLegacyBridge -or $isLegacyBootstrap
 $requiredUpdateRoots = @($updateLayoutRoots | ForEach-Object { [string]$_.source } | Sort-Object -Unique)
-$fanHostUpdatePolicy = 'preserve-existing'
+$fanHostUpdatePolicy = 'replace'
 
 foreach ($path in @($BuildRoot, $ReleaseRoot, $PackageBuildRoot, $StagingRoot, $UpdateRoot, $ReleaseYeManCC, $ReleasePowerControl, $ReleaseCustomSteamLibrary, $ReleasePackages)) {
   Assert-ChildPath $path $WorkspaceRoot 'Task5 output'
 }
 if ((Get-FullPath $ReleaseYeManCC) -ne (Get-FullPath (Join-Path $WorkspaceRoot 'Release\YeManCC'))) { throw 'Unexpected YeManCC release target' }
 if ((Get-FullPath $ReleasePowerControl) -ne (Get-FullPath (Join-Path $WorkspaceRoot 'Release\PowerControl'))) { throw 'Unexpected PowerControl release target' }
-if ((Get-FullPath $ReleaseCustomSteamLibrary) -ne (Get-FullPath (Join-Path $WorkspaceRoot 'Release\CustomSteamLibrary'))) { throw 'Unexpected CustomSteamLibrary release target' }
+if ((Get-FullPath $ReleaseCustomSteamLibrary) -ne (Get-FullPath (Join-Path $WorkspaceRoot 'Release\YeManCC\CustomSteamLibrary'))) { throw 'Unexpected CustomSteamLibrary release target' }
 
 $requiredBuild = @(
   (Join-Path $BuildWeb 'index.html'),
@@ -265,7 +299,7 @@ foreach ($path in $requiredBuild) {
 
 if (Test-Path -LiteralPath $StagingRoot) { Remove-Item -LiteralPath $StagingRoot -Recurse -Force }
 if (Test-Path -LiteralPath $UpdateRoot) { Remove-Item -LiteralPath $UpdateRoot -Recurse -Force }
-New-Item -ItemType Directory -Force -Path $StagingYeManCC, $StagingPowerControl, $StagingCustomSteamLibrary, $UpdateRoot | Out-Null
+New-Item -ItemType Directory -Force -Path $StagingYeManCC, $StagingPowerControl, $UpdateRoot | Out-Null
 
 Copy-DirectoryContents $BuildWeb $StagingYeManCC
 Copy-Item -LiteralPath (Join-Path $BuildNative 'YeManCC.exe') -Destination (Join-Path $StagingYeManCC 'YeManCC.exe') -Force
@@ -275,9 +309,8 @@ Copy-Item -LiteralPath (Join-Path $ProjectRoot 'YeMan-Support.html') -Destinatio
 $sourcePowerControl = Join-Path $ProjectRoot 'PowerControl'
 Copy-PowerControlTemplates $sourcePowerControl $StagingPowerControl
 Assert-CustomSteamLibraryPackage $CustomSteamLibrarySource | Out-Null
-Copy-DirectoryContents $CustomSteamLibrarySource $StagingCustomSteamLibrary
-if ($isLegacyBootstrap) {
-  Copy-DirectoryContents $CustomSteamLibrarySource (Join-Path $StagingYeManCC 'CustomSteamLibrary')
+if ($embedCustomSteamLibrary) {
+  Copy-DirectoryContents $CustomSteamLibrarySource $StagingCustomSteamLibrary
 }
 
 $updateLayoutManifest = [ordered]@{
@@ -337,7 +370,10 @@ foreach ($relative in $requiredPowerControl) {
   if (-not (Test-Path -LiteralPath (Join-Path $StagingPowerControl $relative))) { throw "Release PowerControl item is missing: $relative" }
 }
 $fanHostStagingPath = Join-Path $StagingPowerControl 'fan-host'
-if (Test-Path -LiteralPath $fanHostStagingPath) { throw 'Fan Host must be excluded from this release staging area' }
+if (-not (Test-Path -LiteralPath $fanHostStagingPath -PathType Container)) { throw 'Fan Host V2 is missing from release staging area' }
+$fanHostVerifier = Join-Path $ProjectRoot 'tools\verify-r5v9-fan-host-payload.ps1'
+& powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File $fanHostVerifier -PayloadRoot $fanHostStagingPath
+if ($LASTEXITCODE -ne 0) { throw "Fan Host V2 staging verification failed: exit=$LASTEXITCODE" }
 
 $pawnioExpected = @($assetLock.files | Where-Object component -eq 'PawnIO' | ForEach-Object { ([string]$_.releasePath).Substring('pawnio/'.Length).Replace('/', '\') } | Sort-Object)
 $pawnioActual = @(Get-ChildItem -LiteralPath (Join-Path $StagingPowerControl 'pawnio') -Recurse -File | ForEach-Object { Get-RelativePath (Join-Path $StagingPowerControl 'pawnio') $_.FullName } | Sort-Object)
@@ -354,7 +390,6 @@ foreach ($file in Get-ChildItem -LiteralPath $StagingRoot -Recurse -Force -File)
     ($relative -match '\.md$' -and -not $isFormalFanHostAuthorization -and -not $isCustomSteamLibraryManagedDocument) -or
     $relative -match '(^|\\)(yeman-settings\.json(?:\.bak)?|startup_trace\.txt|hwinfo-ok|fps-monitor\.(hb|pid|log))$' -or
     $relative -match '^PowerControl\\(TPD|intel|ryzenadj|tools)(\\|$)' -or
-    $relative -match '^PowerControl\\fan-host(?:\\|$)' -or
     $relative -match '^PowerControl\\Sleep\\(Enable\.txt|Escalation\.txt|sleepguard\.json|target\.txt|睡眠击杀名单\.txt)$'
   ) { $forbidden += $relative }
 }
@@ -364,7 +399,7 @@ $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 $backupRoot = Join-Path $BackupReleaseRoot "PreTask5-$stamp"
 New-Item -ItemType Directory -Force -Path $ReleaseRoot | Out-Null
 $releaseItems = @($updateLayoutRoots | ForEach-Object { Join-Path $ReleaseRoot ([string]$_.source) }) + @(
-  (Join-Path $ReleaseRoot 'CustomSteamLibrary'),
+  $LegacyReleaseCustomSteamLibrary,
   $ReleasePackages,
   (Join-Path $ReleaseRoot 'version.json'),
   (Join-Path $ReleaseRoot 'release-manifest.json'),
@@ -375,7 +410,6 @@ foreach ($path in $releaseItems) { Move-ExistingReleaseItem $path $backupRoot }
 
 Move-Item -LiteralPath $StagingYeManCC -Destination $ReleaseYeManCC
 Move-Item -LiteralPath $StagingPowerControl -Destination $ReleasePowerControl
-Move-Item -LiteralPath $StagingCustomSteamLibrary -Destination $ReleaseCustomSteamLibrary
 if (Test-Path -LiteralPath $StagingRoot) { Remove-Item -LiteralPath $StagingRoot -Recurse -Force }
 New-Item -ItemType Directory -Force -Path $ReleasePackages | Out-Null
 
@@ -405,11 +439,11 @@ if (-not (Test-Path -LiteralPath (Join-Path $UpdateYeManCC 'YeManCC.exe') -PathT
 if (-not (Test-Path -LiteralPath (Join-Path $UpdateRoot 'PowerControl\pawnio\YeManTdpCtl.exe') -PathType Leaf)) {
   throw 'Update ZIP PowerControl directory is missing PawnIO runtime'
 }
-if (-not $isLegacyBridge) {
-  if (-not (Test-Path -LiteralPath (Join-Path $UpdateRoot 'CustomSteamLibrary\package-manifest.json') -PathType Leaf)) {
+if ($embedCustomSteamLibrary) {
+  if (-not (Test-Path -LiteralPath (Join-Path $UpdateRoot 'YeManCC\CustomSteamLibrary\package-manifest.json') -PathType Leaf)) {
     throw 'Update ZIP CustomSteamLibrary directory is missing package-manifest.json'
   }
-  if (-not (Test-Path -LiteralPath (Join-Path $UpdateRoot 'CustomSteamLibrary\CustomSteamLibrary.exe') -PathType Leaf)) {
+  if (-not (Test-Path -LiteralPath (Join-Path $UpdateRoot 'YeManCC\CustomSteamLibrary\CustomSteamLibrary.exe') -PathType Leaf)) {
     throw 'Update ZIP CustomSteamLibrary directory is missing CustomSteamLibrary.exe'
   }
 }
@@ -440,7 +474,11 @@ try {
   $fanHostEntries = @($zipArchive.Entries | Where-Object {
     $_.FullName.Replace('\', '/').TrimStart('/') -match '^PowerControl/fan-host(?:/|$)'
   })
-  if ($fanHostEntries.Count -gt 0) { throw "YeManCC.zip must not contain PowerControl/fan-host entries: $($fanHostEntries.FullName -join ', ')" }
+  if ($fanHostEntries.Count -eq 0) { throw 'YeManCC.zip must contain the pinned Fan Host V2 PowerControl/fan-host payload' }
+  $fanHostEntryNames = @($fanHostEntries | ForEach-Object { $_.FullName.Replace('\', '/') })
+  if ('PowerControl/fan-host/YeManFanHost.dll' -notin $fanHostEntryNames) {
+    throw 'YeManCC.zip is missing PowerControl/fan-host/YeManFanHost.dll'
+  }
   $flatEntries = @($zipArchive.Entries | Where-Object {
     $normalized = $_.FullName.Replace('\', '/').TrimStart('/')
     $normalized -match '^(YeManCC\.exe|YeMan-Support\.html|assets/|CustomSteamLibrary\.exe|SteamArtworkLab\.exe|workspace-ui/)'
@@ -469,9 +507,9 @@ $testingLines = @(
   (Join-Path $ReleaseYeManCC 'YeManCC.exe'), '',
   'The installed shortcut and scheduled task still run:',
   'C:\SOFT\YeMan\YeManCC\YeManCC.exe', '',
-  'Important: the current application contract still reads PowerControl from',
-  'C:\SOFT\YeMan\PowerControl, so a direct Release EXE test is not a fully',
-  'isolated hardware/configuration test. Task5 does not deploy either directory.', '',
+  'Fan Host V2 is included in PowerControl/fan-host and the updater policy',
+  'is replace; the installed Fan Host is updated only after its lifecycle guard',
+  'and payload hash verification pass. HC binaries remain pinned and unchanged.', '',
   "Update package SHA-256: $packageHash"
 )
 $testingLines | Set-Content -LiteralPath (Join-Path $ReleaseRoot 'TESTING.md') -Encoding UTF8

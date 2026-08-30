@@ -53,6 +53,7 @@ foreach ($entry in $manifest.files) {
 $required = @(
   'YeManFanHost.exe', 'YeManFanHost.dll', 'YeManFanHost.deps.json',
   'YeManFanHost.runtimeconfig.json', 'HandheldCompanion.dll', 'HandheldCompanion.deps.json', 'GamepadMotion.dll',
+  'LibreHardwareMonitorLib.dll',
   'hidapi.net.dll', 'hidapi.dll',
   'WindowsInput.dll', 'GregsStack.InputSimulatorStandard.dll', 'Gma.System.MouseKeyHook.dll',
   'HidLibrary.dll', 'Nefarius.Utilities.DeviceManagement.dll', 'Nefarius.Utilities.Bluetooth.dll',
@@ -157,7 +158,8 @@ $checks = [ordered]@{
     $hostSource.Contains('ApplyPowerProfile(profile);') -and
     $hostSource.Contains('CaptureHcProfileTemplate();') -and
     ($hostSource.Contains('CloneHcPowerProfile(hcProfileTemplate)') -or
-      $hostSource.Contains('CloneHcPowerProfilePreservingFanState(hcProfileTemplate)')) -and
+      $hostSource.Contains('CloneHcPowerProfilePreservingFanState(hcProfileTemplate)') -or
+      $hostSource.Contains('hcProfileTemplate = CloneHcPowerProfilePreservingFanState(selected)')) -and
     -not $hostSource.Contains('hcDeviceReportsOpen') -and
     -not $hostSource.Contains('OEM CPU default fallback')
   )

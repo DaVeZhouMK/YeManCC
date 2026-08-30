@@ -32,8 +32,20 @@ const node4BelowNode3 = normalizeFanNodes([
 if (node4BelowNode3[3].dutyPercent !== 80 || !validateFanNodes(node4BelowNode3)) {
   throw new Error(`node4 was allowed below node3: ${JSON.stringify(node4BelowNode3)}`);
 }
+const node3TemperatureCap = normalizeFanNodes(base, 2, 'tempC', 99);
+if (node3TemperatureCap[2].tempC !== 85 || !validateFanNodes(node3TemperatureCap)) {
+  throw new Error(`node3 temperature exceeded the 85°C safety cap: ${JSON.stringify(node3TemperatureCap)}`);
+}
+if (validateFanNodes([
+  { tempC: 0, dutyPercent: 0 },
+  { tempC: 40, dutyPercent: 20 },
+  { tempC: 86, dutyPercent: 45 },
+  { tempC: 100, dutyPercent: 90 },
+])) {
+  throw new Error('node3 temperature above 85°C was accepted');
+}
 console.log(JSON.stringify({ ok: true, checks: [
   'node1-duty-editable', 'node1-temp-fixed-zero',
   'later-edit-does-not-rewrite-earlier-duty', 'node4-minimum-50',
-  'node4-not-below-node3',
+  'node4-not-below-node3', 'node3-temperature-cap-85',
 ] }));

@@ -60,6 +60,15 @@ const hasWebView =
 
 export const isNativeRuntime = hasWebView;
 
+export function emitNativeEvent(event: string, data: unknown = {}): void {
+  if (!hasWebView) return;
+  try {
+    webview!.postMessage({ event, data });
+  } catch {
+    // Controller focus/edit state must remain best-effort in non-native tests.
+  }
+}
+
 // ── 启动性能采样已按用户要求停用（不再写 startup_trace.txt）──
 
 export function rejectAllPending(reason = 'WebView2 is recovering'): void {

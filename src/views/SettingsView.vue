@@ -3,7 +3,7 @@ import { ref, onMounted, onActivated, onBeforeUnmount, computed } from 'vue';
 import Toggle from '@/components/Toggle.vue';
 import SegButton from '@/components/SegButton.vue';
 import GamepadVisualizer from '@/components/GamepadVisualizer.vue';
-import { summonGet, summonSet, autocloseGet, autocloseSet, updateAccelGet, updateAccelToggle, type GamepadSettings, type AutoCloseConfig, type UpdateAccelState } from '@/bridge/yeman';
+import { summonGet, summonSet, autocloseGet, autocloseSet, updateAccelGet, updateAccelToggle, sleepFactsGet, sleepFactsSetEnabled, sleepFactsClearLog, sleepFactsExportLog, type GamepadSettings, type AutoCloseConfig, type UpdateAccelState, type SleepFactStatus } from '@/bridge/yeman';
 import { shell, fs, dialog } from '@/bridge/api';
 import { APP_VERSION } from '@/version';
 import InlineIcon from '@/components/InlineIcon.vue';
@@ -217,6 +217,9 @@ const uaBusy = ref(false);
 const fanDiagnosticLoggingEnabled = ref(getFanFeatureSettings().diagnosticLoggingEnabled === true);
 const fanLogBusy = ref(false);
 const fanLogStatus = ref('');
+const sleepFacts = ref<SleepFactStatus | null>(null);
+const sleepLogBusy = ref(false);
+const sleepLogStatus = ref('');
 
 // 版本号：构建期由 version.json 注入（scripts/write-version.mjs → src/version.ts）
 const appVersion = APP_VERSION;
@@ -438,6 +441,59 @@ async function exportFanLogs(): Promise<void> {
   }
 }
 
+async function refreshSleepFacts(): Promise<void> {
+  try {
+    sleepFacts.value = await sleepFactsGet();
+  } catch {
+    // 睡眠日志是诊断项，读取失败不能阻塞设置页其它功能。
+  }
+}
+
+async function toggleSleepFactLogging(): Promise<void> {
+  if (sleepLogBusy.value) return;
+  const next = sleepFacts.value?.enabled !== true;
+  sleepLogBusy.value = true;
+  sleepLogStatus.value = '';
+  try {
+    sleepFacts.value = await sleepFactsSetEnabled(next);
+    sleepLogStatus.value = next ? '睡眠日志已开启' : '睡眠日志已关闭';
+  } catch (error) {
+    sleepLogStatus.value = `睡眠日志设置失败：${error instanceof Error ? error.message : String(error)}`;
+  } finally {
+    sleepLogBusy.value = false;
+  }
+}
+
+async function clearSleepLogs(): Promise<void> {
+  if (sleepLogBusy.value) return;
+  sleepLogBusy.value = true;
+  sleepLogStatus.value = '';
+  try {
+    const result = await sleepFactsClearLog();
+    sleepLogStatus.value = result.ok ? '睡眠日志已清空' : '睡眠日志清空失败';
+  } catch (error) {
+    sleepLogStatus.value = `睡眠日志清空失败：${error instanceof Error ? error.message : String(error)}`;
+  } finally {
+    sleepLogBusy.value = false;
+  }
+}
+
+async function exportSleepLogs(): Promise<void> {
+  if (sleepLogBusy.value) return;
+  sleepLogBusy.value = true;
+  sleepLogStatus.value = '';
+  try {
+    const result = await sleepFactsExportLog();
+    sleepLogStatus.value = result.ok && result.path
+      ? `睡眠日志已导出到桌面：${result.path}`
+      : (result.reason || '暂无睡眠日志可导出');
+  } catch (error) {
+    sleepLogStatus.value = `睡眠日志导出失败：${error instanceof Error ? error.message : String(error)}`;
+  } finally {
+    sleepLogBusy.value = false;
+  }
+}
+
 async function onGpSetting<K extends keyof GamepadSettings>(key: K, v: GamepadSettings[K]) {
   errMsg.value = '';
   const prev = gp.value[key];
@@ -514,6 +570,7 @@ onMounted(async () => {
   bgBlur.value = getBackgroundBlur();
   dynamicEnabled.value = getDynamicBackgroundConfig().enabled;
   load();
+  void refreshSleepFacts();
   void loadBackgroundState();
   window.addEventListener('dynamic-background:progress', onDynamicProgress);
 });
@@ -522,6 +579,7 @@ onMounted(async () => {
 onActivated(() => {
   void ensureUpdateManager();
   load();
+  void refreshSleepFacts();
   void loadBackgroundState();
 });
 onBeforeUnmount(() => {
@@ -702,6 +760,17 @@ onBeforeUnmount(() => {
         <button class="fan-log-action" type="button" :disabled="fanLogBusy" @click="exportFanLogs">导出日志到桌面</button>
       </div>
       <p v-if="fanLogStatus" class="muted body fan-log-status" role="status">{{ fanLogStatus }}</p>
+    </section>
+
+    <section class="card fan-log-card sleep-log-card" aria-label="睡眠日志操作">
+      <h3 class="card-title">睡眠日志</h3>
+      <div class="fan-log-actions">
+        <button class="fan-log-action" :class="{ enabled: sleepFacts?.enabled === true }" type="button" :disabled="sleepLogBusy" :aria-pressed="sleepFacts?.enabled === true" @click="toggleSleepFactLogging">{{ sleepFacts?.enabled === true ? '日志已开启' : '日志已关闭' }}</button>
+        <button class="fan-log-action" type="button" :disabled="sleepLogBusy" @click="clearSleepLogs">清空日志</button>
+        <button class="fan-log-action" type="button" :disabled="sleepLogBusy" @click="exportSleepLogs">导出日志到桌面</button>
+      </div>
+      <p v-if="sleepLogStatus" class="muted body fan-log-status" role="status">{{ sleepLogStatus }}</p>
+      <p v-if="sleepFacts?.logPath" class="muted body sleep-log-path">记录文件：{{ sleepFacts.logPath }}</p>
     </section>
 
     <section class="card">

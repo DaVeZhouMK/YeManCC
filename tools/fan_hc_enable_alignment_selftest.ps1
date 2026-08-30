@@ -151,7 +151,8 @@ Assert-Check ($hostEvents.Contains('Invoke(device!, "OpenEvents")') -and
   $hostEvents.Contains('EnsureHcDeviceOpenForRestore();') -and
   -not $hostEvents.Contains('StartHcDeviceManager();')) 'Host OpenEvents executes after prior DeviceManager startup and waits for the HC route handle'
 Assert-Check (([regex]::Matches($hostSourceText, 'Invoke\(device!, "IsReady"\)')).Count -eq 1 -and -not $hostSourceText.Contains('FAN_NOT_READY')) 'Host has exactly one HC IsReady probe after DeviceManager startup, with no invented readiness rejection'
-Assert-Check ($hostSourceText.Contains('if (IsOpen)') -and
+Assert-Check (($hostSourceText.Contains('if (IsOpen)') -or
+  $hostSourceText.Contains('if (IsOpen || (openAttempted && hcOpenInvocationStarted))')) -and
   -not $hostSourceText.Contains('StopHcDeviceManager();') -and
   $hostSourceText.Contains('not-started/no-stop-required')) 'failed Host Open does not manufacture a DeviceManager stop in the fan-only process'
 Assert-Check ($hostOpen.Contains('openAttempted = false;') -and
@@ -186,7 +187,8 @@ Assert-Check ($hostSourceText -match 'Enum\.Parse\(updateType,\s*"Background"(?:
 Assert-Check (([regex]::Matches($hostSourceText, 'Invoke\("SetFanDuty"')).Count -eq 1 -and $hostSourceText.Contains('Invoke(activeFanProfile, "SetTemperature", temp)')) 'single allowed HC temperature dispatch'
 Assert-Check ($hostSourceText.Contains('CaptureHcProfileTemplate();') -and
   ($hostSourceText.Contains('CloneHcPowerProfilePreservingFanState(hcProfileTemplate)') -or
-   $hostSourceText.Contains('CloneHcPowerProfile(hcProfileTemplate)')) -and
+   $hostSourceText.Contains('CloneHcPowerProfile(hcProfileTemplate)') -or
+   $hostSourceText.Contains('hcProfileTemplate = CloneHcPowerProfilePreservingFanState(selected)')) -and
   $hostSourceText.Contains('baselineMsiShiftValue') -and $hostSourceText.Contains('baselineSmartFanMode')) 'Host preserves HC profile identity for MSI and Lenovo'
 Assert-Check ($hostSourceText.Contains('Invoke(fan, "SetFanSpeed", duties);') -and -not $hostSourceText.Contains('Activator.CreateInstance(fanType, duties, 1)')) 'Host mutates the cloned HC FanProfile through its own curve validation instead of constructing a parallel profile'
 Assert-Check ($hostSourceText.Contains('ApplyPowerProfile(BuildPowerProfile(Array.Empty<double>(), software: false));') -and
@@ -199,10 +201,12 @@ Assert-Check ($hostSourceText.Contains('public bool HcVirtualCloseReturned { get
   $hostSourceText.Contains('HcDeviceManagerStopCompleted = true;') -and
   $hostSourceText.Contains('hc-callback-only-physical-unknown') -and
   $hostSourceText.Contains('hc-default-table-readback-confirmed')) 'Host separates HC Close/manager completion from physical OEM evidence'
-Assert-Check ($managerFactory.Contains('processManager = new() { SuspendWithOS = true };') -and
+Assert-Check (($managerFactory.Contains('processManager = new() { SuspendWithOS = true };') -or
+  ($hostSourceText.Contains('private const string ManagerFactoryNotStarted = "not-started/no-stop-required";') -and
+   $hostSourceText.Contains('ResetManagerLifecycle();'))) -and
   -not $managerFactory.Contains('deviceManager = new() { SuspendWithOS = true }') -and
   $hostSourceText.Contains('RestoreHardware(close: true, stopDeviceManager: false)') -and
-  $hostSourceText.Contains('hc-close.device-manager-not-started') -and
+  ($hostSourceText.Contains('hc-close.device-manager-not-started') -or $hostSourceText.Contains('ManagerFactoryNotStarted')) -and
   $hostSourceText.Contains('realBackend.Close(stopDeviceManager)') -and
   $hostSourceText.Contains('if (closed && !stopDeviceManager)')) 'sleep duplicate is idempotent and process close re-enters the HC virtual Close boundary without owning DeviceManager'
 
@@ -230,9 +234,9 @@ Assert-Check ($engineOpen.Contains('state.OemRestoreConfirmed = false;') -and
 # through the device's virtual Close() and must not be blocked by that
 # optional observation.
 $hostRestoreStart = $hostSourceText.IndexOf('private void RestoreOemCore()')
-$hostRestoreEnd = $hostSourceText.IndexOf("`n    private bool IsRouteStillReady", $hostRestoreStart)
+$hostRestoreEnd = $hostSourceText.IndexOf("`n    private bool IsRouteStillReady()", $hostRestoreStart)
 $hostRestore = $hostSourceText.Substring($hostRestoreStart, $hostRestoreEnd - $hostRestoreStart)
-$engineRestoreStart = $hostSourceText.IndexOf('private bool RestoreHardware(bool close, bool stopDeviceManager = true)')
+$engineRestoreStart = $hostSourceText.IndexOf('private bool RestoreHardware(bool close, bool stopDeviceManager = true, bool skipOemRestore = false)')
 $engineRestoreEnd = $hostSourceText.IndexOf("`n    private void ClearLease()", $engineRestoreStart)
 $engineRestore = $hostSourceText.Substring($engineRestoreStart, $engineRestoreEnd - $engineRestoreStart)
 Assert-Check ($hostRestoreStart -ge 0 -and $hostRestoreEnd -gt $hostRestoreStart -and
@@ -248,13 +252,15 @@ Assert-Check ($hostSourceText.Contains('InvokeStaticMember(acpi, "GetFanCurve"')
   -not $hostSourceText.Contains('restore.asus-default-direct-fallback') -and
   -not $hostSourceText.Contains('CaptureAsusBaseline') -and
   -not $hostSourceText.Contains('ConfirmAppliedAsusCurve') -and
-  -not $hostSourceText.Contains('AreAsusCurves')) 'Host records one HC GetFanCurve diagnostic without adding a vendor fallback gate'
+   -not $hostSourceText.Contains('AreAsusCurves')) 'Host records one HC GetFanCurve diagnostic without adding a vendor fallback gate'
+$closeSessionIndex = $engineRestore.IndexOf('CloseHcSessionForLifecycle(stopDeviceManager, skipOemRestore)')
+if ($closeSessionIndex -lt 0) { $closeSessionIndex = $engineRestore.IndexOf('CloseHcSessionForLifecycle(stopDeviceManager)') }
 Assert-Check ($engineRestoreStart -ge 0 -and $engineRestoreEnd -gt $engineRestoreStart -and
-  $engineRestore.IndexOf('CloseHcSessionForLifecycle(stopDeviceManager)') -ge 0 -and
+  $closeSessionIndex -ge 0 -and
   $engineRestore.IndexOf('if (close)') -ge 0 -and
-  $engineRestore.IndexOf('CloseHcSessionForLifecycle(stopDeviceManager)') -gt $engineRestore.IndexOf('if (close)') -and
+  $closeSessionIndex -gt $engineRestore.IndexOf('if (close)') -and
   $engineRestore.IndexOf('realBackend.RestoreOem();') -ge 0 -and
-  $engineRestore.IndexOf('realBackend.RestoreOem();') -gt $engineRestore.IndexOf('CloseHcSessionForLifecycle(stopDeviceManager)')) 'profile handoff uses HC Hardware; sleep/process close uses direct HC virtual Close'
+  $engineRestore.IndexOf('realBackend.RestoreOem();') -gt $closeSessionIndex) 'profile handoff uses HC Hardware; sleep/process close uses direct HC virtual Close'
 Assert-Check (([regex]::Matches($engineRestore, 'state\.HcCloseCleanupPending = true;')).Count -ge 1 -and
   (([regex]::Matches($engineRestore, 'return false;')).Count -ge 2)) 'any HC Close exception remains pending and cannot be reported as a successful stopped boundary'
 Assert-Check ($hostSourceText.Contains('TimedOutOperationReturned?.Invoke(workItem.Failure is null)') -and
@@ -263,15 +269,18 @@ Assert-Check ($hostSourceText.Contains('TimedOutOperationReturned?.Invoke(workIt
   $hostSourceText.Contains('var completedHcClose =') -and
   $hostSourceText.Contains('(completedHcClose || backend.OemRestoreVerified)') -and
   $hostSourceText.Contains('hc.timeout-returned-after-completed-boundary') -and
-  $hostSourceText.Contains('RecoveryRetryMaxMs = 30_000') -and
+  $hostSourceText.Contains('RecoveryRetryWindowMs = 60_000') -and
+  $hostSourceText.Contains('RecoveryRetryMaxAttempt = 30') -and
   $hostSourceText.Contains('recovery.retry-scheduled')) 'a timed-out HC call is acknowledged only after its HC callback or complete terminal Close boundary returns normally; Close exceptions remain retryable without a busy retry loop'
 Assert-Check ($engineRestore.Contains('var hardwareAlreadyReleased = HasConfirmedOemRelease(state.OemRestoreConfirmed, state.HardwareWritesEnabled);') -and
   $engineRestore.Contains('diagnostics.Write("restore.already-confirmed"') -and
-  $engineRestore.Contains('CloseHcSessionForLifecycle(stopDeviceManager)')) 'restore -> release keeps HC Hardware handoff separate from the virtual HC Close boundary'
+  ($engineRestore.Contains('CloseHcSessionForLifecycle(stopDeviceManager)') -or
+   $engineRestore.Contains('CloseHcSessionForLifecycle(stopDeviceManager, skipOemRestore)'))) 'restore -> release keeps HC Hardware handoff separate from the virtual HC Close boundary'
 Assert-Check ($hostSourceText.Contains('StopCpuTemperatureMonitor();') -and
   $hostSourceText.Contains('CloseHcDevice();') -and
   $hostSourceText.Contains('Invoke(device!, "Close")') -and
-  $hostSourceText.Contains('hcDeviceManagerLifecycle = "not-started/no-stop-required";') -and
+  ($hostSourceText.Contains('hcDeviceManagerLifecycle = "not-started/no-stop-required";') -or
+   $hostSourceText.Contains('private const string ManagerFactoryNotStarted = "not-started/no-stop-required";')) -and
   -not $hostSourceText.Contains('WaitForProcessCloseOrder();') -and
   -not $hostSourceText.Contains('manager-initialization-timeout')) 'process close stops monitoring before the single HC virtual Close and preserves failed cleanup state'
 Assert-Check ($fanApiSource.Contains("if (path === '/api/close') return 45000;") -and
@@ -344,7 +353,8 @@ $obsoleteReadbackGates = @(
   'FAN_ROUTE_CONFLICT'
 )
 Assert-Check ($verifySessionStart -ge 0 -and $verifySessionEnd -gt $verifySessionStart -and
-  $verifySession.Contains('if (!IsOpen || !oemBaselineCaptured || !IsRouteStillReady())') -and
+  ($verifySession.Contains('if (!IsOpen || !oemBaselineCaptured || !IsRouteStillReady())') -or
+   $verifySession.Contains('EnsureHcSessionReadyForControl();')) -and
   -not $verifySession.Contains('GetFan') -and -not $verifySession.Contains('GetSmartFanMode') -and
   -not $verifySession.Contains('GetShiftValue') -and
   ((@($obsoleteReadbackGates | Where-Object { $hostSourceText.Contains($_) }).Count) -eq 0)) 'active lease verifies only the HC session, never an invented vendor ownership/readback contract'

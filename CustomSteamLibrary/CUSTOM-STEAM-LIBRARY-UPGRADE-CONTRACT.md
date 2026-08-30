@@ -1,6 +1,30 @@
 # Custom Steam Library 升级契约（与 YeManCC 升级器对齐）
 
-状态（2026-08-25）：YeManCC 三目录 `green-child` 升级适配、CustomSteamLibrary 独立隐藏启动健康握手、完整事务回滚和临时包模拟回归已完成；尚未对 `C:\SOFT\YeMan\YeManCC` 正式安装目录执行真实升级。`mainProgramIntegration=true` 同时表示 protocol 1 运行时接入和当前主程序升级器已具备子包适配，但不代表实体手柄窗口验收已完成。本轮只更新 CustomSteamLibrary 包自身的默认目录，不修改 YeManCC 升级器。
+状态（2026-08-30）：YeManCC 三目录 `green-child` 升级适配、CustomSteamLibrary 独立隐藏启动健康握手、完整事务回滚和临时包模拟回归已完成；CustomSteamLibrary 已正式纳入 YeManCC 主线，唯一正式安装目录为 `C:\SOFT\YeMan\YeManCC\CustomSteamLibrary`。尚未对该正式安装目录执行本机真实升级。`mainProgramIntegration=true` 同时表示 protocol 1 运行时接入和当前主程序升级器已具备子包适配，但不代表实体手柄窗口验收已完成。
+
+## 0. 正式主线和防回退规则
+
+CustomSteamLibrary 不是独立的旧版旁路程序，已经是 YeManCC 正式主线的绿色子程序。以下规则是发布和升级的硬性边界：
+
+| 项目 | 唯一正式位置或来源 | 规则 |
+| --- | --- | --- |
+| 主线子程序源包 | `<YeManCC3>\CustomSteamLibrary` | 只允许从这里进入 YeManCC 发布流程 |
+| 子程序构建输入 | `C:\SOFT\YeManCC-Work\SteamArtworkLab\build` | 必须先有当前构建的宿主、Worker 和 UI |
+| 升级器暂存 | `Build\Package\UpdateRoot\YeManCC\CustomSteamLibrary` | 必须与源包逐文件一致 |
+| 正式发布目录 | `Release\YeManCC\CustomSteamLibrary` | 只用于验收，不作为下一次打包源 |
+| 用户安装目录 | `C:\SOFT\YeMan\YeManCC\CustomSteamLibrary` | 由升级器安装，不参与打包读取 |
+
+禁止把以下位置作为新的 CustomSteamLibrary 发布源：旧的 `Release\CustomSteamLibrary`、历史 `CustomSteamLibrary-official-*`、用户安装目录、临时测试目录或任何带有旧版本清单的副本。打包器必须在复制前将当前构建结果同步到主线源包，并要求 `packageVersion` 等于主线 `version.json`；版本、入口、Worker 或 SHA-256 不一致时必须失败，不能继续生成升级包。
+
+一次发布必须满足：
+
+```text
+主线源包 == UpdateRoot == Release == ZIP 内 YeManCC\CustomSteamLibrary
+CustomSteamLibrary.packageVersion == YeManCC.version.json.version
+CustomSteamLibrary.exe、SteamArtworkLab.exe、workspace-ui 文件的 SHA-256 全部一致
+```
+
+升级器只认 ZIP 内的 `YeManCC\CustomSteamLibrary`，并将它安装到 `C:\SOFT\YeMan\YeManCC\CustomSteamLibrary`。正式安装目录中的旧文件不会反向覆盖主线；如果目标机仍是旧版本，必须通过新 ZIP 执行升级，不能把目标机目录当作发布源。
 
 这份文档解决三个容易混淆的问题：
 
