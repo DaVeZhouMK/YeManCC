@@ -1,0 +1,413 @@
+{
+  "schemaVersion": 1,
+  "files": [
+    {
+      "path": "BlackSharp.Core.dll",
+      "sha256": "acf0f822fb41ee99c3583c1fec3791e464623ee5badaf11272b65a6768b4ad96"
+    },
+    {
+      "path": "controller-hidapi.net.dll",
+      "sha256": "888df8eff8acf22e9771fc132b91657da4d784732c131de0a934d869e36d960d"
+    },
+    {
+      "path": "craftersmine.SteamGridDB.Net.dll",
+      "sha256": "7c6f9616c49ea8083d5800ccf258a8cf4a35c0f4084fa0a4c7e7cd48dd440564"
+    },
+    {
+      "path": "GamepadMotion.dll",
+      "sha256": "e11d59f84b4a4a12e99b15ea998e79de06c6dfb8f1e9c637e973abd4d3d088a9"
+    },
+    {
+      "path": "Gma.System.MouseKeyHook.dll",
+      "sha256": "fa9fec4dfc02c80d262e2e61abce31d9358ca84e36c9794ba5cb30f912940485"
+    },
+    {
+      "path": "GregsStack.InputSimulatorStandard.dll",
+      "sha256": "453e8a4b4cf7241954e9aad060409c24f076ee0c9f742345fc36a1ea8dd8c6ee"
+    },
+    {
+      "path": "HandheldCompanion.deps.json",
+      "sha256": "c9be6d32d0ae83e4d61bab6aadbe92e1da3b477128ae2a74892a8ec3ddab97bc"
+    },
+    {
+      "path": "HandheldCompanion.dll",
+      "sha256": "70e27fd4d73a5ca3e3e750de2736b5e1c3b126d716dd9f4f5794c84da88c6415"
+    },
+    {
+      "path": "hidapi.dll",
+      "sha256": "ebeb835e2b4530ed68843f19d6a2604c51772e3c26e7f542fde194075f82d9b4"
+    },
+    {
+      "path": "hidapi.net.dll",
+      "sha256": "adc343b824405081a1b3ec69b06b4808734fc448ee757d0ea7b723acddca3182"
+    },
+    {
+      "path": "HidLibrary.dll",
+      "sha256": "00ad68889764a8bea6377a01d738a3ebc1dd286691d2ac5bcf7b1d2b16bcd9fa"
+    },
+    {
+      "path": "IGDB.dll",
+      "sha256": "001fb017e2cb017e1fb39b5b0318432ef9c4274064b29ac707bd206a1a0e5ce2"
+    },
+    {
+      "path": "iNKORE.UI.WPF.Modern.Controls.dll",
+      "sha256": "6380a7cdbd90fb5462063f23a72a7a6f3729d2f4894254bbebf9a8f24230d2b7"
+    },
+    {
+      "path": "install-fan-host-payload.ps1",
+      "sha256": "6e57d582fc241fe4ab8289defbff2f455a6ef0d6c171b63e23b1f69095cd9dd5"
+    },
+    {
+      "path": "Interop.IWshRuntimeLibrary.dll",
+      "sha256": "3884afc4d3e1af4d1fbe8e1859b41ed69560db8fe4141501ccc4d16c8e254275"
+    },
+    {
+      "path": "libMonoPosixHelper.dll",
+      "sha256": "5bcccd0a8580fb65680ddc738d27cff6b1a775b287470f1804bbca0737c3d397"
+    },
+    {
+      "path": "LibreHardwareMonitorLib.dll",
+      "sha256": "f7ed30f07ea636c0ddcc5764c15c0a25ae8a0aca02ded77e4af24439955487cf"
+    },
+    {
+      "path": "Microsoft.Extensions.Configuration.Abstractions.dll",
+      "sha256": "a7ae16937ad2931ec036cefde5bc230f6a29e4bcb4a0aca10a29a699a0a51b33"
+    },
+    {
+      "path": "Microsoft.Extensions.Configuration.Binder.dll",
+      "sha256": "0637a0ab2b5a77b000c0d96c46573dae8c04fa86ae1374b5a1f00855a712d6f9"
+    },
+    {
+      "path": "Microsoft.Extensions.Configuration.dll",
+      "sha256": "997b6440cff60fc5e4cc38fa7bddff453937b6f1c9bb349c923c08f278f8b121"
+    },
+    {
+      "path": "Microsoft.Extensions.Configuration.FileExtensions.dll",
+      "sha256": "3529842524c5afa84fd91c97f489257af1fadf254f46b69f9244cc40a8c202f7"
+    },
+    {
+      "path": "Microsoft.Extensions.Configuration.Json.dll",
+      "sha256": "7d84d4eb997b3edd38b5841589b1263cc5e88993792329212fdcc1ce065f01fb"
+    },
+    {
+      "path": "Microsoft.Extensions.DependencyInjection.Abstractions.dll",
+      "sha256": "621f220163119dfb08c8d1dd5bc0df6c038bd9baab0662050042acd7f906b7b7"
+    },
+    {
+      "path": "Microsoft.Extensions.DependencyInjection.dll",
+      "sha256": "660201ba6898f047c273a611306e4ea6750f5bbe1f6d6c4702ab301dbb16a869"
+    },
+    {
+      "path": "Microsoft.Extensions.DependencyModel.dll",
+      "sha256": "0d7fae30684654fa9173ad248ab41b713a48d81df0ef446ee4e40c8d380893e8"
+    },
+    {
+      "path": "Microsoft.Extensions.Diagnostics.Abstractions.dll",
+      "sha256": "c2391bad19098c60cf8211cde11169adccc681866ffda172190794ca8b0d4a32"
+    },
+    {
+      "path": "Microsoft.Extensions.Diagnostics.dll",
+      "sha256": "5f8eff8b08ee7be0b94c43f8001f1012fc07600baf6739460b47a217244d74ab"
+    },
+    {
+      "path": "Microsoft.Extensions.FileProviders.Abstractions.dll",
+      "sha256": "718ba4fbad76976e6bc2b4f16f2465e6f8216bf973f8d447b218c7847cb64970"
+    },
+    {
+      "path": "Microsoft.Extensions.FileProviders.Physical.dll",
+      "sha256": "4445cc46bedada8d5f8b0847bfe386ed590ac3343307b7ab66e6db95b88a6980"
+    },
+    {
+      "path": "Microsoft.Extensions.FileSystemGlobbing.dll",
+      "sha256": "e12418e357464967af8dd8f7e32a3b2076127a829c661695ad65f98e22be388c"
+    },
+    {
+      "path": "Microsoft.Extensions.Http.dll",
+      "sha256": "845db0ef0cd571c1ed07883bbc854510441da90629dcf387bc1ceb337ff42cd6"
+    },
+    {
+      "path": "Microsoft.Extensions.Http.Polly.dll",
+      "sha256": "c281ce33380995f9adcd5d8e4eaeb9a58ec4fcb5de5a737b79e189832c4298fe"
+    },
+    {
+      "path": "Microsoft.Extensions.Logging.Abstractions.dll",
+      "sha256": "5dcb4934cb0dcc5547aeaebebc5bb687cc2522390b7032d68713b29af64f7fd5"
+    },
+    {
+      "path": "Microsoft.Extensions.Logging.dll",
+      "sha256": "c012df727dcb65440fbb1b9924744a96932b617a3d058cc9b9b91c855ebd760f"
+    },
+    {
+      "path": "Microsoft.Extensions.Options.ConfigurationExtensions.dll",
+      "sha256": "db2e2abbbdaf7d12f30adb8feb38fb65797c5f3b5a9cf2f4c954e2a8cda29732"
+    },
+    {
+      "path": "Microsoft.Extensions.Options.dll",
+      "sha256": "a5a6cd30705512cc512a12d4086c07b7a76243174299aaef6b0dee61832fb0d3"
+    },
+    {
+      "path": "Microsoft.Extensions.Primitives.dll",
+      "sha256": "d85aa4a5e5acabb4a96798e2d280153ceb073ba924d0c5d6b5d63fa3f7bfceb8"
+    },
+    {
+      "path": "Microsoft.Win32.TaskScheduler.dll",
+      "sha256": "3ef8d978dfb0a2611436de1872ef76abbb0f3ab1368bcd2bcd0bb584dbf9d60d"
+    },
+    {
+      "path": "Microsoft.Windows.SDK.NET.dll",
+      "sha256": "0ec371d93798852e36461c8adddbeadce0f963a04752f0b64e54fe19c1c834a7"
+    },
+    {
+      "path": "Microsoft.WindowsAPICodePack.Core.dll",
+      "sha256": "f4eec0a30b31fefad68cf67c86cf7fd0cfcae23a6b103c6aa9d48eeae49d52e8"
+    },
+    {
+      "path": "Microsoft.WindowsAPICodePack.dll",
+      "sha256": "27362ff10c441760dfaad41685fc919b1b24735a8797359cbc9eacf4ddfe3ebd"
+    },
+    {
+      "path": "Microsoft.WindowsAPICodePack.ExtendedLinguisticServices.dll",
+      "sha256": "e3b5c44e971a4f7455bc66d21d9b256f140169a9a1cb4fa3d831943fe67ff33e"
+    },
+    {
+      "path": "Microsoft.WindowsAPICodePack.Sensors.dll",
+      "sha256": "4060507cef54e5739b5cceac22d812928ef2191012a38c2d8f04ced368f2aa16"
+    },
+    {
+      "path": "Microsoft.WindowsAPICodePack.Shell.dll",
+      "sha256": "542ef75fb0056d8793e43f27a34b0f0d4245d2331a757ea534916d2310478039"
+    },
+    {
+      "path": "Microsoft.WindowsAPICodePack.ShellExtensions.dll",
+      "sha256": "674fca643395b3caf86b0c1e52ccd709d31d8bedf715c926797cd748cb6a6e47"
+    },
+    {
+      "path": "Mono.Posix.NETStandard.dll",
+      "sha256": "21c3d43ada589df34e99f5f374a0e97408872b5cacff5b79c1dd190b2434a1dd"
+    },
+    {
+      "path": "MonoPosixHelper.dll",
+      "sha256": "d055d79a9566d8515cbac31022e7975c1b8c7be5a1e76c192f69f7bec4010dd2"
+    },
+    {
+      "path": "NAudio.Asio.dll",
+      "sha256": "035c653468ac70370f51fb5bb2001b4cf868e479846ccc8c7a09789aa22e2606"
+    },
+    {
+      "path": "NAudio.Core.dll",
+      "sha256": "4f8d8c4140146674b103c8a3c46fbc4c768a86c0012a167168e3f7da2b3e5c09"
+    },
+    {
+      "path": "NAudio.dll",
+      "sha256": "99f690cf6cdc829f815c06c27fcda9bd18f85b475a8b1b00898fb669fe39f98c"
+    },
+    {
+      "path": "NAudio.Midi.dll",
+      "sha256": "7796a9ec97a1ff29e682855839845da9fe26b6ddcc34addbb514cd73e7a9f02a"
+    },
+    {
+      "path": "NAudio.Vorbis.dll",
+      "sha256": "0ae4de203ffeb14cc5f10859402d3f56e9fe6689c58587d52ba4aa731ef3e8c0"
+    },
+    {
+      "path": "NAudio.Wasapi.dll",
+      "sha256": "a05e371abf96195770ac4f84653d987d63731fed528e98c7fe0d10ce66e37d7e"
+    },
+    {
+      "path": "NAudio.WinForms.dll",
+      "sha256": "7029d547c9da7fad6d32b6fc4fb9120a52f596f6a1c86485ae050a2e971ae4b0"
+    },
+    {
+      "path": "NAudio.WinMM.dll",
+      "sha256": "80807335ee64d5bb26a9de0d1f966a902b5adf32c53b853c8b871937d12b437b"
+    },
+    {
+      "path": "Nefarius.Drivers.HidHide.dll",
+      "sha256": "0a59c8a7c5d921a8561b47b2d9d2657a998676efe1a3e8e31991e9721ab0d88f"
+    },
+    {
+      "path": "Nefarius.Utilities.Bluetooth.dll",
+      "sha256": "010b46997f2bea44a9e95b063e106be3e662a93a7a7fab5e5d485644cc48b433"
+    },
+    {
+      "path": "Nefarius.Utilities.DeviceManagement.dll",
+      "sha256": "b5eaf086634438f2774f6b65dd14254aaa078bf1ebfeb004f997314b61272b7c"
+    },
+    {
+      "path": "Nefarius.Vicius.Abstractions.dll",
+      "sha256": "51f380a12a82e925308e5d6255218df283b692f37b9e991c6ce5e63f3e11d8fa"
+    },
+    {
+      "path": "Nefarius.ViGEm.Client.dll",
+      "sha256": "59dc888e2cd2542f9fd4a2b85432e81f8014ba4d9ed813d01d0968912cfda036"
+    },
+    {
+      "path": "Newtonsoft.Json.dll",
+      "sha256": "a28c251dfe36d881e9e2462e171441b8b0ec156fe3f452602c9149b1b9efe05b"
+    },
+    {
+      "path": "NVorbis.dll",
+      "sha256": "55e7477deeb341058d5543515ed371575a415d8edcf9d0e933a41ca2dee54ad4"
+    },
+    {
+      "path": "PInvoke.Kernel32.dll",
+      "sha256": "3122b9c2ccd89b0ff915f4669d60f9ffa1a4d4a8608f61f5df1b29d6298c4c44"
+    },
+    {
+      "path": "PInvoke.Windows.Core.dll",
+      "sha256": "28dc91c7027ba45b07be564a4564cf9e4606b96b01f4b431056e7d77ab25b81c"
+    },
+    {
+      "path": "Polly.dll",
+      "sha256": "4fb8ff4f77b031f4ed51aadb0e494ef62c9f4f0a8382b972d34a9999707073dc"
+    },
+    {
+      "path": "PrecisionTimer.NET.dll",
+      "sha256": "62d42848fe362a66ffc4be399b1d8d361458a5cbcc416f8b01ec0f7c65bc3331"
+    },
+    {
+      "path": "protobuf-net.Core.dll",
+      "sha256": "a7d69d06337d0c32b854cbe862f7a6e4b97e30e785b13ab0d68c1b0e51d5ace1"
+    },
+    {
+      "path": "protobuf-net.dll",
+      "sha256": "78d95efd88bce208a2aa412f193ed534e4b6337f8c15ff9171b8696946200edf"
+    },
+    {
+      "path": "RAMSPDToolkit-NDD.dll",
+      "sha256": "607e2f3fc56f2313a503f29a9c6c6f4d1a70b926a821b13148ce70567e886501"
+    },
+    {
+      "path": "Reloaded.Memory.dll",
+      "sha256": "c924730da00c2130791bf9a27db3af1d37e06b183be22dac01c6cb1d882d0bad"
+    },
+    {
+      "path": "RestEase.dll",
+      "sha256": "b767b34c113f4c2bf7a6b852947512728e4987b4f389748d68bb7500c8a720b7"
+    },
+    {
+      "path": "ricaun.NamedPipeWrapper.Json.1.8.0.dll",
+      "sha256": "c3135749f7582710c0db0f01f858adee327df41cd63018eca76e24f7ab96eef9"
+    },
+    {
+      "path": "run-emergency-fan-restore.ps1",
+      "sha256": "2db7da8ddf057f0573f2ba54b847bbb0aa506883db5ea3292001ca91d0613ca9"
+    },
+    {
+      "path": "Sentry.dll",
+      "sha256": "d55ec4e68438fd515ae059f36c5fea4c5f5db3e610d042c7fcee318b2e0b1ee0"
+    },
+    {
+      "path": "Serilog.dll",
+      "sha256": "e6b551a75ff7fff20dd0024670d5c42dfb74afa16d54aa0201106dea400a9505"
+    },
+    {
+      "path": "Serilog.Extensions.Logging.dll",
+      "sha256": "80d3edbe3e3ac0b4c5bc764474220e7da11df8d285e0098f3dc1b65a734c8507"
+    },
+    {
+      "path": "Serilog.Extensions.Logging.File.dll",
+      "sha256": "bde4c4259d58539795864b8879aa0a9bbd917fbce58ad57e821f35952ce269f7"
+    },
+    {
+      "path": "Serilog.Formatting.Compact.dll",
+      "sha256": "355e3be9137603e9406af1b3997df90c37792223758a0296e3e1d445eee50130"
+    },
+    {
+      "path": "Serilog.Settings.Configuration.dll",
+      "sha256": "de6fb7b6ee3229e0b0b9356ecdbbd05767d6490aaf0c34e9e49dbd7fe1e974a0"
+    },
+    {
+      "path": "Serilog.Sinks.Async.dll",
+      "sha256": "f0b3d9b22a74d84b36f424884fa337e0e281a8731d6ac176831348776a5cb083"
+    },
+    {
+      "path": "Serilog.Sinks.Console.dll",
+      "sha256": "dc88002ddd9f5fd0ffec9a6568ef89954671f60f2c9161593ee78932538c1e3e"
+    },
+    {
+      "path": "Serilog.Sinks.File.dll",
+      "sha256": "4f4282671c2ac68284b4dc99f7a76eac9cbd4e659978cef642cff9e6c01b676d"
+    },
+    {
+      "path": "Serilog.Sinks.RollingFile.dll",
+      "sha256": "7facba54a4c3c0ea9c349d6d0cc29ec2c25b390c9c42056cc1c1aba691cff67e"
+    },
+    {
+      "path": "Shared.dll",
+      "sha256": "4c9af9792eb93b9c9ea14f6fddf1eab1790af9ea12d632f34568a93e7b6dbef9"
+    },
+    {
+      "path": "SharpDX.Direct3D9.dll",
+      "sha256": "69701eda7433ac0010aba416b9d9c245cd78694770d4bb6b7541b83bace41d55"
+    },
+    {
+      "path": "SharpDX.DirectInput.dll",
+      "sha256": "35d9ae6b98c5b68fdc1fcaf6e03c95c82f9305c7355dd911f8841880b42e945f"
+    },
+    {
+      "path": "SharpDX.dll",
+      "sha256": "518d45a5aaec84cb37e83ee2cf58c503ab6a25febb8c48b53316340c967e84bd"
+    },
+    {
+      "path": "SharpDX.XInput.dll",
+      "sha256": "350195201205840b38aee094bcead4c78b1661f3570a7caa5c36b86ce6d03ff3"
+    },
+    {
+      "path": "steam-hidapi.net.dll",
+      "sha256": "0070daf2a653ce1ff97326ca69e0057274ee30c91ed6fa80229fd494da332959"
+    },
+    {
+      "path": "System.IO.Ports.dll",
+      "sha256": "bf486068a47b18358313791b78aca74f4de61d1d9e2e08b58e3bfbf68bf15a2b"
+    },
+    {
+      "path": "System.Management.dll",
+      "sha256": "01f9360d110863f810431c4d29ada0fca89f267343d030e98aa823ea4c0c0ebb"
+    },
+    {
+      "path": "System.ServiceProcess.ServiceController.dll",
+      "sha256": "3274c2553c736435064e398f879404e8944f39790caee6632e6966046b3440e8"
+    },
+    {
+      "path": "UEFIVaribleDll.dll",
+      "sha256": "0ee2a7c74dae5429fa71c6dce191231df40d000b1f1e9b480da4884a169aac13"
+    },
+    {
+      "path": "WindowsInput.dll",
+      "sha256": "5567cea4661389a7fdcc51ef222e67b13c2176c9be46e61a88a100188a77c711"
+    },
+    {
+      "path": "WinRT.Runtime.dll",
+      "sha256": "bcf3a14e8712a90837fc5c0d8c8a24696af2bd7f74e9767597ec81ededfb23db"
+    },
+    {
+      "path": "YamlDotNet.dll",
+      "sha256": "d618138109a40e4a7250e49e2abad8c450e3636bee18d7499ab231e37fa9150a"
+    },
+    {
+      "path": "YeManFanHost.authorization.md",
+      "sha256": "10235519071b6f7bf4a39eea166b37b7f628aa70c60529396e610b3cfb76dfb6"
+    },
+    {
+      "path": "YeManFanHost.deps.json",
+      "sha256": "81f0dbf69bdd332b1fbd638f6b1ad42c1d3c1686f0b702b52b0d5766c61230a9"
+    },
+    {
+      "path": "YeManFanHost.dll",
+      "sha256": "5d097826a864cd18bec9aa8e2662da82f80381340baa447cf6e7feed47f4cc74"
+    },
+    {
+      "path": "YeManFanHost.exe",
+      "sha256": "a3ce266b880f67045d3f895e2fc68b1fe81f641d5f1a08a01f0de19d2458f733"
+    },
+    {
+      "path": "YeManFanHost.json",
+      "sha256": "b2316017b344c11ed08556a0f6932a2ae6ac6f5e04bbe188d9a89f7596be362e"
+    },
+    {
+      "path": "YeManFanHost.runtimeconfig.json",
+      "sha256": "96bc2946dff8790400d652ec7f8de7bb043e954980d59470c112788b68a1fbd3"
+    }
+  ]
+}

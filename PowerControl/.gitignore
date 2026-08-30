@@ -14,6 +14,7 @@ tdp-*.txt
 FPS-*.txt
 Power.txt
 *.json
+!fan-host/YeManFanHost.payload.json
 *.log
 *.pid
 *.hb
