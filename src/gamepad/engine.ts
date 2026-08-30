@@ -726,7 +726,11 @@ function moveFocus(dx: number, dy: number) {
         // Ignore transient DOM changes during route transitions.
       }
     }
-    return;
+    // Game quick actions use explicit row/column coordinates, but a row can
+    // disappear from the focus list when its action is disabled (for example
+    // the trainer and speed controls before a game is recognized). Let the
+    // semantic game-menu navigator bridge that gap to the next enabled row.
+    if (explicitTarget || !activeGameMenu || !activeGameMenu.contains(base)) return;
   }
   if (activeGameMenu && dy !== 0 && activeGameMenu.contains(base)) {
     const ruleTarget = moveGameRuleFocus(activeGameMenu, base, dy);
