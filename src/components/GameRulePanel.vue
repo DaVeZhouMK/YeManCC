@@ -179,10 +179,17 @@ function disableLeavingBody(el: Element): void {
 function onBack(): void {
   if (!props.open) return;
   if (editorOpen.value) {
+    const closingKind = editorOpen.value;
     editorOpen.value = null;
     draft.value = '';
     error.value = '';
     message.value = '';
+    nextTick(() => {
+      const editorButton = document.querySelector<HTMLElement>(
+        `[data-gp-rule-focus="editor-${closingKind}"]`,
+      );
+      if (editorButton) focusGamepadElement(editorButton);
+    });
     return;
   }
   emit('close');

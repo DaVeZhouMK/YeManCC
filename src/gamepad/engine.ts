@@ -723,10 +723,21 @@ function moveFocus(dx: number, dy: number) {
   // checked before the geometry heuristic so Fan's four node columns cannot
   // jump into a neighbouring row or wrap from node 4 back to node 1. Pages
   // without data-gp-row/data-gp-col retain the existing shared geometry path.
-  const explicitTarget = spatialNavigationTarget(navEls, base, {
-    dx: dx === 0 ? 0 : dx > 0 ? 1 : -1,
-    dy: dy === 0 ? 0 : dy > 0 ? 1 : -1,
-  });
+  // The Y menu has a semantic vertical order. Do not let its optional
+  // coordinate annotations compete with that order when disabled actions or
+  // Vue transitions temporarily remove a row from the focus list. Core
+  // policy and rule-editor navigation are handled by their dedicated paths
+  // below/above this branch.
+  const inGameRuleBody = !!base.closest('[data-gp-game-rules-body]');
+  const inCustomBody = !!base.closest('[data-gp-custom-body]');
+  const useGameMenuSemanticVertical = !!activeGameMenu &&
+    activeGameMenu.contains(base) && dy !== 0 && !inGameRuleBody && !inCustomBody;
+  const explicitTarget = useGameMenuSemanticVertical
+    ? undefined
+    : spatialNavigationTarget(navEls, base, {
+        dx: dx === 0 ? 0 : dx > 0 ? 1 : -1,
+        dy: dy === 0 ? 0 : dy > 0 ? 1 : -1,
+      });
   if (explicitTarget !== undefined) {
     if (explicitTarget) {
       try {

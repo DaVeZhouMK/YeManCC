@@ -21,4 +21,6 @@ Assert-Contains $quick 'data-gp-game-control="fsr-import"' 'FSR semantic source 
 if ($rules -notmatch 'data-gp-rule-focus="manual-input"[\s\S]*?data-gp-row="4"[\s\S]*?data-gp-col="0"') { throw 'manual input is not aligned with confirmation' }
 Assert-Contains $rules 'data-gp-row="4" data-gp-col="1"' 'manual confirmation is not aligned with input'
 Assert-Contains $engine "marker === 'manual-input' || marker === 'manual-confirm'" 'manual row down-stop rule is missing'
-Write-Output 'game rule gamepad layout selftest: 10/10 passed'
+Assert-Contains $engine 'lastRuleItem' 'manual row must return to the active list tail'
+Assert-Contains $engine 'useGameMenuSemanticVertical' 'game menu vertical navigation must use semantic rows'
+Write-Output 'game rule gamepad layout selftest: 12/12 passed'
