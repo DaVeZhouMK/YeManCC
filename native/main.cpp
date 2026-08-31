@@ -14343,10 +14343,9 @@ static void reg_updater() {
         if (!fspath::exists(packagedPowerControl)) {
             failInstall("Update package missing PowerControl", "更新包缺少 PowerControl 目录");
         }
-        const auto packagedCustomSteamLibrary = staging + L"\\CustomSteamLibrary";
-        // CustomSteamLibrary is validated from update-manifest.json when it
-        // is declared. It remains optional here so the new updater can also
-        // install the legacy two-root package as a one-time bootstrap.
+        const auto packagedCustomSteamLibrary = staging + L"\\YeManCC\\CustomSteamLibrary";
+        // CustomSteamLibrary is a managed child of YeManCC in the update
+        // envelope, while its installed location remains YeManCC\\CustomSteamLibrary.
         const auto packagedSupport = packagedYeManCC + L"\\YeMan-Support.html";
         if (!fspath::exists(packagedSupport)) {
             failInstall("Update package missing YeMan-Support.html", "更新包缺少支持页面");
@@ -14821,11 +14820,9 @@ static void reg_updater() {
               f << "    Start-Sleep -Milliseconds 100\n";
               f << "  }\n";
               f << "  $layoutRoots = @(Get-UpdateLayoutRoots)\n";
-              f << "  $customRoot = $layoutRoots | Where-Object { $_.source -ieq 'CustomSteamLibrary' } | Select-Object -First 1\n";
-              f << "  if ($customRoot) { $customSteamLibraryDir = [IO.Path]::GetFullPath((Join-Path $installRoot ([string]$customRoot.target))) }\n";
               f << "  $customSteamLibraryRootPrefix = ([IO.Path]::GetFullPath($customSteamLibraryDir)).TrimEnd('\\') + '\\'\n";
               f << "  $fanHostPackagePresent = Test-Path -LiteralPath $fanHostSource -PathType Container\n";
-              f << "  $customRootPresent = @($layoutRoots | Where-Object { $_.source -ieq 'CustomSteamLibrary' }).Count -gt 0\n";
+              f << "  $customRootPresent = Test-Path -LiteralPath $customSteamLibraryManifest -PathType Leaf\n";
               f << "  if ($customRootPresent) { Stop-CustomSteamLibraryProcesses }\n";
               f << "  Stop-AdditionalLayoutRootProcesses\n";
               f << "  if ($fanHostPackagePresent -and (Test-Path -LiteralPath (Join-Path $pcDir 'fan-host') -PathType Container)) { Wait-FanHostExit }\n";

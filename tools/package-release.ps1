@@ -240,9 +240,6 @@ $updateLayoutRoots = @(
   [ordered]@{ source = 'YeManCC'; target = 'YeManCC'; mode = 'program' },
   [ordered]@{ source = 'PowerControl'; target = 'PowerControl'; mode = 'power-control' }
 )
-if (-not $isLegacyBridge) {
-  $updateLayoutRoots += [ordered]@{ source = 'CustomSteamLibrary'; target = 'YeManCC\CustomSteamLibrary'; mode = 'green-child'; packageManifest = 'package-manifest.json'; stopProcesses = @('CustomSteamLibrary.exe', 'SteamArtworkLab.exe') }
-}
 $requiredUpdateRoots = @($updateLayoutRoots | ForEach-Object { [string]$_.source } | Sort-Object -Unique)
 $fanHostUpdatePolicy = 'preserve-existing'
 
@@ -265,7 +262,7 @@ foreach ($path in $requiredBuild) {
 
 if (Test-Path -LiteralPath $StagingRoot) { Remove-Item -LiteralPath $StagingRoot -Recurse -Force }
 if (Test-Path -LiteralPath $UpdateRoot) { Remove-Item -LiteralPath $UpdateRoot -Recurse -Force }
-New-Item -ItemType Directory -Force -Path $StagingYeManCC, $StagingPowerControl, $StagingCustomSteamLibrary, $UpdateRoot | Out-Null
+New-Item -ItemType Directory -Force -Path $StagingYeManCC, $StagingPowerControl, $UpdateRoot | Out-Null
 
 Copy-DirectoryContents $BuildWeb $StagingYeManCC
 Copy-Item -LiteralPath (Join-Path $BuildNative 'YeManCC.exe') -Destination (Join-Path $StagingYeManCC 'YeManCC.exe') -Force
@@ -275,8 +272,7 @@ Copy-Item -LiteralPath (Join-Path $ProjectRoot 'YeMan-Support.html') -Destinatio
 $sourcePowerControl = Join-Path $ProjectRoot 'PowerControl'
 Copy-PowerControlTemplates $sourcePowerControl $StagingPowerControl
 Assert-CustomSteamLibraryPackage $CustomSteamLibrarySource | Out-Null
-Copy-DirectoryContents $CustomSteamLibrarySource $StagingCustomSteamLibrary
-if ($isLegacyBootstrap) {
+if (-not $isLegacyBridge) {
   Copy-DirectoryContents $CustomSteamLibrarySource (Join-Path $StagingYeManCC 'CustomSteamLibrary')
 }
 
@@ -375,13 +371,11 @@ foreach ($path in $releaseItems) { Move-ExistingReleaseItem $path $backupRoot }
 
 Move-Item -LiteralPath $StagingYeManCC -Destination $ReleaseYeManCC
 Move-Item -LiteralPath $StagingPowerControl -Destination $ReleasePowerControl
-Move-Item -LiteralPath $StagingCustomSteamLibrary -Destination $ReleaseCustomSteamLibrary
 if (Test-Path -LiteralPath $StagingRoot) { Remove-Item -LiteralPath $StagingRoot -Recurse -Force }
 New-Item -ItemType Directory -Force -Path $ReleasePackages | Out-Null
 
-# Keep every declared product directory at the ZIP root. The updater and the
-# archive validator both consume this same root list, so adding a future root
-# no longer requires another hand-written Copy-Item branch here.
+# Keep only the declared install roots at the ZIP root. CustomSteamLibrary is
+# a YeManCC child package and is intentionally copied below YeManCC.
 foreach ($root in $updateLayoutRoots) {
   $source = Join-Path $ReleaseRoot ([string]$root.source)
   $destination = Join-Path $UpdateRoot ([string]$root.source)
@@ -406,11 +400,11 @@ if (-not (Test-Path -LiteralPath (Join-Path $UpdateRoot 'PowerControl\pawnio\YeM
   throw 'Update ZIP PowerControl directory is missing PawnIO runtime'
 }
 if (-not $isLegacyBridge) {
-  if (-not (Test-Path -LiteralPath (Join-Path $UpdateRoot 'CustomSteamLibrary\package-manifest.json') -PathType Leaf)) {
-    throw 'Update ZIP CustomSteamLibrary directory is missing package-manifest.json'
+  if (-not (Test-Path -LiteralPath (Join-Path $UpdateYeManCC 'CustomSteamLibrary\package-manifest.json') -PathType Leaf)) {
+    throw 'Update ZIP YeManCC\CustomSteamLibrary directory is missing package-manifest.json'
   }
-  if (-not (Test-Path -LiteralPath (Join-Path $UpdateRoot 'CustomSteamLibrary\CustomSteamLibrary.exe') -PathType Leaf)) {
-    throw 'Update ZIP CustomSteamLibrary directory is missing CustomSteamLibrary.exe'
+  if (-not (Test-Path -LiteralPath (Join-Path $UpdateYeManCC 'CustomSteamLibrary\CustomSteamLibrary.exe') -PathType Leaf)) {
+    throw 'Update ZIP YeManCC\CustomSteamLibrary directory is missing CustomSteamLibrary.exe'
   }
 }
 if (-not $isLegacyBootstrap -and -not (Test-Path -LiteralPath (Join-Path $UpdateYeManCC 'update-manifest.json') -PathType Leaf)) {

@@ -296,7 +296,7 @@ function Invoke-InstallRound(
   $supportPath = Join-Path $exeDir 'YeMan-Support.html'
   $programSource = Join-Path $staging 'YeManCC'
   $powerControlSource = Join-Path $staging 'PowerControl'
-  $customSource = Join-Path $staging 'CustomSteamLibrary'
+  $customSource = Join-Path $staging 'YeManCC\CustomSteamLibrary'
   $customManagedPaths = @(Get-CustomManagedPaths $customSource)
   $packageExe = Join-Path $programSource 'YeManCC.exe'
   $systemBlacklistSource = Join-Path $powerControlSource 'Sleep\system-blacklist.txt'
@@ -531,14 +531,12 @@ try {
     'PowerControl\pawnio\_internal'
   )
   if ($hasLayoutManifest) { $requiredPackageItems += 'YeManCC\update-manifest.json' }
-  if ('CustomSteamLibrary' -in $declaredRoots) {
-    $requiredPackageItems += @(
-      'CustomSteamLibrary\CustomSteamLibrary.exe',
-      'CustomSteamLibrary\SteamArtworkLab.exe',
-      'CustomSteamLibrary\package-manifest.json',
-      'CustomSteamLibrary\workspace-ui\index.html'
-    )
-  }
+  $requiredPackageItems += @(
+    'YeManCC\CustomSteamLibrary\CustomSteamLibrary.exe',
+    'YeManCC\CustomSteamLibrary\SteamArtworkLab.exe',
+    'YeManCC\CustomSteamLibrary\package-manifest.json',
+    'YeManCC\CustomSteamLibrary\workspace-ui\index.html'
+  )
   foreach ($required in $requiredPackageItems) {
     if (!(Test-Path -LiteralPath (Join-Path $packageRoot $required))) { throw "required package item missing: $required" }
   }
@@ -546,7 +544,7 @@ try {
   # v0.0.22 is the compatibility bridge: it updates YeManCC and
   # PowerControl, embeds CustomSteamLibrary under YeManCC, and deliberately
   # does not create a third ZIP root or a legacy sibling path.
-  if ('CustomSteamLibrary' -notin $declaredRoots) {
+  if (!(Test-Path -LiteralPath (Join-Path $packageRoot 'YeManCC\CustomSteamLibrary\package-manifest.json') -PathType Leaf)) {
     $bridgeRoot = Join-Path $testRoot 'bridge-installed'
     $bridgeExe = Join-Path $bridgeRoot 'YeManCC'
     $bridgePowerControl = Join-Path $bridgeRoot 'PowerControl'
@@ -605,8 +603,8 @@ try {
   Assert-Equal (Get-Content -LiteralPath (Join-Path $successResult.PcDir 'fan-host\old-host-marker.txt') -Raw).Trim() 'keep-old-fan-host' 'success existing Fan Host preservation'
   Assert-Equal (Get-Content -LiteralPath (Join-Path $successResult.CustomDir 'data\config\user.json') -Raw).Trim() 'keep-custom-data' 'success CustomSteamLibrary data'
   Assert-Equal (Get-Content -LiteralPath (Join-Path $successResult.CustomDir 'user-owned.txt') -Raw).Trim() 'keep-custom-unknown' 'success CustomSteamLibrary unknown file'
-  Assert-FileMatch (Join-Path $packageRoot 'CustomSteamLibrary\CustomSteamLibrary.exe') (Join-Path $successResult.CustomDir 'CustomSteamLibrary.exe') 'success CustomSteamLibrary entry point'
-  Assert-FileMatch (Join-Path $packageRoot 'CustomSteamLibrary\SteamArtworkLab.exe') (Join-Path $successResult.CustomDir 'SteamArtworkLab.exe') 'success CustomSteamLibrary worker'
+  Assert-FileMatch (Join-Path $packageRoot 'YeManCC\CustomSteamLibrary\CustomSteamLibrary.exe') (Join-Path $successResult.CustomDir 'CustomSteamLibrary.exe') 'success CustomSteamLibrary entry point'
+  Assert-FileMatch (Join-Path $packageRoot 'YeManCC\CustomSteamLibrary\SteamArtworkLab.exe') (Join-Path $successResult.CustomDir 'SteamArtworkLab.exe') 'success CustomSteamLibrary worker'
   if (Test-Path -LiteralPath (Join-Path $successResult.PcDir 'pawnio\old-runtime-marker.txt')) { throw 'old PawnIO runtime leaked into successful update' }
   Assert-TreeMatch (Join-Path $packageRoot 'PowerControl\pawnio') (Join-Path $successResult.PcDir 'pawnio') 'success PawnIO runtime'
   if (Test-Path -LiteralPath $successResult.Staging) { throw 'success staging directory was not cleaned' }
@@ -635,7 +633,7 @@ try {
   Assert-Equal (Get-Content -LiteralPath (Join-Path $failureResult.PcDir 'Sleep\player-owned.json') -Raw).Trim() 'keep-player-data' 'rollback player data'
   Assert-Equal (Get-Content -LiteralPath (Join-Path $failureResult.CustomDir 'data\config\user.json') -Raw).Trim() 'keep-custom-data' 'rollback CustomSteamLibrary data'
   Assert-Equal (Get-Content -LiteralPath (Join-Path $failureResult.CustomDir 'user-owned.txt') -Raw).Trim() 'keep-custom-unknown' 'rollback CustomSteamLibrary unknown file'
-  Assert-FileMatch (Join-Path $packageRoot 'CustomSteamLibrary\CustomSteamLibrary.exe') (Join-Path $failureResult.CustomDir 'CustomSteamLibrary.exe') 'rollback CustomSteamLibrary entry point'
+  Assert-FileMatch (Join-Path $packageRoot 'YeManCC\CustomSteamLibrary\CustomSteamLibrary.exe') (Join-Path $failureResult.CustomDir 'CustomSteamLibrary.exe') 'rollback CustomSteamLibrary entry point'
   Assert-TreeMatch $oldPawnioSnapshot (Join-Path $failureResult.PcDir 'pawnio') 'rollback PawnIO runtime'
   Assert-Equal (Get-Content -LiteralPath (Join-Path $failureResult.PcDir 'fan-host\old-host-marker.txt') -Raw).Trim() 'keep-old-fan-host' 'rollback existing Fan Host preservation'
   if (Test-Path -LiteralPath (Join-Path $failureResult.ExeDir $failureBaseline.RemovedProgramFile)) { throw 'rollback did not remove package-only program file' }
