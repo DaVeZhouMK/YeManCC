@@ -1,6 +1,6 @@
 # Custom Steam Library 接入契约（YeManCC protocol 1）
 
-状态（2026-08-25）：protocol 1 运行时接入、三目录升级适配和 CustomSteamLibrary 独立隐藏启动健康握手已完成源码与临时包回归；正式安装目录和实体手柄窗口级验收仍未完成。独立发行目录为 `C:\SOFT\YeMan\YeManCC\CustomSteamLibrary`；YeManCC 已增加一级菜单 `自定义游戏库`、异步启动/关闭 IPC 和唯一手柄输入转发。本次只迁移 CustomSteamLibrary 包自身，YeManCC 现有固定桥接路径和升级器未在本轮修改。
+状态（2026-08-25）：protocol 1 运行时接入、三目录升级适配和 CustomSteamLibrary 独立隐藏启动健康握手已完成源码与临时包回归；正式安装目录和实体手柄窗口级验收仍未完成。独立发行目录为 `C:\SOFT\YeMan\CustomSteamLibrary`；YeManCC 已增加一级菜单 `自定义游戏库`、异步启动/关闭 IPC 和唯一手柄输入转发。
 
 ## 1. 角色
 
