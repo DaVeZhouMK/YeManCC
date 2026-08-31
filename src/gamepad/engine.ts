@@ -200,6 +200,10 @@ if (typeof window !== 'undefined') {
   // Refresh the route order after that result without delaying controller
   // startup or changing the current route.
   window.addEventListener('fan-feature:visibility', () => {
+    // The sidebar can react before the async schedule refresh completes.
+    // Refresh the cached controller order synchronously so RB/LB sees the
+    // newly admitted Fan route in the same frame.
+    setVisibleRoutes(performanceScheduleEnabled);
     void refreshVisibleRoutes();
   });
   // 睡眠守护唤醒后，native 通知重启手柄引擎：重置边沿/时间戳状态，并尝试重启循环
@@ -322,8 +326,10 @@ function routeAvailable(route: (typeof ROUTES)[number]): boolean {
 
 let visibleRoutePaths: string[] = ROUTES.filter(routeAvailable).map((r) => r.path);
 let visibleRouteTitles: string[] = ROUTES.filter(routeAvailable).map((r) => r.title);
+let performanceScheduleEnabled = false;
 
 function setVisibleRoutes(enabled: boolean) {
+  performanceScheduleEnabled = enabled;
   const hidden = enabled ? new Set(['/tdp', '/cpu']) : new Set<string>();
   const visible = ROUTES.filter((r) => !hidden.has(r.path) && routeAvailable(r));
   visibleRoutePaths = visible.map((r) => r.path);
@@ -341,6 +347,10 @@ function navigate(opts: GamepadEngineOptions, dir: -1 | 1) {
 }
 
 async function navigateNow(opts: GamepadEngineOptions, dir: -1 | 1) {
+  // Fan visibility is established asynchronously by the handshake. Rebuild
+  // just before switching so the controller order cannot lag behind the
+  // responsive sidebar and skip Fan.
+  setVisibleRoutes(performanceScheduleEnabled);
   const order = visibleRoutePaths;
   const cur = opts.router.currentRoute.value.path;
   let idx = order.indexOf(cur);
