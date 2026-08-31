@@ -99,6 +99,13 @@ function Assert-CustomSteamLibraryPackage([string]$Source) {
     $relative = Normalize-PackageRelativePath ([string]$entry.path)
     $file = Join-Path $Source $relative
     if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw "Custom Steam Library manifest file is missing: $relative" }
+    $entry.bytes = [int64](Get-Item -LiteralPath $file -Force).Length
+    $entry.sha256 = (Get-Sha256 $file).ToLowerInvariant()
+  }
+  $manifest | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $manifestPath -Encoding UTF8
+  foreach ($entry in $indexEntries) {
+    $relative = Normalize-PackageRelativePath ([string]$entry.path)
+    $file = Join-Path $Source $relative
     if ((Get-Item -LiteralPath $file).Length -ne [int64]$entry.bytes) { throw "Custom Steam Library file size mismatch: $relative" }
     if ((Get-Sha256 $file) -ne ([string]$entry.sha256).ToUpperInvariant()) { throw "Custom Steam Library file hash mismatch: $relative" }
   }
@@ -135,6 +142,14 @@ function Sync-CustomSteamLibraryMainline([string]$Source, [string]$Version) {
     (Join-Path $labRoot 'workspace-ui\app.js'),
     (Join-Path $labRoot 'workspace-ui\styles.css')
   )
+  if (-not (Test-Path -LiteralPath $labRoot -PathType Container)) {
+    Write-Output 'CustomSteamLibrary mainline build directory is absent; using the committed mainline child package.'
+    $manifest = Assert-CustomSteamLibraryPackage $Source
+    if ([string]$manifest.packageVersion -ne $Version) {
+      throw "CustomSteamLibrary version did not follow mainline: child=$($manifest.packageVersion), main=$Version"
+    }
+    return
+  }
   foreach ($path in $required) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
       throw "CustomSteamLibrary mainline build is incomplete: $path"
@@ -145,12 +160,26 @@ function Sync-CustomSteamLibraryMainline([string]$Source, [string]$Version) {
   if ($LASTEXITCODE -ne 0) {
     throw "CustomSteamLibrary mainline synchronization failed: exit=$LASTEXITCODE"
   }
+  Refresh-CustomSteamLibraryFileIndex $Source
   $manifestPath = Join-Path $Source 'package-manifest.json'
   $manifest = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
   if ([string]$manifest.packageVersion -ne $Version) {
     throw "CustomSteamLibrary version did not follow mainline: child=$($manifest.packageVersion), main=$Version"
   }
   return $manifest
+}
+
+function Refresh-CustomSteamLibraryFileIndex([string]$Source) {
+  $manifestPath = Join-Path $Source 'package-manifest.json'
+  $manifest = (Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8).TrimStart([char]0xFEFF) | ConvertFrom-Json
+  foreach ($entry in @($manifest.fileIndex)) {
+    $relative = Normalize-PackageRelativePath ([string]$entry.path)
+    $file = Join-Path $Source $relative
+    if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw "Custom Steam Library indexed file is missing: $relative" }
+    $entry.bytes = [int64](Get-Item -LiteralPath $file -Force).Length
+    $entry.sha256 = (Get-Sha256 $file).ToLowerInvariant()
+  }
+  $manifest | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $manifestPath -Encoding UTF8
 }
 
 function Get-RelativePath([string]$Root, [string]$Path) {
@@ -161,6 +190,7 @@ function Get-RelativePath([string]$Root, [string]$Path) {
 
 function Test-IsExcludedPowerControlPath([string]$Relative, [bool]$IsDirectory) {
   $r = $Relative.Replace('/', '\')
+  if ($r -match '^fan-host(?:-quarantine|\\|$)') { return $true }
   if ($r -match '(^|\\)(\.git|build|dist|__pycache__|KX\.bak_removed|product-old-files-[^\\]+)(\\|$)') { return $true }
   if ($r -match '^(TPD|intel|ryzenadj|tools|pawnio|OpenSpeedy|RTSS-Overlays)(\\|$)') { return $true }
   if ($IsDirectory) { return $false }
@@ -266,6 +296,7 @@ if ($CustomSteamLibrarySource -ne $canonicalCustomSteamLibrarySource) {
 }
 
 Sync-CustomSteamLibraryMainline $CustomSteamLibrarySource $version | Out-Null
+Refresh-CustomSteamLibraryFileIndex $CustomSteamLibrarySource
 
 # The ZIP envelope is manifest-driven. The legacy bridge keeps the old
 # YeManCC + PowerControl envelope so a pre-manifest updater can install the
@@ -292,7 +323,7 @@ $updateLayoutRoots = @(
 )
 $embedCustomSteamLibrary = -not $isLegacyBridge -or $isLegacyBootstrap
 $requiredUpdateRoots = @($updateLayoutRoots | ForEach-Object { [string]$_.source } | Sort-Object -Unique)
-$fanHostUpdatePolicy = 'replace'
+$fanHostUpdatePolicy = 'preserve-existing'
 
 foreach ($path in @($BuildRoot, $ReleaseRoot, $PackageBuildRoot, $StagingRoot, $UpdateRoot, $ReleaseYeManCC, $ReleasePowerControl, $ReleaseCustomSteamLibrary, $ReleasePackages)) {
   Assert-ChildPath $path $WorkspaceRoot 'Task5 output'
@@ -383,12 +414,6 @@ $requiredPowerControl = @(
 foreach ($relative in $requiredPowerControl) {
   if (-not (Test-Path -LiteralPath (Join-Path $StagingPowerControl $relative))) { throw "Release PowerControl item is missing: $relative" }
 }
-$fanHostStagingPath = Join-Path $StagingPowerControl 'fan-host'
-if (-not (Test-Path -LiteralPath $fanHostStagingPath -PathType Container)) { throw 'Fan Host V2 is missing from release staging area' }
-$fanHostVerifier = Join-Path $ProjectRoot 'tools\verify-r5v9-fan-host-payload.ps1'
-& powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File $fanHostVerifier -PayloadRoot $fanHostStagingPath
-if ($LASTEXITCODE -ne 0) { throw "Fan Host V2 staging verification failed: exit=$LASTEXITCODE" }
-
 $pawnioExpected = @($assetLock.files | Where-Object component -eq 'PawnIO' | ForEach-Object { ([string]$_.releasePath).Substring('pawnio/'.Length).Replace('/', '\') } | Sort-Object)
 $pawnioActual = @(Get-ChildItem -LiteralPath (Join-Path $StagingPowerControl 'pawnio') -Recurse -File | ForEach-Object { Get-RelativePath (Join-Path $StagingPowerControl 'pawnio') $_.FullName } | Sort-Object)
 if (Compare-Object $pawnioExpected $pawnioActual) { throw 'PawnIO runtime does not exactly match the locked atomic file set' }
@@ -490,11 +515,11 @@ try {
   $fanHostEntries = @($zipArchive.Entries | Where-Object {
     $_.FullName.Replace('\', '/').TrimStart('/') -match '^PowerControl/fan-host(?:/|$)'
   })
-  if ($fanHostEntries.Count -eq 0) { throw 'YeManCC.zip must contain the pinned Fan Host V2 PowerControl/fan-host payload' }
-  $fanHostEntryNames = @($fanHostEntries | ForEach-Object { $_.FullName.Replace('\', '/') })
-  if ('PowerControl/fan-host/YeManFanHost.dll' -notin $fanHostEntryNames) {
-    throw 'YeManCC.zip is missing PowerControl/fan-host/YeManFanHost.dll'
-  }
+  if ($fanHostEntries.Count -gt 0) { throw "YeManCC.zip must not contain PowerControl/fan-host entries: $($fanHostEntries.FullName -join ', ')" }
+  $fanHostQuarantineEntries = @($zipArchive.Entries | Where-Object {
+    $_.FullName.Replace('\', '/').TrimStart('/') -match '^PowerControl/fan-host-quarantine(?:/|$)'
+  })
+  if ($fanHostQuarantineEntries.Count -gt 0) { throw "YeManCC.zip must not contain PowerControl/fan-host-quarantine entries: $($fanHostQuarantineEntries.FullName -join ', ')" }
   $flatEntries = @($zipArchive.Entries | Where-Object {
     $normalized = $_.FullName.Replace('\', '/').TrimStart('/')
     $normalized -match '^(YeManCC\.exe|YeMan-Support\.html|assets/|CustomSteamLibrary\.exe|SteamArtworkLab\.exe|workspace-ui/)'
@@ -554,9 +579,8 @@ $testingLines = @(
   (Join-Path $ReleaseYeManCC 'YeManCC.exe'), '',
   'The installed shortcut and scheduled task still run:',
   'C:\SOFT\YeMan\YeManCC\YeManCC.exe', '',
-  'Fan Host V2 is included in PowerControl/fan-host and the updater policy',
-  'is replace; the installed Fan Host is updated only after its lifecycle guard',
-  'and payload hash verification pass. HC binaries remain pinned and unchanged.', '',
+  'PowerControl/fan-host is excluded from this release; an existing installed',
+  'Fan Host is preserved and is not overwritten by the updater.', '',
   "Update package SHA-256: $packageHash"
 )
 $testingLines | Set-Content -LiteralPath (Join-Path $ReleaseRoot 'TESTING.md') -Encoding UTF8

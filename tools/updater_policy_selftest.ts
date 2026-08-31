@@ -157,9 +157,10 @@ assert.ok(release.includes('Version mismatch: version.json=$version, package.jso
 assert.ok(release.includes('CustomSteamLibrary') && release.includes('Update ZIP roots do not match update-manifest.json'));
 assert.ok(release.includes('updateLayoutManifest') && release.includes('requiredUpdateRoots'));
 assert.ok(release.includes('reject-unless-declared'));
-assert.ok(release.includes("fanHostUpdatePolicy = 'replace'"));
-assert.ok(release.includes('Fan Host V2 is missing from release staging area'));
-assert.ok(release.includes('Fan Host V2 staging verification failed'));
+assert.ok(release.includes("fanHostUpdatePolicy = 'preserve-existing'"));
+assert.ok(release.includes('YeManCC.zip must not contain PowerControl/fan-host entries'));
+assert.ok(release.includes('YeManCC.zip must not contain PowerControl/fan-host-quarantine entries'));
+assert.ok(!release.includes('Fan Host V2 is missing from release staging area'));
 assert.ok(fanHostInstaller.includes('$expectedV2ManifestFileCount = 102'));
 assert.ok(!fanHostInstaller.includes('expectedV2ManifestSha256'));
 assert.ok(fanHostInstaller.includes('LibreHardwareMonitorLib.dll'));

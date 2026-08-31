@@ -7,11 +7,12 @@ $mainSource = Join-Path $PSScriptRoot '..'
 $mainNativeSource = Join-Path $mainSource 'native\main.cpp'
 if (-not (Test-Path -LiteralPath $mainNativeSource -PathType Leaf)) { throw 'main native source missing' }
 $mainNativeText = Get-Content -LiteralPath $mainNativeSource -Raw
-if ($mainNativeText -notmatch 'pressed\(XINPUT_GAMEPAD_X\)\) gamepadEmitUiAction\("edit-game"\)') {
-  throw 'CustomSteamLibrary edit action is not bound to controller X in the mainline input bridge'
+if ($mainNativeText -notmatch 'pressed\(XINPUT_GAMEPAD_Y\)\) gamepadEmitUiAction\("edit-game"\)') {
+  throw 'CustomSteamLibrary edit action is not bound to controller Y in the mainline input bridge'
 }
-if ($mainNativeText -match 'pressed\(XINPUT_GAMEPAD_Y\)\) gamepadEmitUiAction\("edit-game"\)') {
-  throw 'CustomSteamLibrary edit action is incorrectly bound to controller Y'
+if (-not ($mainNativeText.Contains('if (customSteamLibraryChildForeground() &&') -and
+    $mainNativeText.Contains('pressed(XINPUT_GAMEPAD_X)) gamepadEmitUiAction("edit-game");'))) {
+  throw 'CustomSteamLibrary child edit action is not bound to controller X in the mainline input bridge'
 }
 
 function Get-Sha256([string]$Path) {
@@ -529,6 +530,9 @@ try {
   if (Test-Path -LiteralPath (Join-Path $packageRoot 'PowerControl\fan-host')) {
     throw 'PowerControl\fan-host unexpectedly entered the update package'
   }
+  if (Test-Path -LiteralPath (Join-Path $packageRoot 'PowerControl\fan-host-quarantine')) {
+    throw 'PowerControl\fan-host-quarantine unexpectedly entered the update package'
+  }
   if (Get-ChildItem -LiteralPath $packageRoot -Recurse -File -Filter 'exclude.txt') {
     throw 'obsolete exclude.txt entered the update package'
   }
@@ -555,7 +559,7 @@ try {
   # v0.0.22 is the compatibility bridge: it updates YeManCC and
   # PowerControl, embeds CustomSteamLibrary under YeManCC, and deliberately
   # does not create a third ZIP root or a legacy sibling path.
-  if (!(Test-Path -LiteralPath (Join-Path $packageRoot 'YeManCC\CustomSteamLibrary\package-manifest.json') -PathType Leaf)) {
+  if (-not $hasLayoutManifest) {
     $bridgeRoot = Join-Path $testRoot 'bridge-installed'
     $bridgeExe = Join-Path $bridgeRoot 'YeManCC'
     $bridgePowerControl = Join-Path $bridgeRoot 'PowerControl'
