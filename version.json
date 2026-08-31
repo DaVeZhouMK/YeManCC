@@ -1,7 +1,7 @@
 ﻿{
-    "version":  "0.0.27",
-    "notes":  "主线功能与稳定性更新；CustomSteamLibrary 继续位于 YeManCC\\CustomSteamLibrary，PowerControl\\fan-host 暂不参与。",
-    "sha256":  "9FEE6445E9C058C1B01149A511D4569E54E310ACF27853EADE8E3C317FC9FA4F",
-    "publishedAt":  "2026-08-29",
+    "version":  "0.0.28",
+    "notes":  "主线功能与升级器规则更新；CustomSteamLibrary 继续位于 YeManCC\\CustomSteamLibrary，PowerControl\\fan-host 暂不参与。",
+    "sha256":  "762381D05683927CFE141505250191F482B63F6141C62ABF188394527C7083B4",
+    "publishedAt":  "2026-08-31",
     "package":  "Packages/YeManCC.zip"
 }
