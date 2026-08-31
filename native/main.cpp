@@ -4889,6 +4889,7 @@ static void gamepadProcessUiInput(WORD w, ULONGLONG now) {
     const bool rb = (w & XINPUT_GAMEPAD_RIGHT_SHOULDER) != 0;
     const bool back = (w & XINPUT_GAMEPAD_BACK) != 0;
     const bool start = (w & XINPUT_GAMEPAD_START) != 0;
+    const bool xPressed = (w & XINPUT_GAMEPAD_X) != 0;
     const auto pressed = [&](WORD bit) {
         return (w & bit) != 0 && (g_prevW & bit) == 0;
     };
