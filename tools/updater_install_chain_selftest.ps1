@@ -524,7 +524,7 @@ try {
     throw "package roots do not match update-manifest.json; missing: $($missingRoots -join ', '); unexpected: $($unexpectedRoots -join ', '); got: $($topLevel -join ', ')"
   }
   if ($hasLayoutManifest) {
-    Assert-Equal ([string]$layoutManifest.rules.fanHost) 'replace' 'Fan Host update policy'
+    Assert-Equal ([string]$layoutManifest.rules.fanHost) 'preserve-existing' 'Fan Host update policy'
   }
   if (Test-Path -LiteralPath (Join-Path $packageRoot 'PowerControl\fan-host')) {
     throw 'PowerControl\fan-host unexpectedly entered the update package'
