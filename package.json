@@ -26,6 +26,7 @@
     "test:fan-gamepad-node": "esbuild tools/fan_gamepad_node_selftest.ts --bundle --platform=node --format=esm --outfile=../../Build/Validation/SelfTests/fan_gamepad_node_selftest.mjs && node ../../Build/Validation/SelfTests/fan_gamepad_node_selftest.mjs",
     "test:fan-zoom-layout": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/fan_zoom_layout_selftest.ps1",
     "test:gamepad-zoom-layout": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/gamepad_zoom_layout_selftest.ps1",
+    "test:gamepad-face-button-mapping": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/gamepad_face_button_mapping_selftest.ps1",
     "test:game-rule-gamepad-layout": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/game_rule_gamepad_layout_selftest.ps1",
     "test:custom-steam-library-integration": "esbuild tools/custom_steam_library_integration_selftest.ts --bundle --platform=node --format=cjs --outfile=../../Build/Validation/SelfTests/custom_steam_library_integration_selftest.cjs && node ../../Build/Validation/SelfTests/custom_steam_library_integration_selftest.cjs",
     "test:custom-steam-library-health": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/custom_steam_library_health_selftest.ps1",

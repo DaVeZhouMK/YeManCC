@@ -4924,10 +4924,12 @@ static void gamepadProcessUiInput(WORD w, ULONGLONG now) {
 
     // Back combinations own their face buttons globally. Plain face-button
     // edges belong to the foreground page and do not depend on browser input.
+    // Face-button contract: Y alone is the top game-recognition summon.
+    // X is reserved for Select+X keyboard shortcut and must never open it.
     if (!back) {
         if (pressed(XINPUT_GAMEPAD_A)) gamepadEmitUiAction("confirm");
         if (pressed(XINPUT_GAMEPAD_B)) gamepadEmitUiAction("back");
-        if (pressed(XINPUT_GAMEPAD_Y)) gamepadEmitUiAction("edit-game");
+        if (pressed(XINPUT_GAMEPAD_Y) && !xPressed) gamepadEmitUiAction("edit-game");
     }
 
     const bool up = (w & XINPUT_GAMEPAD_DPAD_UP) != 0 || g_curPad.sThumbLY >= GP_UI_THUMB_THRESHOLD;
