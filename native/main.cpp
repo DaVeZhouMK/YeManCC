@@ -4952,10 +4952,14 @@ static void gamepadProcessUiInput(WORD w, ULONGLONG now) {
     if (!back) {
         if (pressed(XINPUT_GAMEPAD_A)) gamepadEmitUiAction("confirm");
         if (pressed(XINPUT_GAMEPAD_B)) gamepadEmitUiAction("back");
-        // X opens the selected CustomSteamLibrary card editor. Y remains
-        // available for the normal YeManCC page actions and must not trigger
-        // an edit in the child window.
-        if (pressed(XINPUT_GAMEPAD_X)) gamepadEmitUiAction("edit-game");
+        // Main YeManCC uses Y to open the top game-recognition menu. The
+        // CustomSteamLibrary child has its own X-to-edit convention, so keep
+        // that mapping only while the child is the foreground input owner.
+        if (customSteamLibraryChildForeground()) {
+            if (pressed(XINPUT_GAMEPAD_X)) gamepadEmitUiAction("edit-game");
+        } else if (pressed(XINPUT_GAMEPAD_Y)) {
+            gamepadEmitUiAction("edit-game");
+        }
     }
 
     const bool up = (w & XINPUT_GAMEPAD_DPAD_UP) != 0 || g_curPad.sThumbLY >= GP_UI_THUMB_THRESHOLD;

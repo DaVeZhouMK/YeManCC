@@ -3,11 +3,11 @@ $root = Split-Path -Parent $PSScriptRoot
 $native = Get-Content (Join-Path $root 'native\main.cpp') -Raw
 $engine = Get-Content (Join-Path $root 'src\gamepad\engine.ts') -Raw
 
-if (-not $native.Contains('pressed(XINPUT_GAMEPAD_Y)') -or -not $native.Contains('gamepadEmitUiAction("edit-game")')) {
-  throw 'native Y button is not mapped to edit-game'
+if ($native -notmatch 'else if\s*\(pressed\(XINPUT_GAMEPAD_Y\)\)\s*\{\s*gamepadEmitUiAction\("edit-game"\)') {
+  throw 'main YeManCC Y button is not mapped to edit-game'
 }
-if ($native -match 'pressed\(XINPUT_GAMEPAD_X\)\) gamepadEmitUiAction\("edit-game"\)') {
-  throw 'native X button must not map to edit-game'
+if ($native -notmatch 'if\s*\(customSteamLibraryChildForeground\(\)\)\s*\{\s*if\s*\(pressed\(XINPUT_GAMEPAD_X\)\) gamepadEmitUiAction\("edit-game"\)') {
+  throw 'CustomSteamLibrary child X edit mapping is missing'
 }
 if (-not $engine.Contains('Y(3)           → 全局编辑游戏识别名单')) {
   throw 'renderer gamepad contract does not document Y as edit-game'
