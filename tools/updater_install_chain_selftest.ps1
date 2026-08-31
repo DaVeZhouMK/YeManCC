@@ -526,8 +526,8 @@ try {
   if ($hasLayoutManifest) {
     Assert-Equal ([string]$layoutManifest.rules.fanHost) 'replace' 'Fan Host update policy'
   }
-  if (Test-Path -LiteralPath (Join-Path $packageRoot 'PowerControl\fan-host')) {
-    throw 'PowerControl\fan-host unexpectedly entered the update package'
+  if (!(Test-Path -LiteralPath (Join-Path $packageRoot 'PowerControl\fan-host'))) {
+    throw 'PowerControl\fan-host is missing from the update package'
   }
   if (Get-ChildItem -LiteralPath $packageRoot -Recurse -File -Filter 'exclude.txt') {
     throw 'obsolete exclude.txt entered the update package'
