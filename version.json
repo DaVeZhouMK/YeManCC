@@ -1,6 +1,6 @@
 {
-  "version": "0.0.25",
-  "notes": "两根目录小修复：修正窗口最大化/恢复交接；CustomSteamLibrary 继续位于 YeManCC\\CustomSteamLibrary，PowerControl\\fan-host 暂不参与。",
+  "version": "0.1.4",
+  "notes": "修复后台扫描期间 Steam 计划缓存时序，防止已加入游戏短暂跌入需处理；保留有效已加入状态。",
   "sha256": "",
   "publishedAt": "",
   "package": "Packages/YeManCC.zip"

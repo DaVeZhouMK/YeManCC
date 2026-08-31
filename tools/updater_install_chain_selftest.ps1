@@ -3,6 +3,17 @@ param()
 
 $ErrorActionPreference = 'Stop'
 
+$mainSource = Join-Path $PSScriptRoot '..'
+$mainNativeSource = Join-Path $mainSource 'native\main.cpp'
+if (-not (Test-Path -LiteralPath $mainNativeSource -PathType Leaf)) { throw 'main native source missing' }
+$mainNativeText = Get-Content -LiteralPath $mainNativeSource -Raw
+if ($mainNativeText -notmatch 'pressed\(XINPUT_GAMEPAD_X\)\) gamepadEmitUiAction\("edit-game"\)') {
+  throw 'CustomSteamLibrary edit action is not bound to controller X in the mainline input bridge'
+}
+if ($mainNativeText -match 'pressed\(XINPUT_GAMEPAD_Y\)\) gamepadEmitUiAction\("edit-game"\)') {
+  throw 'CustomSteamLibrary edit action is incorrectly bound to controller Y'
+}
+
 function Get-Sha256([string]$Path) {
   return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash
 }
