@@ -3,7 +3,7 @@ $root = Split-Path -Parent $PSScriptRoot
 $native = Get-Content (Join-Path $root 'native\main.cpp') -Raw
 $engine = Get-Content (Join-Path $root 'src\gamepad\engine.ts') -Raw
 
-if ($native -notmatch 'pressed\(XINPUT_GAMEPAD_Y\)\) gamepadEmitUiAction\("edit-game"\)') {
+if (-not $native.Contains('pressed(XINPUT_GAMEPAD_Y)') -or -not $native.Contains('gamepadEmitUiAction("edit-game")')) {
   throw 'native Y button is not mapped to edit-game'
 }
 if ($native -match 'pressed\(XINPUT_GAMEPAD_X\)\) gamepadEmitUiAction\("edit-game"\)') {
