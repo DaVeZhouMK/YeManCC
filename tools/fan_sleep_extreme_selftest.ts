@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 
 type Owner = 'oem' | 'yeman' | 'external' | 'unknown';
 type Life = 'ready' | 'suspending' | 'suspended' | 'resuming' | 'awaiting-control' | 'conflict-locked' | 'fault-locked';
@@ -151,14 +152,21 @@ class ResumeSuspendRaceModel {
 }
 
 function sourceChecks(): number {
-  const nativePath = 'C:\\SOFT\\YeManCC-Work\\YeManCC-source\\YeManCC3\\native\\main.cpp';
-  const hostPath = 'C:\\SOFT\\YeManCC-Work\\FanLab\\real-host\\Program.cs';
-  const lifecyclePath = 'C:\\SOFT\\YeManCC-Work\\YeManCC-source\\YeManCC3\\src\\bridge\\fanHost.ts';
-  const hcPath = 'C:\\SOFT\\YeManCC-Work\\FanLab\\hc-upstream\\HandheldCompanion\\Views\\Windows\\MainWindow.xaml.cs';
-  const hcSystemPath = 'C:\\SOFT\\YeManCC-Work\\FanLab\\hc-upstream\\HandheldCompanion\\Managers\\SystemManager.cs';
+  // Resolve the sources from the task checkout, never from the migrated C:\
+  // worktree. HC remains an explicit read-only input so this test cannot
+  // silently compare the active code against an unrelated older baseline.
+  const workspaceRoot = process.env.YEMAN_FAN_WORKSPACE || resolve(process.cwd());
+  const hcRoot = process.env.YEMAN_HC_ROOT || join(workspaceRoot, 'FanLab', 'hc-upstream', 'HandheldCompanion');
+  const nativePath = join(workspaceRoot, 'native', 'main.cpp');
+  const hostPath = process.env.YEMAN_FAN_HOST_SOURCE || join(workspaceRoot, 'FanLab', 'real-host', 'Program.cs');
+  const lifecyclePath = join(workspaceRoot, 'src', 'bridge', 'fanHost.ts');
+  const appPath = join(workspaceRoot, 'src', 'App.vue');
+  const hcPath = join(hcRoot, 'Views', 'Windows', 'MainWindow.xaml.cs');
+  const hcSystemPath = join(hcRoot, 'Managers', 'SystemManager.cs');
   const native = readFileSync(nativePath, 'utf8');
   const host = readFileSync(hostPath, 'utf8');
   const lifecycle = readFileSync(lifecyclePath, 'utf8');
+  const app = readFileSync(appPath, 'utf8');
   const hc = readFileSync(hcPath, 'utf8');
   const hcSystem = readFileSync(hcSystemPath, 'utf8');
   const queryStart = native.indexOf('else if (w == PBT_APMQUERYSUSPEND)');
@@ -174,7 +182,12 @@ function sourceChecks(): number {
     'Kernel-Power 506 must queue fan cleanup');
   assert(native.includes('std::thread([reasonText = std::string(reason ? reason : "unknown"), generation]') && native.includes('}).detach();'),
     'native cleanup must be detached');
-  assert(host.includes('SystemEvents.PowerModeChanged += OnPowerModeChanged') &&
+  // The Host is not a second Windows power owner. Native YMCC is the only
+  // power-event ingress; the Host only serializes authenticated commands.
+  // Keep checking the ordered queue, but do not require a Host-side
+  // SystemEvents subscription that the HC-aligned architecture deliberately
+  // does not use.
+  assert(host.includes('private readonly PowerTransitionIngress powerIngress') &&
     host.includes('Channel.CreateUnbounded<PowerTransition>') &&
     host.includes('powerTransitions.Writer.TryWrite') &&
     host.includes('ProcessPowerTransitionsAsync'),
@@ -200,8 +213,14 @@ function sourceChecks(): number {
     lifecycle.includes("this.state !== 'unknown'") &&
     lifecycle.includes("this.state !== 'starting'") &&
     lifecycle.includes("this.state !== 'handshaking'") &&
-    lifecycle.includes('await this.adapter.suspend();'),
+    lifecycle.includes('await this.adapter.suspend(this.createSuspendRequest());') &&
+    lifecycle.includes('source: \'webview.power\''),
     'frontend sleep boundary must still send Host suspend from startup, fault and unknown states');
+  assert(app.includes('fanHostLifecycle.setPowerGeneration(generation)') &&
+    lifecycle.includes('const generation = Math.floor(this.powerGeneration)') &&
+    lifecycle.includes('generation,') &&
+    lifecycle.includes("source: 'webview.power'"),
+    'frontend/native power generation must reach the Host suspend contract');
   return 15;
 }
 

@@ -1,10 +1,15 @@
+param(
+  [string]$PayloadRoot = '',
+  [string]$HostSourcePath = $env:YEMAN_FAN_HOST_SOURCE
+)
+
 $ErrorActionPreference = 'Stop'
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $workspaceRoot = Split-Path -Parent (Split-Path -Parent $repoRoot)
-$payloadRoot = Join-Path $repoRoot 'PowerControl\fan-host'
+$payloadRoot = if ([string]::IsNullOrWhiteSpace($PayloadRoot)) { Join-Path $repoRoot 'PowerControl\fan-host' } else { [IO.Path]::GetFullPath($PayloadRoot) }
 $manifestPath = Join-Path $payloadRoot 'YeManFanHost.payload.json'
-$hostSourcePath = Join-Path $workspaceRoot 'FanLab\real-host\Program.cs'
+$hostSourcePath = if ([string]::IsNullOrWhiteSpace($HostSourcePath)) { Join-Path $workspaceRoot 'FanLab\real-host\Program.cs' } else { [IO.Path]::GetFullPath($HostSourcePath) }
 $bridgePath = Join-Path $repoRoot 'src\bridge\fanHost.ts'
 $nativePath = Join-Path $repoRoot 'native\main.cpp'
 $aclScriptPath = Join-Path $payloadRoot 'install-fan-host-payload.ps1'

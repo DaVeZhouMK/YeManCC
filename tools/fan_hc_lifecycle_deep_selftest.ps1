@@ -144,7 +144,9 @@ Require-Order 'YeMan Close' $hostClose @(
 $hostDeviceClose = Slice $hostText 'private void CloseHcDevice()' 'private static void ExecuteCloseBoundary'
 Require-Order 'YeMan virtual close' $hostDeviceClose @(
   'Invoke(device!, "Close");',
-  'hcDeviceManagerLifecycle = "not-started/no-stop-required";'
+  'HcVirtualCloseReturned = true;',
+  'UnsubscribeExternalProfileEvents();',
+  'confirmManagerCleanup: ConfirmManagerCleanupAfterClose'
 )
 Require-Contains 'YeMan close owner' $hostText 'Interlocked.Exchange(ref closeBoundaryClaimed, 1)'
 Require-Contains 'YeMan close pending dedupe' $hostText 'HC_CLOSE_PENDING'
@@ -173,9 +175,11 @@ Require-Contains 'native resume IPC' $nativeText 'ipc_emit("power.resumed"'
 Require-Contains 'native exit handoff' $nativeText 'fanHostEmergencyPost('
 Require-Contains 'native exit handoff' $nativeText 'L"/api/parent-exit"'
 Require-Contains 'frontend close one-owner' $frontendText 'send exactly one Close request'
-Require-Contains 'frontend suspend lifecycle' $frontendText 'await this.adapter.suspend();'
-Require-Contains 'frontend resume lifecycle' $frontendText "resumedState.state === 'Resuming'"
-Require-Contains 'frontend fast-resume adoption' $frontendText 'Always perform one read-only state'
+Require-Contains 'frontend suspend lifecycle' $frontendText 'await this.adapter.suspend(this.createSuspendRequest());'
+Require-Contains 'frontend resume lifecycle' $frontendText "async resume(): Promise<void>"
+Require-Contains 'frontend resume lifecycle' $frontendText "await this.runFanGuardOnce('explicit-resume')"
+Require-Contains 'frontend resume admission' $frontendText "FAN_GUARD_RESUME_PENDING"
+Require-Contains 'frontend fast-resume adoption' $frontendText 'read-only state polls'
 
 # 4. Explicitly record the architectural boundaries instead of disguising
 #    them as equivalence: YeMan deliberately does not start HC's complete
@@ -183,7 +187,8 @@ Require-Contains 'frontend fast-resume adoption' $frontendText 'Always perform o
 $fullManagerGraph = $hostText.IndexOf('foreach (IManager manager in ManagerFactory.Managers)', [StringComparison]::Ordinal) -ge 0
 $fanOnlyIsolation = (-not $hostText.Contains('StartHcDeviceManager();')) -and
   (-not $hostText.Contains('StopHcDeviceManager();')) -and
-  $hostText.Contains('hcDeviceManagerLifecycle = "not-started/no-stop-required";')
+  $hostText.Contains('hcDeviceManagerLifecycle = ManagerFactoryNotStarted;') -and
+  $hostText.Contains('ManagerFactoryNotStarted = "not-started/no-stop-required"')
 $routeSpecificReadback = $hostText.IndexOf('hc-default-table-readback-confirmed', [StringComparison]::Ordinal) -ge 0
 $differences = @(
   [pscustomobject]@{ id = 'T1-HC-FULL-MANAGER-GRAPH'; severity = 'P1'; status = 'needs-investigation'; detail = 'Fan Host intentionally keeps HC non-fan ManagerFactory graph stopped; this is not full HC application equivalence.' },

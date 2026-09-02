@@ -178,7 +178,7 @@ class FakeAdapter implements FanApiAdapter {
     }
     return this.cleanupState('OEM');
   }
-  async suspend() {
+  async suspend(_request: { generation: number; source: string; leaseId?: string; reason?: string }) {
     this.calls.push('suspend');
     if (this.suspendFailures-- > 0) throw new Error('SUSPEND_TRANSIENT_FAILURE');
     if (this.directHcCloseWithoutHardwareCallback) {
@@ -262,7 +262,10 @@ async function main(): Promise<void> {
   assert(!isLegacyUnauthenticatedFanHostHealth({ status: 200, body: '{"host":"other-service","protocolVersion":2}' }, 2),
     'legacy host health classifier must reject an unrelated loopback service');
   const hostSource = readFileSync('C:\\SOFT\\YeManCC-Work\\FanLab\\real-host\\Program.cs', 'utf8');
-  const bridgeSource = readFileSync('C:\\SOFT\\YeManCC-Work\\YeManCC-source\\YeManCC3\\src\\bridge\\fanHost.ts', 'utf8');
+  // Read the bridge under test from the active worktree. The old absolute C:
+  // path could silently validate a different migration copy and made the
+  // lifecycle gate appear green while the packaged source had diverged.
+  const bridgeSource = readFileSync('src/bridge/fanHost.ts', 'utf8');
   const apiSource = readFileSync('C:\\SOFT\\YeManCC-Work\\YeManCC-source\\YeManCC3\\src\\bridge\\api.ts', 'utf8');
   const nativeSource = readFileSync('C:\\SOFT\\YeManCC-Work\\YeManCC-source\\YeManCC3\\native\\main.cpp', 'utf8');
   const profileCallbackSources = [
@@ -399,7 +402,7 @@ async function main(): Promise<void> {
     bridgeSource.includes('const FAN_GUARD_MAX_CONSECUTIVE_ENABLE_FAILURES = 5;') &&
     bridgeSource.includes('private fanGuardArmed = false;') &&
     bridgeSource.includes('private desiredCurve: FanNode[] | null = null;') &&
-    bridgeSource.includes('private async runFanGuardOnce(source = \'timer\')') &&
+    bridgeSource.includes('private async runFanGuardOnce(source = \'timer\', allowRecovery = false)') &&
     bridgeSource.includes('private scheduleFanGuard(): void') &&
     bridgeSource.includes('private consecutiveFanGuardEnableFailures = 0;') &&
     bridgeSource.includes('FAN_GUARD_RESUME_PENDING') &&
@@ -585,6 +588,7 @@ async function main(): Promise<void> {
   assert(lifecycle.state === 'ready', 'explicit apply must enable control');
   assert(adapter.calls.slice(0, 5).join(',') === 'handshake,open,open-events,acquire,enable',
     'first apply must open -> open-events -> acquire -> enable');
+  lifecycle.setPowerGeneration(1);
   await lifecycle.suspend();
   assert(lifecycle.state === 'suspended', 'suspend must reach suspended');
   const suspendCalls = adapter.calls.slice(5).join(',');
@@ -594,9 +598,9 @@ async function main(): Promise<void> {
   assert(adapter.calls.slice(6).join(',') === 'state,resume,handshake,open,open-events,acquire,enable',
     `the guard must use one serialized state/resume/rebuild attempt (calls=${adapter.calls.slice(6).join(',')})`);
 
-  // A failed initial enable arms the resident guard before the first write.
-  // The failed attempt must not cancel the timer: the next ten-second tick
-  // retries the same curve until the user disables or the process closes.
+  // A failed initial enable arms the resident guard for observation, but the
+  // timer must not become a second HC recovery owner. Only the application
+  // power transaction may call the explicit resume path.
   const guardRetryAdapter = new FakeAdapter();
   guardRetryAdapter.handshakeFailures = 3;
   const guardRetryLifecycle = new FanHostLifecycle({
@@ -610,20 +614,21 @@ async function main(): Promise<void> {
   let guardInitialFailure = false;
   try { await guardRetryLifecycle.apply(guardRetryCurve); } catch { guardInitialFailure = true; }
   assert(guardInitialFailure, 'the first guarded startup should expose its immediate failure to the caller');
+  const guardRetryInitialCalls = guardRetryAdapter.calls.length;
   await new Promise<void>((resolve) => setTimeout(resolve, 100));
-  assert(guardRetryLifecycle.state === 'ready',
-    `a failed guarded startup must be retried by the resident timer (state=${guardRetryLifecycle.state}, calls=${guardRetryAdapter.calls.join(',')})`);
-  assert(guardRetryAdapter.calls.filter((call) => call === 'handshake').length >= 4 && guardRetryAdapter.calls.includes('enable'),
-    'the ten-second guard retry must continue through handshake and enable after the first failed attempt');
+  assert(guardRetryLifecycle.state !== 'ready',
+    `the observation-only guard must not recover a failed startup (state=${guardRetryLifecycle.state}, calls=${guardRetryAdapter.calls.join(',')})`);
+  assert(guardRetryAdapter.calls.slice(guardRetryInitialCalls).every((call) => call === 'state') &&
+    !guardRetryAdapter.calls.includes('enable') && !guardRetryAdapter.calls.includes('resume'),
+    `the ten-second guard must observe only and never start, resume, or write HC (calls=${guardRetryAdapter.calls.join(',')})`);
   await guardRetryLifecycle.disable();
   const callsAfterGuardDisable = guardRetryAdapter.calls.length;
   await new Promise<void>((resolve) => setTimeout(resolve, 15));
   assert(guardRetryAdapter.calls.length === callsAfterGuardDisable, 'manual disable must disarm the resident fan guard');
   await guardRetryLifecycle.close();
 
-  // The guard is unbounded for transport/handshake/startup failures, but a
-  // real Enable failure has a five-consecutive-attempt safety cap. Once the
-  // cap is reached no sixth hardware write is sent automatically.
+  // The explicit coordinator resume may perform its HC recovery attempt, but
+  // the resident guard must not turn an Enable failure into automatic writes.
   const guardGiveUpAdapter = new FakeAdapter();
   const guardGiveUpLifecycle = new FanHostLifecycle({
     enabled: true,
@@ -634,16 +639,18 @@ async function main(): Promise<void> {
   });
   await guardGiveUpLifecycle.start();
   await guardGiveUpLifecycle.apply(guardRetryCurve);
+  guardGiveUpLifecycle.setPowerGeneration(1);
   await guardGiveUpLifecycle.suspend();
   guardGiveUpAdapter.enableFailures = 5;
   let firstGuardEnableRejected = false;
   try { await guardGiveUpLifecycle.resume(); } catch { firstGuardEnableRejected = true; }
+  const explicitResumeEnableCount = guardGiveUpAdapter.calls.filter((call) => call === 'enable').length;
   await new Promise<void>((resolve) => setTimeout(resolve, 100));
   const guardedEnableCount = guardGiveUpAdapter.calls.filter((call) => call === 'enable').length;
   await new Promise<void>((resolve) => setTimeout(resolve, 25));
-  assert(firstGuardEnableRejected && guardedEnableCount === 6 &&
+  assert(firstGuardEnableRejected && guardedEnableCount === explicitResumeEnableCount &&
     guardGiveUpAdapter.calls.filter((call) => call === 'enable').length === guardedEnableCount,
-    `five consecutive guarded Enable failures must stop automatic writes (count=${guardGiveUpAdapter.calls.filter((call) => call === 'enable').length}, calls=${guardGiveUpAdapter.calls.join(',')})`);
+    `the observation-only guard must not retry failed Enable automatically (count=${guardGiveUpAdapter.calls.filter((call) => call === 'enable').length}, calls=${guardGiveUpAdapter.calls.join(',')})`);
   await guardGiveUpLifecycle.close();
   await lifecycle.close();
   assert(lifecycle.state === 'stopped', 'close must stop a resumed host');
@@ -674,6 +681,7 @@ async function main(): Promise<void> {
   const resumeReadOnly = new FanHostLifecycle({ enabled: true, adapter: resumeReadOnlyAdapter, launcher: new FakeLauncher(), heartbeatIntervalMs: 0 });
   await resumeReadOnly.start();
   await resumeReadOnly.apply([{ tempC: 0, dutyPercent: 0 }, { tempC: 40, dutyPercent: 20 }, { tempC: 70, dutyPercent: 60 }, { tempC: 100, dutyPercent: 100 }]);
+  resumeReadOnly.setPowerGeneration(1);
   await resumeReadOnly.suspend();
   resumeReadOnlyAdapter.handshakeResult = { ...resumeReadOnlyAdapter.handshakeResult, fanRouteWriteReady: false };
   let resumeReadOnlyRejected = false;
@@ -713,6 +721,7 @@ async function main(): Promise<void> {
   const enableThenSleep = new FanHostLifecycle({ enabled: true, adapter: enableThenSleepAdapter, launcher: new FakeLauncher(), heartbeatIntervalMs: 0 });
   await enableThenSleep.start();
   const enableBeforeSleep = enableThenSleep.apply([{ tempC: 0, dutyPercent: 0 }, { tempC: 40, dutyPercent: 20 }, { tempC: 70, dutyPercent: 60 }, { tempC: 100, dutyPercent: 100 }]);
+  enableThenSleep.setPowerGeneration(1);
   const sleepAfterEnable = enableThenSleep.suspend();
   await Promise.all([enableBeforeSleep, sleepAfterEnable]);
   assert(enableThenSleep.state === 'suspended' &&
@@ -727,6 +736,7 @@ async function main(): Promise<void> {
   const sleepThenEnableAdapter = new FakeAdapter();
   const sleepThenEnable = new FanHostLifecycle({ enabled: true, adapter: sleepThenEnableAdapter, launcher: new FakeLauncher(), heartbeatIntervalMs: 0 });
   await sleepThenEnable.start();
+  sleepThenEnable.setPowerGeneration(1);
   const sleepBeforeEnable = sleepThenEnable.suspend();
   const enableAfterSleep = sleepThenEnable.apply([{ tempC: 0, dutyPercent: 0 }, { tempC: 40, dutyPercent: 20 }, { tempC: 70, dutyPercent: 60 }, { tempC: 100, dutyPercent: 100 }]);
   await sleepBeforeEnable;
@@ -772,6 +782,7 @@ async function main(): Promise<void> {
   const suspendRetry = new FanHostLifecycle({ enabled: true, adapter: suspendRetryAdapter, launcher: new FakeLauncher(), heartbeatIntervalMs: 0 });
   await suspendRetry.start();
   await suspendRetry.applyPreset('balanced');
+  suspendRetry.setPowerGeneration(1);
   await suspendRetry.suspend();
   assert(suspendRetry.state === 'suspended' && suspendRetryAdapter.calls.filter((call) => call === 'suspend').length === 2,
     'suspend failure must recover and retry before entering suspended');

@@ -27,7 +27,7 @@
     },
     {
       "path": "HandheldCompanion.deps.json",
-      "sha256": "c9be6d32d0ae83e4d61bab6aadbe92e1da3b477128ae2a74892a8ec3ddab97bc"
+      "sha256": "a44259ed4db0bddc4e98db7c897e3a9ac598194d2be5fc64fff07c1ea90fe725"
     },
     {
       "path": "HandheldCompanion.dll",
@@ -55,7 +55,7 @@
     },
     {
       "path": "install-fan-host-payload.ps1",
-      "sha256": "6e57d582fc241fe4ab8289defbff2f455a6ef0d6c171b63e23b1f69095cd9dd5"
+      "sha256": "932199f1e3398f79bb0d323b0b5859415837131d40dae2de9cf1eb0aea31b648"
     },
     {
       "path": "Interop.IWshRuntimeLibrary.dll",
@@ -291,7 +291,7 @@
     },
     {
       "path": "run-emergency-fan-restore.ps1",
-      "sha256": "2db7da8ddf057f0573f2ba54b847bbb0aa506883db5ea3292001ca91d0613ca9"
+      "sha256": "06084c19ac912056b6f190a77486021ea33ab517a5f482b8c8f09ec258a600b6"
     },
     {
       "path": "Sentry.dll",
@@ -391,7 +391,7 @@
     },
     {
       "path": "YeManFanHost.deps.json",
-      "sha256": "81f0dbf69bdd332b1fbd638f6b1ad42c1d3c1686f0b702b52b0d5766c61230a9"
+      "sha256": "8258da86c01d039852ce2f5aaa651e9684921c6aaf95f70f4fd6f5cc5e2a9860"
     },
     {
       "path": "YeManFanHost.dll",
@@ -407,7 +407,7 @@
     },
     {
       "path": "YeManFanHost.runtimeconfig.json",
-      "sha256": "96bc2946dff8790400d652ec7f8de7bb043e954980d59470c112788b68a1fbd3"
+      "sha256": "30d0dc491056efaaa5e3816f68a688b28e32ff6ca4d3bc85c148c1708d23a453"
     }
   ]
 }

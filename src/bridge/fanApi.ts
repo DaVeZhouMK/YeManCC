@@ -36,6 +36,15 @@ export interface FanLease {
   expiresAtMonoMs?: number;
   owner?: string;
 }
+/** The power transaction identity required by the Host's HC SystemPending
+ * boundary. A suspend request without both fields is never a valid lifecycle
+ * request, even when the loopback transport itself is healthy. */
+export interface FanSuspendRequest {
+  generation: number;
+  source: string;
+  leaseId?: string;
+  reason?: string;
+}
 export interface FanState {
   state: string;
   powerState?: string;
@@ -82,7 +91,7 @@ export interface FanApiAdapter {
   heartbeat(leaseId: string): Promise<FanLease>;
   releaseControl(leaseId: string): Promise<FanState>;
   restoreOem(leaseId?: string): Promise<FanState>;
-  suspend(leaseId?: string): Promise<FanState>;
+  suspend(request: FanSuspendRequest): Promise<FanState>;
   resume(): Promise<FanState>;
   close(): Promise<FanState>;
   /** Request the resident Host to exit only after close/restore succeeds. */
@@ -179,7 +188,7 @@ export class DisabledFanApiAdapter implements FanApiAdapter {
   async heartbeat(_leaseId: string): Promise<FanLease> { throw new Error('Fan 功能尚未启用'); }
   async releaseControl(_leaseId: string): Promise<FanState> { return clone(DISABLED_STATE); }
   async restoreOem(_leaseId?: string): Promise<FanState> { return clone(DISABLED_STATE); }
-  async suspend(_leaseId?: string): Promise<FanState> { return clone(DISABLED_STATE); }
+  async suspend(_request: FanSuspendRequest): Promise<FanState> { return clone(DISABLED_STATE); }
   async resume(): Promise<FanState> { return clone(DISABLED_STATE); }
   async close(): Promise<FanState> { return clone(DISABLED_STATE); }
   async shutdown(): Promise<void> { return; }
@@ -284,8 +293,16 @@ export class HttpFanApiAdapter implements FanApiAdapter {
   restoreOem(leaseId?: string): Promise<FanState> {
     return this.stateRequest('/api/restore', leaseId ? { leaseId } : {});
   }
-  suspend(leaseId?: string): Promise<FanState> {
-    return this.stateRequest('/api/suspend', leaseId ? { leaseId } : {});
+  suspend(request: FanSuspendRequest): Promise<FanState> {
+    if (!Number.isSafeInteger(request.generation) || request.generation <= 0 || !request.source.trim()) {
+      return Promise.reject(new Error('POWER_GENERATION_REQUIRED: Fan suspend 需要有效 generation/source'));
+    }
+    return this.stateRequest('/api/suspend', {
+      generation: request.generation,
+      source: request.source,
+      ...(request.leaseId ? { leaseId: request.leaseId } : {}),
+      ...(request.reason ? { reason: request.reason } : {}),
+    });
   }
   resume(): Promise<FanState> { return this.stateRequest('/api/resume'); }
   close(): Promise<FanState> { return this.stateRequest('/api/close'); }

@@ -14636,7 +14636,7 @@ static void reg_updater() {
              f << "$operationId = " << psLiteral(U2W(operationId)) << "\n";
              f << "$version = " << psLiteral(U2W(version)) << "\n";
              f << "$sha256 = " << psLiteral(U2W(ascii_lower(sha))) << "\n";
-             f << "$expectedFanHostV2ManifestSha256 = '334FB177323FBE8A04306684676211DC822B4F71661823774EB8CCBDD6110D08'\n";
+             f << "$expectedFanHostV2ManifestSha256 = '045CCB79452F0AC8A9FA81839B21030FD14E56B86E81797E3519FA080336A327'\n";
              f << "$expectedFanHostV2ManifestFileCount = 102\n";
              f << "$expectedFanHostV2LhmSha256 = 'F7ED30F07EA636C0DDCC5764C15C0A25AE8A0ACA02DED77E4AF24439955487CF'\n";
              f << "function Write-Utf8Atomic([string]$path, [string]$text) {\n";

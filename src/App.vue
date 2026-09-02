@@ -623,7 +623,8 @@ function notePowerTransitionGeneration(e: Event): number {
   return generation;
 }
 function onPowerSuspending(e: Event): void {
-  notePowerTransitionGeneration(e);
+  const generation = notePowerTransitionGeneration(e);
+  if (generation > 0) fanHostLifecycle.setPowerGeneration(generation);
   // No-op while the real Fan Host gate is false. When separately enabled,
   // lifecycle ordering restores OEM before the backend is suspended.
   // FanView can be evicted from KeepAlive, so the root owns the navigation
@@ -921,6 +922,12 @@ function scheduleResumeTransaction(generation: number): void {
       scheduleResumeRetry(targetGeneration, result.reason ?? 'resume_commit_failed');
       return;
     }
+
+    // The application power transaction is the only owner of fan recovery.
+    // The resident ten-second guard only observes/report stale state; it must
+    // not race this HC-ordered resume with a second /api/resume or curve write.
+    fanHostLifecycle.setPowerGeneration(targetGeneration);
+    await fanHostLifecycle.resume();
 
     committedResumeGeneration = targetGeneration;
     resumeRetryCounts.delete(targetGeneration);

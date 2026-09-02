@@ -10,7 +10,7 @@ $expected = [ordered]@{
   'HandheldCompanion.dll' = '70E27FD4D73A5CA3E3E750DE2736B5E1C3B126D716DD9F4F5794C84DA88C6415'
   'LibreHardwareMonitorLib.dll' = 'F7ED30F07EA636C0DDCC5764C15C0A25AE8A0ACA02DED77E4AF24439955487CF'
 }
-$expectedManifestSha256 = '334FB177323FBE8A04306684676211DC822B4F71661823774EB8CCBDD6110D08'
+$expectedManifestSha256 = '045CCB79452F0AC8A9FA81839B21030FD14E56B86E81797E3519FA080336A327'
 $payloadFull = [IO.Path]::GetFullPath($PayloadRoot).TrimEnd('\')
 if (-not (Test-Path -LiteralPath $payloadFull -PathType Container)) { throw "Fan Host V2 payload missing: $payloadFull" }
 

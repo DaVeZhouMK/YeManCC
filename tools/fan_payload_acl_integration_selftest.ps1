@@ -41,28 +41,21 @@ function Assert-NoUntrustedWrite([string]$Path) {
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $workspaceRoot = Split-Path -Parent (Split-Path -Parent $repoRoot)
 $installerSource = Join-Path $repoRoot 'PowerControl\fan-host\install-fan-host-payload.ps1'
+$sourcePayloadRoot = Join-Path $repoRoot 'PowerControl\fan-host'
 $validationRoot = Join-Path $workspaceRoot 'Build\Validation'
 $fixtureRoot = Join-Path $validationRoot ('fan-payload-acl-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '-' + [guid]::NewGuid().ToString('N'))
 $payloadRoot = Join-Path $fixtureRoot 'fan-host'
 New-Item -ItemType Directory -Force -Path $payloadRoot | Out-Null
 
-$files = @(
-  'YeManFanHost.exe', 'YeManFanHost.dll', 'YeManFanHost.deps.json',
-  'YeManFanHost.runtimeconfig.json', 'HandheldCompanion.dll', 'GamepadMotion.dll',
-  'YeManFanHost.authorization.md'
-)
-foreach ($file in $files) {
-  [IO.File]::WriteAllText((Join-Path $payloadRoot $file), "fixture-$file", [Text.Encoding]::UTF8)
+# Use the complete task-local payload as the fixture. The production installer
+# deliberately requires the authoritative 102-entry manifest; a seven-file
+# synthetic manifest only tested the old gate and could no longer exercise the
+# real ACL/quarantine path.
+foreach ($sourceItem in Get-ChildItem -LiteralPath $sourcePayloadRoot -Force) {
+  Copy-Item -LiteralPath $sourceItem.FullName -Destination (Join-Path $payloadRoot $sourceItem.Name) -Recurse -Force
 }
-Copy-Item -LiteralPath $installerSource -Destination (Join-Path $payloadRoot 'install-fan-host-payload.ps1') -Force
-$files += 'install-fan-host-payload.ps1'
-
-[ordered]@{
-  schemaVersion = 1
-  files = @($files | ForEach-Object {
-    [ordered]@{ path = $_; sha256 = Get-Sha256 (Join-Path $payloadRoot $_) }
-  })
-} | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $payloadRoot 'YeManFanHost.payload.json') -Encoding UTF8
+$manifest = Get-Content -LiteralPath (Join-Path $payloadRoot 'YeManFanHost.payload.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+$files = @($manifest.files | ForEach-Object { [string]$_.path })
 
 # Reproduce the deployment bug found in the ROG feedback: inherited broad
 # access and stale old runtime files beside a valid manifest payload.

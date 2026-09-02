@@ -323,7 +323,8 @@ $updateLayoutRoots = @(
 )
 $embedCustomSteamLibrary = -not $isLegacyBridge -or $isLegacyBootstrap
 $requiredUpdateRoots = @($updateLayoutRoots | ForEach-Object { [string]$_.source } | Sort-Object -Unique)
-$fanHostUpdatePolicy = 'preserve-existing'
+$includeFanHostInFullTestPackage = $releaseEnvelope -eq 'full'
+$fanHostUpdatePolicy = if ($includeFanHostInFullTestPackage) { 'include-task-isolated-payload' } else { 'preserve-existing' }
 
 foreach ($path in @($BuildRoot, $ReleaseRoot, $PackageBuildRoot, $StagingRoot, $UpdateRoot, $ReleaseYeManCC, $ReleasePowerControl, $ReleaseCustomSteamLibrary, $ReleasePackages)) {
   Assert-ChildPath $path $WorkspaceRoot 'Task5 output'
@@ -353,6 +354,14 @@ Copy-Item -LiteralPath (Join-Path $ProjectRoot 'YeMan-Support.html') -Destinatio
 
 $sourcePowerControl = Join-Path $ProjectRoot 'PowerControl'
 Copy-PowerControlTemplates $sourcePowerControl $StagingPowerControl
+if ($includeFanHostInFullTestPackage) {
+  # Fan Host is excluded by the generic PowerControl template policy because
+  # normal updater releases preserve the installed, separately authenticated
+  # Host. This isolated full test envelope is explicitly the opposite: it
+  # must carry the task-local Host payload so the tester receives one complete
+  # runnable package.
+  Copy-DirectoryContents (Join-Path $sourcePowerControl 'fan-host') (Join-Path $StagingPowerControl 'fan-host')
+}
 Assert-CustomSteamLibraryPackage $CustomSteamLibrarySource | Out-Null
 if ($embedCustomSteamLibrary) {
   Copy-DirectoryContents $CustomSteamLibrarySource $StagingCustomSteamLibrary
@@ -375,7 +384,14 @@ $updateLayoutManifest | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join
 
 $lockPath = Join-Path $ProjectRoot 'tools\release-assets.lock.json'
 $assetLock = Get-Content -LiteralPath $lockPath -Raw -Encoding UTF8 | ConvertFrom-Json
-$useWorkspaceAssets = Test-Path -LiteralPath $AssetsRoot -PathType Container
+$workspaceAssetsComplete = (Test-Path -LiteralPath $AssetsRoot -PathType Container) -and
+  (@($assetLock.files | Where-Object {
+    -not (Test-Path -LiteralPath (Join-Path $AssetsRoot ([string]$_.assetPath).Replace('/', '\')) -PathType Leaf)
+  }).Count -eq 0)
+# A task checkout may contain an intentionally empty/incomplete Assets
+# directory. Treat that as absent and use the verified PowerControl fallback;
+# an empty directory must not shadow a complete task-local fallback set.
+$useWorkspaceAssets = $workspaceAssetsComplete
 $assetSources = @{}
 foreach ($entry in $assetLock.files) {
   $source = if ($useWorkspaceAssets) {
@@ -515,7 +531,11 @@ try {
   $fanHostEntries = @($zipArchive.Entries | Where-Object {
     $_.FullName.Replace('\', '/').TrimStart('/') -match '^PowerControl/fan-host(?:/|$)'
   })
-  if ($fanHostEntries.Count -gt 0) { throw "YeManCC.zip must not contain PowerControl/fan-host entries: $($fanHostEntries.FullName -join ', ')" }
+  if ($includeFanHostInFullTestPackage) {
+    if ($fanHostEntries.Count -eq 0) { throw 'Full isolated test package must contain PowerControl/fan-host' }
+  } elseif ($fanHostEntries.Count -gt 0) {
+    throw "YeManCC.zip must not contain PowerControl/fan-host entries: $($fanHostEntries.FullName -join ', ')"
+  }
   $fanHostQuarantineEntries = @($zipArchive.Entries | Where-Object {
     $_.FullName.Replace('\', '/').TrimStart('/') -match '^PowerControl/fan-host-quarantine(?:/|$)'
   })
@@ -562,6 +582,8 @@ try {
   $zipArchive.Dispose()
 }
 $packageHash = Get-Sha256 $compatPackage
+$fanHostTestingLine1 = if ($includeFanHostInFullTestPackage) { 'This isolated full test package includes PowerControl/fan-host.' } else { 'PowerControl/fan-host is excluded from this release; an existing installed' }
+$fanHostTestingLine2 = if ($includeFanHostInFullTestPackage) { 'Use the included Fan Host payload together with this package.' } else { 'Fan Host is preserved and is not overwritten by the updater.' }
 
 $releaseVersion = [ordered]@{
   version = $version
@@ -579,8 +601,8 @@ $testingLines = @(
   (Join-Path $ReleaseYeManCC 'YeManCC.exe'), '',
   'The installed shortcut and scheduled task still run:',
   'C:\SOFT\YeMan\YeManCC\YeManCC.exe', '',
-  'PowerControl/fan-host is excluded from this release; an existing installed',
-  'Fan Host is preserved and is not overwritten by the updater.', '',
+  $fanHostTestingLine1,
+  $fanHostTestingLine2, '',
   "Update package SHA-256: $packageHash"
 )
 $testingLines | Set-Content -LiteralPath (Join-Path $ReleaseRoot 'TESTING.md') -Encoding UTF8

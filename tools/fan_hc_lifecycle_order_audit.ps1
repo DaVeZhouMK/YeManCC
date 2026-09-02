@@ -108,13 +108,16 @@ Require-Order 'YeMan Close' $hostClose @(
 $hostCloseBoundary = Slice $hostText 'private void CloseHcDevice()' 'private static void ExecuteCloseBoundary'
 Require-Order 'YeMan CloseHcDevice' $hostCloseBoundary @(
   'Invoke(device!, "Close");',
-  'hcDeviceManagerLifecycle = "not-started/no-stop-required";'
+  'HcVirtualCloseReturned = true;',
+  'UnsubscribeExternalProfileEvents();',
+  'confirmManagerCleanup: ConfirmManagerCleanupAfterClose'
 )
 
 $fullGraph = $hostText.IndexOf('foreach (IManager manager in ManagerFactory.Managers)', [StringComparison]::Ordinal) -ge 0
 $fanOnly = (-not $hostText.Contains('StartHcDeviceManager();')) -and
   (-not $hostText.Contains('StopHcDeviceManager();')) -and
-  ($hostText.Contains('hcDeviceManagerLifecycle = "not-started/no-stop-required";'))
+  $hostText.Contains('hcDeviceManagerLifecycle = ManagerFactoryNotStarted;') -and
+  $hostText.Contains('ManagerFactoryNotStarted = "not-started/no-stop-required"')
 $directCallback = $hostText.IndexOf('Invoke("PowerProfileManager_Applied", profile', [StringComparison]::Ordinal) -ge 0
 $powerManagerStarted = $hostText.IndexOf('Invoke(hcPowerProfileManager, "Start")', [StringComparison]::Ordinal) -ge 0
 

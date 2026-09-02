@@ -6,6 +6,7 @@ import {
   type FanLease,
   type FanNode,
   type FanState,
+  type FanSuspendRequest,
 } from './fanApi';
 import { fanDiagnosticLog, setFanDiagnosticPowerGeneration } from './fanDiagnostics';
 
@@ -1054,6 +1055,18 @@ export class FanHostLifecycle {
     }
   }
 
+  private createSuspendRequest(): FanSuspendRequest {
+    const generation = Math.floor(this.powerGeneration);
+    if (!Number.isSafeInteger(generation) || generation <= 0) {
+      throw new Error('POWER_GENERATION_REQUIRED: Fan Host suspend 缺少有效 power generation');
+    }
+    return {
+      generation,
+      source: 'webview.power',
+      reason: 'system-pending',
+    };
+  }
+
   /** Read host telemetry without changing ownership or hardware state. */
   async getState(): Promise<FanState> {
     return this.enqueue(() => this.adapter.getState());
@@ -1537,7 +1550,7 @@ export class FanHostLifecycle {
         // to an explicit control disable, not to suspend.
         this.stopHeartbeat();
         this.advanceSessionGeneration();
-        const suspended = await this.adapter.suspend();
+        const suspended = await this.adapter.suspend(this.createSuspendRequest());
         assertHcSessionSuspended(suspended, 'Fan Host suspend');
         // The Host has completed the HC Close boundary. A lease is scoped to
         // that now-closed device session and must never be reused after wake.
@@ -1571,7 +1584,7 @@ export class FanHostLifecycle {
         // if that succeeds, retry the suspend endpoint before fault-locking.
         try {
           await this.recoverAfterMutationFailure();
-          const suspended = await this.adapter.suspend();
+          const suspended = await this.adapter.suspend(this.createSuspendRequest());
           assertHcSessionSuspended(suspended, 'Fan Host suspend retry');
           this.lease = null;
           this.opened = false;
@@ -1585,11 +1598,17 @@ export class FanHostLifecycle {
     });
   }
 
+  /**
+   * Resume is owned by the application power transaction.  The resident
+   * ten-second guard deliberately does not call this method: it is an
+   * observation-only monitor, matching the HC lifecycle boundary where the
+   * power coordinator owns SystemReady/CurrentDevice.Open.
+   */
   async resume(): Promise<void> {
     return this.enqueue(async () => {
       fanDiagnosticLog('lifecycle.resume-begin', { state: this.state });
       if (!this.enabled || this.state === 'disabled' || !this.fanGuardArmed) return;
-      await this.runFanGuardOnce('explicit-resume');
+      await this.runFanGuardOnce('coordinator-resume', true);
     });
   }
 
@@ -1983,12 +2002,30 @@ export class FanHostLifecycle {
    * only this attempt; the timer is re-armed in scheduleFanGuard's finally
    * path and tries again ten seconds later. No wake/AC/DC event owns this loop.
    */
-  private async runFanGuardOnce(source = 'timer'): Promise<void> {
+  private async runFanGuardOnce(source = 'timer', allowRecovery = false): Promise<void> {
     const curve = this.desiredCurve ? cloneFanNodes(this.desiredCurve) : null;
     if (!this.enabled || !this.fanGuardArmed || !curve) return;
     fanDiagnosticLog('lifecycle.fan-guard-attempt', { source, state: this.state });
     this.lastEnableAttemptFailed = false;
     try {
+      // The timer is an observer only. Keep this branch before any route
+      // refresh, Host start, or recovery call so a stale state can never make
+      // the guard become a second HC lifecycle owner.
+      if (!allowRecovery) {
+        const observed = await this.adapter.getState();
+        this.syncRemoteSessionState(observed);
+        if (this.remoteFanControlHealthy(observed) && this.lease) {
+          this.activeCurve = cloneFanNodes(curve);
+          this.resumeCurve = null;
+          this.setState('ready');
+          this.scheduleHeartbeat();
+          this.emitFanGuardState(true);
+          fanDiagnosticLog('lifecycle.fan-guard-healthy', { source, state: observed.state });
+          return;
+        }
+        throw new Error('FAN_GUARD_OBSERVATION_ONLY');
+      }
+
       if (this.state === 'fault-locked' || this.state === 'conflict-locked' || this.state === 'unknown') {
         await this.recoverLockedHostBeforeStart();
       }

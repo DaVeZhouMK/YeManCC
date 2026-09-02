@@ -2,7 +2,16 @@ $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $native = Get-Content -Raw (Join-Path $repoRoot 'native\main.cpp')
 $workspaceRoot = Split-Path -Parent (Split-Path -Parent $repoRoot)
-$hostSource = Get-Content -Raw (Join-Path $workspaceRoot 'FanLab\real-host\Program.cs')
+$hostCandidates = @(
+  (Join-Path $workspaceRoot 'FanLab\real-host\Program.cs'),
+  'G:\YeManCC-Work\Mainline\YeManCC-source\YeManCC\FanLab\real-host\Program.cs',
+  'G:\YeManCC-Work\Isolated\Tasks\HC-Candidate-20260902\assets\candidates\FanHost-source-FANHOST-REAL-HOST-20260831\Program.cs'
+)
+$hostSourcePath = $hostCandidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+if (-not $hostSourcePath) {
+  throw "FanHost source baseline not found; checked: $($hostCandidates -join '; ')"
+}
+$hostSource = Get-Content -Raw -LiteralPath $hostSourcePath
 
 $queryStart = $native.IndexOf('else if (w == PBT_APMQUERYSUSPEND)')
 $suspendStart = $native.IndexOf('else if (w == PBT_APMSUSPEND)', $queryStart)
@@ -14,7 +23,7 @@ $suspendBody = if ($suspendStart -ge 0 -and $suspendEnd -gt $suspendStart) {
   $native.Substring($suspendStart, $suspendEnd - $suspendStart)
 } else { '' }
 $hostCallbackStart = $hostSource.IndexOf('private void OnPowerModeChanged')
-$hostQueueStart = $hostSource.IndexOf('private object SuspendOnPowerWorker', $hostCallbackStart)
+$hostQueueStart = if ($hostCallbackStart -ge 0) { $hostSource.IndexOf('private object SuspendOnPowerWorker', $hostCallbackStart) } else { -1 }
 $hostCallbackBody = if ($hostCallbackStart -ge 0 -and $hostQueueStart -gt $hostCallbackStart) {
   $hostSource.Substring($hostCallbackStart, $hostQueueStart - $hostCallbackStart)
 } else { '' }
@@ -36,15 +45,23 @@ $checks = [ordered]@{
   safeCloseFallback = $native.Contains('fanHostEmergencyPost(L"/api/close", reason, 1)') -and
     $native.Contains('if (suspendStatus != 404 && suspendStatus != 405)') -and
     $native.Contains('no concurrent close fallback')
-  hostSystemPowerObserver = $hostSource.Contains('SystemEvents.PowerModeChanged += OnPowerModeChanged')
+  # Older Host revisions subscribed directly to SystemEvents. The current
+  # source receives the native tagged boundary through PowerIngress and the
+  # serialized Channel worker; accept either explicitly, never a path guessed
+  # from a different migration copy.
+  hostSystemPowerObserver = $hostSource.Contains('SystemEvents.PowerModeChanged += OnPowerModeChanged') -or
+    ($hostSource.Contains('PowerIngressTarget') -and $hostSource.Contains('ProcessPowerTransitionsAsync'))
   hostPowerCallbackQueues = $hostSource.Contains('QueuePowerTransition(') -and
     $hostSource.Contains('PowerIngressTarget.Suspended') -and
     $hostSource.Contains('SuspendOnPowerWorker') -and
     $hostSource.Contains('engine.ResumeForSystemPower()')
-  hostPowerCallbackHasNoWait = $hostCallbackBody.Contains('QueuePowerTransition') -and
+  hostPowerCallbackHasNoWait = (($hostCallbackBody.Contains('QueuePowerTransition') -and
     -not ($hostCallbackBody.Contains('.Wait(') -or $hostCallbackBody.Contains('.Result') -or
       $hostCallbackBody.Contains('GetAwaiter().GetResult') -or $hostCallbackBody.Contains('Thread.Sleep') -or
-      $hostCallbackBody.Contains('lock (') -or $hostCallbackBody.Contains('diagnostics.Write'))
+      $hostCallbackBody.Contains('lock (') -or $hostCallbackBody.Contains('diagnostics.Write'))) -or
+    ($hostCallbackStart -lt 0 -and $hostSource.Contains('QueuePowerTransition(') -and
+      $hostSource.Contains('Channel.CreateUnbounded<PowerTransition>') -and
+      $hostSource.Contains('ProcessPowerTransitionsAsync')))
   hostSuspendGateIsLockFree = $hostSource.Contains('Volatile.Write(ref systemSuspendPending, 1)') -and
     $hostSource.Contains('realBackend?.BlockWritesForSuspend()')
   hostPowerQueueRunsAsync = $hostSource.Contains('Channel.CreateUnbounded<PowerTransition>') -and

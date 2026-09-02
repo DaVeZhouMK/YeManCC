@@ -120,7 +120,7 @@ if ((Has $lockedRecovery 'await this.closeHostAfterRestore();') -and (Has $locke
 Require-All 'T4-FRONT-LEASE-01' 'Frontend heartbeat/mutation failure recovery is serialized and observer-only after transport loss' $front @(
   'recoverAfterMutationFailure', 'restoreAndRelease', 'waitForHostRecovery(false)', 'scheduleHeartbeat')
 Require-All 'T4-FRONT-SLEEP-01' 'Frontend suspend/resume closes and recreates HC session' $front @(
-  'await this.adapter.suspend();', 'assertHcSessionSuspended', "this.state === 'suspended'", 'await this.adapter.resume();', 'applyMutation(curveToResume)')
+  'await this.adapter.suspend(this.createSuspendRequest());', 'assertHcSessionSuspended', "this.state === 'suspended'", 'await this.adapter.resume();', 'this.resumeCurve = curveToResume', 'await this.applyMutation(curve)')
 if ((Has $nav 'void fanHostLifecycle.close().catch(() => {});') -and
     (Has $nav 'await app.exit(0);') -and !(Has $nav 'await fanHostLifecycle.close();')) {
   Pass 'T4-FRONT-EXIT-01' 'Exit button hands off immediately to native parent-exit safety' 'NavRail.quit'
