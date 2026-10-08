@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
   T1 read-only lifecycle parity audit for HC and YeMan Fan Host.
 
@@ -131,11 +131,15 @@ Require-Order 'YeMan Open' $hostOpen @(
   'CaptureOemBaseline();'
 )
 if ($hostOpen.Contains('StartHcDeviceManager();')) { throw 'YeMan fan-only Open must not start HC DeviceManager' }
-$hostEvents = Slice $hostText 'private void OpenEventsCore()' 'private void SubscribeExternalProfileEvents()'
+# §2（FAN-926R 裁决）：旧要求（独立 `private void OpenEventsCore()` + `Invoke` 后轮询
+# `EnsureHcDeviceOpenForRestore()`）已被 920-v1.14 §25 正式取代 —— 现行生产入口为
+# `OpenEventsBeginCore()`，合同 = 调用前确证会话/路由就绪 + 调用后以正式收据开始设备打开。
+$hostEvents = Slice $hostText 'private HcDeviceOpenNeed OpenEventsBeginCore()' 'private void OpenEventsFinalizeCore()'
 Require-Order 'YeMan OpenEvents' $hostEvents @(
-  'Invoke(device!, "OpenEvents");',
-  'EnsureHcDeviceOpenForRestore();'
+  'EnsureHcSessionReadyForOpenEvents();',
+  'Invoke(device!, "OpenEvents");'
 )
+if (-not $hostEvents.Contains('BeginHcDeviceOpenForRestore();')) { throw 'YeMan OpenEvents must begin the formal HC device-open receipt after invoking OpenEvents' }
 $hostClose = Slice $hostText 'private void CloseCore(bool stopDeviceManager)' 'private void CloseHcDevice()'
 Require-Order 'YeMan Close' $hostClose @(
   'StopCpuTemperatureMonitor();',
@@ -157,12 +161,18 @@ Require-Contains 'YeMan host ordered power queue' $hostText 'ProcessPowerTransit
 Require-Contains 'YeMan native resume gate' $hostText 'automaticResumeWorkerThreadId'
 Require-Contains 'YeMan resume admission gate' $hostText 'POWER_RESUMING'
 Require-Contains 'YeMan resume worker cleanup' $hostText 'finally'
-Require-Contains 'YeMan resuspend race gate' $hostText 'suspendRequestedDuringResume'
-Require-Contains 'YeMan resuspend race gate' $hostText 'power.suspend-deferred-during-resume'
-Require-Contains 'YeMan resuspend owner' $hostText 'HC_RESUSPEND_AFTER_RESUME_FAILED'
+Require-Contains 'YeMan HC IsReady wait' $hostText 'private void WaitForHcDeviceReadyBeforeOpen()'
+$readyWaitIndex = $hostText.IndexOf('WaitForHcDeviceReadyBeforeOpen();', [StringComparison]::Ordinal)
+$openDeviceIndex = $hostText.IndexOf('OpenHcDevice();', [StringComparison]::Ordinal)
+if ($readyWaitIndex -lt 0 -or $openDeviceIndex -lt 0 -or $readyWaitIndex -ge $openDeviceIndex) {
+  throw 'YeMan HC SystemReady must poll IsReady before the virtual Open call'
+}
+Require-Contains 'YeMan resuspend HC parity' $hostText 'HC SystemPending closes synchronously even when the previous'
+Require-Contains 'YeMan resuspend HC parity' $hostText 'PowerState == "Suspended" || state.PowerState == "Suspending"'
+Require-Contains 'YeMan resuspend benign skip' $hostText 'the next SystemReady re-runs the F5'
 
-# 3. Native and renderer boundaries: callbacks only enqueue, and UI/native
-#    duplicate observers share the Host's idempotent serialized boundary.
+# 3. Native and renderer boundaries: native is the sole F4 sender; renderer
+#    observes suspend and participates only in the tagged F5 resume transaction.
 Require-Contains 'native power callback safety' $nativeText 'fanHostScheduleEmergencySuspend("suspend-confirmed", currentPowerGeneration())'
 Require-Contains 'native power callback safety' $nativeText 'fanHostScheduleEmergencySuspend("suspend-broadcast", generation)'
 Require-Contains 'native power callback safety' $nativeText 'fanHostScheduleEmergencySuspend("kernel-power-506", generation)'
@@ -174,12 +184,48 @@ Require-Contains 'native resume IPC' $nativeText 'ipc_emit("power.resuming"'
 Require-Contains 'native resume IPC' $nativeText 'ipc_emit("power.resumed"'
 Require-Contains 'native exit handoff' $nativeText 'fanHostEmergencyPost('
 Require-Contains 'native exit handoff' $nativeText 'L"/api/parent-exit"'
+Require-Contains 'Host F4 native authority gate' $hostText 'RequireNativeSuspendAuthority(body);'
+Require-Contains 'Host F4 native authority gate' $hostText 'F4_NATIVE_AUTHORITY_REQUIRED'
+$hostSystemPending = Slice $hostText 'private object SuspendUnlocked()' 'private ResumeAdmission StartAutomaticResumeUnlocked('
+Require-Contains 'Host F4 single close owner' $hostSystemPending 'CloseForSystemPending()'
+# ★ 因 FAN-926R 裁决 §3-D1 **改要求**（明示取代，不是"仅更新符号/证明行为未变"）：
+#   旧要求 = SuspendUnlocked 不得在 Close 前预写默认曲线，且 SystemPending 全局一律
+#            `skipOemRestore: true` / `clearOemEvidence: true`（"一律 Close-first"）。
+#   新要求 = 有写历史且会话可操作时，由**唯一生命周期 owner 在进入 HC Close 之前**
+#            有界执行一次现成默认模式恢复；会话不可操作时才 not-attempted；证据保留并三轴分列。
+#   仍然成立的部分：睡眠**通知/接受路径本身**不得直接发起 HC 长调用（由 owner 承担），
+#   也不得以写 0/手动停扇替代系统睡眠。
+if ($hostSystemPending.Contains('RestoreHardware(close: true') -or $hostSystemPending.Contains('RestoreOem(')) {
+  throw 'YeMan F4: the sleep notification path itself must not call the release directly; the single close owner owns it'
+}
+Require-Contains 'Host D1 bounded pre-close release decision' $hostText 'power.suspend-preclose-release-decision'
+Require-Contains 'Host D1 release-before-close' $hostText 'skipOemRestore: !preCloseReleaseAttempted'
+Require-Contains 'Host D1 evidence retained' $hostText 'clearOemEvidence: false'
+Require-Contains 'Host D1 usable-session gate' $hostText 'var preCloseReleaseAttempted = state.HardwareWritesObserved'
+Require-Contains 'Host strict F4 no physical claim' $hostText 'state.OemRestoreEvidence = "not-observed"'
+Require-Contains 'Host strict F4 no ownership claim' $hostText 'ownershipClaim = false'
+Require-Contains 'Host strict F4 retry owner' $hostText 'recoveryRetryUsesSystemPendingClose'
 Require-Contains 'frontend close one-owner' $frontendText 'send exactly one Close request'
-Require-Contains 'frontend suspend lifecycle' $frontendText 'await this.adapter.suspend(this.createSuspendRequest());'
 Require-Contains 'frontend resume lifecycle' $frontendText "async resume(): Promise<void>"
-Require-Contains 'frontend resume lifecycle' $frontendText "await this.runFanGuardOnce('explicit-resume')"
-Require-Contains 'frontend resume admission' $frontendText "FAN_GUARD_RESUME_PENDING"
-Require-Contains 'frontend fast-resume adoption' $frontendText 'read-only state polls'
+# 920 §8.0-D B5 remap: the old assertions pinned the deleted guard/negotiation window
+# (runFanGuardOnce('coordinator-resume') / FAN_GUARD_RESUME_PENDING / "read-only state polls"),
+# self-documented in fanHost.ts L2026-2028 and L1833-1834 (E9 T0 trim). Intent preserved: resume
+# must remain event-driven, must read the remote state read-only before rebuilding, and must not
+# reintroduce a guard/resume-pending window.
+# 920-v1.2 W1: resume() now re-writes through the shared bounded retry (mutateWithBoundedRetry),
+# so the pinned literal is the callback form rather than a bare single-shot await.
+# G7（FAN-926R 执行单 §3.3）**因本裁决改要求**：准入 + 单次入队执行的唯一执行器是
+# mutateWithBoundedRetry，重放体抽到 replayResumeCurve()，因此"重放回调"锚点变成
+# `() => this.replayResumeCurve(generation, intentRevision)`，而曲线写入仍是同一个
+# applyMutation(desiredCurve)。断言意图不变：resume 必须事件驱动、先只读快照再经同一
+# applyMutation 重写已记住的曲线，且不得复活 guard/resume-pending 观察窗。
+Require-Contains 'frontend resume lifecycle' $frontendText '() => this.replayResumeCurve(generation, intentRevision)'
+Require-Contains 'frontend resume lifecycle' $frontendText 'this.applyMutation(this.desiredCurve as readonly FanNode[])'
+Require-Contains 'frontend resume lifecycle' $frontendText 'const remote = await this.adapter.getState().catch(() => null);'
+Require-Contains 'frontend resume lifecycle' $frontendText '无 adapter.resume/协商/观察窗'
+if ($frontendText.Contains('FAN_GUARD_RESUME_PENDING') -or $frontendText.Contains('runFanGuardOnce')) {
+  throw 'YeMan frontend must not reintroduce a resident fan-guard/resume-pending window (E9 deletion面)'
+}
 
 # 4. Explicitly record the architectural boundaries instead of disguising
 #    them as equivalence: YeMan deliberately does not start HC's complete
@@ -231,7 +277,7 @@ $summary = @"
 - YeMan serialized power queue and single Close owner: source-confirmed
 - YeMan external admission while automatic resume rebuild is ``Resuming``: blocked (``POWER_RESUMING``)
 - Automatic resume worker bypass: thread-bound only, cleared in ``finally``
-- Duplicate native/UI suspend/resume observers: serialized/idempotent Host boundary
+- Power commands: native is the sole F4 suspend authority; renderer only coordinates tagged F5 resume
 
 ## Standing rule
 

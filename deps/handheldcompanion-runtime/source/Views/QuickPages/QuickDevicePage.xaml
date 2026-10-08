@@ -1,0 +1,191 @@
+﻿<Page
+    x:Class="HandheldCompanion.Views.QuickPages.QuickDevicePage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:ikw="http://schemas.inkore.net/lib/ui/wpf"
+    xmlns:l="clr-namespace:HandheldCompanion.Localization"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:resx="clr-namespace:HandheldCompanion.Properties"
+    xmlns:ui="http://schemas.inkore.net/lib/ui/wpf/modern"
+    xmlns:viewmodels="clr-namespace:HandheldCompanion.ViewModels"
+    Name="QuickDevice"
+    Title="{l:Static resx:Resources.QuickDevicePage_Title}"
+    Margin="12,0,12,0"
+    d:Background="White"
+    d:DataContext="{d:DesignInstance Type=viewmodels:QuickDevicePageViewModel}"
+    d:DesignHeight="1200"
+    d:DesignWidth="640"
+    KeepAlive="True"
+    Loaded="Page_Loaded"
+    Unloaded="Page_Unloaded"
+    mc:Ignorable="d">
+
+    <ikw:SimpleStackPanel Spacing="28">
+
+        <!--  Device settings  -->
+        <ikw:SimpleStackPanel Spacing="8">
+            <TextBlock Style="{StaticResource BaseTextBlockStyle}" Text="{l:Static resx:Resources.QuickDevicePage_DeviceSettings}" />
+
+            <ikw:SimpleStackPanel Spacing="3">
+                <ikw:SimpleStackPanel
+                    Name="DisplayStack"
+                    IsEnabled="{Binding IsDisplayStackEnabled}"
+                    Spacing="3">
+                    <ui:SettingsCard Description="{l:Static resx:Resources.QuickDevicePage_DisplayResolutionDesc}" Header="{l:Static resx:Resources.QuickDevicePage_DisplayResolution}">
+                        <ui:SettingsCard.HeaderIcon>
+                            <ui:FontIcon Icon="{x:Static ui:SegoeFluentIcons.AspectRatio}" />
+                        </ui:SettingsCard.HeaderIcon>
+                        <ComboBox
+                            Name="ComboBoxResolution"
+                            IsReadOnly="True"
+                            ItemsSource="{Binding Resolutions, Mode=OneWay, UpdateSourceTrigger=PropertyChanged}"
+                            SelectedItem="{Binding SelectedResolution, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                    </ui:SettingsCard>
+                    <ui:SettingsCard Description="{l:Static resx:Resources.QuickDevicePage_DisplayFrequencyDesc}" Header="{l:Static resx:Resources.QuickDevicePage_DisplayFrequency}">
+                        <ui:SettingsCard.HeaderIcon>
+                            <ui:FontIcon Icon="{x:Static ui:SegoeFluentIcons.DeviceLaptopNoPic}" />
+                        </ui:SettingsCard.HeaderIcon>
+                        <ComboBox
+                            Name="ComboBoxFrequency"
+                            IsReadOnly="True"
+                            ItemsSource="{Binding Frequencies, Mode=OneWay, UpdateSourceTrigger=PropertyChanged}"
+                            SelectedValue="{Binding SelectedFrequencyValue, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                            SelectedValuePath="Frequency" />
+                    </ui:SettingsCard>
+                </ikw:SimpleStackPanel>
+
+                <Border
+                    Name="ResolutionOverrideStack"
+                    Padding="15,12,12,12"
+                    ui:ThemeManager.RequestedTheme="{Binding Source={x:Static ui:ThemeManager.Current}, Path=ActualApplicationTheme, Converter={StaticResource InverseAppThemeConverter}}"
+                    Background="{DynamicResource SystemControlPageBackgroundAltHighBrush}"
+                    CornerRadius="{DynamicResource ControlCornerRadius}"
+                    Visibility="{Binding ResolutionOverrideStackVisibility}">
+
+                    <ikw:SimpleStackPanel
+                        Grid.Row="1"
+                        Grid.ColumnSpan="2"
+                        Margin="20,6,0,0"
+                        HorizontalAlignment="Center"
+                        Orientation="Horizontal">
+                        <ui:FontIcon
+                            Height="20"
+                            Margin="10,0"
+                            HorizontalAlignment="Center"
+                            FontFamily="{DynamicResource SymbolThemeFontFamily}"
+                            Foreground="{DynamicResource SystemControlForegroundBaseHighBrush}"
+                            Glyph="&#xe7ba;" />
+                        <TextBlock
+                            Foreground="{DynamicResource SystemControlForegroundBaseHighBrush}"
+                            Style="{StaticResource CaptionTextBlockStyle}"
+                            Text="{l:Static resx:Resources.QuickDevicePage_ResolutionOverrideWarning}"
+                            TextWrapping="Wrap" />
+                    </ikw:SimpleStackPanel>
+                </Border>
+
+                <ui:SettingsCard Header="Wi-Fi">
+                    <ui:SettingsCard.HeaderIcon>
+                        <ui:FontIcon Icon="{x:Static ui:SegoeFluentIcons.Wifi}" />
+                    </ui:SettingsCard.HeaderIcon>
+                    <ui:ToggleSwitch
+                        Name="WifiToggle"
+                        IsEnabled="{Binding IsWiFiSupported}"
+                        IsOn="{Binding IsWiFiEnabled, Mode=TwoWay}" />
+                </ui:SettingsCard>
+
+                <ui:SettingsCard Header="{l:Static resx:Resources.QuickDevicePage_Bluetooth}">
+                    <ui:SettingsCard.HeaderIcon>
+                        <ui:FontIcon Icon="{x:Static ui:SegoeFluentIcons.Bluetooth}" />
+                    </ui:SettingsCard.HeaderIcon>
+                    <ui:ToggleSwitch
+                        Name="BluetoothToggle"
+                        IsEnabled="{Binding IsBluetoothSupported}"
+                        IsOn="{Binding IsBluetoothEnabled, Mode=TwoWay}" />
+                </ui:SettingsCard>
+
+                <ui:SettingsCard Description="{l:Static resx:Resources.QuickDevicePage_NightLightDesc}" Header="{l:Static resx:Resources.QuickDevicePage_NightLight}">
+                    <ui:SettingsCard.HeaderIcon>
+                        <ui:FontIcon Icon="{x:Static ui:SegoeFluentIcons.BlueLight}" />
+                    </ui:SettingsCard.HeaderIcon>
+                    <ui:ToggleSwitch
+                        Name="NightLightToggle"
+                        IsEnabled="{Binding IsNightLightSupported}"
+                        IsOn="{Binding IsNightLightEnabled, Mode=TwoWay}" />
+                </ui:SettingsCard>
+
+                <!--  AYANEO Flip DS  -->
+                <ikw:SimpleStackPanel
+                    Name="AYANEOFlipDSPanel"
+                    d:Visibility="Visible"
+                    Visibility="{Binding AYANEOFlipDSPanelVisibility}">
+
+                    <ui:SettingsExpander Header="Enable second display">
+                        <ui:SettingsExpander.HeaderIcon>
+                            <ui:FontIcon Icon="{x:Static ui:SegoeFluentIcons.OpenInNewWindow}" />
+                        </ui:SettingsExpander.HeaderIcon>
+                        <ui:ToggleSwitch Name="Toggle_AYANEOFlipScreen" IsOn="{Binding AYANEOFlipScreenEnabled, Mode=TwoWay}" />
+                        <ui:SettingsExpander.Items>
+                            <ui:SettingsCard ContentAlignment="Left">
+                                <DockPanel Visibility="{Binding AYANEOFlipScreenEnabled, UpdateSourceTrigger=PropertyChanged, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                    <Label
+                                        VerticalAlignment="Center"
+                                        Content="{Binding AYANEOFlipScreenBrightness, Mode=OneWay}"
+                                        ContentStringFormat="{}{0:N0} %" />
+                                    <Slider
+                                        Name="Slider_AYANEOFlipScreenBrightness"
+                                        Margin="8,0,0,0"
+                                        HorizontalAlignment="Stretch"
+                                        VerticalAlignment="Center"
+                                        AutoToolTipPrecision="0"
+                                        IsMoveToPointEnabled="True"
+                                        IsSnapToTickEnabled="True"
+                                        LargeChange="10"
+                                        Maximum="100"
+                                        Minimum="10"
+                                        SmallChange="1"
+                                        TickFrequency="10"
+                                        TickPlacement="BottomRight"
+                                        ToolTip="{Binding Value, StringFormat=N0, RelativeSource={RelativeSource Self}, Mode=OneWay}"
+                                        Value="{Binding AYANEOFlipScreenBrightness, Mode=TwoWay}" />
+                                </DockPanel>
+                            </ui:SettingsCard>
+                        </ui:SettingsExpander.Items>
+                    </ui:SettingsExpander>
+                </ikw:SimpleStackPanel>
+
+                <!--  Device or Capabilities specific  -->
+                <ikw:SimpleStackPanel Spacing="3">
+                    <ui:SettingsCard
+                        Name="FanOverridePanel"
+                        Description="{l:Static resx:Resources.DevicePage_FullFanSpeedDesc}"
+                        Header="{l:Static resx:Resources.DevicePage_FullFanSpeedText}"
+                        Visibility="{Binding FanOverridePanelVisibility}">
+                        <ui:SettingsCard.HeaderIcon>
+                            <ui:FontIcon Icon="{x:Static ui:SegoeFluentIcons.ReadingList}" />
+                        </ui:SettingsCard.HeaderIcon>
+                        <ui:ToggleSwitch Name="Toggle_FanOverride" IsOn="{Binding FanOverrideEnabled, Mode=TwoWay}" />
+                    </ui:SettingsCard>
+                </ikw:SimpleStackPanel>
+            </ikw:SimpleStackPanel>
+        </ikw:SimpleStackPanel>
+
+        <!--  Dynamic lighting settings  -->
+        <ikw:SimpleStackPanel Spacing="8">
+            <TextBlock Style="{StaticResource BaseTextBlockStyle}" Text="{l:Static resx:Resources.QuickDevicePage_DynamicLighting}" />
+
+            <ikw:SimpleStackPanel Name="DynamicLightingPanel" Spacing="3">
+                <!--  Use Dynamic lighting  -->
+                <ui:SettingsCard Header="{l:Static resx:Resources.QuickDevicePage_DynamicLightingToggle}">
+                    <ui:SettingsCard.HeaderIcon>
+                        <ui:FontIcon Icon="{x:Static ui:SegoeFluentIcons.LEDLight}" />
+                    </ui:SettingsCard.HeaderIcon>
+                    <ui:ToggleSwitch
+                        Name="UseDynamicLightingToggle"
+                        IsEnabled="{Binding IsDynamicLightingSupported}"
+                        IsOn="{Binding IsDynamicLightingEnabled, Mode=TwoWay}" />
+                </ui:SettingsCard>
+            </ikw:SimpleStackPanel>
+        </ikw:SimpleStackPanel>
+    </ikw:SimpleStackPanel>
+</Page>

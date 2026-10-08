@@ -1,0 +1,282 @@
+using HandheldCompanion.Actions;
+using HandheldCompanion.Devices;
+using HandheldCompanion.Helpers;
+using HandheldCompanion.Inputs;
+using HandheldCompanion.Managers;
+using HandheldCompanion.Utils;
+using HandheldCompanion.ViewModels;
+using System;
+using System.Collections.Generic;
+using System.Numerics;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
+using System.Windows.Input;
+
+namespace HandheldCompanion.Views.Pages.Profiles;
+
+/// <summary>
+///     Interaction logic for SettingsMode0.xaml
+/// </summary>
+public partial class SettingsMode0 : Page
+{
+    private CrossThreadLock updateLock = new();
+
+    private const ButtonFlags gyroButtonFlags = ButtonFlags.HOTKEY_GYRO_AIMING;
+    private Hotkey GyroHotkey = new(gyroButtonFlags) { IsInternal = true, Name = "HOTKEY_GYRO_AIMING" };
+
+    public SettingsMode0()
+    {
+        DataContext = new SettingsMode0ViewModel();
+        InitializeComponent();
+    }
+
+    public SettingsMode0(string Tag) : this()
+    {
+        this.Tag = Tag;
+
+        MotionManager.SettingsMode0Update += MotionManager_SettingsMode0Update;
+        ManagerFactory.hotkeysManager.Updated += HotkeysManager_Updated;
+
+        // store hotkey to manager
+        ManagerFactory.hotkeysManager.UpdateOrCreateHotkey(GyroHotkey);
+    }
+
+    public void SetProfile()
+    {
+        if (updateLock.TryEnter())
+        {
+            try
+            {
+                // UI thread
+                UIHelper.TryInvoke(() =>
+                {
+                    Profile? selectedProfile = ProfilesPage.selectedProfile;
+                    if (selectedProfile is null)
+                        return;
+
+                    SliderSensitivityX.Value = selectedProfile.MotionSensivityX;
+                    SliderSensitivityY.Value = selectedProfile.MotionSensivityY;
+                    tb_ProfileAimingDownSightsMultiplier.Value = selectedProfile.AimingSightsMultiplier;
+
+                    GyroHotkey.inputsChord.ButtonState = (ButtonState)selectedProfile.AimingSightsTrigger.Clone();
+                    ManagerFactory.hotkeysManager.UpdateOrCreateHotkey(GyroHotkey);
+
+                    // temp
+                    StackCurve.Children.Clear();
+                    foreach (KeyValuePair<double, double> elem in selectedProfile.MotionSensivityArray)
+                    {
+                        // skip first item ?
+                        if (elem.Key == 0)
+                            continue;
+
+                        double height = elem.Value * StackCurve.Height;
+                        Thumb thumb = new Thumb
+                        {
+                            Tag = elem.Key,
+                            Width = 8,
+                            MaxHeight = StackCurve.Height,
+                            Height = height,
+                            VerticalAlignment = VerticalAlignment.Bottom,
+                            BorderThickness = new Thickness(0),
+                            IsEnabled = false // prevent the control from being clickable
+                        };
+
+                        // Bind the Stroke property to a dynamic resource
+                        thumb.SetResourceReference(Thumb.BackgroundProperty, "SystemControlHighlightAltListAccentLowBrush");
+                        thumb.SetResourceReference(Thumb.BorderBrushProperty, "SystemControlHighlightAltListAccentHighBrush");
+
+                        StackCurve.Children.Add(thumb);
+                    }
+                });
+            }
+            catch { }
+            finally
+            {
+                updateLock.Exit();
+            }
+        }
+    }
+
+    private void Page_Loaded(object sender, RoutedEventArgs e)
+    {
+    }
+
+    public void Page_Closed()
+    {
+    }
+
+    private void MotionManager_SettingsMode0Update(Vector3 gyrometer)
+    {
+        Highlight_Thumb(Math.Max(Math.Max(Math.Abs(gyrometer.Z), Math.Abs(gyrometer.X)), Math.Abs(gyrometer.Y)));
+    }
+
+    private void SliderSensitivityX_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (ProfilesPage.selectedProfile is null)
+            return;
+
+        // prevent update loop
+        if (updateLock.IsEntered())
+            return;
+
+        ProfilesPage.selectedProfile.MotionSensivityX = (float)SliderSensitivityX.Value;
+        ProfilesPage.SubmitProfile();
+    }
+
+    private void SliderSensitivityY_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (ProfilesPage.selectedProfile is null)
+            return;
+
+        // prevent update loop
+        if (updateLock.IsEntered())
+            return;
+
+        ProfilesPage.selectedProfile.MotionSensivityY = (float)SliderSensitivityY.Value;
+        ProfilesPage.SubmitProfile();
+    }
+
+    private void Highlight_Thumb(float value)
+    {
+        // UI thread
+        UIHelper.TryInvoke(() =>
+        {
+            double dist_x = value / IDevice.GetCurrent().GamepadMotion.GetCalibration().GetGyroThreshold();
+
+            foreach (Control control in StackCurve.Children)
+            {
+                double x = (double)control.Tag;
+
+                if (dist_x > x)
+                    control.BorderThickness = new Thickness(0, 0, 0, 20);
+                else
+                    control.BorderThickness = new Thickness(0);
+            }
+        });
+    }
+
+    private void StackCurve_MouseDown(object sender, MouseButtonEventArgs e)
+    {
+        StackCurve_MouseMove(sender, e);
+    }
+
+    private void StackCurve_MouseMove(object sender, MouseEventArgs e)
+    {
+        if (ProfilesPage.selectedProfile is null)
+            return;
+
+        Control? thumb = null;
+
+        foreach (Control control in StackCurve.Children)
+        {
+            var position = e.GetPosition(control);
+            var dist_x = Math.Abs(position.X);
+
+            // Bind the Stroke property to a dynamic resource
+            control.SetResourceReference(BackgroundProperty, "SystemControlHighlightAltListAccentLowBrush");
+
+            if (dist_x <= control.Width)
+                thumb = control;
+        }
+
+        if (thumb is null)
+            return;
+
+        // Bind the Stroke property to a dynamic resource
+        thumb.SetResourceReference(Thumb.BackgroundProperty, "SystemControlHighlightAltListAccentHighBrush");
+
+        if (e.LeftButton == MouseButtonState.Pressed)
+        {
+            var x = (double)thumb.Tag;
+            thumb.Height = StackCurve.ActualHeight - e.GetPosition(StackCurve).Y;
+            ProfilesPage.selectedProfile.MotionSensivityArray[x] = thumb.Height / StackCurve.Height;
+            ProfilesPage.SubmitProfile();
+        }
+    }
+
+    private void Button_Click(object sender, RoutedEventArgs e)
+    {
+        Profile? selectedProfile = ProfilesPage.selectedProfile;
+        if (selectedProfile is null)
+            return;
+
+        // default preset
+        foreach (Control Thumb in StackCurve.Children)
+        {
+            var x = (double)Thumb.Tag;
+            Thumb.Height = StackCurve.Height / 2.0f;
+            selectedProfile.MotionSensivityArray[x] = Thumb.Height / StackCurve.Height;
+        }
+        ProfilesPage.SubmitProfile();
+    }
+
+    private void Button_Click_1(object sender, RoutedEventArgs e)
+    {
+        Profile? selectedProfile = ProfilesPage.selectedProfile;
+        if (selectedProfile is null)
+            return;
+
+        // agressive preset
+        var tempx = 24f / Profile.SensivityArraySize;
+        foreach (Control Thumb in StackCurve.Children)
+        {
+            var x = (double)Thumb.Tag;
+            var value = (float)(-Math.Sqrt(x * tempx) + 0.85f);
+
+            Thumb.Height = StackCurve.Height * value;
+            selectedProfile.MotionSensivityArray[x] = Thumb.Height / StackCurve.Height;
+        }
+        ProfilesPage.SubmitProfile();
+    }
+
+    private void Button_Click_2(object sender, RoutedEventArgs e)
+    {
+        Profile? selectedProfile = ProfilesPage.selectedProfile;
+        if (selectedProfile is null)
+            return;
+
+        // precise preset
+        var tempx = 12f / Profile.SensivityArraySize;
+        foreach (Control Thumb in StackCurve.Children)
+        {
+            var x = (double)Thumb.Tag;
+            var value = (float)(Math.Sqrt(x * tempx) + 0.25f - tempx * x);
+
+            Thumb.Height = StackCurve.Height * value;
+            selectedProfile.MotionSensivityArray[x] = Thumb.Height / StackCurve.Height;
+        }
+        ProfilesPage.SubmitProfile();
+    }
+
+    private void SliderAimingDownSightsMultiplier_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (ProfilesPage.selectedProfile is null)
+            return;
+
+        // prevent update loop
+        if (updateLock.IsEntered())
+            return;
+
+        ProfilesPage.selectedProfile.AimingSightsMultiplier = (float)tb_ProfileAimingDownSightsMultiplier.Value;
+        ProfilesPage.SubmitProfile();
+    }
+
+    private void HotkeysManager_Updated(Hotkey hotkey)
+    {
+        if (ProfilesPage.selectedProfile is null)
+            return;
+
+        if (!ProfilesPage.selectedProfile.Layout.GyroLayout.TryGetValue(AxisLayoutFlags.Gyroscope, out IActions? currentAction))
+            return;
+
+        if (hotkey.ButtonFlags != gyroButtonFlags)
+            return;
+
+        // update gyro hotkey
+        GyroHotkey = hotkey;
+
+        ProfilesPage.selectedProfile.AimingSightsTrigger = (ButtonState)hotkey.inputsChord.ButtonState.Clone();
+        ProfilesPage.SubmitProfile();
+    }
+}

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { detectPolicyGame, getPolicyGame, isPolicyGameInitialized, subscribePolicyGameStatus } from '@/bridge/gamePolicyTarget';
+import { initialPageWork } from '@/robust/startupReadiness';
 import { computed, nextTick, onActivated, onDeactivated, onMounted, onUnmounted, ref, watch } from 'vue';
 import { focusGamepadElement, getGamepadPopupPlacement, scrollElementIntoSafeArea } from '@/gamepad/focus';
 import AppIcon from '@/components/AppIcon.vue';
@@ -28,17 +30,19 @@ import {
 import { getUiSetting, loadUiSettings, setUiSettings } from '@/bridge/uiSettings';
 import {
   refreshGameStatus,
-  subscribeGameStatus,
   type DetectedGame,
 } from '@/bridge/gamedetect';
 import { topMonitorData, type TopMonData } from '@/bridge/topmon';
+import { powerSourceMode } from '@/bridge/powerSource';
 import { registerScheduledTask } from '@/scheduler';
 import {
   applyPerformanceSchedule,
   defaultPerformanceScheduleConfig,
   disablePerformanceSchedule,
   getPerformanceScheduleWarning,
+  loadGameCustomConfig,
   loadPerformanceSchedule,
+  onGameCustomConfigChanged,
   onPerformanceScheduleWarning,
   resetPerformanceScheduleProfiles,
   savePerformanceSchedule,
@@ -47,6 +51,7 @@ import {
   CORE_MODE_OPTIONS,
   type CpuPreset,
   type CoreMode,
+  type GameCustomConfig,
   type PerformanceScheduleConfig,
   type PowerSide,
   type ScheduleMode,
@@ -62,7 +67,8 @@ import {
 const config = ref<PerformanceScheduleConfig>(defaultPerformanceScheduleConfig());
 const cpuProfiles = ref<CpuProfilesConfig>(defaultCpuProfilesConfig());
 const selectedSide = ref<PowerSide>('ac');
-const powerSide = ref<PowerSide>('ac');
+const powerSide = computed<PowerSide>(() => powerSourceMode.value ??
+  (topMonitorData.value?.ac === 0 ? 'dc' : 'ac'));
 const editing = ref<ScheduleMode | null>(null);
 const editingDraft = ref<ScheduleProfile | null>(null);
 // 编辑面板独立的 TDP / FPS 上限（与草稿值解耦，避免下拉选不上去）
@@ -75,7 +81,10 @@ const applyingSide = ref<Record<PowerSide, boolean>>({ ac: false, dc: false });
 const statusMsg = ref('');
 const errMsg = ref('');
 const warningMsg = ref('');
-const game = ref<DetectedGame | null>(null);
+const game = ref<DetectedGame | null>(getPolicyGame());
+const gameCustomConfig = ref<GameCustomConfig | null>(null);
+const policyDetectionPending = ref(!isPolicyGameInitialized());
+const gameCustomConfigReady = ref(false);
 const showMonitor = ref(getUiSetting('scheduleMonitor'));
 watch(showMonitor, (v) => {
   void setUiSettings({ scheduleMonitor: v });
@@ -110,6 +119,7 @@ let stopTopMon: (() => void) | null = null;
 let stopMonitorChart: (() => void) | null = null;
 let offFloatUpdate: (() => void) | null = null;
 let offScheduleWarning: (() => void) | null = null;
+let stopGameCustomConfigWatch: (() => void) | null = null;
 let statusHideTimer: ReturnType<typeof setTimeout> | null = null;
 let warningHideTimer: ReturnType<typeof setTimeout> | null = null;
 const SCHEDULE_WARNING_VISIBLE_MS = 5_000;
@@ -135,6 +145,38 @@ const MODE_ORDER: ScheduleMode[] = [
   'elite',
   'extreme',
 ];
+
+function gameCustomKey(target: DetectedGame | null): string {
+  const raw = target?.path?.split(/[\\/]/).pop() || target?.name || '';
+  const normalized = raw.toLowerCase().trim();
+  return normalized ? (normalized.endsWith('.exe') ? normalized : `${normalized}.exe`) : '';
+}
+
+const activeGameCustomProfile = computed(() => {
+  const key = gameCustomKey(game.value);
+  if (!key) return null;
+  const entry = gameCustomConfig.value?.entries[key];
+  return entry && entry.enabled !== false ? entry : null;
+});
+const automaticOptimizationUnavailable = computed(() => activeGameCustomProfile.value !== null);
+const performanceControlsLocked = computed(() =>
+  policyDetectionPending.value || !gameCustomConfigReady.value || automaticOptimizationUnavailable.value,
+);
+const automaticOptimizationTitle = computed(() => {
+  if (policyDetectionPending.value || !gameCustomConfigReady.value) return '正在确认专属配置…';
+  return automaticOptimizationUnavailable.value ? '游戏专属配置生效中' : '自动优化';
+});
+
+function showCustomPriorityNotice(): void {
+  errMsg.value = '';
+  statusMsg.value = '游戏专属配置生效中';
+}
+
+async function refreshGameCustomConfig(): Promise<void> {
+  gameCustomConfigReady.value = false;
+  gameCustomConfig.value = await loadGameCustomConfig().catch(() => null);
+  gameCustomConfigReady.value = true;
+}
 const POWER_SIDES: PowerSide[] = ['ac', 'dc'];
 const modeOptionSub = (side: PowerSide, mode: ScheduleMode): string => {
   return modeDetail(side, mode);
@@ -435,6 +477,7 @@ function loadEditingDraft() {
 }
 
 function openEditor(side: PowerSide = powerSide.value, mode: ScheduleMode = config.value.active[side]) {
+  if (performanceControlsLocked.value) return;
   selectedSide.value = side;
   editing.value = mode;
   loadEditingDraft();
@@ -449,6 +492,10 @@ function closeEditor() {
 // 编辑按钮：再点一次关闭（双击开关），不再依赖收回气泡
 function toggleEditor() {
   if (busy.value) return;
+  if (performanceControlsLocked.value) {
+    if (automaticOptimizationUnavailable.value) showCustomPriorityNotice();
+    return;
+  }
   if (editing.value) {
     closeEditor();
     return;
@@ -457,6 +504,7 @@ function toggleEditor() {
 }
 
 function selectEditingMode(rawMode: string | number) {
+  if (performanceControlsLocked.value) return;
   const mode = rawMode as ScheduleMode;
   if (!MODE_ORDER.includes(mode)) return;
   editing.value = mode;
@@ -464,6 +512,7 @@ function selectEditingMode(rawMode: string | number) {
 }
 
 function updateEditing<K extends keyof ScheduleProfile>(key: K, value: ScheduleProfile[K]) {
+  if (performanceControlsLocked.value) return;
   if (!editingDraft.value) return;
   if (!editing.value) return;
   editingDraft.value = { ...editingDraft.value, [key]: value };
@@ -520,6 +569,10 @@ async function drainModeApplyQueue(): Promise<void> {
 }
 
 function selectMode(side: PowerSide, rawMode: string | number) {
+  if (performanceControlsLocked.value) {
+    if (automaticOptimizationUnavailable.value) showCustomPriorityNotice();
+    return;
+  }
   const mode = rawMode as ScheduleMode;
   if (!MODE_ORDER.includes(mode) || config.value.active[side] === mode) return;
   selectedSide.value = side;
@@ -566,6 +619,10 @@ function scrollEditorIntoView() {
 
 function requestResetProfiles() {
   if (busy.value) return;
+  if (performanceControlsLocked.value) {
+    if (automaticOptimizationUnavailable.value) showCustomPriorityNotice();
+    return;
+  }
   void flushPendingModeApplies();
   const trigger = resetTriggerEl.value;
   if (!trigger) {
@@ -608,6 +665,10 @@ function onResetDocPointer(e: PointerEvent) {
 
 async function doResetProfiles() {
   if (busy.value) return;
+  if (performanceControlsLocked.value) {
+    if (automaticOptimizationUnavailable.value) showCustomPriorityNotice();
+    return;
+  }
   await flushPendingModeApplies();
   busy.value = true;
   errMsg.value = '';
@@ -633,6 +694,10 @@ async function doResetProfiles() {
 
 async function enterManualMode() {
   if (busy.value) return;
+  if (performanceControlsLocked.value) {
+    if (automaticOptimizationUnavailable.value) showCustomPriorityNotice();
+    return;
+  }
   await flushPendingModeApplies();
   busy.value = true;
   try {
@@ -651,6 +716,10 @@ async function enterManualMode() {
 
 async function enableQuickMode() {
   if (busy.value) return;
+  if (performanceControlsLocked.value) {
+    if (automaticOptimizationUnavailable.value) showCustomPriorityNotice();
+    return;
+  }
   await flushPendingModeApplies();
   busy.value = true;
   errMsg.value = '';
@@ -672,6 +741,10 @@ async function enableQuickMode() {
 }
 
 async function saveEditor() {
+  if (performanceControlsLocked.value) {
+    if (automaticOptimizationUnavailable.value) showCustomPriorityNotice();
+    return;
+  }
   const draft = editingDraft.value;
   if (!draft) return;
   await flushPendingModeApplies();
@@ -710,26 +783,15 @@ async function saveEditor() {
 
 async function refreshStatus() {
   const params = await readPowerParams().catch(() => null);
-  const tm = topMon.value;
   manualParams.value = params;
-  if (tm) {
-    const newSide = tm.ac === 0 ? 'dc' : 'ac';
-    if (newSide !== powerSide.value) {
-      powerSide.value = newSide;
-    }
-  }
 }
 
 function syncGame(g: DetectedGame | null) {
-  const previous = game.value;
-  const targetChanged = !!previous &&
-    (!g || previous.pid !== g.pid || previous.processCreated !== g.processCreated ||
-      previous.source !== g.source);
+  // One resident owner applies CPU/TDP/core policy even when this page is hidden.
+  // A callback (including a confirmed null) is the first safe point at which
+  // the page may unlock its global performance controls.
   game.value = g;
-  if (config.value.enabled && (targetChanged || (!previous && g))) {
-    void applyPerformanceSchedule(powerSide.value, config.value.active[powerSide.value], config.value)
-      .catch(() => {});
-  }
+  policyDetectionPending.value = false;
 }
 
 function onGamepadBack(e: Event) {
@@ -744,10 +806,11 @@ function onGamepadBack(e: Event) {
   e.preventDefault();
 }
 
-onMounted(async () => {
+onMounted(() => initialPageWork.track(async () => {
   // 注意：KeepAlive 下 onMounted 之后紧跟 onActivated，监听注册统一放在 onActivated，
   // 避免重复注册（同一 handler 注册两次 → 事件触发两次）。
   config.value = await loadPerformanceSchedule();
+  await refreshGameCustomConfig();
   cpuProfiles.value = await loadCpuProfiles();
   await refreshCoreArchitectureForAuto();
   await refreshStatus();
@@ -760,6 +823,18 @@ onMounted(async () => {
     showScheduleWarning(warning.message);
   });
   sampleMonitor();
+  stopGameCustomConfigWatch = onGameCustomConfigChanged((next) => {
+    gameCustomConfig.value = next;
+    gameCustomConfigReady.value = true;
+  });
+}));
+
+watch(performanceControlsLocked, (locked) => {
+  if (!locked) return;
+  // A profile may be enabled from the game quick menu while this page is kept
+  // alive. Close editable UI immediately so no stale AC/DC change can win.
+  closeEditor();
+  resetConfirmOpen.value = false;
 });
 
 function onGamepadPerformanceModeChanged(e: Event): void {
@@ -789,16 +864,24 @@ function unregisterDocListeners(): void {
   document.removeEventListener('pointerdown', onResetDocPointer);
 }
 
-onActivated(async () => {
+onActivated(() => initialPageWork.track(async () => {
   await loadUiSettings();
   showMonitor.value = getUiSetting('scheduleMonitor');
   registerDocListeners(); // 失活时已移除，重新激活后必须恢复监听
+  policyDetectionPending.value = !isPolicyGameInitialized();
+  if (!unsubGame) unsubGame = subscribePolicyGameStatus(syncGame);
+  if (policyDetectionPending.value) {
+    await detectPolicyGame().catch(() => null);
+    // Failed native reads intentionally keep the page locked; the resident
+    // detector will call syncGame after its bounded retry succeeds.
+    if (isPolicyGameInitialized()) policyDetectionPending.value = false;
+  }
   config.value = await loadPerformanceSchedule();
+  await refreshGameCustomConfig();
   cpuProfiles.value = await loadCpuProfiles();
   await refreshCoreArchitectureForAuto();
   selectedSide.value = powerSide.value;
   await refreshStatus();
-  if (!unsubGame) unsubGame = subscribeGameStatus(syncGame);
   if (!stopTopMon) {
     stopTopMon = registerScheduledTask('performance-schedule-status', 2000, refreshStatus, {
       pauseWhenHidden: true,
@@ -814,7 +897,7 @@ onActivated(async () => {
       runImmediately: true,
     });
   }
-});
+}));
 
 onDeactivated(() => {
   unregisterDocListeners(); // 隐藏页不再接收应用级事件
@@ -835,6 +918,8 @@ onUnmounted(() => {
   stopMonitorChart?.();
   offFloatUpdate?.();
   offScheduleWarning?.();
+  stopGameCustomConfigWatch?.();
+  stopGameCustomConfigWatch = null;
   window.removeEventListener('ipc:gamepad-back', onGamepadBack);
   window.removeEventListener('gamepad:performance-mode-changed', onGamepadPerformanceModeChanged);
   document.removeEventListener('pointerdown', onResetDocPointer);
@@ -893,7 +978,7 @@ onUnmounted(() => {
     <!-- 自动优化：仅自动模式（config.enabled）显示；手动模式隐藏，手动模式由 TDP 功耗 / CPU 调度页面直接控制 -->
     <div v-if="config.enabled" class="schedule-card card">
       <div class="section-head">
-        <div class="section-title">自动优化</div>
+        <div class="section-title" :class="{ unavailable: performanceControlsLocked }">{{ automaticOptimizationTitle }}</div>
         <div class="current-badge" :class="powerSide">当前 {{ powerSide.toUpperCase() }}</div>
       </div>
 
@@ -913,7 +998,7 @@ onUnmounted(() => {
             <Dropdown
               :model-value="config.active[side]"
               :options="modeOptionsFor(side)"
-              :disabled="busy"
+              :disabled="busy || performanceControlsLocked"
               :color="side === 'dc' ? 'dc' : 'accent'"
               :aria-label="`${side.toUpperCase()} 性能档位`"
               @update:model-value="selectMode(side, $event)"
@@ -927,15 +1012,15 @@ onUnmounted(() => {
     <div class="schedule-tools card">
       <div class="tool-actions" data-gp-group="schedule-tools">
         <!-- 自动模式：切换为手动模式在最前 -->
-        <button v-if="config.enabled" type="button" data-gp-group="schedule-tools" class="tool-mode-btn" :disabled="busy" @click="enterManualMode">
+        <button v-if="config.enabled" type="button" data-gp-group="schedule-tools" class="tool-mode-btn" :disabled="busy || performanceControlsLocked" @click="enterManualMode">
           <AppIcon name="settings" />切换为手动模式
         </button>
         <!-- 手动模式：切换为自动模式在最前 -->
-        <button v-else type="button" data-gp-group="schedule-tools" class="tool-mode-btn" :disabled="busy" @click="enableQuickMode">
+        <button v-else type="button" data-gp-group="schedule-tools" class="tool-mode-btn" :disabled="busy || performanceControlsLocked" @click="enableQuickMode">
           <AppIcon name="rocket" />切换为自动模式
         </button>
         <!-- 编辑：再点一次关闭（双击开关）；仅自动模式下可编辑性能组合，手动模式隐藏（手动模式由 TDP 功耗 / CPU 调度页面直接控制） -->
-        <button v-if="config.enabled" type="button" data-gp-group="schedule-tools" :class="{ active: !!editing }" :disabled="busy" @click="toggleEditor">
+        <button v-if="config.enabled" type="button" data-gp-group="schedule-tools" :class="{ active: !!editing }" :disabled="busy || performanceControlsLocked" @click="toggleEditor">
           <AppIcon name="edit" />编辑性能组合
         </button>
         <!-- 监控：状态按钮，点击切换 -->
@@ -965,7 +1050,7 @@ onUnmounted(() => {
             :model-value="editing"
             :options="editModeOptions"
             :color="sideColor"
-            :disabled="busy"
+            :disabled="busy || performanceControlsLocked"
             gp-row="0"
             gp-col="0"
             show-selected-sub
@@ -982,7 +1067,7 @@ onUnmounted(() => {
             :model-value="editingDraft.coreMode"
             :options="CORE_MODE_OPTS"
             :color="sideColor"
-            :disabled="busy"
+            :disabled="busy || performanceControlsLocked"
             :gp-row="editorGridPosition('coreMode')?.row"
             :gp-col="editorGridPosition('coreMode')?.col"
             @update:model-value="updateEditing('coreMode', $event as CoreMode)"
@@ -994,7 +1079,7 @@ onUnmounted(() => {
             :model-value="editingDraft.cpuTarget"
             :options="CPU_FLOAT_OPTS"
             :color="sideColor"
-            :disabled="busy"
+            :disabled="busy || performanceControlsLocked"
             :gp-row="editorGridPosition('cpuTarget')?.row"
             :gp-col="editorGridPosition('cpuTarget')?.col"
             show-selected-sub
@@ -1007,7 +1092,7 @@ onUnmounted(() => {
             :model-value="editingDraft.cpuPreset"
             :options="CPU_OPTS"
             :color="sideColor"
-            :disabled="busy"
+            :disabled="busy || performanceControlsLocked"
             :gp-row="editorGridPosition('cpuPreset')?.row"
             :gp-col="editorGridPosition('cpuPreset')?.col"
             show-selected-sub
@@ -1021,7 +1106,7 @@ onUnmounted(() => {
             :model-value="editingDraft.tdpStrategy"
             :options="TDP_STRATEGY_OPTS"
             :color="sideColor"
-            :disabled="busy"
+            :disabled="busy || performanceControlsLocked"
             :gp-row="editorGridPosition('tdpStrategy')?.row"
             :gp-col="editorGridPosition('tdpStrategy')?.col"
             show-selected-sub
@@ -1040,7 +1125,7 @@ onUnmounted(() => {
             label="TDP 最大值"
             unit="W"
             :color="sideColor"
-            :disabled="busy"
+            :disabled="busy || performanceControlsLocked"
             :gp-row="editorTdpRow"
             gp-col="0"
             @update:model-value="updateEditing('tdpMax', $event)"
@@ -1050,7 +1135,7 @@ onUnmounted(() => {
             :model-value="tdpCeiling"
             :options="tdpCeilingOpts"
             :color="sideColor"
-            :disabled="busy"
+            :disabled="busy || performanceControlsLocked"
             width="104px"
             :gp-row="editorTdpRow"
             gp-col="1"
@@ -1068,7 +1153,7 @@ onUnmounted(() => {
             :unit="editingDraft.fpsTarget === 0 ? undefined : 'FPS'"
             :value-text="editingDraft.fpsTarget === 0 ? '不锁帧' : undefined"
             :color="sideColor"
-            :disabled="busy || editingDraft.fpsTarget === 0"
+            :disabled="busy || performanceControlsLocked || editingDraft.fpsTarget === 0"
             :gp-row="editorFpsRow"
             gp-col="0"
             @update:model-value="updateEditing('fpsTarget', $event)"
@@ -1078,7 +1163,7 @@ onUnmounted(() => {
             :model-value="fpsCeiling"
             :options="fpsCeilingOpts"
             :color="sideColor"
-            :disabled="busy"
+            :disabled="busy || performanceControlsLocked"
             width="104px"
             :gp-row="editorFpsRow"
             gp-col="1"
@@ -1096,12 +1181,12 @@ onUnmounted(() => {
           class="editor-reset"
           :data-gp-row="editorActionsRow"
           data-gp-col="0"
-          :disabled="busy"
+          :disabled="busy || performanceControlsLocked"
           @click="requestResetProfiles"
         >
           <AppIcon name="refresh" />配置重制
         </button>
-        <button type="button" data-gp-group="schedule-editor-actions" class="primary" :data-gp-row="editorActionsRow" data-gp-col="1" :disabled="busy" @click="saveEditor">保存组合</button>
+        <button type="button" data-gp-group="schedule-editor-actions" class="primary" :data-gp-row="editorActionsRow" data-gp-col="1" :disabled="busy || performanceControlsLocked" @click="saveEditor">保存组合</button>
         <button type="button" data-gp-group="schedule-editor-actions" class="editor-cancel" :data-gp-row="editorActionsRow" data-gp-col="2" @click="closeEditor">
           取消 <small class="gp-hint">B</small>
         </button>
@@ -1222,6 +1307,7 @@ onUnmounted(() => {
   padding: 10px 12px;
   margin-bottom: 10px;
 }
+.section-title.unavailable { color: #f5b942; }
 .game-line, .section-head {
   display: flex;
   align-items: center;

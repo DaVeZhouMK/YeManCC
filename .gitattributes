@@ -29,3 +29,22 @@
 *.pow binary
 *.pyd binary
 *.sys binary
+
+# Immutable SHA-bound payloads must survive checkout without EOL rewriting.
+PowerControl/fan-host/** -text
+PowerControl/handheldcompanion-runtime/** -text
+PowerControl/redist/** -text
+deps/handheldcompanion-runtime/** -text
+deps/hidmaestro/** -text
+
+# Fan source-freeze indices also bind the exact original source bytes.
+FanLab/real-host/** -text
+FanLab/fan-backend/** -text
+FanLab/LightSetter/** -text
+FanLab/fanhost-source-files.sha256 -text
+FanLab/FANHOST-SOURCE-BASELINE.json -text
+
+# release-assets.lock.json binds these fallback assets byte-for-byte.
+PowerControl/MG-AUTO/** -text
+PowerControl/pawnio/** -text
+PowerControl/OpenSpeedy/** -text

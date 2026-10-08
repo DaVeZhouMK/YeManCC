@@ -1,0 +1,23 @@
+{
+  "name": "sleeptype-s4-downgraded",
+  "expect": {
+    "type": "S4_DOWNGRADED_TO_S3",
+    "confidence": "high",
+    "downgrade": true
+  },
+  "facts": {
+    "pcfgA": "The following sleep states are available on this system:\n    Standby (S3)\n    Hibernate\n    Hybrid Sleep\n\nThe following sleep states are not available on this system:\n    Standby (S1)\n    Standby (S2)\n    Standby (S0 Low Power Idle)",
+    "requested": "s4",
+    "events42": [
+      {
+        "targetState": 3,
+        "effectiveState": 3,
+        "sleepReason": "Application API"
+      }
+    ],
+    "hiberfilExists": false,
+    "hiberfilUpdated": false,
+    "gapSeconds": 10
+  },
+  "note": "the documented Win11 24H2/25H2 regression: hibernate requested, sleep performed"
+}

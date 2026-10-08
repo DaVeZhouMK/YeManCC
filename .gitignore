@@ -16,6 +16,7 @@ PowerControl/**/*.bak_*
 !deps/webview2/build/
 pkg/
 YeManCC.zip
+YeManCC-Complete.zip
 /Build/
 /Release/
 /Backup/
@@ -69,3 +70,20 @@ PowerControl/Test-AutoRotation-Repair.vbs
 # 系统
 Thumbs.db
 Desktop.ini
+
+# Local freeze/research output is never part of Git source or release inputs.
+/Backups/
+**/bin/
+**/obj/
+**/__pycache__/
+*.pyc
+*.bak
+*.bak-*
+*.bak_*
+/native/main.cpp.current-crash-investigation
+/tools/cpu-rog/Results/
+/native/testrun_rtss/
+/deps/webview2_raw/
+
+# HC Wavefront meshes are locked source resources, not compiler .obj output.
+!deps/handheldcompanion-runtime/source/3DModels/**/*.obj

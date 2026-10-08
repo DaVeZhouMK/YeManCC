@@ -7,6 +7,13 @@ import {
   dirnameOf,
   LS_PRIMARY,
   type OptiBackend,
+  type OptiAction,
+  optiscalerAnalyze,
+  optiConsoleInstalled,
+  openOptiConsole,
+  OPTISCALER_CLIENT_DIR,
+  OPTISCALER_CLIENT_EXE,
+  OPTISCALER_CLIENT_URL,
 } from '@/bridge/quickapp';
 import {
   subscribeGameStatus,
@@ -52,6 +59,13 @@ import {
 } from '@/bridge/music';
 import InlineIcon from '@/components/InlineIcon.vue';
 import Dropdown from '@/components/Dropdown.vue';
+import QuickAppIcon from '@/components/QuickAppIcon.vue';
+import { createDefaultQuickApps } from '@/bridge/quickAppDefaults';
+import { quickAppIconKind, quickAppIconVariant } from '@/bridge/quickAppIcons';
+
+// 保留功能实现，仅从快捷应用内页移除入口；不渲染，鼠标/键盘/手柄均不可到达。
+const SHOW_QUICK_FUNCTIONS = false;
+const SHOW_GAME_SPEED = false;
 
 const busy = ref(false);
 const errMsg = ref('');
@@ -89,15 +103,44 @@ let fsrDialogResolve: ((value: boolean) => void) | null = null;
 
 // OptiScaler 方案选择器：按钮只改变待提交方案，必须点击“确认方案并继续”才执行。
 const optiPickerOpen = ref(false);
-const optiPickerChoice = ref<OptiBackend | 'uninstall'>('fsr');
+const optiPickerChoice = ref<OptiAction>('fsr');
 const optiPickerStyle = ref<Record<string, string>>({ position: 'fixed' });
 const optiPickerAbove = ref(false);
 const optiPickerPanelEl = ref<HTMLElement | null>(null);
-let optiPickerResolve: ((value: OptiBackend | 'uninstall' | null) => void) | null = null;
+let optiPickerResolve: ((value: OptiAction | null) => void) | null = null;
 const OPTI_BACKEND_CHOICES: OptiBackend[] = ['fsr', 'xess'];
 
 function backendLabel(value: OptiBackend | null | undefined): string {
-  return value === 'xess' ? 'XeSS' : value === 'fsr' ? 'FSR' : '未知';
+  return value === 'xess' ? 'XeSS' : value === 'fsr' ? 'FSR4' : '未知';
+}
+
+// 只打开 OPT 客户端，不读取或关闭它的运行进程。
+async function onOpenOptiConsole() {
+  errMsg.value = '';
+  statusMsg.value = '';
+  try {
+    if (!(await optiConsoleInstalled())) {
+      const goDownload = await showFsrConfirm(
+        '未找到 OPT 客户端',
+        `未检测到 ${OPTISCALER_CLIENT_EXE}。\n请前往 GitHub 下载 OptiscalerClient，并把文件复制到 ${OPTISCALER_CLIENT_DIR}\\ 后重试。`,
+        '打开下载页',
+        '知道了',
+        true,
+      );
+      if (goDownload) {
+        await shell.open(OPTISCALER_CLIENT_URL).catch((e) => {
+          errMsg.value = '打开下载页失败：' + (e as Error).message;
+        });
+      }
+      return;
+    }
+    await openOptiConsole();
+    statusMsg.value = '已打开 OPT 客户端。';
+  } catch (e) {
+    errMsg.value = 'OPT 客户端打开失败：' + (e as Error).message;
+  } finally {
+    focusFsrTrigger();
+  }
 }
 const fsrDialogIcon = computed(() => {
   if (fsrDialogTone.value === 'error') return 'warning';
@@ -126,12 +169,12 @@ function positionFsrDialog() {
 function positionOptiPicker() {
   const trigger = fsrTriggerEl.value;
   const r = trigger?.getBoundingClientRect();
-  const placement = getGamepadPopupPlacement(r ?? null, Math.min(420, window.innerWidth - 16), 250, 8);
+  const placement = getGamepadPopupPlacement(r ?? null, Math.min(420, window.innerWidth - 16), 300, 8);
   optiPickerAbove.value = placement.above;
   optiPickerStyle.value = placement.style;
 }
 
-function showOptiBackendPicker(): Promise<OptiBackend | 'uninstall' | null> {
+function showOptiBackendPicker(): Promise<OptiAction | null> {
   if (optiPickerResolve) optiPickerResolve(null);
   optiPickerChoice.value = 'fsr';
   positionOptiPicker();
@@ -140,10 +183,10 @@ function showOptiBackendPicker(): Promise<OptiBackend | 'uninstall' | null> {
     positionOptiPicker();
     focusGamepadElement(document.querySelector<HTMLElement>('.opti-picker .opti-option-btn'));
   });
-  return new Promise<OptiBackend | 'uninstall' | null>((resolve) => { optiPickerResolve = resolve; });
+  return new Promise<OptiAction | null>((resolve) => { optiPickerResolve = resolve; });
 }
 
-function closeOptiBackendPicker(value: OptiBackend | 'uninstall' | null) {
+function closeOptiBackendPicker(value: OptiAction | null) {
   if (!optiPickerOpen.value && !optiPickerResolve) return;
   optiPickerOpen.value = false;
   const resolve = optiPickerResolve;
@@ -539,71 +582,66 @@ async function onOptiScalerCurrent() {
   if (!release) { errMsg.value = '已有其它快捷操作正在执行，请稍候。'; return; }
   errMsg.value = '';
   statusMsg.value = '';
-  // 从强制识别开始就锁定按钮，避免双击并发启动两条安装/卸载事务。
+  // 从方案选择开始锁定按钮，避免并发安装/卸载事务。
   busy.value = true;
 
-  // A button click must use a fresh detection result. refreshGameStatus may
-  // intentionally retain the last shared state after a transient poll error;
-  // that is useful for the page, but unsafe for a destructive file operation.
-  const current = await detectGame(true).catch((e) => {
-    errMsg.value = '识别当前游戏失败：' + (e as Error).message;
-    return null;
-  });
-  let gamePath = current?.path?.trim() || '';
-  let gamePid = Number(current?.pid) || 0;
-  let gameName = current ? (detectedGameName(current) || basename(gamePath)) : '';
-  if (!current || gamePid <= 0 || !gamePath || !/\.exe$/i.test(gamePath)) {
-    errMsg.value = '';
-    const chooseManual = await showFsrConfirm(
-      '未识别到当前游戏',
-      '请选择手动安装或卸载 OptiScaler（支持 FSR / XeSS）。',
-      '手动选择',
-      '按 B 取消',
-      true,
-    );
-    if (!chooseManual) {
-      statusMsg.value = '已取消 OptiScaler 操作。';
-      busy.value = false;
-      release();
-      focusFsrTrigger();
-      return;
-    }
-    const picked = await dialog.openFile([
-      { name: '可执行程序', extensions: ['exe'] },
-    ]).catch((e) => {
-      errMsg.value = '打开程序选择器失败：' + (e as Error).message;
-      return null;
-    });
-    if (!picked) {
-      if (!errMsg.value) statusMsg.value = '已取消 OptiScaler 操作。';
-      busy.value = false;
-      release();
-      focusFsrTrigger();
-      return;
-    }
-    gamePath = picked.trim();
-    gamePid = 0;
-    if (!gamePath || !/\.exe$/i.test(gamePath)) {
-      errMsg.value = '请选择 exe 可执行程序。';
-      busy.value = false;
-      release();
-      focusFsrTrigger();
-      return;
-    }
-    errMsg.value = '';
-    gameName = basename(gamePath);
-  }
   try {
     const picked = await showOptiBackendPicker();
-    if (!picked) {
-      statusMsg.value = '已取消 OptiScaler 操作。';
-      return;
+    if (!picked) { statusMsg.value = '已取消 OptiScaler 操作。'; return; }
+    if (picked === 'client') { await onOpenOptiConsole(); return; }
+    // A button click must use a fresh detection result. refreshGameStatus may
+    // intentionally retain the last shared state after a transient poll error;
+    // that is useful for the page, but unsafe for a destructive file operation.
+    const current = await detectGame(true).catch((e) => {
+      errMsg.value = '识别当前游戏失败：' + (e as Error).message;
+      return null;
+    });
+    let gamePath = current?.path?.trim() || '';
+    let gamePid = Number(current?.pid) || 0;
+    let gameName = current ? (detectedGameName(current) || basename(gamePath)) : '';
+    if (!current || gamePid <= 0 || !gamePath || !/\.exe$/i.test(gamePath)) {
+      errMsg.value = '';
+      const chooseManual = await showFsrConfirm(
+        '未识别到当前游戏',
+        '请选择手动安装或卸载 OptiScaler（支持 FSR / XeSS）。',
+        '手动选择',
+        '按 B 取消',
+        true,
+      );
+      if (!chooseManual) {
+        statusMsg.value = '已取消 OptiScaler 操作。';
+        return;
+      }
+      const picked = await dialog.openFile([
+        { name: '可执行程序', extensions: ['exe'] },
+      ]).catch((e) => {
+        errMsg.value = '打开程序选择器失败：' + (e as Error).message;
+        return null;
+      });
+      if (!picked) {
+        if (!errMsg.value) statusMsg.value = '已取消 OptiScaler 操作。';
+        return;
+      }
+      gamePath = picked.trim();
+      gamePid = 0;
+      if (!gamePath || !/\.exe$/i.test(gamePath)) {
+        errMsg.value = '请选择 exe 可执行程序。';
+        return;
+      }
+      errMsg.value = '';
+      gameName = basename(gamePath);
     }
     const uninstall = picked === 'uninstall';
     const action = uninstall ? '卸载' : '安装';
-    const selectedBackend: OptiBackend | 'auto' = uninstall ? 'auto' : picked;
+    const selectedBackend: OptiBackend | 'auto' = uninstall ? 'auto' : picked as OptiBackend;
     const selectedBackendLabel = selectedBackend === 'auto' ? '当前配置' : backendLabel(selectedBackend);
 
+    if (!uninstall) {
+      const preflight = await optiscalerAnalyze(gamePath);
+      if (!preflight.ok || preflight.antiCheat || !preflight.availableBackends?.includes(selectedBackend as OptiBackend)) {
+        throw new Error(preflight.antiCheat ? '检测到反作弊，不进行自动注入。' : (preflight.missing?.join('；') || '所选模式缺少本地缓存，请先准备文件。'));
+      }
+    }
     if (current && gamePid > 0) {
       const terminate = await showFsrConfirm(
         '需要结束当前游戏',
@@ -641,7 +679,7 @@ async function onOptiScalerCurrent() {
 
     const detail = uninstall
       ? `已卸载当前游戏的 OptiScaler。${result.restored ? `\n还原 ${result.restored} 个原文件。` : ''}${result.removed ? `\n清理 ${result.removed} 个文件。` : ''}`
-      : `已为当前游戏安装 OptiScaler（${result.backend ? backendLabel(result.backend) : selectedBackendLabel}）。${result.written ? `\n写入 ${result.written} 个文件。` : ''}`;
+      : `已为当前游戏安装 OptiScaler（${result.backend ? backendLabel(result.backend) : selectedBackendLabel}）。${result.written ? `\n写入 ${result.written} 个文件。` : ''}${result.version ? `\n版本：${result.version}` : ''}${result.warnings?.length ? `\n${result.warnings.join('\n')}` : ''}`;
     statusMsg.value = detail.replace(/\n/g, '');
     await showFsrMessage(`OptiScaler ${action}成功`, detail, 'success');
 
@@ -669,13 +707,11 @@ async function onOptiScalerCurrent() {
   } finally {
     busy.value = false;
     release();
-    void refreshGameStatus();
     focusFsrTrigger();
   }
 }
 
 // ── 启动应用（图标形式，自动衍生）──
-const LAUNCH_APPS_FILE = 'C:\\SOFT\\YeMan\\PowerControl\\launch_apps.json';
 interface LaunchApp {
   name: string;
   path: string;
@@ -684,6 +720,7 @@ interface LaunchApp {
 }
 const launchApps = ref<LaunchApp[]>([]);
 const launchBusy = ref(false);
+const launchAppsReady = ref(false);
 const menuOpen = ref(false);
 const menuStyle = ref<Record<string, string>>({ position: 'fixed' });
 const menuAppIndex = ref(-1);
@@ -691,12 +728,14 @@ const menuTriggerEl = ref<HTMLElement | null>(null);
 const LAUNCH_MENU_WIDTH = 220;
 const LAUNCH_MENU_HEIGHT = 220;
 
-// 确定性颜色（基于路径 hash）— 明亮系
-function iconColor(path: string): string {
-  let h = 0;
-  for (let i = 0; i < path.length; i++) h = ((h << 5) - h + path.charCodeAt(i)) | 0;
-  const colors = ['#4caf50','#2196f3','#9c27b0','#ff9800','#00bcd4','#f44336','#3f51b5','#ff5722','#8bc34a','#03a9f4','#e91e63','#cddc39','#009688','#673ab7','#795548'];
-  return colors[Math.abs(h) % colors.length];
+const DEFAULT_LAUNCH_APPS = createDefaultQuickApps().apps;
+
+function launchIconKind(app: LaunchApp) {
+  return quickAppIconKind(app);
+}
+
+function launchIconVariant(app: LaunchApp) {
+  return quickAppIconVariant(app);
 }
 
 function normalizeLaunchApp(value: unknown): LaunchApp | null {
@@ -712,46 +751,87 @@ function normalizeLaunchApp(value: unknown): LaunchApp | null {
 }
 
 async function loadLaunchApps() {
+  if (launchBusy.value) return;
+  launchBusy.value = true;
+  errMsg.value = '';
+  statusMsg.value = '';
   try {
     const quickApps = await readSettingsSection<any>('quickApps');
     const parsed: unknown = quickApps.apps;
-    if (Array.isArray(parsed)) {
-      launchApps.value = parsed
-        .map(normalizeLaunchApp)
-        .filter((a): a is LaunchApp => a !== null);
-    } else if (parsed && typeof parsed === 'object' && Array.isArray((parsed as any).apps)) {
-      // 兼容未来可能采用 { apps: [...] } 的包裹格式。
-      launchApps.value = (parsed as any).apps
-        .map(normalizeLaunchApp)
-        .filter((a: LaunchApp | null): a is LaunchApp => a !== null);
-    }
-  } catch { /* 文件还不存在或 JSON 损坏时，用空列表，不覆盖原文件 */ }
+    const items = Array.isArray(parsed) ? parsed
+      : parsed && typeof parsed === 'object' && Array.isArray((parsed as any).apps)
+        ? (parsed as any).apps : null;
+    if (!items) throw new Error('应用列表格式无效，请保留配置文件并重试');
+    launchApps.value = items
+      .map(normalizeLaunchApp)
+      .filter((app): app is LaunchApp => app !== null);
+    launchAppsReady.value = true;
+  } catch (e) {
+    // Keep the previous list, and never treat a failed read as a saved empty list.
+    launchAppsReady.value = false;
+    errMsg.value = '读取自定义应用失败：' + (e as Error).message;
+  } finally {
+    launchBusy.value = false;
+  }
 }
 
-async function saveLaunchApps() {
+async function saveLaunchApps(next: LaunchApp[]): Promise<boolean> {
   try {
-    // 原子写入：避免程序退出/断电时把 launch_apps.json 写成半截 JSON。
-    await saveSettingsSection('quickApps', { apps: launchApps.value });
-  } catch { /* 忽略写入失败，内存中的用户列表不丢 */ }
+    // Own a JSON snapshot; neither live Vue proxies nor later edits may enter
+    // the durable settings cache. Update the page only after native write ACK.
+    const snapshot = JSON.parse(JSON.stringify(next)) as LaunchApp[];
+    await saveSettingsSection('quickApps', { apps: snapshot });
+    launchApps.value = snapshot;
+    return true;
+  } catch (e) {
+    statusMsg.value = '';
+    errMsg.value = '保存自定义应用失败，修改未保存：' + (e as Error).message;
+    return false;
+  }
+}
+
+async function restoreDefaultLaunchApps() {
+  if (launchBusy.value || !launchAppsReady.value) return;
+  launchBusy.value = true;
+  errMsg.value = '';
+  statusMsg.value = '';
+  try {
+    const defaults = DEFAULT_LAUNCH_APPS.map((app) => ({ ...app }));
+    if (await saveLaunchApps(defaults)) statusMsg.value = '已恢复默认应用（5 个）';
+  } catch (e) {
+    errMsg.value = '恢复默认应用失败：' + (e as Error).message;
+  } finally {
+    launchBusy.value = false;
+  }
 }
 
 async function addLaunchApp() {
-  // 不限定 exe：默认定位「所有文件」，并可切换到 exe / 快捷方式 / 脚本等
-  const picked = await dialog.openFile([
-    { name: '所有文件', extensions: ['*'] },
-    { name: '可执行程序', extensions: ['exe'] },
-    { name: '快捷方式', extensions: ['lnk'] },
-    { name: '脚本/批处理', extensions: ['bat', 'cmd', 'ps1'] },
-  ]);
-  if (!picked) return;
-  const name = basename(picked);
-  if (launchApps.value.some(a => a.path === picked)) {
-    errMsg.value = '该应用已在列表中。';
-    return;
+  if (launchBusy.value || !launchAppsReady.value) return;
+  launchBusy.value = true;
+  errMsg.value = '';
+  statusMsg.value = '';
+  try {
+    // Accept executables, shortcuts and scripts as before.
+    const picked = await dialog.openFile([
+      { name: '所有文件', extensions: ['*'] },
+      { name: '可执行程序', extensions: ['exe'] },
+      { name: '快捷方式', extensions: ['lnk'] },
+      { name: '脚本/批处理', extensions: ['bat', 'cmd', 'ps1'] },
+    ]);
+    if (!picked) return;
+    const name = basename(picked);
+    if (launchApps.value.some(app => app.path === picked)) {
+      errMsg.value = '该应用已在列表中。';
+      return;
+    }
+    if (await saveLaunchApps([...launchApps.value, { name, path: picked }])) {
+      statusMsg.value = `已添加：${name}`;
+    }
+  } catch (e) {
+    errMsg.value = '添加自定义应用失败：' + (e as Error).message;
+  } finally {
+    launchBusy.value = false;
   }
-  launchApps.value.push({ name, path: picked });
-  await saveLaunchApps();
-  statusMsg.value = `已添加：${name}`;
 }
 
 function openMenu(index: number, event: MouseEvent) {
@@ -812,6 +892,7 @@ function onGamepadBack(e: Event) {
 }
 
 async function launchApp(index: number) {
+  if (launchBusy.value || !launchAppsReady.value) return;
   closeMenu();
   const app = launchApps.value[index];
   if (!app) return;
@@ -829,24 +910,38 @@ async function launchApp(index: number) {
 }
 
 async function renameApp(index: number) {
+  if (launchBusy.value || !launchAppsReady.value) return;
   closeMenu();
   const app = launchApps.value[index];
   if (!app) return;
   const input = window.prompt('自定义显示名称（留空则使用原文件名）', app.name);
   if (input === null) return;
   const name = input.trim() || basename(app.path);
-  launchApps.value[index].name = name;
-  await saveLaunchApps();
-  statusMsg.value = `已重命名：${name}`;
+  launchBusy.value = true;
+  errMsg.value = '';
+  statusMsg.value = '';
+  try {
+    const next = launchApps.value.map((item, i) => i === index ? { ...item, name } : item);
+    if (await saveLaunchApps(next)) statusMsg.value = `已重命名：${name}`;
+  } finally {
+    launchBusy.value = false;
+  }
 }
 
 async function deleteApp(index: number) {
+  if (launchBusy.value || !launchAppsReady.value) return;
   closeMenu();
   const app = launchApps.value[index];
   if (!app) return;
-  launchApps.value.splice(index, 1);
-  await saveLaunchApps();
-  statusMsg.value = `已删除：${app.name}`;
+  launchBusy.value = true;
+  errMsg.value = '';
+  statusMsg.value = '';
+  try {
+    const next = launchApps.value.filter((_, i) => i !== index);
+    if (await saveLaunchApps(next)) statusMsg.value = `已删除：${app.name}`;
+  } finally {
+    launchBusy.value = false;
+  }
 }
 
 function basename(p: string): string {
@@ -915,7 +1010,47 @@ onUnmounted(() => {
     <div v-if="errMsg" class="err-bar">{{ errMsg }}</div>
     <div v-if="statusMsg" class="ok-bar">{{ statusMsg }}</div>
 
-    <!-- 第一排：音乐播放器 -->
+    <!-- 第一排：自定义应用启动与添加 -->
+    <section class="card launch-apps-card">
+      <div class="sub-head launch-apps-head">
+        <span class="sub-title"><InlineIcon name="rocket" /> 添加自定义应用</span>
+        <div class="launch-app-actions">
+          <button v-if="!launchAppsReady" class="add-app-btn" :disabled="launchBusy" @click="loadLaunchApps">重试读取</button>
+          <button class="add-app-btn restore-default-btn" :disabled="launchBusy || !launchAppsReady" @click="restoreDefaultLaunchApps">恢复默认</button>
+          <button class="add-app-btn" :disabled="launchBusy || !launchAppsReady" @click="addLaunchApp">+ 添加应用</button>
+        </div>
+      </div>
+      <div class="launch-grid">
+        <button
+          v-for="(app, i) in launchApps"
+          :key="app.path"
+          class="launch-card"
+          type="button"
+          :disabled="launchBusy || !launchAppsReady"
+          @click="openMenu(i, $event)"
+          @contextmenu.prevent="openMenu(i, $event)"
+        >
+          <div class="launch-icon" :aria-label="`${app.name}图标`">
+            <QuickAppIcon :kind="launchIconKind(app)" :variant="launchIconVariant(app)" :app-path="app.path" />
+          </div>
+          <span class="launch-name">{{ app.name.replace(/\.exe$/i, '') }}</span>
+        </button>
+      </div>
+      <!-- 点击/右键弹出菜单 -->
+      <Teleport to="body">
+        <div v-if="menuOpen" class="launch-menu-mask" @click="closeMenu()" @contextmenu.prevent="closeMenu()"></div>
+        <Transition name="pop">
+          <div v-if="menuOpen" class="launch-menu" :style="menuStyle" data-gp-modal>
+            <button class="launch-menu-item" @click="launchApp(menuAppIndex)"><InlineIcon name="play" /> 启动</button>
+            <button class="launch-menu-item" @click="renameApp(menuAppIndex)"><InlineIcon name="edit" /> 重命名</button>
+            <button class="launch-menu-item launch-menu-danger" @click="deleteApp(menuAppIndex)"><InlineIcon name="close" /> 删除</button>
+            <button class="launch-menu-item launch-menu-cancel" @click="closeMenu(true, $event)"><InlineIcon name="close" /> 取消</button>
+          </div>
+        </Transition>
+      </Teleport>
+    </section>
+
+    <!-- 第二排：音乐播放器 -->
     <section class="card">
       <h3 class="card-title"><InlineIcon name="music" /> 音乐播放</h3>
 
@@ -951,7 +1086,7 @@ onUnmounted(() => {
       <div v-if="musicError" class="music-err">{{ musicError }}</div>
     </section>
 
-    <!-- 第二排：显示设置，分辨率和多显示器各自独立气泡 -->
+    <!-- 第三排：显示设置，分辨率和多显示器各自独立气泡 -->
     <div class="display-bubbles display-settings-bubbles">
       <section class="card display-block">
         <div class="sub-head">
@@ -987,8 +1122,8 @@ onUnmounted(() => {
       </section>
     </div>
 
-    <!-- 剩余快捷功能：插帧并排，随后游戏加速，最后应用启动 -->
-    <section class="card quick-functions-card">
+    <!-- 保留快捷功能与游戏加速实现，当前隐藏这两个入口 -->
+    <section v-if="SHOW_QUICK_FUNCTIONS" class="card quick-functions-card">
       <h3 class="card-title"><InlineIcon name="settings" /> 快捷功能</h3>
       <div class="frame-actions">
         <button class="quick-btn" :disabled="busy" @click="onLaunchLs">
@@ -998,16 +1133,21 @@ onUnmounted(() => {
             <span class="quick-sub">写入 LS 插帧预设并启动</span>
           </span>
         </button>
-        <button ref="fsrTriggerEl" class="quick-btn opti-btn opti-any" :disabled="busy" @click="onOptiScalerCurrent">
+        <button
+          ref="fsrTriggerEl"
+          class="quick-btn opti-btn opti-any"
+          :disabled="busy"
+          @click="onOptiScalerCurrent"
+        >
           <InlineIcon name="bolt" />
           <span class="quick-btn-copy opti-copy">
             <span class="quick-main">FSR4.1/Xess-OPT自动导入</span>
-            <span class="quick-sub">识别游戏特征并选择后端</span>
+            <span class="quick-sub">FSR4 / XeSS 自动套用 · OPT 客户端</span>
           </span>
         </button>
       </div>
 
-      <div class="sub-block">
+      <div v-if="SHOW_GAME_SPEED" class="sub-block">
         <div class="sub-head">
           <span class="sub-title"><InlineIcon name="speed" /> 游戏加速</span>
           <span class="sub-tip">{{ activeSpeed ? '当前 ' + activeSpeed + '×，点 1× 还原' : '选择倍率加速当前游戏（1× = 关闭）' }}</span>
@@ -1026,42 +1166,6 @@ onUnmounted(() => {
 
     </section>
 
-    <!-- 页面最底部独立气泡：应用启动 -->
-    <section class="card launch-apps-card">
-      <div class="sub-head">
-        <span class="sub-title"><InlineIcon name="rocket" /> 添加自定义应用</span>
-        <button class="add-app-btn" :disabled="launchBusy" @click="addLaunchApp">+ 添加应用</button>
-      </div>
-      <div class="launch-grid">
-        <button
-          v-for="(app, i) in launchApps"
-          :key="app.path"
-          class="launch-card"
-          type="button"
-          :disabled="launchBusy"
-          @click="openMenu(i, $event)"
-          @contextmenu.prevent="openMenu(i, $event)"
-        >
-          <div class="launch-icon" :style="{ background: iconColor(app.path) }">
-            {{ app.name.charAt(0).toUpperCase() }}
-          </div>
-          <span class="launch-name">{{ app.name.replace(/\.exe$/i, '') }}</span>
-        </button>
-      </div>
-      <!-- 点击/右键弹出菜单 -->
-      <Teleport to="body">
-        <div v-if="menuOpen" class="launch-menu-mask" @click="closeMenu()" @contextmenu.prevent="closeMenu()"></div>
-        <Transition name="pop">
-          <div v-if="menuOpen" class="launch-menu" :style="menuStyle" data-gp-modal>
-            <button class="launch-menu-item" @click="launchApp(menuAppIndex)"><InlineIcon name="play" /> 启动</button>
-            <button class="launch-menu-item" @click="renameApp(menuAppIndex)"><InlineIcon name="edit" /> 重命名</button>
-            <button class="launch-menu-item launch-menu-danger" @click="deleteApp(menuAppIndex)"><InlineIcon name="close" /> 删除</button>
-            <button class="launch-menu-item launch-menu-cancel" @click="closeMenu(true, $event)"><InlineIcon name="close" /> 取消</button>
-          </div>
-        </Transition>
-      </Teleport>
-    </section>
-
     <Teleport to="body">
       <Transition name="fsr-pop">
         <div
@@ -1078,7 +1182,7 @@ onUnmounted(() => {
           @keydown.esc.prevent="closeOptiBackendPicker(null)"
         >
           <div class="rc-title"><InlineIcon name="bolt" />选择 OptiScaler 方案</div>
-          <p class="rc-desc opti-picker-desc">请选择操作方案，点击“确认方案并继续”后才会执行。</p>
+          <p class="rc-desc opti-picker-desc">FSR4 / XeSS 自动套用本地缓存与 Auto x2 配置；OPT 客户端只打开程序。</p>
           <div class="opti-picker-options" role="group" aria-label="OptiScaler 方案">
             <button
               v-for="backend in OPTI_BACKEND_CHOICES"
@@ -1089,13 +1193,16 @@ onUnmounted(() => {
               :aria-pressed="optiPickerChoice === backend"
               @click="optiPickerChoice = backend"
             >{{ backendLabel(backend) }}</button>
+            <button type="button" class="opti-option-btn" :class="{ selected: optiPickerChoice === 'client' }" :aria-pressed="optiPickerChoice === 'client'" @click="optiPickerChoice = 'client'">OPT 客户端</button>
+          </div>
+          <div class="opti-picker-maintenance">
             <button
               type="button"
               class="opti-option-btn uninstall"
               :class="{ selected: optiPickerChoice === 'uninstall' }"
               :aria-pressed="optiPickerChoice === 'uninstall'"
               @click="optiPickerChoice = 'uninstall'"
-            >卸载</button>
+            >卸载并还原游戏文件</button>
           </div>
           <div class="rc-actions" data-gp-group="fsr-dialog">
             <button type="button" data-gp-group="fsr-dialog" @click="closeOptiBackendPicker(optiPickerChoice)">确认方案并继续</button>
@@ -1147,6 +1254,7 @@ onUnmounted(() => {
   padding-bottom: 20px;
   display: flex;
   flex-direction: column;
+  min-height: max-content;
 }
 .quick-functions-card { order: 1; }
 .display-settings-bubbles { order: 2; }
@@ -1369,7 +1477,9 @@ onUnmounted(() => {
   background: rgba(229, 72, 77, 0.12);
 }
 /* ── 启动应用（图标形式）── */
-.launch-apps-card { order: 3; }
+.launch-apps-card { order: 0; min-height: 0; }
+.launch-apps-head { align-items: center; }
+.launch-app-actions { display: flex; align-items: center; justify-content: flex-end; gap: 6px; flex-wrap: wrap; }
 .add-app-btn {
   flex: 0 0 auto;
   padding: 5px 12px;
@@ -1386,12 +1496,25 @@ onUnmounted(() => {
   background: rgba(46, 166, 255, 0.2);
   border-color: var(--accent);
 }
+.restore-default-btn {
+  color: #ff9ea1;
+  border-color: rgba(229, 72, 77, 0.52);
+  background: rgba(229, 72, 77, 0.1);
+}
+.restore-default-btn:hover:not(:disabled) {
+  color: #ffd8d9;
+  border-color: #ff7f83;
+  background: rgba(229, 72, 77, 0.2);
+}
 .add-app-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .launch-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr); /* 一行 3 个：卡片长度较 4 列加长约 50% */
+  grid-template-columns: repeat(3, minmax(0, 1fr)); /* 新增应用自动生成下一排 */
+  grid-auto-rows: minmax(48px, auto);
+  align-content: start;
   gap: 10px;
   margin-top: 8px;
+  min-height: 0;
 }
 .launch-card {
   display: flex;
@@ -1419,12 +1542,18 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 15px;
-  font-weight: 800;
-  color: #fff;
-  text-shadow: 0 1px 3px rgba(0,0,0,0.35);
-  box-shadow: 0 2px 6px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.18);
+  color: var(--text);
+  background: color-mix(in srgb, var(--bg-input) 88%, transparent);
+  border: 1px solid rgba(255, 255, 255, 0.12);
   flex-shrink: 0;
+  transition: color 0.12s, border-color 0.12s, background 0.12s;
+}
+.launch-icon :deep(.quick-app-icon) { width: 22px; height: 22px; }
+.launch-card:hover .launch-icon,
+.launch-card:focus-visible .launch-icon {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 58%, transparent);
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg-input));
 }
 .launch-name {
   font-size: 10px;
@@ -1576,6 +1705,8 @@ onUnmounted(() => {
   margin-bottom: 10px;
   font-size: 12px;
 }
+.opti-picker-maintenance { margin-top: 8px; }
+.opti-picker-maintenance .opti-option-btn { width: 100%; }
 .opti-picker-options {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

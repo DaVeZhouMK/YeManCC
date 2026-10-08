@@ -18,22 +18,21 @@ export interface TdpAutoApply {
   wake: boolean;
 }
 
-// 读取持久化开关；文件缺失或格式无效时回退默认（两者都开）
+// 仅真正缺失的字段使用默认值。读取失败不能被视为启用硬件自动应用的授权。
 export async function readTdpAutoApply(): Promise<TdpAutoApply> {
-  try {
-    const j = await readSettingsSection<any>('tdp');
-    const a = (j.autoApply || {}) as { boot?: boolean; wake?: boolean };
-    return {
-      boot: typeof a.boot === 'boolean' ? a.boot : true,
-      wake: typeof a.wake === 'boolean' ? a.wake : true,
-    };
-  } catch {
-    return { boot: true, wake: true };
-  }
+  const j = await readSettingsSection<any>('tdp');
+  const a = (j.autoApply || {}) as { boot?: boolean; wake?: boolean };
+  return {
+    boot: typeof a.boot === 'boolean' ? a.boot : true,
+    wake: typeof a.wake === 'boolean' ? a.wake : true,
+  };
 }
 
-export async function writeTdpAutoApply(v: TdpAutoApply): Promise<void> {
-  await saveSettingsSection('tdp', { autoApply: { boot: !!v.boot, wake: !!v.wake } });
+export async function writeTdpAutoApply(v: Partial<TdpAutoApply>): Promise<void> {
+  const patch: Partial<TdpAutoApply> = {};
+  if (Object.prototype.hasOwnProperty.call(v, 'boot')) patch.boot = !!v.boot;
+  if (Object.prototype.hasOwnProperty.call(v, 'wake')) patch.wake = !!v.wake;
+  if (Object.keys(patch).length) await saveSettingsSection('tdp', { autoApply: patch });
 }
 
 // 开机 / 唤醒时按开关应用 TDP 最大值。

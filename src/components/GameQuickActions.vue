@@ -7,7 +7,18 @@ import Dropdown from '@/components/Dropdown.vue';
 import { focusGamepadElement, getGamepadPopupPlacement } from '@/gamepad/focus';
 import { detectGame, detectedGameName, type DetectedGame } from '@/bridge/gamedetect';
 import { GameTrainerCancelledError, openOrSearchGameTrainer } from '@/bridge/gameTrainer';
-import { oneClickFrameGen, oneClickOptiScaler, type OptiBackend } from '@/bridge/quickapp';
+import {
+  oneClickFrameGen,
+  oneClickOptiScaler,
+  type OptiBackend,
+  type OptiAction,
+  optiscalerAnalyze,
+  optiConsoleInstalled,
+  openOptiConsole,
+  OPTISCALER_CLIENT_DIR,
+  OPTISCALER_CLIENT_EXE,
+  OPTISCALER_CLIENT_URL,
+} from '@/bridge/quickapp';
 import { SPEED_PRESETS, applyGameSpeed, clearGameSpeed, getGameSpeedState, isMinecraftTarget } from '@/bridge/speedhack';
 import {
   closeGame,
@@ -25,7 +36,10 @@ import {
   validateLockedGameTarget,
   type LockedGameTarget,
 } from '@/bridge/gameQuickSession';
-import { dialog, proc, shell } from '@/bridge/api';
+import { dialog, proc, shell, windowApi } from '@/bridge/api';
+import { subscribePolicyGameStatus, getPolicyGame } from '@/bridge/gamePolicyTarget';
+import { effectiveInputPersona } from '@/bridge/gameInputOverride';
+import { loadSettings } from '@/bridge/settingsRepository';
 import { tryAcquireQuickAction } from '@/bridge/quickActionLock';
 import { isMouseModeSuppressed } from '@/gamepad/engine';
 
@@ -52,6 +66,11 @@ const mouseNotice = ref('');
 const statusMsg = ref('');
 const errMsg = ref('');
 const speedFactor = ref(1);
+// 2026-09-30 用户裁决：当前输出人格决定鼠标从哪来——SteamDeck 虚拟手柄时鼠标由
+// Steam 接管，这一行要如实显示「Steam鼠标」而不是笼统的「模拟鼠标」。
+const padPersona = ref('disabled');
+const steamDeckPadActive = computed(() => padPersona.value === 'steamdeck');
+const mouseModeLabel = computed(() => (steamDeckPadActive.value ? 'Steam鼠标' : '模拟鼠标'));
 const rulesOpen = ref(false);
 const speedOptions = SPEED_PRESETS.map((value) => ({ value, label: `${value}×` }));
 
@@ -65,11 +84,37 @@ const fsrDialogStyle = ref<Record<string, string>>({ position: 'fixed' });
 const fsrDialogConfirmEl = ref<HTMLElement | null>(null);
 const fsrDialogPanelEl = ref<HTMLElement | null>(null);
 const fsrDialogMode = ref<'confirm' | 'backend'>('confirm');
-type OptiAction = OptiBackend | 'uninstall';
 const fsrBackendChoice = ref<OptiAction>('fsr');
 const OPTI_BACKEND_CHOICES: OptiBackend[] = ['fsr', 'xess'];
 let fsrResolve: ((value: boolean | OptiAction | null) => void) | null = null;
 
+// 只打开 OPT 客户端，不读取或关闭它的运行进程。
+async function onOpenOptiConsole(): Promise<void> {
+  status('');
+  try {
+    if (!(await optiConsoleInstalled())) {
+      const goDownload = await openDialog(
+        '未找到 OPT 客户端',
+        `未检测到 ${OPTISCALER_CLIENT_EXE}。\n请前往 GitHub 下载 OptiscalerClient，并把文件复制到 ${OPTISCALER_CLIENT_DIR}\\ 后重试。`,
+        '打开下载页',
+        '知道了',
+      );
+      if (goDownload) {
+        await shell.open(OPTISCALER_CLIENT_URL).catch((error) => {
+          status('', `打开下载页失败：${(error as Error).message}`);
+        });
+      }
+      return;
+    }
+    await openOptiConsole();
+    status('已打开 OPT 客户端');
+  } catch (error) {
+    status('', `OPT 客户端打开失败：${(error as Error).message}`);
+  }
+}
+
+const policyGame = ref<DetectedGame | null>(getPolicyGame());
+let stopPolicyGame: (() => void) | null = null;
 const targetGame = computed(() => locked.value || props.game);
 const targetName = computed(() => targetGame.value
   ? (detectedGameName(targetGame.value) || targetGame.value.name)
@@ -166,11 +211,21 @@ async function refreshSpeedState(target: DetectedGame | null): Promise<void> {
 
 async function refreshControlState(target: DetectedGame | null): Promise<void> {
   mouseOn.value = isMouseModeSuppressed();
+  await refreshPadPersona();
   if (!target) {
     paused.value = false;
     return;
   }
   paused.value = (await hasSuspendedState(target.pid).catch(() => ({ suspended: false }))).suspended;
+}
+
+// 顶部菜单要如实反映当前输出人格（专属配置的覆盖也走同一份设置），
+// 读取失败保持上一次的值，不用错误值覆盖显示。
+async function refreshPadPersona(): Promise<void> {
+  try {
+    const settings = await loadSettings();
+    padPersona.value = effectiveInputPersona(settings.input);
+  } catch { /* 保持上值 */ }
 }
 
 function onSuspendedStateSync(e: Event): void {
@@ -179,6 +234,12 @@ function onSuspendedStateSync(e: Event): void {
 
 function onMouseModeSync(e: Event): void {
   mouseOn.value = Boolean((e as CustomEvent<{ on?: boolean }>).detail?.on);
+}
+
+// 覆盖下发/恢复后 native 侧真正生效的人格由 gameInputOverride 广播（含游戏退出恢复）。
+function onPadPersonaSync(e: Event): void {
+  const persona = (e as CustomEvent<{ persona?: string }>).detail?.persona;
+  if (typeof persona === 'string' && persona) padPersona.value = persona;
 }
 
 async function togglePause(): Promise<void> {
@@ -218,17 +279,20 @@ async function closeCurrentGame(): Promise<void> {
   }
 }
 
-// Windows 原生任务视图入口：直接调用 Explorer Shell 项，不模拟 Win+Tab/Alt+Tab 按键。
-const WINDOWS_TASK_VIEW_SHELL = 'shell:::{3080F90E-D7AD-11D9-BD98-0000947B0257}';
-
+// Windows 任务视图：由 native 注入真实 Win+Tab（与手柄类型解耦；不再走 explorer CLSID
+// 转发——后者每次调用会驻留一个 explorer 实例且成功率不稳）。
+// 切换程序是“离开 YMCC 去用别的窗口”：任务视图弹出后随即最小化本窗口（与界面上的
+// 最小化按钮同一语义），否则选完目标 YMCC 仍以最大化窗口留在前台，还要手动再收一次。
 async function openTaskView(): Promise<void> {
   if (taskViewBusy.value) return;
   taskViewBusy.value = true;
   try {
-    await shell.execute('explorer.exe', [WINDOWS_TASK_VIEW_SHELL]);
-    status('已打开 Windows 窗口切换');
+    await shell.taskView();
+    // 注入失败时保持窗口原样、错误提示仍可见；最小化是随动作一起做的窗口交接。
+    await windowApi.minimize().catch(() => false);
+    status('已切换 Windows 任务视图');
   } catch (error) {
-    status('', `打开 Windows 窗口切换失败：${(error as Error).message}`);
+    status('', `切换 Windows 任务视图失败：${(error as Error).message}`);
   } finally {
     taskViewBusy.value = false;
   }
@@ -240,13 +304,13 @@ async function toggleMouse(): Promise<void> {
   mouseNotice.value = '';
   try {
     const result = await toggleMouseMode();
-    if (!result.ok) throw new Error(result.error || '模拟鼠标切换失败');
+    if (!result.ok) throw new Error(result.error || `${mouseModeLabel.value}切换失败`);
     mouseOn.value = result.on;
     window.dispatchEvent(new CustomEvent('gp:mouse-mode', { detail: { on: result.on, backend: result.backend } }));
-    status(result.on ? '模拟鼠标已开启' : '模拟鼠标已关闭');
+    status(result.on ? `${mouseModeLabel.value}已开启` : `${mouseModeLabel.value}已关闭`);
   } catch (error) {
     mouseNotice.value = (error as Error).message;
-    status('', `模拟鼠标切换失败：${(error as Error).message}`);
+    status('', `${mouseModeLabel.value}切换失败：${(error as Error).message}`);
   } finally {
     mouseBusy.value = false;
   }
@@ -344,7 +408,8 @@ function openDialog(title: string, description: string, confirmLabel = '确认',
   fsrDialogConfirmLabel.value = confirmLabel;
   fsrDialogCancelLabel.value = cancelLabel;
   fsrDialogOpen.value = true;
-  const anchor = document.querySelector<HTMLElement>('[data-gp-game-quick-menu]')?.getBoundingClientRect() || null;
+  const anchor = document.querySelector<HTMLElement>('[data-gp-game-control="fsr-import"]')?.getBoundingClientRect()
+    || document.querySelector<HTMLElement>('[data-gp-game-quick-menu]')?.getBoundingClientRect() || null;
   const placement = getGamepadPopupPlacement(anchor, Math.min(420, window.innerWidth - 16), 260, 8);
   fsrDialogAbove.value = placement.above;
   fsrDialogStyle.value = placement.style;
@@ -358,17 +423,18 @@ function openBackendDialog(): Promise<OptiAction | null> {
   fsrDialogMode.value = 'backend';
   fsrBackendChoice.value = 'fsr';
   fsrDialogTitle.value = '选择 OptiScaler 方案';
-  fsrDialogDescription.value = '请选择操作方案，点击“确认方案并继续”后才会执行。';
+  fsrDialogDescription.value = 'FSR4 / XeSS 自动套用本地缓存与 Auto x2 配置；OPT 客户端只打开程序。';
   fsrDialogConfirmLabel.value = '确认方案并继续';
   fsrDialogCancelLabel.value = '取消';
   fsrDialogOpen.value = true;
-  const anchor = document.querySelector<HTMLElement>('[data-gp-game-quick-menu]')?.getBoundingClientRect() || null;
-  const placement = getGamepadPopupPlacement(anchor, Math.min(420, window.innerWidth - 16), 250, 8);
+  const anchor = document.querySelector<HTMLElement>('[data-gp-game-control="fsr-import"]')?.getBoundingClientRect()
+    || document.querySelector<HTMLElement>('[data-gp-game-quick-menu]')?.getBoundingClientRect() || null;
+  const placement = getGamepadPopupPlacement(anchor, Math.min(420, window.innerWidth - 16), 300, 8);
   fsrDialogAbove.value = placement.above;
   fsrDialogStyle.value = placement.style;
   nextTick(() => focusGamepadElement(document.querySelector<HTMLElement>('[data-gp-game-quick-dialog] .quick-opti-option-btn')));
   return new Promise<OptiAction | null>((resolve) => {
-    fsrResolve = (value) => resolve(value === 'fsr' || value === 'xess' || value === 'uninstall' ? value : null);
+    fsrResolve = (value) => resolve(value === 'fsr' || value === 'xess' || value === 'client' || value === 'uninstall' ? value : null);
   });
 }
 
@@ -397,6 +463,9 @@ async function runFsr(): Promise<void> {
   let gamePath = '';
   let selectedGameName = '';
   try {
+    const picked = await openBackendDialog();
+    if (!picked) { status('已取消 OptiScaler 操作'); return; }
+    if (picked === 'client') { await onOpenOptiConsole(); return; }
     if (targetGame.value) {
       target = await ensureTarget();
       gamePath = target.path;
@@ -421,14 +490,15 @@ async function runFsr(): Promise<void> {
       }
       selectedGameName = fileNameFromPath(gamePath);
     }
-    const picked = await openBackendDialog();
-    if (!picked) {
-      status('已取消 OptiScaler 操作');
-      return;
-    }
     const uninstall = picked === 'uninstall';
     const action = uninstall ? '卸载' : '安装';
-    const selectedBackend: OptiBackend | 'auto' = uninstall ? 'auto' : picked;
+    const selectedBackend: OptiBackend | 'auto' = uninstall ? 'auto' : picked as OptiBackend;
+    if (!uninstall) {
+      const preflight = await optiscalerAnalyze(gamePath);
+      if (!preflight.ok || preflight.antiCheat || !preflight.availableBackends?.includes(selectedBackend as OptiBackend)) {
+        throw new Error(preflight.antiCheat ? '检测到反作弊，不进行自动注入。' : (preflight.missing?.join('；') || '所选模式缺少本地缓存，请先准备文件。'));
+      }
+    }
     if (target) {
       if (!await openDialog('需要结束当前游戏', `OptiScaler ${action}前需要结束「${selectedGameName}」。\n是否立即结束游戏并继续？`, '结束游戏并继续')) {
         status(`已取消${action}，游戏未结束`);
@@ -441,7 +511,7 @@ async function runFsr(): Promise<void> {
     const result = await oneClickOptiScaler(gamePath, uninstall, selectedBackend);
     if (!result.ok) throw new Error(result.msgs?.join('；') || `${action}失败`);
     const completedName = selectedGameName;
-    status(`OptiScaler ${action}成功（${result.backend === 'xess' ? 'XeSS' : result.backend === 'fsr' ? 'FSR' : '自动'}）`);
+    status(`OptiScaler ${action}成功（${result.backend === 'xess' ? 'XeSS' : result.backend === 'fsr' ? 'FSR4' : '自动'}）${result.version ? ` · ${result.version}` : ''}${result.warnings?.length ? `\n${result.warnings.join('\n')}` : ''}`);
     if (target) onTargetLost();
     if (!uninstall && await openDialog('是否启动游戏', `「${completedName}」已安装完成，是否现在启动游戏？`, '启动游戏')) {
       await shell.execute(gamePath, []);
@@ -479,6 +549,11 @@ async function runSpeed(factor: number): Promise<void> {
   }
 }
 
+function onWakeGameRecovery(): void {
+  // Reread current state; a late old recovery event must not clear a new pause.
+  void refreshMenuState();
+}
+
 function onCustomStatus(value: { message?: string; error?: string }): void {
   status(value.message || '', value.error || '');
 }
@@ -500,17 +575,23 @@ watch(() => props.game, (game) => {
 watch(() => props.open, (open) => { if (open) void refreshMenuState(); });
 
 onMounted(() => {
+  stopPolicyGame = subscribePolicyGameStatus((game) => { policyGame.value = game; });
   window.addEventListener('ipc:gamepad-back', onGamepadBack);
   window.addEventListener(QUICKAPP_SUSPENDED_EVENT, onSuspendedStateSync as EventListener);
+  window.addEventListener('ipc:game.wake-recovery', onWakeGameRecovery);
   window.addEventListener('gp:mouse-mode', onMouseModeSync as EventListener);
+  window.addEventListener('gp:pad-persona', onPadPersonaSync as EventListener);
   window.addEventListener('game-quick-target-lost', onTargetLost);
   window.addEventListener('game-quick-refresh', refreshGame);
   void refreshMenuState();
 });
 onBeforeUnmount(() => {
+  stopPolicyGame?.();
   window.removeEventListener('ipc:gamepad-back', onGamepadBack);
   window.removeEventListener(QUICKAPP_SUSPENDED_EVENT, onSuspendedStateSync as EventListener);
+  window.removeEventListener('ipc:game.wake-recovery', onWakeGameRecovery);
   window.removeEventListener('gp:mouse-mode', onMouseModeSync as EventListener);
+  window.removeEventListener('gp:pad-persona', onPadPersonaSync as EventListener);
   window.removeEventListener('game-quick-target-lost', onTargetLost);
   window.removeEventListener('game-quick-refresh', refreshGame);
   if (fsrResolve) closeDialog(false);
@@ -523,25 +604,27 @@ onBeforeUnmount(() => {
       <div class="game-quick-target"><AppIcon :name="locked ? 'lock' : 'gamepad'" /><span>{{ targetName }}</span><small>{{ locked ? '已锁定' : '未锁定' }}</small></div>
     </div>
 
+    <!-- 视觉顺序即手柄横向顺序：data-gp-col 必须与按钮的 DOM 顺序一致（0 切换程序、
+         1 暂停游戏、2 关闭游戏、3 模拟鼠标），否则手柄左右与看到的图标对不上。 -->
     <div class="quick-game-controls" data-gp-group="game-quick-game-controls" data-gp-game-row="controls">
-      <button ref="pauseButtonEl" type="button" data-gp-row="0" data-gp-col="0" :disabled="disabledForAction || !targetGame" @click="togglePause">
-        <AppIcon :name="paused ? 'play' : 'pause'" />{{ paused ? '继续游戏' : '暂停游戏' }}
-      </button>
-      <button type="button" class="danger" data-gp-row="0" data-gp-col="1" :disabled="disabledForAction || !targetGame" @click="closeCurrentGame">
-        <AppIcon name="close" />关闭游戏
-      </button>
-      <button type="button" data-gp-row="0" data-gp-col="2" data-gp-game-control="switch-program" :disabled="disabledForAction" @click="openTaskView">
+      <button type="button" data-gp-row="0" data-gp-col="0" data-gp-game-control="switch-program" :disabled="disabledForAction" @click="openTaskView">
         <AppIcon name="monitor" />切换程序
       </button>
+      <button ref="pauseButtonEl" type="button" data-gp-row="0" data-gp-col="1" :disabled="disabledForAction || !targetGame" @click="togglePause">
+        <AppIcon :name="paused ? 'play' : 'pause'" />{{ paused ? '继续游戏' : '暂停游戏' }}
+      </button>
+      <button type="button" class="danger" data-gp-row="0" data-gp-col="2" :disabled="disabledForAction || !targetGame" @click="closeCurrentGame">
+        <AppIcon name="close" />关闭游戏
+      </button>
       <button type="button" data-gp-row="0" data-gp-col="3" :class="{ active: mouseOn }" :disabled="disabledForAction" @click="toggleMouse">
-        <AppIcon name="mouse" />{{ mouseOn ? '模拟鼠标已开启' : '模拟鼠标已关闭' }}
+        <AppIcon name="mouse" />{{ mouseModeLabel }}{{ mouseOn ? '已开启' : '已关闭' }}
       </button>
     </div>
     <div v-if="mouseNotice" class="quick-control-notice">{{ mouseNotice }}</div>
 
     <div class="game-quick-actions" data-gp-group="game-quick-actions">
       <button type="button" class="quick-action" data-gp-game-row="actions-1" data-gp-row="1" data-gp-col="0" data-gp-game-control="fsr-import" :disabled="disabledForAction" @click="runFsr">
-        <AppIcon name="bolt" /><span><strong>FSR4.1/Xess-OPT自动导入</strong><small>{{ targetGame ? '识别、选择、安装 / 卸载' : '未识别时手动选择程序' }}</small></span>
+        <AppIcon name="bolt" /><span><strong>FSR4.1/Xess-OPT自动导入</strong><small>FSR4 / XeSS 自动套用 · OPT 客户端</small></span>
       </button>
       <button type="button" class="quick-action" data-gp-game-row="actions-1" data-gp-row="1" data-gp-col="1" :disabled="disabledForAction || !targetGame" @click="runLosslessScaling">
         <AppIcon name="rocket" /><span><strong>Lossless Scaling</strong><small>小黄鸭一键插帧</small></span>
@@ -565,9 +648,10 @@ onBeforeUnmount(() => {
     />
 
     <GameCustomProfilePanel
-      :game="targetGame"
+      :game="policyGame"
       :open="open"
       @status="onCustomStatus"
+      @changed="refreshPadPersona"
     />
 
     <div class="game-quick-footer" data-gp-group="game-quick-footer" data-gp-game-row="footer">
@@ -590,14 +674,17 @@ onBeforeUnmount(() => {
                 :class="{ selected: fsrBackendChoice === backend }"
                 :aria-pressed="fsrBackendChoice === backend"
                 @click="fsrBackendChoice = backend"
-              >{{ backend === 'xess' ? 'XeSS' : 'FSR' }}</button>
+              >{{ backend === 'xess' ? 'XeSS' : 'FSR4' }}</button>
+              <button type="button" class="quick-opti-option-btn" :class="{ selected: fsrBackendChoice === 'client' }" :aria-pressed="fsrBackendChoice === 'client'" @click="fsrBackendChoice = 'client'">OPT 客户端</button>
+            </div>
+            <div class="quick-opti-maintenance">
               <button
                 type="button"
                 class="quick-opti-option-btn uninstall"
                 :class="{ selected: fsrBackendChoice === 'uninstall' }"
                 :aria-pressed="fsrBackendChoice === 'uninstall'"
                 @click="fsrBackendChoice = 'uninstall'"
-              >卸载</button>
+              >卸载并还原游戏文件</button>
             </div>
           </template>
           <div class="quick-dialog-actions">
@@ -635,6 +722,7 @@ onBeforeUnmount(() => {
 .quick-action span { display: grid; gap: 2px; min-width: 0; }
 .quick-action strong { font-size: 11px; }
 .quick-action small, .quick-speed-title { color: var(--text-dim); font-size: 9px; }
+.quick-action.active { border-color: color-mix(in srgb, var(--accent) 45%, transparent); color: var(--accent); }
 .quick-speed { display: grid; grid-template-columns: minmax(0, 1fr) 82px; align-items: center; gap: 5px; }
 .quick-speed.is-disabled { opacity: .45; cursor: default; }
 .quick-speed.is-disabled :deep(.dd-trigger:disabled) { opacity: 1; }
@@ -656,13 +744,15 @@ onBeforeUnmount(() => {
 .quick-control-notice { color: var(--danger); font-size: 10px; line-height: 1.35; }
 .quick-status { color: var(--ok); font-size: 10px; line-height: 1.35; white-space: pre-line; }
 .quick-status.error { color: var(--danger); }
-.quick-dialog { padding: 12px; border: 1px solid rgba(255,255,255,.12); border-radius: 10px; background: color-mix(in srgb, var(--bg-solid) 96%, #101722); box-shadow: 0 16px 40px rgba(0,0,0,.55); z-index: 1000; }
+.quick-dialog { box-sizing: border-box; overflow-y: auto; padding: 12px; border: 1px solid rgba(255,255,255,.12); border-radius: 10px; background: color-mix(in srgb, var(--bg-solid) 96%, #101722); box-shadow: 0 16px 40px rgba(0,0,0,.55); z-index: 1000; }
 .quick-dialog-title { display: flex; align-items: center; gap: 7px; font-weight: 700; font-size: 13px; }
 .quick-dialog-title :deep(svg) { width: 16px; height: 16px; color: var(--accent); }
 .quick-dialog p { white-space: pre-line; color: var(--text-dim); font-size: 11px; line-height: 1.5; margin: 8px 0; }
 .quick-dialog-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
 .quick-dialog-actions button { min-height: 34px; border: 1px solid rgba(255,255,255,.08); border-radius: 7px; background: var(--bg-input); color: var(--text); cursor: pointer; }
 .quick-dialog-actions button:first-child { background: var(--accent); color: #07131d; font-weight: 700; }
+.quick-opti-maintenance { margin: 8px 0; }
+.quick-opti-maintenance .quick-opti-option-btn { width: 100%; }
 .quick-opti-options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; margin: 8px 0; }
 .quick-opti-option-btn { min-height: 38px; border: 1px solid rgba(255,255,255,.1); border-radius: 7px; background: var(--bg-input); color: var(--text); font-size: 11px; font-weight: 700; cursor: pointer; }
 .quick-opti-option-btn:hover, .quick-opti-option-btn.selected { border-color: var(--accent); background: rgba(46,166,255,.14); color: var(--accent); }

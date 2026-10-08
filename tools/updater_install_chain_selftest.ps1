@@ -1,17 +1,28 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param()
 
 $ErrorActionPreference = 'Stop'
+
+# Windows PowerShell launched by pnpm/pwsh must resolve its own built-in modules first.
+$ownModules = Join-Path $PSHOME 'Modules'
+if (($env:PSModulePath -split ';')[0].TrimEnd('\') -ine $ownModules.TrimEnd('\')) {
+  $env:PSModulePath = $ownModules + ';' + $env:PSModulePath
+}
 
 $mainSource = Join-Path $PSScriptRoot '..'
 $mainNativeSource = Join-Path $mainSource 'native\main.cpp'
 if (-not (Test-Path -LiteralPath $mainNativeSource -PathType Leaf)) { throw 'main native source missing' }
 $mainNativeText = Get-Content -LiteralPath $mainNativeSource -Raw
-if ($mainNativeText -notmatch 'pressed\(XINPUT_GAMEPAD_Y\)\) gamepadEmitUiAction\("edit-game"\)') {
+# 2026-09-17 修正：Y 绑定现为多行写法（`else if (pressed(XINPUT_GAMEPAD_Y)) {`
+# + 下一行 gamepadEmitUiAction），原单行正则误报"未绑定"；放宽为 80 字符内
+# 允许换行/空白（功能断言不变：只要求 Y 探测后紧随 emit）。
+if ($mainNativeText -notmatch 'pressed\(XINPUT_GAMEPAD_Y\)\)[\s\S]{0,80}?gamepadEmitUiAction\("edit-game"\)') {
   throw 'CustomSteamLibrary edit action is not bound to controller Y in the mainline input bridge'
 }
-if (-not ($mainNativeText.Contains('if (customSteamLibraryChildForeground() &&') -and
-    $mainNativeText.Contains('pressed(XINPUT_GAMEPAD_X)) gamepadEmitUiAction("edit-game");'))) {
+# 2026-09-17 修正：child 绑定现为嵌套写法（`if (customSteamLibraryChildForeground()) {`
+# + 内层 X 探测单行），原"同一行含 &&"断言误报；放宽为 80 字符内允许换行。
+if (-not ($mainNativeText.Contains('customSteamLibraryChildForeground()') -and
+    ($mainNativeText -match 'pressed\(XINPUT_GAMEPAD_X\)\)[\s\S]{0,80}?gamepadEmitUiAction\("edit-game"\)'))) {
   throw 'CustomSteamLibrary child edit action is not bound to controller X in the mainline input bridge'
 }
 
@@ -265,7 +276,10 @@ function New-OldInstall(
 ) {
   Copy-TreeChecked (Join-Path $PackageRoot 'YeManCC') $ExeDir
   Copy-TreeChecked (Join-Path $PackageRoot 'PowerControl') $PcDir
-  Copy-TreeChecked (Join-Path $PackageRoot 'CustomSteamLibrary') $CustomDir
+  # 2026-09-17 修正：现行两根结构——CustomSteamLibrary 是 YeManCC 子目录
+  # （旧顶层第三根已废弃，用户裁决删除 legacy）；测试安装位 CustomDir 从
+  # YeManCC 子目录取（与 575 行断言、update-manifest roots=两根 一致）。
+  Copy-TreeChecked (Join-Path $PackageRoot 'YeManCC\CustomSteamLibrary') $CustomDir
   Set-Content -LiteralPath (Join-Path $ExeDir 'version.json') -Value '{"version":"0.0.10","notes":"old"}' -Encoding UTF8
   Set-Content -LiteralPath (Join-Path $ExeDir 'index.html') -Value 'old-index' -Encoding UTF8
   Set-Content -LiteralPath (Join-Path $ExeDir 'YeMan-Support.html') -Value 'old-support' -Encoding UTF8
@@ -482,7 +496,12 @@ function Invoke-InstallRound(
 }
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
-$workspaceRoot = [IO.Path]::GetFullPath((Join-Path $repoRoot '..\..'))
+# CI writes Release inside its checkout; local canonical builds use ../../Release.
+$workspaceRoot = if ([string]::IsNullOrWhiteSpace($env:YEMAN_WORKSPACE_ROOT)) {
+  [IO.Path]::GetFullPath((Join-Path $repoRoot '..\..'))
+} else {
+  [IO.Path]::GetFullPath($env:YEMAN_WORKSPACE_ROOT)
+}
 $package = Join-Path $workspaceRoot 'Release\Packages\YeManCC.zip'
 $releaseManifest = Join-Path $workspaceRoot 'Release\version.json'
 if (!(Test-Path -LiteralPath $package -PathType Leaf)) { throw "release package missing: $package" }
@@ -525,10 +544,11 @@ try {
     throw "package roots do not match update-manifest.json; missing: $($missingRoots -join ', '); unexpected: $($unexpectedRoots -join ', '); got: $($topLevel -join ', ')"
   }
   if ($hasLayoutManifest) {
-    Assert-Equal ([string]$layoutManifest.rules.fanHost) 'preserve-existing' 'Fan Host update policy'
+    Assert-Equal ([string]$layoutManifest.rules.fanHost) 'preserve-existing' 'Legacy Fan Host policy'
+    Assert-Equal ([string]$layoutManifest.rules.fanHostV2) 'replace' 'V2 Fan Host update policy'
   }
-  if (Test-Path -LiteralPath (Join-Path $packageRoot 'PowerControl\fan-host')) {
-    throw 'PowerControl\fan-host unexpectedly entered the update package'
+  if (!(Test-Path -LiteralPath (Join-Path $packageRoot 'PowerControl\fan-host-v2\YeManFanHost.exe'))) {
+    throw 'PowerControl\fan-host-v2 is missing from the update package'
   }
   if (Test-Path -LiteralPath (Join-Path $packageRoot 'PowerControl\fan-host-quarantine')) {
     throw 'PowerControl\fan-host-quarantine unexpectedly entered the update package'
@@ -542,6 +562,7 @@ try {
     'YeManCC\index.html',
     'YeManCC\YeMan-Support.html',
     'PowerControl\Sleep\system-blacklist.txt',
+    'PowerControl\redist\HidHide_1.5.230_x64.exe',
     'PowerControl\pawnio\YeManTdpCtl.exe',
     'PowerControl\pawnio\_internal'
   )
@@ -612,10 +633,11 @@ try {
   Assert-FileMatch (Join-Path $packageRoot 'YeManCC\index.html') (Join-Path $successResult.ExeDir 'index.html') 'success program files'
   Assert-FileMatch (Join-Path $packageRoot 'YeManCC\YeMan-Support.html') (Join-Path $successResult.ExeDir 'YeMan-Support.html') 'success support page'
   Assert-FileMatch (Join-Path $packageRoot 'PowerControl\Sleep\system-blacklist.txt') (Join-Path $successResult.PcDir 'Sleep\system-blacklist.txt') 'success system blacklist'
+  Assert-FileMatch (Join-Path $packageRoot 'PowerControl\redist\HidHide_1.5.230_x64.exe') (Join-Path $successResult.PcDir 'redist\HidHide_1.5.230_x64.exe') 'success HidHide installer deployment'
   Assert-Equal (Get-Content -LiteralPath (Join-Path $successResult.PcDir 'Sleep\player-blacklist.txt') -Raw).Trim() 'player-owned-rule' 'success player blacklist'
   Assert-Equal (Get-Content -LiteralPath (Join-Path $successResult.PcDir 'Sleep\player-owned.json') -Raw).Trim() 'keep-player-data' 'success player data'
   if (!(Test-Path -LiteralPath (Join-Path $successResult.PcDir 'exclude.txt') -PathType Leaf)) { throw 'existing user exclude.txt was unexpectedly deleted' }
-  Assert-Equal (Get-Content -LiteralPath (Join-Path $successResult.PcDir 'fan-host\old-host-marker.txt') -Raw).Trim() 'keep-old-fan-host' 'success existing Fan Host preservation'
+  Assert-FileMatch (Join-Path $packageRoot 'PowerControl\fan-host-v2\YeManFanHost.exe') (Join-Path $successResult.PcDir 'fan-host-v2\YeManFanHost.exe') 'success Fan Host replacement'
   Assert-Equal (Get-Content -LiteralPath (Join-Path $successResult.CustomDir 'data\config\user.json') -Raw).Trim() 'keep-custom-data' 'success CustomSteamLibrary data'
   Assert-Equal (Get-Content -LiteralPath (Join-Path $successResult.CustomDir 'user-owned.txt') -Raw).Trim() 'keep-custom-unknown' 'success CustomSteamLibrary unknown file'
   Assert-FileMatch (Join-Path $packageRoot 'YeManCC\CustomSteamLibrary\CustomSteamLibrary.exe') (Join-Path $successResult.CustomDir 'CustomSteamLibrary.exe') 'success CustomSteamLibrary entry point'

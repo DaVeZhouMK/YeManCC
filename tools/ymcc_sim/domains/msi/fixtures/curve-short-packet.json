@@ -1,0 +1,8 @@
+{
+  "name": "curve-short-packet",
+  "kind": "curve",
+  "expect": { "ok": false, "reason": "short-packet", "duties": null, "asRpm": false },
+  "raw": [1, 40, 49, 58, 67, 75, 75, 75],
+  "readSuccess": true,
+  "note": "8 bytes instead of 32: refuse to decode, never pad with zeros (a zero-filled duty would look like a valid 0% curve)"
+}

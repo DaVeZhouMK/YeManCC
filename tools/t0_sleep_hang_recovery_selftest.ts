@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 const native = readFileSync(resolve(process.cwd(), 'native/main.cpp'), 'utf8');
+const fanHost = readFileSync(resolve(process.cwd(), 'FanLab/real-host/Program.cs'), 'utf8');
 
 function requireNative(token: string): void {
   assert.ok(native.includes(token), `missing T0 recovery guard: ${token}`);
@@ -20,9 +21,23 @@ function section(start: string, end: string): string {
 // and a successful new launch must still run the established marker recovery path.
 requireNative('static void appendNativeLifecycleLog(const char* event, json detail = json::object());');
 requireNative('native-lifecycle.log');
-requireNative('appendNativeLifecycleLog("sleep-orphan-recovery-start")');
+requireNative('sgRecordFact("sleep-orphan-recovery-start")');
 requireNative('const SgResumeResult recovered = sgResumeTrackedAll();');
-requireNative('appendNativeLifecycleLog("sleep-orphan-recovery-complete"');
+requireNative('sgRecordFact("sleep-orphan-recovery-complete"');
+requireNative('SG_FACT_LOG');
+// A13 同步（2026-09-20）：原断言为 3 元组 { uiPath, hostPath, coordinatorPath }；
+// 现源为 4 元组，新增 hostFaultPath（main.cpp:33254 定义 / :33259 循环）——
+// 即"未清理终止"的判据把 Host 故障日志也纳入直读范围，属性更强而非减弱。
+// 若该元组回退为 3 项（丢掉 hostFaultPath），下面的断言会失败。
+requireNative('for (const auto& path : { uiPath, hostPath, hostFaultPath, coordinatorPath })');
+requireNative('const std::wstring hostFaultPath = fan_host_state_dir() + L"\\\\logs\\\\fan-host-fault.log";');
+
+// The user-facing fan logging switch is shared with the resident Host. Native
+// writes "enabled" while older installations used "1"; both must retain
+// diagnostics without changing the switch's safety semantics.
+assert.ok(fanHost.includes('string.Equals(enabledValue, "enabled", StringComparison.OrdinalIgnoreCase)') &&
+  fanHost.includes('string.Equals(enabledValue, "1", StringComparison.Ordinal)'),
+  'FanHost diagnostics must accept the native shared logging flag and legacy value');
 
 // Static evidence: never treat the first 0-HWND observation as a zombie.
 requireNative('waitForExistingInstanceWindow(title, 1500, existing)');
@@ -56,7 +71,7 @@ assert.ok(terminator.includes('TerminateProcess(process, 0)'),
 
 const takeover = section(
   '// T0 sleep-hang repair: normal single-instance behavior remains unchanged,',
-  'appendNativeLifecycleLog("boot-single-instance-acquired")',
+  'appendNativeLifecycleLog("boot-single-instance-acquired");',
 );
 assert.ok(takeover.includes('if (candidates.size() == 1)'),
   'takeover must require exactly one candidate');

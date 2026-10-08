@@ -4,7 +4,7 @@
 // 不再被页面、App 或 autofloat 调用，旧 cpu_lock.json 不会覆盖当前 CPU 调节链路。
 
 import { applyPowerParams, readPowerParams, PW, type PowerParams } from './yeman';
-import { readSettingsSection, saveSettingsSection } from './settingsRepository';
+import { getSettingsGeneration, assertSettingsGeneration, readSettingsSection, saveSettingsSection } from './settingsRepository';
 
 export const CPU_LOCK_FILE = 'C:\\SOFT\\YeMan\\PowerControl\\cpu_lock.json';
 
@@ -51,8 +51,7 @@ let loaded = false;
 
 const listeners = new Set<(c: CpuLockCfg) => void>();
 function notify(): void {
-  const snap = { ...cache };
-  listeners.forEach((cb) => cb(snap));
+  listeners.forEach((cb) => { try { cb({ ...cache }); } catch { /* Observer failures cannot undo a commit. */ } });
 }
 export function onCpuLockUpdate(cb: (c: CpuLockCfg) => void): () => void {
   listeners.add(cb);
@@ -93,19 +92,19 @@ function sideCfg(side: CpuLockSide): CpuLockSideCfg {
     : { locked: cache.dcLocked, freq: cache.dcFreq, aggr: cache.dcAggr, turbo: cache.dcTurbo };
 }
 
-function setSideCfg(side: CpuLockSide, patch: CpuLockSidePatch, locked?: boolean): void {
+function setSideCfg(config: CpuLockCfg, side: CpuLockSide, patch: CpuLockSidePatch, locked?: boolean): void {
   if (side === 'ac') {
-    if (patch.freq !== undefined) cache.acFreq = patch.freq;
-    if (patch.aggr !== undefined) cache.acAggr = patch.aggr;
-    if (patch.turbo !== undefined) cache.acTurbo = patch.turbo;
-    if (locked !== undefined) cache.acLocked = locked;
+    if (patch.freq !== undefined) config.acFreq = patch.freq;
+    if (patch.aggr !== undefined) config.acAggr = patch.aggr;
+    if (patch.turbo !== undefined) config.acTurbo = patch.turbo;
+    if (locked !== undefined) config.acLocked = locked;
   } else {
-    if (patch.freq !== undefined) cache.dcFreq = patch.freq;
-    if (patch.aggr !== undefined) cache.dcAggr = patch.aggr;
-    if (patch.turbo !== undefined) cache.dcTurbo = patch.turbo;
-    if (locked !== undefined) cache.dcLocked = locked;
+    if (patch.freq !== undefined) config.dcFreq = patch.freq;
+    if (patch.aggr !== undefined) config.dcAggr = patch.aggr;
+    if (patch.turbo !== undefined) config.dcTurbo = patch.turbo;
+    if (locked !== undefined) config.dcLocked = locked;
   }
-  cache.locked = cache.acLocked || cache.dcLocked;
+  config.locked = config.acLocked || config.dcLocked;
 }
 
 function sideValues(side: CpuLockSide): CpuLockSidePatch {
@@ -114,9 +113,30 @@ function sideValues(side: CpuLockSide): CpuLockSidePatch {
     : { freq: cache.dcFreq, aggr: cache.dcAggr, turbo: cache.dcTurbo };
 }
 
-async function persist(): Promise<void> {
-  cache.locked = cache.acLocked || cache.dcLocked;
-  await saveSettingsSection('cpu', { lock: cache });
+let configQueue: Promise<void> = Promise.resolve();
+function queueConfig<T>(operation: () => Promise<T>): Promise<T> {
+  const generation = getSettingsGeneration();
+  const run = configQueue.then(() => { assertSettingsGeneration(generation); return operation(); });
+  configQueue = run.then(() => {}, () => {});
+  return run;
+}
+async function mutateLock(mutator: (next: CpuLockCfg) => void): Promise<void> {
+  const generation = getSettingsGeneration();
+  await queueConfig(async () => {
+    const cpu = await readSettingsSection<any>('cpu');
+    const current = sanitize(cpu.lock);
+    const next = { ...current };
+    mutator(next);
+    next.locked = next.acLocked || next.dcLocked;
+    const patch: Partial<CpuLockCfg> = {};
+    for (const key of Object.keys(next) as (keyof CpuLockCfg)[])
+      if (next[key] !== current[key]) (patch as any)[key] = next[key];
+    if (Object.keys(patch).length) await saveSettingsSection('cpu', { lock: patch }, generation);
+    // No optimistic global cache mutation before a successful durable save.
+    cache = sanitize((await readSettingsSection<any>('cpu')).lock);
+    loaded = true;
+    notify();
+  });
 }
 
 // 同步读取缓存。无参数保持旧 API 语义：只要任一侧锁定即返回 true。
@@ -142,19 +162,18 @@ export function getCpuLockSide(side: CpuLockSide): CpuLockSideCfg {
 
 // 从磁盘载入；旧 locked 字段会迁移成 acLocked/dcLocked。
 export async function loadCpuLock(): Promise<CpuLockCfg> {
-  let legacy = false;
-  try {
+  const generation = getSettingsGeneration();
+  return queueConfig(async () => {
     const cpu = await readSettingsSection<any>('cpu');
     const raw = cpu.lock || {};
-    legacy = !hasOwn(raw, 'acLocked') || !hasOwn(raw, 'dcLocked');
-    cache = sanitize(raw);
-  } catch {
-    cache = { ...DEFAULT_LOCK };
-  }
-  loaded = true;
-  if (legacy) await persist();
-  notify();
-  return { ...cache };
+    const next = sanitize(raw);
+    if (!hasOwn(raw, 'acLocked') || !hasOwn(raw, 'dcLocked'))
+      await saveSettingsSection('cpu', { lock: next }, generation);
+    cache = next;
+    loaded = true;
+    notify();
+    return { ...cache };
+  });
 }
 
 async function ensureLoaded(): Promise<void> {
@@ -174,21 +193,21 @@ export async function setCpuLock(
   valuesOrApply: CpuLockSidePatch | boolean = {},
   apply = false,
 ): Promise<void> {
-  await ensureLoaded();
-  if (typeof sideOrValues === 'string') {
-    setSideCfg(sideOrValues, valuesOrApply as CpuLockSidePatch, true);
-  } else {
-    const v = sideOrValues;
-    setSideCfg('ac', fullPatch(v), true);
-    setSideCfg('dc', { freq: v.dcFreq, aggr: v.dcAggr, turbo: v.dcTurbo }, true);
-  }
-  await persist();
-  notify();
+  const patch = typeof sideOrValues === 'string' ? { ...(valuesOrApply as CpuLockSidePatch) } : { ...sideOrValues };
+  await mutateLock(next => {
+    if (typeof sideOrValues === 'string') setSideCfg(next, sideOrValues, patch as CpuLockSidePatch, true);
+    else {
+      const v = patch as CpuLockPatch;
+      setSideCfg(next, 'ac', fullPatch(v), true);
+      setSideCfg(next, 'dc', { freq: v.dcFreq, aggr: v.dcAggr, turbo: v.dcTurbo }, true);
+    }
+  });
   if (typeof valuesOrApply === 'boolean' ? valuesOrApply : apply) await applyCpuLock().catch(() => {});
 }
 
 // 新 API 的语义化名称。
 export async function lockCpuSide(side: CpuLockSide, values?: CpuLockSidePatch, apply = false): Promise<void> {
+  values = values ? { ...values } : undefined;
   await ensureLoaded();
   if (!values) {
     const current = await readPowerParams();
@@ -198,9 +217,8 @@ export async function lockCpuSide(side: CpuLockSide, values?: CpuLockSidePatch, 
         : { freq: current.dcFreq, aggr: current.dcAggr, turbo: current.dcTurbo }
       : sideValues(side);
   }
-  setSideCfg(side, values, true);
-  await persist();
-  notify();
+  const patch = { ...values };
+  await mutateLock(next => setSideCfg(next, side, patch, true));
   if (apply) await applyCpuLock().catch(() => {});
 }
 
@@ -208,17 +226,16 @@ export async function lockCpuSide(side: CpuLockSide, values?: CpuLockSidePatch, 
 export async function updateCpuLock(v: CpuLockPatch): Promise<void>;
 export async function updateCpuLock(side: CpuLockSide, v: CpuLockSidePatch): Promise<void>;
 export async function updateCpuLock(sideOrValues: CpuLockSide | CpuLockPatch, values?: CpuLockSidePatch): Promise<void> {
-  await ensureLoaded();
-  if (typeof sideOrValues === 'string') {
-    if (!sideLocked(sideOrValues)) return;
-    setSideCfg(sideOrValues, values ?? {});
-  } else {
-    if (cache.acLocked) setSideCfg('ac', fullPatch(sideOrValues));
-    if (cache.dcLocked) setSideCfg('dc', { freq: sideOrValues.dcFreq, aggr: sideOrValues.dcAggr, turbo: sideOrValues.dcTurbo });
-    if (!cache.acLocked && !cache.dcLocked) return;
-  }
-  await persist();
-  notify();
+  const submitted = typeof sideOrValues === 'string' ? { ...values } : { ...sideOrValues };
+  await mutateLock(next => {
+    if (typeof sideOrValues === 'string') {
+      if (sideOrValues === 'ac' ? next.acLocked : next.dcLocked) setSideCfg(next, sideOrValues, submitted as CpuLockSidePatch);
+    } else {
+      const v = submitted as CpuLockPatch;
+      if (next.acLocked) setSideCfg(next, 'ac', fullPatch(v));
+      if (next.dcLocked) setSideCfg(next, 'dc', { freq: v.dcFreq, aggr: v.dcAggr, turbo: v.dcTurbo });
+    }
+  });
 }
 
 export async function updateCpuLockSide(side: CpuLockSide, values: CpuLockSidePatch): Promise<void> {
@@ -229,15 +246,10 @@ export async function updateCpuLockSide(side: CpuLockSide, values: CpuLockSidePa
 export async function clearCpuLock(): Promise<void>;
 export async function clearCpuLock(side: CpuLockSide): Promise<void>;
 export async function clearCpuLock(side?: CpuLockSide): Promise<void> {
-  await ensureLoaded();
-  if (side) setSideCfg(side, {}, false);
-  else {
-    cache.acLocked = false;
-    cache.dcLocked = false;
-    cache.locked = false;
-  }
-  await persist();
-  notify();
+  await mutateLock(next => {
+    if (side) setSideCfg(next, side, {}, false);
+    else { next.acLocked = false; next.dcLocked = false; next.locked = false; }
+  });
 }
 
 export async function unlockCpuSide(side: CpuLockSide): Promise<void> {

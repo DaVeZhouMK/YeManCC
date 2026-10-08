@@ -2,7 +2,7 @@
     "schemaVersion":  2,
     "packageId":  "custom-steam-library",
     "packageType":  "green-child",
-    "packageVersion":  "0.0.28",
+    "packageVersion":  "0.0.33",
     "productName":  "Steam自定义游戏库",
     "productNameEnglish":  "Custom Steam Library",
     "entryPoint":  "CustomSteamLibrary.exe",
@@ -73,10 +73,114 @@
     "legacyPaths":  [
                         "D:\\YeMan\\Steam大屏"
                     ],
-    "generatedAt":  "2026-08-31T14:28:34.0784317+08:00",
+    "generatedAt":  "2026-10-08T16:40:28.2676326+08:00",
     "sourceBuild":  {
-                        "host":  "b2836479df426991e78222d836c4bbedb5a316d42064dfbecaa86648751eeaa7",
-                        "worker":  "914ac6ae9ffd76c2586fbdcd443e50aa4bc4b8c272cf9ba3e820f5dc044ae121"
+                        "host":  "dedcaac1f1e9ad0cf06260198ab819400dbbfb7fef57f02f60b542f507477932",
+                        "worker":  "a2a9a7785493ef4f5a49a4a4e334852be1616a6c2867f144a4171de7f06a037c",
+                        "hostSources":  [
+                                            {
+                                                "path":  "CustomSteamLibrary/assets/custom-steam-library.ico",
+                                                "sha256":  "6bdea618684f30f5ec1d0b53bdab854aa3cbba00fd32ea551ba580d24cbc76af"
+                                            },
+                                            {
+                                                "path":  "deps/json/json.hpp",
+                                                "sha256":  "853b2eb3bf7632c949f4a2dd6fb8a629c5ff25cc0059d29c7d21915dc719487f"
+                                            },
+                                            {
+                                                "path":  "deps/webview2/build/native/include/WebView2.h",
+                                                "sha256":  "52174d99459f6c01927eb61671c22600e0aedbcdf59d38db36f52c32a6b55d61"
+                                            },
+                                            {
+                                                "path":  "deps/webview2/build/native/include/WebView2EnvironmentOptions.h",
+                                                "sha256":  "a83255409630e1bd99c6fa3b706c89bc4a2ce35a59e939f72119c57403e2bc2e"
+                                            },
+                                            {
+                                                "path":  "deps/webview2/build/native/x64/WebView2LoaderStatic.lib",
+                                                "sha256":  "89c6b872783b8f6c3cedbff618adb42082d455c615453ae10cfc753f1e8f25d8"
+                                            },
+                                            {
+                                                "path":  "native/custom-steam-library/build_host.bat",
+                                                "sha256":  "dccff93d419ba61a5633e51b67516ed1811389d5e193f7a740f949374bd11b97"
+                                            },
+                                            {
+                                                "path":  "native/custom-steam-library/custom_steam_library_exclusions.h",
+                                                "sha256":  "c940032a71bd46df30c01e7db4ae92be5dad6c9dd13e589bf082439db02ac3f1"
+                                            },
+                                            {
+                                                "path":  "native/custom-steam-library/custom_steam_library_identity_cache.h",
+                                                "sha256":  "da31ddbe3ff0c51c549a68644a01d51843a17f1ef282b2bef9e863ca44e6fde8"
+                                            },
+                                            {
+                                                "path":  "native/custom-steam-library/custom_steam_library_inventory.h",
+                                                "sha256":  "8186f3b2364ddfb7150a33b632941fa5cdf2f605a00e537f5ede7af505ed75c1"
+                                            },
+                                            {
+                                                "path":  "native/custom-steam-library/custom_steam_library_paths.h",
+                                                "sha256":  "944c4d8abfeb94b63108320f08d91f35a879d272ac62b4694bc20c0b42766795"
+                                            },
+                                            {
+                                                "path":  "native/custom-steam-library/workspace_host.cpp",
+                                                "sha256":  "15477f9d6278c1c53a9641138797f224a3cab4ce224d889746a3dc32831abda2"
+                                            },
+                                            {
+                                                "path":  "native/custom-steam-library/workspace_host.rc",
+                                                "sha256":  "6354a62da4dbeb07bd21dee5c3e39bee1fd062a99fd2cdc76cab01f6d4bf2084"
+                                            },
+                                            {
+                                                "path":  "tools/build-custom-steam-library-host.ps1",
+                                                "sha256":  "6c85a8602283750f276e92743e20bf0715c3cd9d714a860c42ae4db93aa48ed4"
+                                            },
+                                            {
+                                                "path":  "tools/custom_steam_library_build_guard.ps1",
+                                                "sha256":  "93f4c2e5a49caabb6350da9421f9c07db22e1ed853fe83fd3fa7d83f59181989"
+                                            }
+                                        ],
+                        "workerSources":  [
+                                              {
+                                                  "path":  "CustomSteamLibrary/assets/custom-steam-library.ico",
+                                                  "sha256":  "6bdea618684f30f5ec1d0b53bdab854aa3cbba00fd32ea551ba580d24cbc76af"
+                                              },
+                                              {
+                                                  "path":  "deps/json/json.hpp",
+                                                  "sha256":  "853b2eb3bf7632c949f4a2dd6fb8a629c5ff25cc0059d29c7d21915dc719487f"
+                                              },
+                                              {
+                                                  "path":  "native/custom-steam-library/build_worker.bat",
+                                                  "sha256":  "38c5da028a3c76abf33263eaacdf0764657338c27c908a9d33993130ca5addac"
+                                              },
+                                              {
+                                                  "path":  "native/custom-steam-library/custom_steam_library_exclusions.h",
+                                                  "sha256":  "c940032a71bd46df30c01e7db4ae92be5dad6c9dd13e589bf082439db02ac3f1"
+                                              },
+                                              {
+                                                  "path":  "native/custom-steam-library/custom_steam_library_identity_cache.h",
+                                                  "sha256":  "da31ddbe3ff0c51c549a68644a01d51843a17f1ef282b2bef9e863ca44e6fde8"
+                                              },
+                                              {
+                                                  "path":  "native/custom-steam-library/custom_steam_library_inventory.h",
+                                                  "sha256":  "8186f3b2364ddfb7150a33b632941fa5cdf2f605a00e537f5ede7af505ed75c1"
+                                              },
+                                              {
+                                                  "path":  "native/custom-steam-library/custom_steam_library_paths.h",
+                                                  "sha256":  "944c4d8abfeb94b63108320f08d91f35a879d272ac62b4694bc20c0b42766795"
+                                              },
+                                              {
+                                                  "path":  "native/custom-steam-library/steam_artwork_lab.cpp",
+                                                  "sha256":  "0f4585258ee868f76f9977c8b2ec89b94d72cf8e7816be577eae97fd51376849"
+                                              },
+                                              {
+                                                  "path":  "native/custom-steam-library/steam_artwork_lab.rc",
+                                                  "sha256":  "1b7bbaf2a8bf1350b15d8c7f098e3da2ebc4903815ef673eb000ab1b48a3440c"
+                                              },
+                                              {
+                                                  "path":  "tools/build-custom-steam-library-worker.ps1",
+                                                  "sha256":  "abacfdf3af0f6b5032f24081daa893e8526c95eacd4700ca9c7ba0d87d7e2152"
+                                              },
+                                              {
+                                                  "path":  "tools/custom_steam_library_build_guard.ps1",
+                                                  "sha256":  "93f4c2e5a49caabb6350da9421f9c07db22e1ed853fe83fd3fa7d83f59181989"
+                                              }
+                                          ]
                     },
     "files":  [
                   "CustomSteamLibrary.exe",
@@ -93,13 +197,13 @@
     "fileIndex":  [
                       {
                           "path":  "CustomSteamLibrary.exe",
-                          "bytes":  1377280,
-                          "sha256":  "b2836479df426991e78222d836c4bbedb5a316d42064dfbecaa86648751eeaa7"
+                          "bytes":  1476608,
+                          "sha256":  "dedcaac1f1e9ad0cf06260198ab819400dbbfb7fef57f02f60b542f507477932"
                       },
                       {
                           "path":  "SteamArtworkLab.exe",
-                          "bytes":  2585088,
-                          "sha256":  "914ac6ae9ffd76c2586fbdcd443e50aa4bc4b8c272cf9ba3e820f5dc044ae121"
+                          "bytes":  2857472,
+                          "sha256":  "a2a9a7785493ef4f5a49a4a4e334852be1616a6c2867f144a4171de7f06a037c"
                       },
                       {
                           "path":  "run-workspace.bat",
@@ -113,18 +217,18 @@
                       },
                       {
                           "path":  "workspace-ui/index.html",
-                          "bytes":  11852,
-                          "sha256":  "3fb893d78e391a3f80a7e471b1b14abd693857b08cfa366a3b4d178eac4f770d"
+                          "bytes":  19413,
+                          "sha256":  "8577083114a49b6bbfd1b8c4f95027fa1e65d49061415521a641190074b5de32"
                       },
                       {
                           "path":  "workspace-ui/app.js",
-                          "bytes":  167542,
-                          "sha256":  "0cfeade1cf0d06af12363e0799b013155d44a0e92a57c0879e07650bbcc81294"
+                          "bytes":  189057,
+                          "sha256":  "a15cb232b194f28d928842433ac00607a42dd4e58ca822eb819f07d6ee381ade"
                       },
                       {
                           "path":  "workspace-ui/styles.css",
-                          "bytes":  64619,
-                          "sha256":  "9a849ce5d96fc2f2b289ea753b01dee2c3a85464741636bddf0cdadd75900776"
+                          "bytes":  68526,
+                          "sha256":  "71e0c24ed83da7466d814dd89a7cf16523f7d467518d3c7223322459f4fdcfe4"
                       },
                       {
                           "path":  "CUSTOM-STEAM-LIBRARY-INTEGRATION-CONTRACT.md",

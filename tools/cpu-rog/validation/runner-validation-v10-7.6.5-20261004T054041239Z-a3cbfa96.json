@@ -1,0 +1,606 @@
+{
+  "schemaVersion": 1,
+  "toolVersion": "rog-portable-runner-2",
+  "attemptFieldsScope": "this-tool-invocation-only-not-machine-wide",
+  "productVersionConfirmed": false,
+  "rogActions": "HOLD",
+  "timestampUtc": "2026-10-04T05:40:41.2359285Z",
+  "powershellVersion": "7.6.5",
+  "scope": "local-software-tool-validation-only",
+  "localToolValidation": false,
+  "rogRegressionPassed": false,
+  "rogToolRegression": "NOT_RUN",
+  "rogProductRegression": "NOT_RUN",
+  "rogCpuAB": "NOT_RUN",
+  "realProductProcessesTouched": false,
+  "realElevationPerformed": false,
+  "realCpuSamplingPerformed": false,
+  "realPortCallsPerformed": false,
+  "casesTotal": 136,
+  "casesPassed": 133,
+  "casesFailed": 3,
+  "cases": [
+    {
+      "passed": true,
+      "name": "source parser validation only"
+    },
+    {
+      "passed": true,
+      "name": "static finite operations no forbidden commands or local paths"
+    },
+    {
+      "passed": true,
+      "name": "validate default never invokes runtime controls"
+    },
+    {
+      "passed": true,
+      "name": "copied default wrapper spaces Chinese portable path"
+    },
+    {
+      "passed": true,
+      "name": "wrapper invalid action structured failure"
+    },
+    {
+      "passed": true,
+      "name": "wrapper missing parameter value structured failure"
+    },
+    {
+      "passed": true,
+      "name": "wrapper unknown argument opaque value not leaked"
+    },
+    {
+      "passed": true,
+      "name": "wrapper preflight missing path"
+    },
+    {
+      "passed": true,
+      "name": "wrapper missing target file"
+    },
+    {
+      "passed": true,
+      "name": "wrapper bad hash cannot reach process control"
+    },
+    {
+      "passed": true,
+      "name": "wrapper no hash cannot authorize observed hash"
+    },
+    {
+      "passed": true,
+      "name": "wrapper known hash is not user action authorization"
+    },
+    {
+      "passed": false,
+      "name": "lifecycle wrapper failure safe",
+      "errorCode": "ASSERTION_FAILED"
+    },
+    {
+      "passed": false,
+      "name": "fan wrapper failure safe",
+      "errorCode": "ASSERTION_FAILED"
+    },
+    {
+      "passed": true,
+      "name": "worker wrapper missing request safe"
+    },
+    {
+      "passed": true,
+      "name": "output unique session repeat refuses overwrite"
+    },
+    {
+      "passed": true,
+      "name": "bad numeric argument safe result"
+    },
+    {
+      "passed": true,
+      "name": "config cannot authorize control"
+    },
+    {
+      "passed": true,
+      "name": "private start arguments rejected"
+    },
+    {
+      "passed": true,
+      "name": "exact paired public start arguments accepted"
+    },
+    {
+      "passed": true,
+      "name": "paired public start argument mismatch rejected"
+    },
+    {
+      "passed": true,
+      "name": "UTC JSON stable across zh-CN and en-US"
+    },
+    {
+      "passed": true,
+      "name": "preflight unknown hash is read-only discovery"
+    },
+    {
+      "passed": true,
+      "name": "status exact fake root no commandLine serialization"
+    },
+    {
+      "passed": true,
+      "name": "PID reused birth rejected"
+    },
+    {
+      "passed": true,
+      "name": "process changed path rejected"
+    },
+    {
+      "passed": true,
+      "name": "different current user rejected"
+    },
+    {
+      "passed": true,
+      "name": "observe without control evidence remains non-S0 non-S4 non-AB"
+    },
+    {
+      "passed": true,
+      "name": "capture missing runtime evidence does not call collector"
+    },
+    {
+      "passed": true,
+      "name": "capture opaque evidence not formal proof nor copied into result"
+    },
+    {
+      "passed": true,
+      "name": "permission failure is not capability absence"
+    },
+    {
+      "passed": true,
+      "name": "normal fake root close only never force"
+    },
+    {
+      "passed": true,
+      "name": "normal close unavailable no forced fallback"
+    },
+    {
+      "passed": true,
+      "name": "fake restart process evidence is not frontend ready"
+    },
+    {
+      "passed": true,
+      "name": "failed restart stop cannot cause start"
+    },
+    {
+      "passed": true,
+      "name": "fake start rejects already running root"
+    },
+    {
+      "passed": true,
+      "name": "fake start actual target high proof required"
+    },
+    {
+      "passed": true,
+      "name": "fake hidden RunAs waits finite worker only"
+    },
+    {
+      "passed": true,
+      "name": "fake RunAs refusal no bypass"
+    },
+    {
+      "passed": true,
+      "name": "worker lower fake token safely records failure"
+    },
+    {
+      "passed": true,
+      "name": "worker cannot take arbitrary request namespace"
+    },
+    {
+      "passed": true,
+      "name": "fan exact LocalAppData namespace"
+    },
+    {
+      "passed": true,
+      "name": "fan exact paired isolated derived namespace"
+    },
+    {
+      "passed": true,
+      "name": "fan duplicated CLI session refused"
+    },
+    {
+      "passed": true,
+      "name": "fan paired SID mismatch refused"
+    },
+    {
+      "passed": true,
+      "name": "fan CLI equals spoof refused"
+    },
+    {
+      "passed": true,
+      "name": "fan reply strict mock zero writes FILETIME safe projection"
+    },
+    {
+      "passed": true,
+      "name": "fan physical write true refused"
+    },
+    {
+      "passed": true,
+      "name": "fan false string spoof refused"
+    },
+    {
+      "passed": true,
+      "name": "fan reused host FILETIME refused"
+    },
+    {
+      "passed": true,
+      "name": "fan wrong host parent refused"
+    },
+    {
+      "passed": true,
+      "name": "fan request mismatch refused"
+    },
+    {
+      "passed": true,
+      "name": "manifest copied hashes sizes checked not ROG proof"
+    },
+    {
+      "passed": true,
+      "name": "manifest mismatch safe failure"
+    },
+    {
+      "passed": true,
+      "name": "manifest traversal refused"
+    },
+    {
+      "passed": true,
+      "name": "manifest false ROG passed refused"
+    },
+    {
+      "passed": true,
+      "name": "fixtures did not sleep or call real sampler or process control"
+    },
+    {
+      "passed": true,
+      "name": "CLI LogFile multiple explicit values parsed like StartArgument"
+    },
+    {
+      "passed": true,
+      "name": "LogFile forwarded only to inert collector metadata interface"
+    },
+    {
+      "passed": true,
+      "name": "LogFile wildcard failure never exports original path"
+    },
+    {
+      "passed": true,
+      "name": "default sample interval matches 250ms task book"
+    },
+    {
+      "passed": true,
+      "name": "reparse directory gate uses fake filesystem item no junction created"
+    },
+    {
+      "passed": true,
+      "name": "normal exit timeout with fake owned child no force or restart"
+    },
+    {
+      "passed": true,
+      "name": "capture root gate binds externally trusted hash and exact process"
+    },
+    {
+      "passed": true,
+      "name": "capture root gate refuses stale prior success"
+    },
+    {
+      "passed": false,
+      "name": "worker mock success is single-use exact user proof not product regression",
+      "errorCode": "SAFE_OPERATION_FAILED"
+    },
+    {
+      "passed": true,
+      "name": "manifest must bind all adjacent docs including OPERATOR-COMMANDS"
+    },
+    {
+      "passed": true,
+      "name": "LogFile bounded to same 32-file core limit"
+    },
+    {
+      "passed": true,
+      "name": "v10 version and manifest fixture use v10 task name"
+    },
+    {
+      "passed": true,
+      "name": "v10 nonadmin status default never elevates and discovers PID birth"
+    },
+    {
+      "passed": true,
+      "name": "v10 nonadmin preflight default never elevates or probes features"
+    },
+    {
+      "passed": true,
+      "name": "v10 readonly elevation flag without exact authorization is rejected before attempt"
+    },
+    {
+      "passed": true,
+      "name": "v10 readonly mismatched authorization including case is rejected"
+    },
+    {
+      "passed": true,
+      "name": "v10 authorization alone is not an elevation request"
+    },
+    {
+      "passed": true,
+      "name": "v10 already high readonly with both flags does not spawn another worker"
+    },
+    {
+      "passed": true,
+      "name": "v10 authorized fake RunAs preflight discovers with no trusted hash PID or birth"
+    },
+    {
+      "passed": true,
+      "name": "v10 authorized fake RunAs status discovers with no trusted hash PID or birth"
+    },
+    {
+      "passed": true,
+      "name": "v10 authorized preflight worker never samples controls or calls fan helper"
+    },
+    {
+      "passed": true,
+      "name": "v10 explicit PID no birth discovers actual UTC without filling input"
+    },
+    {
+      "passed": true,
+      "name": "v10 provided birth is validated exactly no estimated local time"
+    },
+    {
+      "passed": true,
+      "name": "v10 input birth null and empty only permit read-only discovery"
+    },
+    {
+      "passed": true,
+      "name": "v10 invalid birth types including false zero never silently treated as empty"
+    },
+    {
+      "passed": true,
+      "name": "v10 CIM birth unavailable retains path PID owner facts not permission-only claim"
+    },
+    {
+      "passed": true,
+      "name": "v10 CIM birth empty type invalid and kind invalid have fixed separate codes"
+    },
+    {
+      "passed": true,
+      "name": "v10 DMTF and local-culture birth strings are not guessed or converted"
+    },
+    {
+      "passed": true,
+      "name": "v10 UTC DateTime DateTimeOffset JSON and cultures preserve precise birth"
+    },
+    {
+      "passed": true,
+      "name": "v10 missing path is unavailable not assumed access denied and retains actual birth"
+    },
+    {
+      "passed": true,
+      "name": "v10 invalid path type never string-cast into a target"
+    },
+    {
+      "passed": true,
+      "name": "v10 actual query denial is distinct from generic query failure"
+    },
+    {
+      "passed": true,
+      "name": "v10 generic CIM error is not falsely named a permission failure"
+    },
+    {
+      "passed": true,
+      "name": "v10 unavailable owner preserves other fields but no identity"
+    },
+    {
+      "passed": true,
+      "name": "v10 invalid owner type separate from missing or denied"
+    },
+    {
+      "passed": true,
+      "name": "v10 actual owner helper ReturnValue denial and malformed type are classified"
+    },
+    {
+      "passed": true,
+      "name": "v10 explicit candidate PID foreign path is refused without echoing foreign path"
+    },
+    {
+      "passed": true,
+      "name": "v10 explicit candidate PID foreign owner is refused"
+    },
+    {
+      "passed": true,
+      "name": "v10 broad discovery excludes known foreign candidates no false root"
+    },
+    {
+      "passed": true,
+      "name": "v10 ambiguous current-user roots preserve candidates but never choose one"
+    },
+    {
+      "passed": true,
+      "name": "v10 one complete root plus unknown candidate still no unique identity"
+    },
+    {
+      "passed": true,
+      "name": "v10 unknown fields with RootCount zero cannot authorize later start"
+    },
+    {
+      "passed": true,
+      "name": "v10 token query unavailable does not suppress read-only identity or claim denied"
+    },
+    {
+      "passed": true,
+      "name": "v10 rejected RunAs retains target facts and exact attempted diagnostics"
+    },
+    {
+      "passed": true,
+      "name": "v10 real worker dispatcher fake birth failure retains partial worker facts and parent binding"
+    },
+    {
+      "passed": true,
+      "name": "v10 bound worker opaque error or details never projected"
+    },
+    {
+      "passed": true,
+      "name": "v10 mismatched worker nonce rejected before error or facts projection"
+    },
+    {
+      "passed": true,
+      "name": "v10 worker timeout is bounded no force and preserves attempt fields"
+    },
+    {
+      "passed": true,
+      "name": "v10 missing worker proof distinct from attempted refusal or action failure"
+    },
+    {
+      "passed": true,
+      "name": "v10 only read-only actions may use untrusted discovered hash"
+    },
+    {
+      "passed": true,
+      "name": "v10 non-readonly absent birth stays exact identity gate before any RunAs"
+    },
+    {
+      "passed": true,
+      "name": "v10 observe capture elevation require exact authorization even if already high"
+    },
+    {
+      "passed": true,
+      "name": "v10 attempted diagnostics are this tool invocation not a machine-wide denial claim"
+    },
+    {
+      "passed": true,
+      "name": "v10 CIM uint32 PID broad discovery accepted"
+    },
+    {
+      "passed": true,
+      "name": "v10 CIM uint32 PID exact TargetPid match accepted"
+    },
+    {
+      "passed": true,
+      "name": "v10 CIM PID only bounded signed int uint32 long not float string overflow"
+    },
+    {
+      "passed": true,
+      "name": "v10 CIM PID mismatch refused sequence protocol not broadened for uint32"
+    },
+    {
+      "passed": true,
+      "name": "v10 CIM owner uint32 zero success int long statuses remain compatible"
+    },
+    {
+      "passed": true,
+      "name": "v10 CIM owner uint32 denied failed malformed classifications"
+    },
+    {
+      "passed": true,
+      "name": "v10 low protected metadata and process preflight authorized worker discovers no hash"
+    },
+    {
+      "passed": true,
+      "name": "v10 low protected preflight no flag fails locally never elevates"
+    },
+    {
+      "passed": true,
+      "name": "v10 low protected metadata and process status authorized worker discovers no hash"
+    },
+    {
+      "passed": true,
+      "name": "v10 low protected status no flag fails locally never elevates"
+    },
+    {
+      "passed": true,
+      "name": "v10 low protected read-only missing authorization neither reads target nor launches"
+    },
+    {
+      "passed": true,
+      "name": "v10 low protected observe complete selectors reach high worker before real gates"
+    },
+    {
+      "passed": true,
+      "name": "v10 low protected capture complete selectors reach high worker before real gates"
+    },
+    {
+      "passed": true,
+      "name": "v10 low protected restart complete selectors reach high worker before real gates"
+    },
+    {
+      "passed": true,
+      "name": "v10 low protected stop complete selectors reach high worker before real gates"
+    },
+    {
+      "passed": true,
+      "name": "v10 low protected fan-probe complete selectors reach high worker before real gates"
+    },
+    {
+      "passed": true,
+      "name": "v10 low protected start complete selectors reach high worker before real gates"
+    },
+    {
+      "passed": true,
+      "name": "v10 low protected observe no elevation flag refuses before finite operation"
+    },
+    {
+      "passed": true,
+      "name": "v10 low protected restart no elevation flag refuses before finite operation"
+    },
+    {
+      "passed": true,
+      "name": "v10 low process-only denial does not block authorized observe restart parent"
+    },
+    {
+      "passed": true,
+      "name": "v10 already high exact target is actually validated locally no worker"
+    },
+    {
+      "passed": true,
+      "name": "v10 worker unverified high token fails before target metadata hash CIM owner"
+    },
+    {
+      "passed": true,
+      "name": "v10 high worker actual hash gate fails before synthetic product operation"
+    },
+    {
+      "passed": true,
+      "name": "v10 high worker actual path gate fails before synthetic product operation"
+    },
+    {
+      "passed": true,
+      "name": "v10 high worker actual birth gate fails before synthetic product operation"
+    },
+    {
+      "passed": true,
+      "name": "v10 high worker actual owner gate fails before synthetic product operation"
+    }
+  ],
+  "fixtureMode": "temporary inert wrappers + synthetic collector + fake process/control/native seams",
+  "fixtureRetainedForAudit": true,
+  "validatedSourceFiles": [
+    {
+      "bytes": 58725,
+      "path": "Invoke-ROG-CPU.ps1",
+      "sha256": "3ea6872f9c14481cdd963889f62a9033dc7d8f81941fbd0e2c8db0361b024f7d"
+    },
+    {
+      "bytes": 5621,
+      "path": "Invoke-YMCC-AuthorizedWorker.ps1",
+      "sha256": "4be38c7bf91811b40eaa739ebac3b6fd2f47dc9a672a1448289868947ea9f21b"
+    },
+    {
+      "bytes": 8849,
+      "path": "Control-YMCC-Lifecycle.ps1",
+      "sha256": "350e573ea38ed96c79256fd9a4ac991cf38f295f6956828abe289b05aaaaf54e"
+    },
+    {
+      "bytes": 11447,
+      "path": "Send-YMCC-AI-Fan-Mock.ps1",
+      "sha256": "f640c9a2ccd878b5115b284c7734bf826fe299d6d7e5e72fded219187276d084"
+    },
+    {
+      "bytes": 221,
+      "path": "config.example.json",
+      "sha256": "e4c292ab44625fad5e60a9cbff6ad99eb54e924ebc5893be867a60e134b81df8"
+    },
+    {
+      "bytes": 75349,
+      "path": "tests\\Test-ROG-CPU-Runner.ps1",
+      "sha256": "0de5d05c455deb01a7b096b3311be7eaeb31582ea7f8396f94f67278eefc6db9"
+    }
+  ],
+  "collectorExecution": "INERT_FIXTURE_ONLY_REAL_COLLECTOR_VALIDATION_DELEGATED"
+}

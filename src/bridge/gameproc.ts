@@ -92,9 +92,14 @@ export async function resumeGame(): Promise<GameCtlResult> {
         msgs: resumed > 0 ? [] : ['没有已暂停的游戏'],
       };
     }
+    let raw: string;
+    try { raw = await fs.readTextFile(SUSPEND_STATE); }
+    catch (error) {
+      return { ok: false, okCount: 0, failCount: 1, msgs: [`暂停状态读取失败，已保留恢复记录：${(error as Error).message}`] };
+    }
     let state: any;
     try {
-      state = JSON.parse(await fs.readTextFile(SUSPEND_STATE));
+      state = JSON.parse(raw);
     } catch {
       const fallback = await invoke<{ resumed?: number }>('game.resume', { pids: [] }).catch(() => ({ resumed: 0 }));
       const resumed = Number(fallback?.resumed) || 0;
@@ -286,6 +291,25 @@ export async function toggleJoyxoff(): Promise<boolean> {
   return false;
 }
 
+/**
+ * 2026-09-30 用户裁决：切到 SteamDeck 虚拟手柄时鼠标由 Steam 接管，JoyXoff 若在跑
+ * 必须强行关掉（存在才关）。直接走 JoyXoff.bat 的 taskkill 分支并隐藏执行——
+ * 不复用 模拟鼠标.vbs，避免「关闭」时播放开启音效。返回是否真的关过一个进程。
+ */
+export async function closeJoyxoffIfRunning(): Promise<boolean> {
+  if (!(await isJoyxoffRunning())) return false;
+  if (await fs.exists(JOYXOFF_BAT).catch(() => false)) {
+    await shell.hidden('cmd.exe', ['/c', JOYXOFF_BAT]).catch(() => {});
+  } else {
+    await shell.hidden('wscript.exe', ['//nologo', JOYXOFF_VBS]).catch(() => {});
+  }
+  for (let i = 0; i < 8; i++) {
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    if (!(await isJoyxoffRunning())) break;
+  }
+  return true;
+}
+
 export type MouseBackend = 'gamebar' | 'joyxoff';
 
 export interface MouseModeState {
@@ -296,6 +320,21 @@ export interface MouseModeState {
   gamebarOn?: boolean;
   joyxoffAvailable?: boolean;
   gamebarAvailable?: boolean;
+  reason?: 'gameinput_redist_missing' | 'gamebar_interface_error' | string;
+  error?: string;
+}
+
+export interface GameInputRedistState {
+  installed: boolean;
+  mouseInterfaceAvailable: boolean;
+  installerAvailable: boolean;
+  hresult: number;
+}
+
+export interface GameInputRedistInstallResult {
+  ok: boolean;
+  launched?: boolean;
+  alreadyInstalled?: boolean;
   error?: string;
 }
 
@@ -309,4 +348,12 @@ export async function setMouseBackend(backend: MouseBackend): Promise<MouseModeS
 
 export async function toggleMouseMode(): Promise<MouseModeState> {
   return invoke<MouseModeState>('mouseMode.toggle', {});
+}
+
+export async function getGameInputRedistState(): Promise<GameInputRedistState> {
+  return invoke<GameInputRedistState>('gameinput.redist.status', {});
+}
+
+export async function installGameInputRedist(): Promise<GameInputRedistInstallResult> {
+  return invoke<GameInputRedistInstallResult>('gameinput.redist.install', {});
 }

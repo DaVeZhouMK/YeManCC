@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "artifactId": "T19-EVIDENCE-QUALITY-GATE-20260904",
+  "status": "SPEC-READY",
+  "runtimeClosure": "UNENCLOSED",
+  "tiers": ["source-located", "ui-cas", "mock-pass", "isolated-probe", "product-candidate", "R1-runtime-observed"],
+  "claims": [
+    {
+      "claimId": "T10-config-activation",
+      "maximumTier": "mock-pass",
+      "evidence": ["T10-E01", "GyroConfigActivation.v1 pure mock"],
+      "missingForRuntime": ["native/InputHost binding", "exact ACK on state-file protocol", "same-revision first real frame", "release/recovery"]
+    },
+    {
+      "claimId": "T11-calibration-safety",
+      "maximumTier": "source-located",
+      "evidence": ["T11-E01", "CalibrationSafetyDelta.v1 static candidate audit"],
+      "missingForRuntime": ["provider capability binding", "same-device static/movement/recovery observation", "epoch-bound calibration proof"]
+    },
+    {
+      "claimId": "T12-motion-sample",
+      "maximumTier": "mock-pass",
+      "evidence": ["T12-E01", "MotionSample.v1 pure mock"],
+      "missingForRuntime": ["native provider matrix binding", "HIDMaestro descriptor proof", "consumer and recovery observation"]
+    },
+    {
+      "claimId": "T13-physical-visibility",
+      "maximumTier": "mock-pass",
+      "evidence": ["T13-E01", "physical visibility transaction mock"],
+      "missingForRuntime": ["R1 physical snapshot/diff/restore", "P-XINPUT consumer isolation proof"]
+    },
+    {
+      "claimId": "ROG-OEM-Disable",
+      "maximumTier": "source-located",
+      "evidence": ["HC source path", "recorded ROG negative"],
+      "missingForRuntime": ["none; prohibited product path remains SAFE_STOP"]
+    }
+  ],
+  "automaticDowngrade": ["missing revision/hash/ACK or first-active-frame -> no higher than ui-cas/source-located", "missing physical identity, descriptor, named consumer, recovery or R1 authorization -> no runtime claim", "single API success, screenshot, archive SHA, process start or one log line -> no tier promotion", "source comments using parity terminology on a legacy partial candidate -> product-candidate only; ledger disposition prevails"],
+  "requiredReferences": ["tools/HCParityDriftLedger.v2.json", "tools/ParameterConsumptionLedger.v1.json", "tools/CalibrationSafetyDelta.v1.json", "tools/PersonaDescriptorParity.v1.json", "tools/RogVisibilityTopology.v1.json"]
+}

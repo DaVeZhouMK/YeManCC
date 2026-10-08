@@ -1,0 +1,58 @@
+<Page
+    x:Class="HandheldCompanion.Views.Pages.NotificationsPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:ikw="http://schemas.inkore.net/lib/ui/wpf"
+    xmlns:l="clr-namespace:HandheldCompanion.Localization"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:resx="clr-namespace:HandheldCompanion.Properties"
+    xmlns:ui="http://schemas.inkore.net/lib/ui/wpf/modern"
+    xmlns:viewmodels="clr-namespace:HandheldCompanion.ViewModels"
+    Name="About"
+    Title="{l:Static resx:Resources.MainWindow_navNotifications}"
+    d:Background="White"
+    d:DesignHeight="1000"
+    d:DesignWidth="1000"
+    KeepAlive="True"
+    Loaded="Page_Loaded"
+    mc:Ignorable="d">
+
+    <ikw:SimpleStackPanel Margin="20" Spacing="3">
+
+        <ui:InfoBar
+            Title="{l:Static resx:Resources.NotificationsPage_NothingToSee}"
+            IsClosable="False"
+            IsOpen="True"
+            Message="{l:Static resx:Resources.NotificationsPage_NothingToSeeDesc}"
+            Severity="Success"
+            Visibility="{Binding HasNotifications, Mode=OneWay, UpdateSourceTrigger=PropertyChanged, Converter={StaticResource BooleanToVisibilityConverter}, ConverterParameter=False}" />
+
+        <ItemsControl ItemsSource="{Binding Notifications}">
+            <ItemsControl.ItemsPanel>
+                <ItemsPanelTemplate>
+                    <ikw:SimpleStackPanel Orientation="Vertical" Spacing="3" />
+                </ItemsPanelTemplate>
+            </ItemsControl.ItemsPanel>
+
+            <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                    <ui:InfoBar
+                        Title="{Binding Title, Mode=OneWay, UpdateSourceTrigger=PropertyChanged}"
+                        CloseButtonCommand="{Binding InfoBarCloseCommand}"
+                        IsClosable="{Binding IsClosable, Mode=OneWay, UpdateSourceTrigger=PropertyChanged}"
+                        IsOpen="True"
+                        Message="{Binding Message, Mode=OneWay, UpdateSourceTrigger=PropertyChanged}"
+                        Severity="{Binding Severity, Mode=OneWay, UpdateSourceTrigger=PropertyChanged}">
+                        <ui:InfoBar.ActionButton>
+                            <Button
+                                Command="{Binding ActionCommand}"
+                                Content="{Binding Action, Mode=OneWay, UpdateSourceTrigger=PropertyChanged}"
+                                Visibility="{Binding IsClickable, Mode=OneWay, UpdateSourceTrigger=PropertyChanged, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                        </ui:InfoBar.ActionButton>
+                    </ui:InfoBar>
+                </DataTemplate>
+            </ItemsControl.ItemTemplate>
+        </ItemsControl>
+    </ikw:SimpleStackPanel>
+</Page>

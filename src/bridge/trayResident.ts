@@ -10,7 +10,7 @@
 // PowerView 负责 UI 展示、门控与写入。
 
 import { tray } from './api';
-import { readSettingsSection, saveSettingsSection } from './settingsRepository';
+import { getSettingsGeneration, assertSettingsGeneration, readSettingsSection, saveSettingsSection } from './settingsRepository';
 
 const TRAY_CFG = 'C:\\SOFT\\YeMan\\PowerControl\\tray_resident.json';
 
@@ -39,11 +39,23 @@ export async function applyTrayResident(): Promise<void> {
 }
 
 // 切换并即时应用（UI 开关变更时调用）
-export async function setTrayResident(v: boolean): Promise<void> {
-  await writeTrayResident(v);
-  try {
-    await tray.setResident(v);
-  } catch {
-    /* ignore */
-  }
+let trayWriteQueue: Promise<void> = Promise.resolve();
+export function setTrayResident(v: boolean): Promise<void> {
+  const generation = getSettingsGeneration();
+  const run = trayWriteQueue.then(async () => {
+    assertSettingsGeneration(generation);
+    const previous = (await readSettingsSection<any>('tray')).resident === true;
+    await saveSettingsSection('tray', { resident: v }, generation);
+    try {
+      const applied = await tray.setResident(v);
+      if (!applied) throw new Error('任务栏设置未被系统接受');
+    } catch (error) {
+      // UI may roll back only after the preference rollback is durable too.
+      try { await saveSettingsSection('tray', { resident: previous }, generation); }
+      catch (rollback) { throw new Error(`任务栏应用失败且偏好回滚失败：${(rollback as Error).message}`); }
+      throw error;
+    }
+  });
+  trayWriteQueue = run.catch(() => {});
+  return run;
 }

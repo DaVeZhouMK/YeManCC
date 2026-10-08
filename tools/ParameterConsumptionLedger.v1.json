@@ -1,0 +1,100 @@
+{
+  "schemaVersion": 1,
+  "ledgerId": "T15-PARAMETER-CONSUMPTION-20260904",
+  "hcBaseline": "0.32.4.0/06c0b954",
+  "status": "SPEC-READY",
+  "runtimeClosure": "UNENCLOSED",
+  "scope": "T15 static consumption audit only; this file neither applies configuration nor authorizes InputHost/native integration.",
+  "transactionContract": "request(revision, hash, epoch, owner) -> revoke -> neutral -> ACK(appliedRevision, appliedHash, status) -> same-revision first frame -> active",
+  "currentFinding": "The UI repository has revision/hash/ACK bookkeeping. The marker-gated standalone lane now consumes a bounded HC subset after same-provider pairing and calibration lock: gyro/accel multipliers, Local/Player/World selection, inversion, sensitivities, output axis and gyroWeight. Deadzone/shape, velocity accumulator, steering, complete revisioned Host apply and external consumer evidence remain unclosed; the formal release remains safe-zero/no-report.",
+  "entries": [
+    {
+      "replayId": "T10-F01",
+      "configPath": "input.gyroMotion.gyroMultiplier",
+      "hcSource": "Managers/MotionManager.cs::SetupMotion defaultGyro = GamepadMotion * GyrometerMultiplier",
+      "inputLayer": "Default gyro",
+      "outputLayer": "mappedGyroXY -> assembled/report",
+      "mockConsumer": "src/bridge/gyroMotionMapperMock.ts",
+      "nativeConsumer": "partial standalone lane; inputHostSubmitPad consumes gyroMultiplier after pair/calibration lock; no revisioned Host apply",
+      "safeStop": "parameter-not-consumed",
+      "fixture": "tools/gyro_motion_mapper_mock_selftest.ts"
+    },
+    {
+      "replayId": "T10-F02",
+      "configPath": "input.gyroMotion.motionSensitivityX/Y",
+      "hcSource": "Managers/MotionManager.cs::ProcessMotion ApplyCustomSensitivity/GetSensitivityX/Y",
+      "inputLayer": "mapped gyro axis",
+      "outputLayer": "axis-specific short clamp",
+      "mockConsumer": "src/bridge/gyroMotionMapperMock.ts",
+      "nativeConsumer": "partial standalone lane; consumes motionSensitivityX/Y with HC threshold path; custom curve is not consumed",
+      "safeStop": "axis-cross-coupled",
+      "fixture": "tools/gyro_motion_mapper_mock_selftest.ts"
+    },
+    {
+      "replayId": "T10-F03",
+      "configPath": "input.gyroMotion.invertHorizontal/invertVertical",
+      "hcSource": "Managers/MotionManager.cs::ProcessMotion inversion after motion-space selection",
+      "inputLayer": "mapped gyro axis",
+      "outputLayer": "mappedGyroXY sign",
+      "mockConsumer": "src/bridge/gyroMotionMapperMock.ts",
+      "nativeConsumer": "partial standalone lane; consumes inversion after motion-space selection; DSU-specific HC inversion is not consumed",
+      "safeStop": "invert-before-matrix",
+      "fixture": "tools/gyro_motion_mapper_mock_selftest.ts"
+    },
+    {
+      "replayId": "T10-F04",
+      "configPath": "input.gyroMotion.gyroWeight",
+      "hcSource": "Managers/LayoutManager.cs::weightFactor = gyroWeight - stickNorm",
+      "inputLayer": "AxisActions gyro result",
+      "outputLayer": "assembled stick/report",
+      "mockConsumer": "src/bridge/virtualReportAssembler.ts",
+      "nativeConsumer": "partial standalone lane; consumes gyroWeight in the LayoutManager blend equivalent; no revisioned Host apply",
+      "safeStop": "weight-not-applied",
+      "fixture": "tools/assisted_stick_assembler_selftest.ts"
+    },
+    {
+      "replayId": "T10-F05",
+      "configPath": "input.gyroMotion.innerDeadzone/outerDeadzone/antiDeadzone/outputShape",
+      "hcSource": "AxisActions modifier sequence before LayoutManager blend",
+      "inputLayer": "gyro AxisActions",
+      "outputLayer": "modified gyro vector -> assembled stick",
+      "mockConsumer": "src/bridge/virtualReportAssembler.ts",
+      "nativeConsumer": "not-consumed in native lane; mock only, AxisActions deadzone/shape still not runtime-consumed",
+      "safeStop": "modifier-order-mismatch",
+      "fixture": "tools/assisted_stick_assembler_selftest.ts"
+    },
+    {
+      "replayId": "T10-F06",
+      "configPath": "input.gyroMotion.velocityMode/velocityScale",
+      "hcSource": "Managers/MotionManager.cs::velocity accumulator path",
+      "inputLayer": "multi-frame mapped gyro",
+      "outputLayer": "accumulated output",
+      "mockConsumer": "src/bridge/gyroMotionMapperMock.ts",
+      "nativeConsumer": "not-consumed in native lane; velocity accumulator is not opened",
+      "safeStop": "accumulator-leak",
+      "fixture": "tools/gyro_motion_mapper_mock_selftest.ts"
+    },
+    {
+      "replayId": "T10-F07",
+      "configPath": "input.gyroMotion.motionInput",
+      "hcSource": "Managers/MotionManager.cs::LocalSpace/PlayerSpace/WorldSpace/JoystickSteering",
+      "inputLayer": "motion-space selector",
+      "outputLayer": "mappedGyroXY or steering action",
+      "mockConsumer": "src/bridge/gyroMotionMapperMock.ts",
+      "nativeConsumer": "partial standalone lane; Local/Player/World selectors are consumed; JoystickSteering and full HC inclination route remain unadmitted",
+      "safeStop": "motion-space-unavailable",
+      "fixture": "tools/gyro_motion_mapper_mock_selftest.ts"
+    },
+    {
+      "replayId": "T10-F08",
+      "configPath": "input.gyroMotion.enabled/outputMode/motionMode/motionTrigger",
+      "hcSource": "Managers/MotionManager.cs::MotionTriggered and action disable path",
+      "inputLayer": "admission gate",
+      "outputLayer": "zero gyro contribution while base input survives",
+      "mockConsumer": "src/bridge/gyroMotionMapperMock.ts + virtualReportAssembler.ts",
+      "nativeConsumer": "partial standalone lane consumes enabled/outputMode/motionMode/trigger as gates; no revisioned Host configuration consumer",
+      "safeStop": "gyro-off-base-input-corrupted",
+      "fixture": "tools/gyro_motion_mapper_mock_selftest.ts"
+    }
+  ]
+}

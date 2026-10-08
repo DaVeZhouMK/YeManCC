@@ -127,8 +127,9 @@ if ((Has $text.host 'Invoke\("PowerProfileManager_Applied",\s*profile,\s*source\
 if ((Has $text.host 'SubscribeExternalProfileEvents') -and (Has $text.host 'OnExternalProfileApplied') -and (Has $text.host 'OnExternalProfileDiscarded')) {
   Pass 'YM-E02' 'Host subscribes to external Applied/Discarded events' 'Program.cs:795-895'
 } else { Fail 'YM-E02' 'Host external profile subscriptions' 'subscription boundary absent' }
-if ((Has $text.host 'RequestPowerProfileWatchdogTick') -and (Has $text.host 'waiting-for-Applied') -and
-    (Has $text.host 'pendingExternalProfileDiscarded')) {
+if ((Has $text.host 'TryAcceptDiscarded') -and (Has $text.host 'TryConsumeDiscarded') -and
+    (Has $text.host 'HC\.ProfileManager\.Discarded.*waiting-for-Applied') -and
+    (Has $text.host 'hc.external-profile-discarded-no-applied')) {
   Pass 'YM-E03' 'Host treats Discarded as a wait boundary and serializes follow-up observation' 'Program.cs:835-895,1218-1243'
 } else { Fail 'YM-E03' 'Host Discarded handoff' 'new HC-aligned discard wait behavior absent' }
 $appliedHandlerStart = $text.host.IndexOf('private void OnExternalProfileApplied')
@@ -137,9 +138,9 @@ $handlerEnd = $text.host.IndexOf('private void RequestPowerProfileWatchdogTick')
 $handlerSlice = if ($appliedHandlerStart -ge 0 -and $handlerEnd -gt $appliedHandlerStart) {
   $text.host.Substring($appliedHandlerStart, $handlerEnd - $appliedHandlerStart)
 } else { '' }
-if ((Has $text.host 'externalProfileGate') -and
+if ((Has $text.host 'ExternalProfilePendingQueue') -and (Has $text.host 'externalProfileQueue') -and
     $handlerSlice -notmatch 'lock\s*\(hardwareGate\)' -and
-    (Has $text.host 'external-profile-discarded-no-applied') -and
+    (Has $text.host 'hc.external-profile-discarded-no-applied') -and
     (Has $text.host 'retain-last-safe-template')) {
   Pass 'YM-E04' 'Host event callbacks use an independent snapshot gate and bounded no-next-Applied evidence' 'Program.cs: externalProfileGate; callback slice; 2-second no-next-Applied diagnostic'
 } else { Fail 'YM-E04' 'Host profile callback lock ordering' 'callback still acquires hardwareGate or bounded discard evidence is absent' }
@@ -148,7 +149,7 @@ $watchdogStart = $text.host.IndexOf('private void EnsurePowerProfileWatchdog')
 $adoptSlice = if ($adoptStart -ge 0 -and $watchdogStart -gt $adoptStart) {
   $text.host.Substring($adoptStart, $watchdogStart - $adoptStart)
 } else { '' }
-if ($adoptSlice -notmatch '(?m)^\s*(?:var\s+\w+\s*=\s*)?Invoke\(manager,\s*"GetCurrent"' -and (Has $text.host 'pendingExternalProfileUpdateSource') -and
+if ($adoptSlice -notmatch '(?m)^\s*(?:var\s+\w+\s*=\s*)?Invoke\(manager,\s*"GetCurrent"' -and (Has $text.host 'externalProfileQueue.TryGetPending') -and
     (Has $text.host 'NormalizeUpdateSourceName') -and (Has $text.host 'ApplyPowerProfile\(profile, source\)')) {
   Pass 'YM-E05' 'Host consumes detached Applied snapshots without re-entering HC Manager under hardwareGate and preserves UpdateSource' 'Program.cs: TryAdoptExternalHcProfile; PowerProfileWatchdogTick; ApplyPowerProfile'
 } else { Fail 'YM-E05' 'Host profile callback re-entry/source propagation' 'manager re-entry or source propagation boundary is not proven' }

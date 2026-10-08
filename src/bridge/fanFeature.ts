@@ -1,7 +1,7 @@
 import { computed, ref, toRaw } from 'vue';
 import { readSettingsSection, saveSettingsSection } from './settingsRepository';
 import { createFanApiAdapter, type FanApiAdapter, type FanNode } from './fanApi';
-import { configureFanDiagnosticLogging } from './fanDiagnostics';
+import { adoptFanDiagnosticLoggingState, configureFanDiagnosticLogging, readFanDiagnosticLogging } from './fanDiagnostics';
 
 export type FanPreset = 'soft' | 'balanced' | 'aggressive';
 
@@ -199,7 +199,16 @@ export async function initializeFanFeature(): Promise<FanFeatureSettings> {
         };
         fanMotionEnabled.value = settings.value.motionEnabled;
         try {
-          await configureFanDiagnosticLogging(settings.value.diagnosticLoggingEnabled);
+          // 203/Fan b141（P1b / CP-10）：初始化**不得**把 `fan` 节里的旧默认值推给统一日志门
+          // ——那会覆盖已持久化的 `domainLogs.virtual=true`（S4 的 logging-enabled →
+          // logging-disabled 翻转）。这里只**读回**权威值并采纳；写只发生在用户明确操作时。
+          const authoritative = await readFanDiagnosticLogging();
+          if (authoritative !== null) {
+            settings.value = { ...settings.value, diagnosticLoggingEnabled: authoritative };
+            // b142：读回之后还必须把权威值**采纳为桥内日志门**，否则 `fanDiagnosticLog()`
+            // 仍被本模块的 ref（默认 false）挡掉，整场会话的 lifecycle.* 行会静默丢失。
+            adoptFanDiagnosticLoggingState(authoritative);
+          }
         } catch {
           // A pre-log-switch native shell cannot persist fan diagnostics, but
           // must not make the rest of the Fan settings disappear.

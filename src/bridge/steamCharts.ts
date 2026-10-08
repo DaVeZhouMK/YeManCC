@@ -35,7 +35,7 @@ const CACHE_MAX_AGE_MS = 6 * 60 * 60 * 1000;
 const FALLBACK_POWER_CONTROL_DIR = 'C:\\SOFT\\YeMan\\PowerControl';
 
 let cachePathPromise: Promise<{ dir: string; steamFile: string; steamDeckFile: string }> | null = null;
-const activeLoads: Partial<Record<SteamChartMode, Promise<SteamChartsResult>>> = {};
+const activeLoads: Partial<Record<SteamChartMode, { force: boolean; promise: Promise<SteamChartsResult> }>> = {};
 
 function normalizePath(value: string): string {
   return value.replace(/[\\/]+$/, '').replace(/\//g, '\\');
@@ -200,12 +200,20 @@ function resultFromCache(cache: SteamChartsCache, now: number): SteamChartsResul
 }
 
 export async function loadSteamCharts(mode: SteamChartMode = 'steamdeck', force = false): Promise<SteamChartsResult> {
-  if (activeLoads[mode]) return activeLoads[mode]!;
-  activeLoads[mode] = (async () => {
+  const active = activeLoads[mode];
+  if (active) {
+    if (!force || active.force) return structuredClone(await active.promise);
+    // A manual refresh must not be satisfied by an ordinary cache-only load.
+    await active.promise.catch(() => {});
+    return loadSteamCharts(mode, true);
+  }
+  const promise = (async () => {
     const cached = await readCache(mode); const now = Date.now();
     if (!force && cached && now - Date.parse(cached.refreshedAt) < CACHE_MAX_AGE_MS) return resultFromCache(cached, now);
     try { const next = await loadOnline(mode); await writeCache(next); return { ...next, fromCache: false, stale: false }; }
     catch (error) { if (cached) return resultFromCache(cached, now); throw error instanceof Error ? error : new Error(String(error)); }
   })();
-  try { return await activeLoads[mode]!; } finally { delete activeLoads[mode]; }
+  activeLoads[mode] = { force, promise };
+  try { return structuredClone(await promise); }
+  finally { if (activeLoads[mode]?.promise === promise) delete activeLoads[mode]; }
 }

@@ -11,6 +11,8 @@ const props = withDefaults(
     color?: 'ac' | 'dc' | 'accent';
     full?: boolean;
     disabled?: boolean;
+    gpRow?: number | string;
+    gpColStart?: number | string;
   }>(),
   { color: 'accent', full: false, disabled: false }
 );
@@ -25,12 +27,14 @@ const accentVar = props.color === 'dc' ? 'var(--dc-accent)' : 'var(--accent)';
 <template>
   <div class="seg" :class="{ full: full, disabled: disabled }" :style="{ '--seg-accent': accentVar }">
     <button
-      v-for="o in options"
+      v-for="(o, i) in options"
       :key="o.value"
       type="button"
       class="seg-btn"
       :class="{ active: o.value === modelValue }"
       :disabled="disabled"
+      :data-gp-row="gpRow"
+      :data-gp-col="gpRow == null ? undefined : Number(gpColStart ?? 0) + i"
       @click="pick(o.value)"
     >
       <span class="seg-main">{{ o.label }}</span>
@@ -42,10 +46,10 @@ const accentVar = props.color === 'dc' ? 'var(--dc-accent)' : 'var(--accent)';
 <style scoped>
 .seg {
   display: inline-flex;
-  background: var(--bg-input);
-  border-radius: var(--radius-ctrl);
-  padding: 3px;
-  gap: 2px;
+  align-items: center;
+  background: transparent;
+  padding: 0;
+  gap: 7px;
   flex-wrap: nowrap;
 }
 .seg.full {
@@ -54,28 +58,26 @@ const accentVar = props.color === 'dc' ? 'var(--dc-accent)' : 'var(--accent)';
 }
 .seg.full .seg-btn {
   flex: 1 1 0;
-  justify-content: center;
   min-width: 0;
-  padding-left: 4px;
-  padding-right: 4px;
 }
 .seg-btn {
-  border: none;
-  background: transparent;
-  color: var(--text);
-  font-size: var(--btn-font-size);
-  line-height: var(--btn-line-height);
-  padding: var(--btn-py) 10px;
-  min-height: var(--btn-min-h);
-  border-radius: 6px;
-  cursor: pointer;
-  transition: background 0.12s, color 0.12s;
-  white-space: nowrap;
   display: inline-flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 2px;
+  min-height: 38px;
+  padding: 0 8px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
+  background: var(--bg-input);
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: var(--btn-line-height);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
 }
 .seg-main {
   line-height: 1.15;
@@ -94,26 +96,23 @@ const accentVar = props.color === 'dc' ? 'var(--dc-accent)' : 'var(--accent)';
   white-space: normal;
   font-variant-numeric: tabular-nums;
 }
-.seg-btn:hover {
+.seg-btn:hover:not(:disabled) {
   color: var(--text);
 }
 .seg-btn.active {
-  background: var(--seg-accent);
-  color: #06121d;
-  font-weight: 600;
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg-input));
+  font-weight: 700;
 }
 .seg-btn:focus-visible {
   box-shadow: var(--focus-ring);
 }
-/* 禁用态：整体变暗 + 取消鼠标响应，视觉上明确表达"已锁定" */
 .seg.disabled {
   opacity: 0.45;
   pointer-events: none;
 }
 .seg.disabled .seg-btn {
   cursor: default;
-}
-.seg.disabled .seg-btn.active {
-  opacity: 0.65;
 }
 </style>

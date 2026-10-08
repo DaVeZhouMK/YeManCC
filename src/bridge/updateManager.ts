@@ -48,6 +48,7 @@ const initial: UpdateSnapshot = {
 export const updateSnapshot = reactive<UpdateSnapshot>({ ...initial });
 export const updateInfo = ref<UpdateInfo | null>(null);
 let initialized = false;
+let initialization: Promise<void> | null = null;
 let activeOperation = '';
 let offProgress: (() => void) | null = null;
 
@@ -92,28 +93,34 @@ export async function ensureUpdateManager(): Promise<void> {
     offProgress = on<UpdateProgressState>('update.progress', merge);
   }
   if (initialized) return;
-  initialized = true;
-  try {
-    const saved = await readNativeUpdateState();
-    restoreSavedUpdateInfo(saved);
-    if (
-      (saved.phase === 'downloaded' || saved.phase === 'installing' || saved.phase === 'interrupted') &&
-      saved.stage === 'install'
-    ) {
-      merge({ ...saved, phase: 'interrupted', message: '上次安装未完成，可重试安装' });
-    } else if (saved.phase === 'downloading' || saved.phase === 'validating' || saved.phase === 'installing') {
-      merge({ ...saved, phase: 'interrupted', message: '上次下载未完成，可继续下载' });
-    } else {
-      merge(saved);
+  if (initialization) return initialization;
+  const task = (async () => {
+    try {
+      const saved = await readNativeUpdateState();
+      restoreSavedUpdateInfo(saved);
+      if (
+        (saved.phase === 'downloaded' || saved.phase === 'installing' || saved.phase === 'interrupted') &&
+        saved.stage === 'install'
+      ) {
+        merge({ ...saved, phase: 'interrupted', message: '上次安装未完成，可重试安装' });
+      } else if (saved.phase === 'downloading' || saved.phase === 'validating' || saved.phase === 'installing') {
+        merge({ ...saved, phase: 'interrupted', message: '上次下载未完成，可继续下载' });
+      } else {
+        merge(saved);
+      }
+      initialized = true;
+    } catch {
+      /* Native state is optional in preview, but a failed load stays retryable. */
     }
-  } catch {
-    /* Native state is optional during browser preview. */
-  }
+  })();
+  initialization = task;
+  try { await task; }
+  finally { if (initialization === task) initialization = null; }
 }
 
 export async function checkForUpdate(appVersion: string): Promise<void> {
   await ensureUpdateManager();
-  if (updateSnapshot.phase === 'downloading' || updateSnapshot.phase === 'installing') return;
+  if (['checking', 'downloading', 'validating', 'installing'].includes(updateSnapshot.phase)) return;
   updateInfo.value = null;
   activeOperation = makeOperationId();
   updateSnapshot.operationId = activeOperation;

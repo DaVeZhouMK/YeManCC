@@ -6,6 +6,11 @@
   This script deliberately does not deploy to C:\SOFT\YeMan. It only builds
   and packages the workspace Release directories. Formal deployment requires a
   separate, explicitly authorized task.
+  YMCC standard export and this release entry converge on package-release.ps1
+  (package.json: release -> build -> package). HC-SLIM-01 keeps the four large
+  runtime DLLs and HIDMaestro; the two duplicate utility placements are omitted
+  only while their pinned HC-runtime authorities remain available. No separate
+  legacy ZIP or unverified slimming policy is assembled by this wrapper.
 #>
 [CmdletBinding()]
 param(
@@ -15,6 +20,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
+$previousWorkspaceRoot = $env:YEMAN_WORKSPACE_ROOT
 
 Push-Location $ProjectRoot
 try {
@@ -32,6 +38,7 @@ try {
     }
   }
 } finally {
+  $env:YEMAN_WORKSPACE_ROOT = $previousWorkspaceRoot
   Pop-Location
 }
 

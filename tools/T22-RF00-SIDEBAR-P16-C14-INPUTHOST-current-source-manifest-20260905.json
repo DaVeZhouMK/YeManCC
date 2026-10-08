@@ -1,0 +1,379 @@
+{
+  "schemaVersion": "T22-RF00-CurrentSourceManifest.v5",
+  "manifestId": "T22-RF00-20260905-SIDEBAR-P16-C14-INPUTHOST-STATIC-CURRENT",
+  "capturedUtc": "2026-09-05T02:46:10.5868731Z",
+  "captureMode": "static-read-hash-documentation-only",
+  "runtimeOperation": false,
+  "buildOrTest": false,
+  "operator": "Codex BUS / P16 HidHide claim-scope + InputHost lifecycle static re-freeze",
+  "cwd": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC",
+  "argv": [
+    "git -C <YMCC> rev-parse HEAD",
+    "git -C <YMCC> status --porcelain=v1",
+    "Get-FileHash -Algorithm SHA256 <47 key files>",
+    "git -C <HC> rev-parse HEAD",
+    "git -C <HC> status --porcelain=v1"
+  ],
+  "ymcc": {
+    "repository": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC",
+    "head": "aa8f38b83cc960267d2f68bf78d0e8adaca2234f",
+    "worktreePorcelainCount": 346,
+    "worktreePorcelainRawPath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\T22-RF00-SIDEBAR-P16-C14-INPUTHOST-current-source-porcelain-20260905.raw.txt",
+    "worktreePorcelainCanonicalSha256": "C3A0E64C0E431BC4A244A6993098EC321E749050351796C59B23DD48C5ADBA15",
+    "worktreePorcelainArtifactSha256": "C3A0E64C0E431BC4A244A6993098EC321E749050351796C59B23DD48C5ADBA15",
+    "porcelainBytes": 16618,
+    "porcelainEncoding": "UTF-8 without BOM; LF; complete git status --porcelain=v1 output",
+    "exitCode": 0
+  },
+  "hc": {
+    "root": "G:\\YeManCC-Work\\Isolated\\HC-Candidate-0.32.4.0-06c0b954-20260902",
+    "head": "06c0b9544db2b1f39abf9cd3796225ccfb096103",
+    "expectedVersion": "0.32.4.0",
+    "expectedCommit": "06c0b9544db2b1f39abf9cd3796225ccfb096103",
+    "worktreePorcelainCount": 0,
+    "statusVerified": true
+  },
+  "sourceDigest": "596BA944944E0477C378DD3BF7FDB04A297B69397F238F1A7A4B821BDE37DEDD",
+  "sourceDigestAlgorithm": "SHA256(UTF8(join(keyFiles sorted lexically by ordinal scope then ordinal relativePath, scope + TAB + relativePath + TAB + fileSha256 + TAB + bytes + LF)))",
+  "keyFileSetChange": "P16 expands P15 from 41 to 48 keys: adds HC selected-controller HidHide/DeviceManager/VirtualManager/VIIPERTarget authority and InputHost project-reference provenance for C14/C15 and the BUS-P11 lifecycle audit.",
+  "coverage": [
+    "P01 Windows sensor event/default/threshold authority",
+    "P02 calibration and motion mapping",
+    "P03 InputHost state-file/lifecycle/provenance",
+    "P04 HidHide selected-controller versus legacy global scan",
+    "P05 ROG model/UI-owner/sidebar scope",
+    "P06 release/recovery boundaries",
+    "P07 current-source provenance and DGF range"
+  ],
+  "keyFiles": [
+    {
+      "scope": "DOC",
+      "relativePath": "Docs\\Tasks\\GyroVirtual\\13-DECISION-CHANGE-CONTROL-20260903.md",
+      "absolutePath": "G:\\YeManCC-Work\\Docs\\Tasks\\GyroVirtual\\13-DECISION-CHANGE-CONTROL-20260903.md",
+      "sha256": "615B98F17D6CC22203EF7D582255245450BF2C34C654E6C9462C4CE486657880",
+      "bytes": 5634
+    },
+    {
+      "scope": "DOC",
+      "relativePath": "Docs\\Tasks\\GyroVirtual\\20-YMCC-UI-INPUT-LOGGING-INTEGRATION-CONTRACT-20260903.md",
+      "absolutePath": "G:\\YeManCC-Work\\Docs\\Tasks\\GyroVirtual\\20-YMCC-UI-INPUT-LOGGING-INTEGRATION-CONTRACT-20260903.md",
+      "sha256": "8A05D6AA84F1F972CF12D28819DC74CD9994EDCA49E9AA4E7FD111EE552E23A9",
+      "bytes": 16938
+    },
+    {
+      "scope": "DOC",
+      "relativePath": "Docs\\Tasks\\GyroVirtual\\24-UNIFIED-LIFECYCLE-AND-COORDINATION-CONTRACT-20260903.md",
+      "absolutePath": "G:\\YeManCC-Work\\Docs\\Tasks\\GyroVirtual\\24-UNIFIED-LIFECYCLE-AND-COORDINATION-CONTRACT-20260903.md",
+      "sha256": "21ED9BDA1A42BE5288C6EBD6DAEEDE02613D907FBCEA115404E2D1E42033EFD6",
+      "bytes": 5363
+    },
+    {
+      "scope": "DOC",
+      "relativePath": "Docs\\Tasks\\GyroVirtual\\25-GAMEPAD-GYRO-MD-REORGANIZED-GAP-REASSESSMENT-20260903.md",
+      "absolutePath": "G:\\YeManCC-Work\\Docs\\Tasks\\GyroVirtual\\25-GAMEPAD-GYRO-MD-REORGANIZED-GAP-REASSESSMENT-20260903.md",
+      "sha256": "82A9F578FCAD554F6EB41BDCD2E3EA836A84701E8EA06CFD2CB785640B1AA551",
+      "bytes": 54688
+    },
+    {
+      "scope": "DOC",
+      "relativePath": "Docs\\Tasks\\GyroVirtual\\30-GYRO-PARAMETER-SHIELD-RESET-ACCEL-CONTRACT-20260904.md",
+      "absolutePath": "G:\\YeManCC-Work\\Docs\\Tasks\\GyroVirtual\\30-GYRO-PARAMETER-SHIELD-RESET-ACCEL-CONTRACT-20260904.md",
+      "sha256": "1A4EBC57A59600E75CE0C1B4BB96206D8CCB56DD10E9ADB16406E12D5C46B53A",
+      "bytes": 69163
+    },
+    {
+      "scope": "DOC",
+      "relativePath": "Docs\\Tasks\\GyroVirtual\\TASK.md",
+      "absolutePath": "G:\\YeManCC-Work\\Docs\\Tasks\\GyroVirtual\\TASK.md",
+      "sha256": "449DC77AD4974ECCDDCA3EA0D475797109326D3C4CA64B222E151A830684BF35",
+      "bytes": 75424
+    },
+    {
+      "scope": "HC",
+      "relativePath": "HandheldCompanion\\Controllers\\IController.cs",
+      "absolutePath": "G:\\YeManCC-Work\\Isolated\\HC-Candidate-0.32.4.0-06c0b954-20260902\\HandheldCompanion\\Controllers\\IController.cs",
+      "sha256": "4A9DA4FE7E2F257DF5C78B9AF843F0BF424C80D92410A675E3E59C0C3AE68C8A",
+      "bytes": 31937
+    },
+    {
+      "scope": "HC",
+      "relativePath": "HandheldCompanion\\Devices\\ASUS\\ROGAlly.cs",
+      "absolutePath": "G:\\YeManCC-Work\\Isolated\\HC-Candidate-0.32.4.0-06c0b954-20260902\\HandheldCompanion\\Devices\\ASUS\\ROGAlly.cs",
+      "sha256": "04097428F3D62DE75F8160EB47398E1C61606F9D6681EB605D100B384814AA00",
+      "bytes": 25435
+    },
+    {
+      "scope": "HC",
+      "relativePath": "HandheldCompanion\\Devices\\ASUS\\ROGAllyX.cs",
+      "absolutePath": "G:\\YeManCC-Work\\Isolated\\HC-Candidate-0.32.4.0-06c0b954-20260902\\HandheldCompanion\\Devices\\ASUS\\ROGAllyX.cs",
+      "sha256": "8907D79FEB28D2C76C6EB3D0F20E798C0D91CC5E0D7A84616B1D2C7064ECECBD",
+      "bytes": 1137
+    },
+    {
+      "scope": "HC",
+      "relativePath": "HandheldCompanion\\Devices\\ASUS\\XboxROGAlly.cs",
+      "absolutePath": "G:\\YeManCC-Work\\Isolated\\HC-Candidate-0.32.4.0-06c0b954-20260902\\HandheldCompanion\\Devices\\ASUS\\XboxROGAlly.cs",
+      "sha256": "78BF90520419B63C6C8FD2BC12543B2D16280895802D8F9952849C4E030FE3D4",
+      "bytes": 1815
+    },
+    {
+      "scope": "HC",
+      "relativePath": "HandheldCompanion\\Devices\\ASUS\\XboxROGAllyX.cs",
+      "absolutePath": "G:\\YeManCC-Work\\Isolated\\HC-Candidate-0.32.4.0-06c0b954-20260902\\HandheldCompanion\\Devices\\ASUS\\XboxROGAllyX.cs",
+      "sha256": "404987B6116C5DC79FEC80AABDF97D6E28F146EC2FFC3AF69ED8FC71E40FF8EE",
+      "bytes": 1826
+    },
+    {
+      "scope": "HC",
+      "relativePath": "HandheldCompanion\\Devices\\IDevice.cs",
+      "absolutePath": "G:\\YeManCC-Work\\Isolated\\HC-Candidate-0.32.4.0-06c0b954-20260902\\HandheldCompanion\\Devices\\IDevice.cs",
+      "sha256": "FBAED1DFD329E3328376488B8EC70C3A7FDCF97D70DCB37F1525EE33AA169C20",
+      "bytes": 48018
+    },
+    {
+      "scope": "HC",
+      "relativePath": "HandheldCompanion\\Helpers\\GamepadMotion.cs",
+      "absolutePath": "G:\\YeManCC-Work\\Isolated\\HC-Candidate-0.32.4.0-06c0b954-20260902\\HandheldCompanion\\Helpers\\GamepadMotion.cs",
+      "sha256": "7BA36F0DCB0E280D526E5B09E95888AF58B98927B3C83001858817EC12FB23ED",
+      "bytes": 12816
+    },
+    {
+      "scope": "HC",
+      "relativePath": "HandheldCompanion\\Managers\\ControllerManager.cs",
+      "absolutePath": "G:\\YeManCC-Work\\Isolated\\HC-Candidate-0.32.4.0-06c0b954-20260902\\HandheldCompanion\\Managers\\ControllerManager.cs",
+      "sha256": "C656D93C3E105DC79F9B43171B90EB8DEA73809F5AFAEC927E481DEC52D6B2FF",
+      "bytes": 112814
+    },
+    {
+      "scope": "HC",
+      "relativePath": "HandheldCompanion\\Managers\\DeviceManager.cs",
+      "absolutePath": "G:\\YeManCC-Work\\Isolated\\HC-Candidate-0.32.4.0-06c0b954-20260902\\HandheldCompanion\\Managers\\DeviceManager.cs",
+      "sha256": "6B58865B08280589361F38C620835D5A65681915C55BC6BF5F5256E6651F28AE",
+      "bytes": 47134
+    },
+    {
+      "scope": "HC",
+      "relativePath": "HandheldCompanion\\Managers\\LayoutManager.cs",
+      "absolutePath": "G:\\YeManCC-Work\\Isolated\\HC-Candidate-0.32.4.0-06c0b954-20260902\\HandheldCompanion\\Managers\\LayoutManager.cs",
+      "sha256": "1A4D3EBDCB09F8431EFD138F580086F435BC8296B0D248BFB02BF4650D0994A1",
+      "bytes": 36010
+    },
+    {
+      "scope": "HC",
+      "relativePath": "HandheldCompanion\\Managers\\MotionManager.cs",
+      "absolutePath": "G:\\YeManCC-Work\\Isolated\\HC-Candidate-0.32.4.0-06c0b954-20260902\\HandheldCompanion\\Managers\\MotionManager.cs",
+      "sha256": "19A9C645351DC74B5A0E2A74D99C3AD95F105CF85EDF173C8AF8531713F6FC7E",
+      "bytes": 15971
+    },
+    {
+      "scope": "HC",
+      "relativePath": "HandheldCompanion\\Managers\\SensorsManager.cs",
+      "absolutePath": "G:\\YeManCC-Work\\Isolated\\HC-Candidate-0.32.4.0-06c0b954-20260902\\HandheldCompanion\\Managers\\SensorsManager.cs",
+      "sha256": "660CC003DF8C425CC4AA7D478C3D7327991C194D8FAE13F1EFD060B38BC2B4A3",
+      "bytes": 16413
+    },
+    {
+      "scope": "HC",
+      "relativePath": "HandheldCompanion\\Managers\\TimerManager.cs",
+      "absolutePath": "G:\\YeManCC-Work\\Isolated\\HC-Candidate-0.32.4.0-06c0b954-20260902\\HandheldCompanion\\Managers\\TimerManager.cs",
+      "sha256": "14C75AF92389667076401902B3A8B4448B1C7AA8F809B75566C9EB153076DB3C",
+      "bytes": 6215
+    },
+    {
+      "scope": "HC",
+      "relativePath": "HandheldCompanion\\Managers\\VirtualManager.cs",
+      "absolutePath": "G:\\YeManCC-Work\\Isolated\\HC-Candidate-0.32.4.0-06c0b954-20260902\\HandheldCompanion\\Managers\\VirtualManager.cs",
+      "sha256": "46D0B0812BBA00A9A1E9DC8A16892154FC4F02EEBF5CB413B87C6FFBA1219106",
+      "bytes": 23136
+    },
+    {
+      "scope": "HC",
+      "relativePath": "HandheldCompanion\\Misc\\HidHide.cs",
+      "absolutePath": "G:\\YeManCC-Work\\Isolated\\HC-Candidate-0.32.4.0-06c0b954-20260902\\HandheldCompanion\\Misc\\HidHide.cs",
+      "sha256": "9CD9B573343FF197F67169BF651541FB293397D6666E6E14E1CEAE5651830253",
+      "bytes": 11806
+    },
+    {
+      "scope": "HC",
+      "relativePath": "HandheldCompanion\\Sensors\\IMUAccelerometer.cs",
+      "absolutePath": "G:\\YeManCC-Work\\Isolated\\HC-Candidate-0.32.4.0-06c0b954-20260902\\HandheldCompanion\\Sensors\\IMUAccelerometer.cs",
+      "sha256": "F63C11C0729B013E7B03D717C09F25FC099A8433752B52DE9E3826BCDFFF7B4C",
+      "bytes": 5012
+    },
+    {
+      "scope": "HC",
+      "relativePath": "HandheldCompanion\\Sensors\\IMUGyrometer.cs",
+      "absolutePath": "G:\\YeManCC-Work\\Isolated\\HC-Candidate-0.32.4.0-06c0b954-20260902\\HandheldCompanion\\Sensors\\IMUGyrometer.cs",
+      "sha256": "BC44A51518C82BDDAF7BA2D79A37A7F57EF762E7F0D5F5B291DBB472077930E1",
+      "bytes": 5084
+    },
+    {
+      "scope": "HC",
+      "relativePath": "HandheldCompanion\\Targets\\VIIPERTarget.cs",
+      "absolutePath": "G:\\YeManCC-Work\\Isolated\\HC-Candidate-0.32.4.0-06c0b954-20260902\\HandheldCompanion\\Targets\\VIIPERTarget.cs",
+      "sha256": "3E7650D061D95E3B2BDD8F8B615F98DB6EAFAA103020E388C47A1001DB1BBD67",
+      "bytes": 8686
+    },
+    {
+      "scope": "HC",
+      "relativePath": "HandheldCompanion\\Utils\\InputUtils.cs",
+      "absolutePath": "G:\\YeManCC-Work\\Isolated\\HC-Candidate-0.32.4.0-06c0b954-20260902\\HandheldCompanion\\Utils\\InputUtils.cs",
+      "sha256": "B6E509D3D64CFFFD16DA1930C37C18372A12D0B52C6476CC2F685AB1CFC84F7A",
+      "bytes": 21944
+    },
+    {
+      "scope": "YMCC",
+      "relativePath": "InputHost\\Program.cs",
+      "absolutePath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\InputHost\\Program.cs",
+      "sha256": "72F7E4F890DF4AE2F93196AE9FE7C11F74976851ABCC78546D8521E428A484F3",
+      "bytes": 7494
+    },
+    {
+      "scope": "YMCC",
+      "relativePath": "InputHost\\YeManInputHost.csproj",
+      "absolutePath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\InputHost\\YeManInputHost.csproj",
+      "sha256": "07819D4D54EC8680B56F64A582806705C71DBAE20BB61E368612F3944F37A531",
+      "bytes": 696
+    },
+    {
+      "scope": "YMCC",
+      "relativePath": "native\\main.cpp",
+      "absolutePath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\native\\main.cpp",
+      "sha256": "B21F2EE216FA474FEA5DA405BCCD6F5AEC91F96ADEB0E540BDE1701EDEDBA65F",
+      "bytes": 1056530
+    },
+    {
+      "scope": "YMCC",
+      "relativePath": "src\\bridge\\controllerFeedbackCapabilities.ts",
+      "absolutePath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\src\\bridge\\controllerFeedbackCapabilities.ts",
+      "sha256": "03D982BBE78E7A776324897FC6B7123701A5EF29BCA634E75120A688B9526A4C",
+      "bytes": 6668
+    },
+    {
+      "scope": "YMCC",
+      "relativePath": "src\\bridge\\controllerShortcutRules.ts",
+      "absolutePath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\src\\bridge\\controllerShortcutRules.ts",
+      "sha256": "196B5D12B13C9CBD34F571420384D32AEC2F6D9DEF5A7AECE9340B75E310978C",
+      "bytes": 12386
+    },
+    {
+      "scope": "YMCC",
+      "relativePath": "src\\bridge\\gyroVirtualFeature.ts",
+      "absolutePath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\src\\bridge\\gyroVirtualFeature.ts",
+      "sha256": "51DC980922F10ECE3A197D5883041AF21122E45020E90447C31EC8302B2F32D9",
+      "bytes": 3201
+    },
+    {
+      "scope": "YMCC",
+      "relativePath": "src\\bridge\\inputCoordinatorMock.ts",
+      "absolutePath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\src\\bridge\\inputCoordinatorMock.ts",
+      "sha256": "D64B7D108F06FAD2624BEA53825896C6FC91904638299B64B57D58BC8CBB5B6E",
+      "bytes": 8361
+    },
+    {
+      "scope": "YMCC",
+      "relativePath": "src\\bridge\\inputDiagnosticsUi.ts",
+      "absolutePath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\src\\bridge\\inputDiagnosticsUi.ts",
+      "sha256": "17CC09AFE8BE1F7113E1A2828C3411EF223901CE29F60AE9A3AA7B10EFD26141",
+      "bytes": 3435
+    },
+    {
+      "scope": "YMCC",
+      "relativePath": "src\\bridge\\inputOwnerRuntime.ts",
+      "absolutePath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\src\\bridge\\inputOwnerRuntime.ts",
+      "sha256": "74C135BC525AB2BE4129A69497D460AB2A75B2619EA26C6982B4E3B600170B8C",
+      "bytes": 1924
+    },
+    {
+      "scope": "YMCC",
+      "relativePath": "src\\bridge\\physicalInputOwnership.ts",
+      "absolutePath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\src\\bridge\\physicalInputOwnership.ts",
+      "sha256": "D807BE442E1577DD7778EC2EBB32F58858EA4013D703783F435066B8168D5D89",
+      "bytes": 3806
+    },
+    {
+      "scope": "YMCC",
+      "relativePath": "src\\bridge\\rogInputAdapter.ts",
+      "absolutePath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\src\\bridge\\rogInputAdapter.ts",
+      "sha256": "D1EC2EB58D22F80EF38D47F017809E57844264B2FC96C238E21252E5BBDAF634",
+      "bytes": 3633
+    },
+    {
+      "scope": "YMCC",
+      "relativePath": "src\\bridge\\settingsRepository.ts",
+      "absolutePath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\src\\bridge\\settingsRepository.ts",
+      "sha256": "C7B14684A18EF72CB3B426260AF9719CE223F7BD9A984261444926886ADBF11E",
+      "bytes": 27608
+    },
+    {
+      "scope": "YMCC",
+      "relativePath": "src\\components\\GyroVirtualCapabilityCard.vue",
+      "absolutePath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\src\\components\\GyroVirtualCapabilityCard.vue",
+      "sha256": "15F073B1E95EE5B9AD8DB14BF9E0ADE20D90FB9AC8B19830294F10CA34C7DB85",
+      "bytes": 3048
+    },
+    {
+      "scope": "YMCC",
+      "relativePath": "src\\components\\NavRail.vue",
+      "absolutePath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\src\\components\\NavRail.vue",
+      "sha256": "25B57E3D6DC6ADDC3F07D4F3A5A0B070FC35DE3E037A52BB4665E92629939C95",
+      "bytes": 6672
+    },
+    {
+      "scope": "YMCC",
+      "relativePath": "src\\gamepad\\engine.ts",
+      "absolutePath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\src\\gamepad\\engine.ts",
+      "sha256": "E7900D4BABBD7F937CD4111CBA2F5EC17DD05D6B1B3BB3EB47A4B02D82B462CA",
+      "bytes": 69564
+    },
+    {
+      "scope": "YMCC",
+      "relativePath": "src\\router.ts",
+      "absolutePath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\src\\router.ts",
+      "sha256": "FAB482BC7E1DD2ED968DB066953CC8D91AE2AE12E751FCE3F899FA48F213CBC0",
+      "bytes": 4344
+    },
+    {
+      "scope": "YMCC",
+      "relativePath": "src\\views\\ButtonMappingView.vue",
+      "absolutePath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\src\\views\\ButtonMappingView.vue",
+      "sha256": "B2F03F8361DE9670B8BD8E428C84CAFADA34D85D13F93D19ED0603837E90F7DE",
+      "bytes": 8777
+    },
+    {
+      "scope": "YMCC",
+      "relativePath": "src\\views\\GyroMotionView.vue",
+      "absolutePath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\src\\views\\GyroMotionView.vue",
+      "sha256": "F62C84D104799E9AFD22A10A736F5D675C0CAA9B3C0DB0DE6A7249C3967B421D",
+      "bytes": 20428
+    },
+    {
+      "scope": "YMCC",
+      "relativePath": "tools\\ParameterConsumptionLedger.v1.json",
+      "absolutePath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ParameterConsumptionLedger.v1.json",
+      "sha256": "5D2737A6E9A3519AC951ADA29A84B73CC080A33BBA1330D71F0052B92DF97B80",
+      "bytes": 4972
+    },
+    {
+      "scope": "YMCC",
+      "relativePath": "tools\\T15T16EmpiricalClosureTestDesign.v1.md",
+      "absolutePath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\T15T16EmpiricalClosureTestDesign.v1.md",
+      "sha256": "616A85772CE1FC0DBE232C61F1C4B992269AF94D2201554DA638D6B215371F84",
+      "bytes": 19665
+    },
+    {
+      "scope": "YMCC",
+      "relativePath": "tools\\package-release.ps1",
+      "absolutePath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\package-release.ps1",
+      "sha256": "E8974FB8EE00DBF9CCFCE9BBEC38A7A3040368A232CCB5D14EF49BCABD07565E",
+      "bytes": 39914
+    },
+    {
+      "scope": "YMCC",
+      "relativePath": "tools\\updater_policy_selftest.ts",
+      "absolutePath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\updater_policy_selftest.ts",
+      "sha256": "D24F3502902467C89F4E3EA80C6DEDF19A968833EB7CCB84B90C65F194CC5E30",
+      "bytes": 9714
+    }
+  ]
+}

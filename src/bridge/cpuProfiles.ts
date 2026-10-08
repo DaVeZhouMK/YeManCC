@@ -1,5 +1,5 @@
 import type { PowerParams } from './yeman';
-import { readSettingsSection, saveSettingsSection } from './settingsRepository';
+import { getSettingsGeneration, assertSettingsGeneration, readSettingsSection, saveSettingsSection } from './settingsRepository';
 
 export const CPU_PROFILES_FILE = 'C:\\SOFT\\YeMan\\PowerControl\\cpu_profiles.json';
 
@@ -114,7 +114,6 @@ function normalizeConfig(value: unknown): CpuProfilesConfig {
   };
 }
 
-let cache: CpuProfilesConfig | null = null;
 let writeQueue: Promise<void> = Promise.resolve();
 
 export async function cpuProfilesFileExists(): Promise<boolean> {
@@ -127,30 +126,19 @@ export async function cpuProfilesFileExists(): Promise<boolean> {
 }
 
 export async function loadCpuProfiles(): Promise<CpuProfilesConfig> {
-  if (cache) return structuredClone(cache);
-  try {
-    const cpu = await readSettingsSection<any>('cpu');
-    cache = normalizeConfig({
-      version: 1,
-      active: cpu.active,
-      profiles: cpu.profiles,
-    });
-  } catch {
-    cache = defaultCpuProfilesConfig();
-  }
-  return structuredClone(cache);
+  const cpu = await readSettingsSection<any>('cpu');
+  return normalizeConfig({ version: 1, active: cpu.active, profiles: cpu.profiles });
 }
 
 export async function saveCpuProfiles(config: CpuProfilesConfig): Promise<void> {
   const nextConfig = normalizeConfig(config);
-  const content = JSON.stringify(nextConfig, null, 2);
+  const generation = getSettingsGeneration();
   const write = writeQueue.then(() => saveSettingsSection('cpu', {
     active: nextConfig.active,
     profiles: nextConfig.profiles,
-  }));
+  }, generation));
   writeQueue = write.catch(() => {});
   await write;
-  cache = nextConfig;
 }
 
 export function getCpuProfileMeta(id: CpuProfileId) {

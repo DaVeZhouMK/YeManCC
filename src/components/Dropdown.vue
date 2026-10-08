@@ -417,7 +417,10 @@ function onGpNav(e: Event) {
 }
 
 .dd-menu {
-  z-index: 1000;
+  /* Menus are teleported to body. Keep them above in-app full-screen
+     bubbles (the shortcut editor is z-index 1100) so the highlighted option
+     is actually visible and remains clickable. */
+  z-index: 1300;
   background: #161d29;
   border: 1px solid #2a3342;
   border-radius: var(--dd-popup-menu-radius, 10px);

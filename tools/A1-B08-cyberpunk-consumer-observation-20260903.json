@@ -1,0 +1,11 @@
+{
+  "evidenceId": "A1-B08-CYBERPUNK-CONSUMER-OBSERVATION-20260903",
+  "consumer": "game",
+  "consumerName": "Cyberpunk 2077",
+  "result": "visible",
+  "observation": "During the immediately preceding bounded HidHide cloak interval, the user reported that joystick and A-button input continued to work normally with no perceived blocking.",
+  "reporter": "interactive-user",
+  "systemMutation": false,
+  "relatedProbe": "A1-B08-physical-hidhide-probe.json",
+  "recordedUtc": "2026-09-03T13:31:00Z"
+}

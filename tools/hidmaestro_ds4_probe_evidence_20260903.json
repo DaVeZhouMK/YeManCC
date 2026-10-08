@@ -1,0 +1,23 @@
+{
+  "evidenceId": "A1-R1-HIDMAESTRO-DS4-PROBE-20260903",
+  "status": "PASS",
+  "assetLockId": "HC-GYRO-VIRTUAL-MAINLINE-LOCK-20260903",
+  "asset": { "assetId": "HIDMaestro-1.7.0", "sha256": "A146AB8A46D2E9CE1FB2EA269FF231830607876F6F4DB7BB13CE891EF33DEECE" },
+  "probe": {
+    "isolatedExtract": "G:\\YeManCC-Work\\Temp\\hidmaestro-probe-20260903-01",
+    "command": "HIDMaestroTest.exe emulate dualshock-4-v2",
+    "profile": "dualshock-4-v2",
+    "profileIdentity": "054C:09CC",
+    "driverInstall": "OK",
+    "create": "dualshock-4-v2 created in 147 ms",
+    "reportSubmission": "test pattern and PS output frames observed",
+    "cleanup": "quit ACK; slot 0 disposed in 154 ms; total cleanup 157 ms"
+  },
+  "postCleanup": {
+    "hidhideModified": false,
+    "physicalControllerAccess": false,
+    "hidMaestroOrDualshockDevicePresent": false
+  },
+  "scope": "Single isolated DS4 persona only. No HC process started, no physical controller accessed, no HidHide visibility transaction applied.",
+  "remaining": ["HIDAPI/Steam/game consumer observation not performed", "HidHide effective suppression remains unverified"]
+}

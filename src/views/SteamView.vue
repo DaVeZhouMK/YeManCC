@@ -1,10 +1,9 @@
 <script setup lang="ts">
-import { ref, nextTick, onMounted, onBeforeUnmount, onActivated, onDeactivated, inject, watch, type Ref } from 'vue';
+import { ref, onMounted, onBeforeUnmount, onActivated, onDeactivated, inject, watch, type Ref } from 'vue';
 import Toggle from '@/components/Toggle.vue';
 import InlineIcon from '@/components/InlineIcon.vue';
 import { dialog, shell } from '@/bridge/api';
 import { isUiVisible, onUiVisibilityChange } from '@/bridge/uiLifecycle';
-import { focusGamepadElement } from '@/gamepad/focus';
 import {
   STEAM_ADDONS,
   type SteamAddonKey,
@@ -35,10 +34,6 @@ const errMsg = ref('');
 const customAddons = ref<SteamCustomAddon[]>([]);
 const steamRunKnown = ref(false);
 const steamChecking = ref(false);
-const steamLaunchPopupOpen = ref(false);
-const steamStateButtonEl = ref<HTMLButtonElement | null>(null);
-const steamLaunchPopupPanelEl = ref<HTMLElement | null>(null);
-const steamLaunchPopupCancelEl = ref<HTMLButtonElement | null>(null);
 let noticeTimer: ReturnType<typeof setTimeout> | null = null;
 let steamPollTimer: ReturnType<typeof setInterval> | null = null;
 let steamPollBusy = false;
@@ -48,44 +43,6 @@ let stopUiVisibility: (() => void) | null = null;
 const customLibrarySummary = ref<CustomSteamLibrarySummary | null>(null);
 const customLibraryBusy = ref(false);
 const customLibraryRunning = ref(false);
-
-function restoreSteamStateFocus() {
-  nextTick(() => {
-    if (steamStateButtonEl.value && !steamStateButtonEl.value.disabled) {
-      focusGamepadElement(steamStateButtonEl.value);
-    }
-  });
-}
-
-function closeSteamLaunchPopup(restoreFocus = true) {
-  if (!steamLaunchPopupOpen.value) return;
-  steamLaunchPopupOpen.value = false;
-  if (restoreFocus) restoreSteamStateFocus();
-}
-
-function openSteamLaunchPopup() {
-  if (busy.value || steamChecking.value) return;
-  if (steamLaunchPopupOpen.value) {
-    closeSteamLaunchPopup();
-    return;
-  }
-  steamLaunchPopupOpen.value = true;
-  nextTick(() => focusGamepadElement(steamLaunchPopupCancelEl.value));
-}
-
-function onSteamLaunchPopupBack(e: Event) {
-  if (!steamLaunchPopupOpen.value) return;
-  e.preventDefault();
-  closeSteamLaunchPopup();
-}
-
-function handleSteamLaunchPopupEsc() {
-  closeSteamLaunchPopup();
-}
-
-function cancelSteamLaunchPopup() {
-  closeSteamLaunchPopup();
-}
 
 const STEAM_POLL_INTERVAL_MS = 2000;
 const STEAM_POLL_TIMEOUT_MS = 20000;
@@ -336,28 +293,11 @@ async function closeSteam() {
   }
 }
 
-async function launchBigPicture() {
+// 开启始终复用联动启动大屏；方向导航只移动焦点，确认才执行开关。
+async function toggleSteamPower() {
   if (busy.value || steamChecking.value) return;
-  busy.value = true;
-  try {
-    if (!(await canStartSteam())) {
-      busy.value = false;
-      return;
-    }
-    await shell.open('steam://open/bigpicture');
-    // URI 调用只负责发起请求，状态仍由真实 steam.exe 检测决定。
-    pollSteamState(
-      true,
-      () => {
-        busy.value = false;
-        showNotice('Steam 启动后暂未检测到运行进程，请稍后确认。');
-      },
-      () => { busy.value = false; },
-    );
-  } catch (e) {
-    showNotice('普通启动 Steam 大屏失败：' + (e as Error).message);
-    busy.value = false;
-  }
+  if (running.value) await closeSteam();
+  else await launch();
 }
 
 async function refreshCustomLibrarySummary() {
@@ -392,21 +332,6 @@ function onCustomLibraryConflict(event: Event) {
   showNotice(`自定义游戏库未接管输入（${detail?.inputOwner || 'unknown'}），已阻止主程序重复响应。`);
 }
 
-function launchLinkedFromPopup() {
-  closeSteamLaunchPopup(false);
-  void launch();
-}
-
-function launchNormalFromPopup() {
-  closeSteamLaunchPopup(false);
-  void launchBigPicture();
-}
-
-function closeSteamFromPopup() {
-  closeSteamLaunchPopup(false);
-  void closeSteam();
-}
-
 // ── 全局刷新监听（App 预加载 / 支持页刷新按钮）──
 const globalRefreshKey = inject<Ref<number>>('globalRefreshKey');
 if (globalRefreshKey) {
@@ -419,12 +344,10 @@ if (globalRefreshKey) {
 
 onMounted(() => {
   steamActive = true;
-  window.addEventListener('ipc:gamepad-back', onSteamLaunchPopupBack);
   window.addEventListener('customSteamLibrary:closed', onCustomLibraryClosed);
   window.addEventListener('customSteamLibrary:conflict', onCustomLibraryConflict);
   stopUiVisibility = onUiVisibilityChange(({ visible }) => {
     if (!visible) {
-      closeSteamLaunchPopup(false);
       stopSteamPolling();
     }
   });
@@ -433,11 +356,9 @@ onMounted(() => {
 });
 onActivated(() => {
   steamActive = true;
-  window.addEventListener('ipc:gamepad-back', onSteamLaunchPopupBack);
   if (!stopUiVisibility) {
     stopUiVisibility = onUiVisibilityChange(({ visible }) => {
       if (!visible) {
-        closeSteamLaunchPopup(false);
         stopSteamPolling();
       }
     });
@@ -447,13 +368,9 @@ onActivated(() => {
 });
 onDeactivated(() => {
   steamActive = false;
-  closeSteamLaunchPopup(false);
-  window.removeEventListener('ipc:gamepad-back', onSteamLaunchPopupBack);
   stopSteamPolling();
 });
 onBeforeUnmount(() => {
-  closeSteamLaunchPopup(false);
-  window.removeEventListener('ipc:gamepad-back', onSteamLaunchPopupBack);
   window.removeEventListener('customSteamLibrary:closed', onCustomLibraryClosed);
   window.removeEventListener('customSteamLibrary:conflict', onCustomLibraryConflict);
   stopSteamPolling();
@@ -471,16 +388,16 @@ onBeforeUnmount(() => {
 
     <section class="card">
       <h3 class="card-title"><InlineIcon name="steam" /> Steam 大屏</h3>
-      <div class="states-row">
+      <div class="states-row" data-gp-row="0">
         <button
-          ref="steamStateButtonEl"
           type="button"
           class="state-card steam-state-card"
           data-gp-row="0"
           data-gp-col="0"
           :class="{ clickable: !busy && !steamChecking }"
           :disabled="busy || steamChecking"
-          @click="openSteamLaunchPopup"
+          title="检测 Steam 运行状态"
+          @click="refreshSteamState"
         >
           <span class="dot" :class="{ on: running }"></span>
           <span class="sc-body">
@@ -488,27 +405,20 @@ onBeforeUnmount(() => {
             <span class="sc-text">{{ running ? (steamChecking ? '正在检测退出…' : '运行中') : '未启动' }}</span>
           </span>
         </button>
-      </div>
-      <Transition name="steam-launch-pop">
-        <div
-          v-if="steamLaunchPopupOpen"
-          ref="steamLaunchPopupPanelEl"
-          class="steam-launch-popup"
-          role="dialog"
-          aria-modal="true"
-          aria-label="选择 Steam 大屏启动方式"
-          data-gp-modal
-          @keydown.esc.prevent="handleSteamLaunchPopupEsc"
+        <button
+          type="button"
+          class="steam-power-button"
+          :class="{ close: running }"
+          data-gp-row="0"
+          data-gp-col="1"
+          :disabled="busy || steamChecking"
+          :title="running ? '关闭 Steam' : '开启 Steam 并联动启动大屏'"
+          @click="toggleSteamPower"
         >
-          <div class="steam-launch-popup-title"><InlineIcon name="steam" /> Steam {{ running ? '运行中' : '未启动' }}</div>
-          <div class="steam-launch-popup-actions">
-            <button type="button" :disabled="running || busy || steamChecking" @click="launchLinkedFromPopup"><InlineIcon name="play" /> 联动启动大屏</button>
-            <button type="button" :disabled="running || busy || steamChecking" @click="launchNormalFromPopup"><InlineIcon name="fullscreen" /> 普通大屏</button>
-            <button type="button" class="close" :disabled="!running || busy || steamChecking" @click="closeSteamFromPopup"><InlineIcon name="close" /> 关闭Steam大屏</button>
-            <button ref="steamLaunchPopupCancelEl" type="button" class="cancel" @click="cancelSteamLaunchPopup">按<strong>B</strong>取消</button>
-          </div>
-        </div>
-      </Transition>
+          <InlineIcon :name="running ? 'close' : 'play'" />
+          {{ running ? '关闭 Steam' : '开启 Steam' }}
+        </button>
+      </div>
     </section>
 
     <section class="card custom-library-entry-card" aria-label="自定义游戏库">
@@ -629,6 +539,40 @@ onBeforeUnmount(() => {
 .steam-state-card:disabled {
   cursor: default;
 }
+.steam-power-button {
+  min-height: 54px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid color-mix(in srgb, var(--accent) 46%, transparent);
+  border-radius: var(--radius-ctrl);
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg-input));
+  color: var(--accent);
+  padding: 10px 12px;
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.steam-power-button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 18%, var(--bg-input));
+}
+.steam-power-button.close {
+  border-color: color-mix(in srgb, var(--danger) 46%, transparent);
+  background: color-mix(in srgb, var(--danger) 8%, var(--bg-input));
+  color: var(--danger);
+}
+.steam-power-button.close:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 16%, var(--bg-input));
+}
+.steam-state-card:focus-visible,
+.steam-power-button:focus-visible {
+  box-shadow: var(--focus-ring);
+}
+.steam-power-button:disabled {
+  cursor: default;
+}
 .dot {
   width: 9px;
   height: 9px;
@@ -659,6 +603,7 @@ onBeforeUnmount(() => {
   margin-top: 2px;
 }
 .steam-state-card:disabled,
+.steam-power-button:disabled,
 .addon-launch-btn:disabled {
   opacity: 0.58;
 }
@@ -767,81 +712,6 @@ onBeforeUnmount(() => {
 .add-addon-btn:disabled {
   opacity: 0.5;
   cursor: default;
-}
-.steam-launch-popup {
-  width: 100%;
-  margin-top: 8px;
-  padding: 14px;
-  border: 1px solid #2a3342;
-  border-radius: 12px;
-  background: #161d29;
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55);
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-.steam-launch-popup-title {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  font-size: 16px;
-  font-weight: 700;
-  color: var(--text);
-}
-.steam-launch-popup-title :deep(svg) {
-  width: 20px;
-  height: 20px;
-  color: var(--accent);
-}
-.steam-launch-popup-actions {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
-  margin-top: 3px;
-}
-.steam-launch-popup-actions button {
-  min-height: 44px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 9px;
-  background: var(--bg-input);
-  color: var(--text);
-  font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
-}
-.steam-launch-popup-actions button:first-child {
-  background: var(--accent);
-  color: #07131d;
-  font-weight: 700;
-}
-.steam-launch-popup-actions button.close {
-  color: var(--danger);
-  border-color: color-mix(in srgb, var(--danger) 46%, transparent);
-  background: color-mix(in srgb, var(--danger) 8%, var(--bg-input));
-}
-.steam-launch-popup-actions button.close:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--danger) 16%, var(--bg-input));
-  border-color: var(--danger);
-}
-.steam-launch-popup-actions button.cancel {
-  color: var(--text);
-}
-.steam-launch-popup-actions button.cancel strong {
-  color: var(--danger);
-  font-weight: 800;
-}
-.steam-launch-popup-actions button:disabled {
-  opacity: 0.42;
-  cursor: default;
-}
-.steam-launch-pop-enter-active,
-.steam-launch-pop-leave-active {
-  transition: opacity 0.12s ease, transform 0.12s ease;
-}
-.steam-launch-pop-enter-from,
-.steam-launch-pop-leave-to {
-  opacity: 0;
-  transform: translateY(-4px);
 }
 .custom-library-entry-card {
   padding: 12px 14px;

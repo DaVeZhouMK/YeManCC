@@ -1,0 +1,95 @@
+﻿using System;
+using System.Collections.Generic;
+using System.Numerics;
+using Windows.Devices.Sensors;
+using static HandheldCompanion.Utils.DeviceUtils;
+
+namespace HandheldCompanion.Sensors;
+
+[Flags]
+public enum XInputSensorFlags
+{
+    Default = 0,
+    RawValue = 1,
+    Centered = 2,
+    WithRatio = 4,
+    CenteredRaw = RawValue | Centered,
+    CenteredRatio = RawValue | WithRatio
+}
+
+[Flags]
+public enum XInputSensorStatus
+{
+    Missing = 0,
+    Ready = 1,
+    Busy = 2
+}
+
+public class SensorReading
+{
+    public Vector3 reading = new();
+    public double timestamp;
+}
+
+public abstract class IMUSensor : IDisposable
+{
+    protected SensorReading reading = new();
+
+    // Direct accumulation buffer for axis values (faster than Dictionary<char, double>)
+    // Index: 0=X, 1=Y, 2=Z
+    protected double[] readingAxis = new double[3];
+
+    public object? sensor;
+    protected SensorFamily sensorFamily;
+    protected int updateInterval;
+    protected float threshold;
+
+    public event ReadingUpdatedEventHandler? ReadingUpdated;
+    public delegate void ReadingUpdatedEventHandler();
+
+    ~IMUSensor()
+    {
+        Dispose();
+    }
+
+    public virtual void Dispose()
+    {
+        StopListening();
+
+        GC.SuppressFinalize(this);
+    }
+
+    protected virtual void ReadingChanged()
+    {
+        ReadingUpdated?.Invoke();
+    }
+
+    public virtual void StartListening()
+    {
+    }
+
+    public virtual void StopListening()
+    {
+    }
+
+    public override string ToString()
+    {
+        return GetType().Name;
+    }
+
+    public string GetInstanceId()
+    {
+        if (sensor is not null)
+        {
+            switch (sensorFamily)
+            {
+                case SensorFamily.Windows:
+                    return ((Gyrometer)sensor).DeviceId;
+                case SensorFamily.SerialUSBIMU:
+                    return ((SerialUSBIMU)sensor).USBDevice.DeviceId;
+            }
+        }
+
+        return string.Empty;
+    }
+}

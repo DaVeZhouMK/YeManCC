@@ -1,7 +1,10 @@
 <script setup lang="ts">
+import { computed } from 'vue';
 import { ICONS } from '@/icons';
 
-defineProps<{ name: string }>();
+const props = defineProps<{ name: string; strokeWidth?: number }>();
+const lightIconNames = new Set(['gauge', 'gamepad', 'rotate']);
+const resolvedStrokeWidth = computed(() => props.strokeWidth ?? (lightIconNames.has(props.name) ? 1.2 : 1.6));
 </script>
 
 <template>
@@ -10,7 +13,7 @@ defineProps<{ name: string }>();
     viewBox="0 0 24 24"
     fill="none"
     stroke="currentColor"
-    stroke-width="1.6"
+    :stroke-width="resolvedStrokeWidth"
     stroke-linecap="round"
     stroke-linejoin="round"
     aria-hidden="true"

@@ -47,3 +47,15 @@ Sleep/resleep-last.txt
 pawnio/build/
 pawnio/dist/
 pawnio/__pycache__/
+
+# Immutable program metadata is source input, not mutable user JSON.
+!/fan-host/YeManFanHost.deps.json
+!/fan-host/YeManFanHost.json
+!/fan-host/YeManFanHost.payload.json
+!/fan-host/YeManFanHost.runtimeconfig.json
+!/handheldcompanion-runtime/HC-CANDIDATE-0.32.4.0-06c0b954-20260902/HandheldCompanion.deps.json
+!/handheldcompanion-runtime/HC-CANDIDATE-0.32.4.0-06c0b954-20260902/HandheldCompanion.json
+!/handheldcompanion-runtime/HC-CANDIDATE-0.32.4.0-06c0b954-20260902/HandheldCompanion.runtime.json
+!/redist/HIDMaestroSetup.deps.json
+!/redist/HIDMaestroSetup.manifest.json
+!/redist/HIDMaestroSetup.runtimeconfig.json

@@ -1,0 +1,79 @@
+{
+  "schema": 1,
+  "name": "sleep-types",
+  "version": "v1 (2026-09-22, batch 204-F: S0/S3/S4 分型落地)",
+  "purpose": "把 S0(Modern Standby/S0ix) / S3(classic sleep) / S4(hibernate) 三种睡眠形态落成可执行的判型能力：判据、期望的风扇链行为、证据等级。判型只依据可观测事实，未知不猜（UNKNOWN）。",
+  "evidenceGrades": {
+    "spec": "厂商/OS 规范或官方文档（URL 记录）",
+    "field-observed": "本机实测字段（sleep-facts / 事件日志 / powercfg）",
+    "device-measured": "真机完成过该形态",
+    "unverified": "推断，未验证"
+  },
+  "platformCapability_9950": {
+    "available": ["Standby (S3)", "Hibernate", "Hybrid Sleep"],
+    "unavailable": ["Standby (S1)", "Standby (S2)", "Standby (S0 Low Power Idle)", "Fast Startup(策略禁用)"],
+    "grade": "field-observed",
+    "source": "powercfg /a (2026-09-22)"
+  },
+  "types": [
+    {
+      "type": "S0ix",
+      "aliases": ["Modern Standby", "S0 Low Power Idle", "Connected Standby"],
+      "definition": "系统停留在 S0 的低功耗空闲档：CPU 近停、网络/部分设备半活跃，可被网络事件唤醒；与 S3 互斥（固件二选一）",
+      "detection": [
+        { "rule": "powercfg /a 列出 'Standby (S0 Low Power Idle)'（可能带 Network Connected/Disconnected）", "grade": "spec" },
+        { "rule": "Kernel-Power 会话事件族 506(进入)/507(退出 connected standby)/566(会话切换) 出现，而**没有** 42/107 的 S3 目标态", "grade": "spec" },
+        { "rule": "深度指标用 SleepStudy(DRIPS%)，而不是挂起间隙", "grade": "spec" }
+      ],
+      "fanExpectation": "S0ix 没有经典挂起边沿（进程不冻结在 S3 语义上）；FanHost 的电源边沿可能由 session/device 事件驱动。本机不支持 ⇒ 该形态下风扇行为 DEVICE_PENDING（需 S0ix 设备）",
+      "grade": "unverified",
+      "sources": [
+        "https://learn.microsoft.com/en-us/windows-hardware/design/device-experiences/modern-standby",
+        "https://learn.microsoft.com/en-us/windows-hardware/design/device-experiences/modern-standby-sleepstudy",
+        "https://learn.microsoft.com/en-us/windows-hardware/design/device-experiences/modern-standby-vs-s3"
+      ]
+    },
+    {
+      "type": "S3",
+      "aliases": ["classic sleep", "Standby (S3)"],
+      "definition": "仅内存保持供电的经典睡眠；进程被冻结，唤醒后从内存镜像继续",
+      "detection": [
+        { "rule": "Kernel-Power 42 的 TargetState/EffectiveState = 3（进入睡眠）", "grade": "spec" },
+        { "rule": "Kernel-Power 107 出现在唤醒时（TargetState/WakeFromState = 3）", "grade": "spec" },
+        { "rule": "powercfg /a 列出 'Standby (S3)' 且未列出 S0 Low Power Idle", "grade": "spec" },
+        { "rule": "唤醒耗时秒级（2–5 s 量级）；hiberfil.sys 不被本周期更新", "grade": "spec" }
+      ],
+      "fanExpectation": "本机真机已验证 3 周期：唤醒后 App(pid 38404) 与沙箱宿主均存活；唤醒时 fan-host-resume-native-trigger 无 lease ⇒ **401 fail-closed**（不伪造重建）",
+      "grade": "device-measured",
+      "sources": ["evidence: _scratch/.../window-s3-20260922/s3-result-20260922-230911.json"]
+    },
+    {
+      "type": "S4",
+      "aliases": ["hibernate", "Hibernate"],
+      "definition": "内存内容写入 hiberfil.sys 后断电；唤醒时从磁盘恢复镜像（S4 是「最低功耗但有状态」）",
+      "detection": [
+        { "rule": "Kernel-Power 42 的 TargetState/EffectiveState = 4", "grade": "spec" },
+        { "rule": "hiberfil.sys 在本窗口被写入/更新（存在性 + mtime + 大小）", "grade": "spec" },
+        { "rule": "唤醒耗时显著长于 S3（8–20 s 量级，视 SSD/RAM）", "grade": "spec" },
+        { "rule": "**降级判据**：请求 hibernate 但 42 的 TargetState=3 且 hiberfil 未更新 ⇒ 记为 S4_DOWNGRADED_TO_S3（Win11 24H2/25H2 已知回归）", "grade": "spec" }
+      ],
+      "fanExpectation": "待本批实测（同 S3 口径：真 S4 1 周期 + 沙箱宿主在场 + 偏移绑定反推）；若被降级为 S3，则按 S3 的风扇行为解释并如实标注降级",
+      "grade": "unverified",
+      "sources": [
+        "https://learn.microsoft.com/en-in/answers/questions/5978486/windows-11-unexpectedly-enters-s4-hibernate-a-few",
+        "https://learn.microsoft.com/en-ie/answers/questions/5900545/windows-11-25h2-silently-downgrades-hibernate-to-s"
+      ]
+    }
+  ],
+  "verdictVocabulary": ["S0ix", "S0ix-network-disconnected", "S3", "S4", "S4_MISLABELED_AS_S3", "S4_DOWNGRADED_TO_S3", "S4_NOT_CONFIRMED", "UNKNOWN"],
+  "operatorRulings_20260922": [
+    "HARD STOP：不再触发任何睡眠（S3/S4/混合/休眠），以后也不允许 —— 所有睡眠触发脚本已加永久硬闸；分型只做离线判型与既有证据复用",
+    "S4 在部分平台上会被**错误表达为 S3**（微软侧已知）⇒ 判型以是否真的写盘（hiberfil 更新）+ 间隙为硬证据，事件/状态标签仅作旁证",
+    "本机已修复的 YMCC AC/DC 电源按钮处理是**正确基准**（不改动该路径）；分型只做观测与判型，不触碰产品行为"
+  ],
+  "policy": {
+    "noGuessing": "证据不足一律 UNKNOWN，不填最可能值",
+    "productFactsFirst": "优先使用产品自身的 sleep-facts（含 kernel-power 事件镜像与 power-broadcast lifecycle），事件日志仅在可读时作为第二来源",
+    "fieldSemanticsCaveat": "产品 sleep-facts 里的 kernel-power 字段编码（如 targetState=5）与 Windows 文档的 TargetState(3/4) 语义**可能不同**，判型器同时记录原值并标注来源，不做跨来源数值等价假设"
+  }
+}

@@ -16,7 +16,7 @@ import { initMusic } from '@/bridge/music';
 import { readTdp, setTdp, setRtssLimit, readFps, rtssRunning, toggleTask, taskExists, detectPowerMode, detectPowerModeReliable, detectPowerModeStable, reconcileRememberedPowerScheme, resumeTdpDaemonAfterWake, getSleepPowerPlanOptimizationEnabled, optimizeSleepPowerPlans } from '@/bridge/yeman';
 import TopMonitorBar from '@/components/TopMonitorBar.vue';
 import { applyTheme } from '@/bridge/theme';
-import { cyclePerformanceScheduleMode, getPerformanceScheduleOwnership, refreshPerformanceScheduleCoreMode, restorePerformanceScheduleIfConfigured } from '@/bridge/performanceSchedule';
+import { cyclePerformanceScheduleMode, getPerformanceScheduleOwnership, refreshPerformanceScheduleCoreMode, restorePerformanceScheduleIfConfigured, SkipApplyError } from '@/bridge/performanceSchedule';
 import { getMouseModeState } from '@/bridge/gameproc';
 import {
   backgroundGet,
@@ -31,23 +31,31 @@ import {
   refreshDynamicBackground,
 } from '@/bridge/dynamicBackground';
 import { detectGame, subscribeGameStatus, type DetectedGame } from '@/bridge/gamedetect';
-import { BOOT_CONTROL_CENTER_TASK, bootMirrorExists, setPowerControlDir, toggleBootMirror } from '@/bridge/yeman';
+import { startGamePolicyRuntime, stopGamePolicyRuntime } from '@/bridge/gamePolicyRuntime';
+import { startGameInputOverrideWatch, stopGameInputOverrideWatch } from '@/bridge/gameInputOverride';
+import { BOOT_CONTROL_CENTER_TASK, bootMirrorExists, ensureRtssOverlayInstalled, setPowerControlDir, toggleBootMirror } from '@/bridge/yeman';
 import { getUiSetting, loadUiSettings } from '@/bridge/uiSettings';
 import { topMonitorData, type TopMonData } from '@/bridge/topmon';
 import { nextLowBatteryStatic, shouldSkipVideoReconcile } from '@/bridge/backgroundPolicy';
 import { runPowerResumeTransaction } from '@/bridge/powerResume';
 import { readSettingsSection, saveSettingsSection } from '@/bridge/settingsRepository';
 import { isUiVisible, onUiVisibilityChange, setNativeWindowVisible } from '@/bridge/uiLifecycle';
+import { rememberPowerSourceMode, startForegroundPowerSourceRefresh } from '@/bridge/powerSource';
 import {
   getFanFeatureSettings,
-  FAN_FORCE_PREVIEW,
+  getFanPresetCurve,
   initializeFanFeature,
-  recordFanHandshake,
   rememberFanDevice,
   setFanControlActive,
 } from '@/bridge/fanFeature';
-import { fanDiagnosticLog } from '@/bridge/fanDiagnostics';
-import { FAN_REAL_HOST_ENABLED, fanHostLifecycle, resolveFanHostConfig } from '@/bridge/fanHost';
+import { fanDiagnosticLog, fanLifecycleEvidence } from '@/bridge/fanDiagnostics';
+import { fanHostLifecycle, resolveFanHostConfig } from '@/bridge/fanHost';
+import { setGyroVirtualFeatureAssetsRoot } from '@/bridge/gyroVirtualFeature';
+import { startAiFanService } from '@/bridge/aiFanService';
+import { parseAiFanMockSession, projectAiFanErrorCode } from '@/bridge/aiFanMock';
+let aiFanMockActive = false;
+let aiCpuIsolated = false;
+let stopAiFanService: (() => void) | null = null;
 
 applyTheme(
   document.documentElement.dataset.theme === 'cyberpunk'
@@ -56,6 +64,9 @@ applyTheme(
       ? 'red-black'
       : 'blue-black',
 );
+
+// Visibility gates decorative rendering only; native control/renewal remain active.
+const uiVisible = ref(isUiVisible());
 
 const BOOT_TASK = BOOT_CONTROL_CENTER_TASK;
 const BOOT_CFG = 'C:\\SOFT\\YeMan\\PowerControl\\boot_config.json';
@@ -69,8 +80,68 @@ async function healBootTask() {
   } catch { /* 配置文件不存在或无权限，忽略 */ }
 }
 
+// ── FAN-932：风扇「开机/休眠唤醒启动风扇」偏好（startupDesired.fanControl）的唯一自动启动编排入口 ──
+// 开机与唤醒共用本函数，不在两个事件处理器里各写一份 start/apply 规则。要求（裁决 §2.1）：
+//   1) 按 `boot` 或电源代次去重并串行执行，重复的 resume-ready / renderer 重建不重复写曲线；
+//   2) 偏好非严格 true 立即返回（本路径只读一次设置，不启动 Host、不发 HTTP、不碰 HC）；
+//   3) 已有活动控制意图优先（崩溃接续/活动会话/唤醒已恢复的曲线），绝不用默认曲线覆盖用户曲线；
+//   4) 设备门必须同时满足 allowed && writeReady 才继续 apply；
+//   5) apply 前再次核对代次、偏好与活动意图，期间被取代就取消本次写入；
+//   6) 失败按现有失败路径记录，不改写成“已启动”，也不在同一代内无限重试。
+let fanAutoStartChain: Promise<void> = Promise.resolve();
+let fanBootAutoStartDone = false;
+const fanAutoStartGenerations = new Set<number>();
+function ensureFanAutoStart(reason: 'boot' | 'resume', generation = 0): Promise<void> {
+  // Explicit AI session has its own requests; do not inherit real stored on-state.
+  if (aiFanMockActive) return Promise.resolve();
+  if (reason === 'boot') {
+    if (fanBootAutoStartDone) return Promise.resolve();
+    fanBootAutoStartDone = true;
+  } else {
+    if (generation <= 0 || fanAutoStartGenerations.has(generation)) return Promise.resolve();
+    fanAutoStartGenerations.add(generation);
+  }
+  const run = fanAutoStartChain.then(async () => {
+    try {
+      if (fanHostLifecycle.hasControlIntent) return;
+      const startup = await readSettingsSection<{ fanControl?: boolean }>('startupDesired');
+      if (startup.fanControl !== true) return;
+      const gate = await fanHostLifecycle.start();
+      if (!gate.allowed || !gate.writeReady) {
+        fanDiagnosticLog('lifecycle.auto-start-blocked', {
+          reason, generation, allowed: gate.allowed, writeReady: gate.writeReady, gate: gate.reason ?? '',
+        });
+        return;
+      }
+      // apply 前最后一次核对：代次未过期、仍无活动意图、偏好仍开。
+      if (reason === 'resume' && generation !== latestResumeGeneration) {
+        fanDiagnosticLog('lifecycle.auto-start-superseded', { reason, generation, latest: latestResumeGeneration });
+        return;
+      }
+      if (fanHostLifecycle.hasControlIntent) return;
+      const stillOn = await readSettingsSection<{ fanControl?: boolean }>('startupDesired');
+      if (stillOn.fanControl !== true) return;
+      const fanSettings = getFanFeatureSettings();
+      if (fanSettings.featureEnabled !== true) return;
+      // 必须使用用户保存的 preset 曲线，不得用写死的默认曲线代替。
+      await fanHostLifecycle.apply(getFanPresetCurve(fanSettings.preset));
+      fanDiagnosticLog('lifecycle.auto-start-applied', { reason, generation, preset: fanSettings.preset });
+    } catch (error) {
+      fanDiagnosticLog('lifecycle.auto-start-failed', {
+        reason, generation, error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+  fanAutoStartChain = run.catch(() => {});
+  return run;
+}
+
 const router = useRouter();
 const store = useDebugStore();
+// The legacy deep-link route keeps the editor document free of the main YMCC
+// navigation/monitor chrome. The normal controller entry now renders the
+// editor as a full-screen, centered bubble in the main WebView.
+const isStandaloneEditor = computed(() => router.currentRoute.value.path === '/button-mapping/shortcuts');
 const backgroundUrl = ref('');
 const backgroundKind = ref<BackgroundKind>('image');
 const backgroundVideo = ref<HTMLVideoElement | null>(null);
@@ -625,12 +696,14 @@ function notePowerTransitionGeneration(e: Event): number {
 function onPowerSuspending(e: Event): void {
   const generation = notePowerTransitionGeneration(e);
   if (generation > 0) fanHostLifecycle.setPowerGeneration(generation);
-  // No-op while the real Fan Host gate is false. When separately enabled,
-  // lifecycle ordering restores OEM before the backend is suspended.
+  fanHostLifecycle.observePowerBoundary('suspending', generation);
+  // F4 has exactly one production lifecycle authority: native sends the
+  // generation-tagged /api/suspend command. The renderer only freezes local
+  // UI writes and keeps its generation/coordinator view coherent; it must not
+  // race native with a second HC CurrentDevice.Close request.
   // FanView can be evicted from KeepAlive, so the root owns the navigation
   // indicator at the power boundary as well.
   setFanControlActive(false);
-  void fanHostLifecycle.suspend().catch(() => {});
   if (resumeVideoTimer !== null) {
     window.clearTimeout(resumeVideoTimer);
     resumeVideoTimer = null;
@@ -640,19 +713,78 @@ function onPowerSuspending(e: Event): void {
   suspendBackgroundVideo();
 }
 function onPowerResuming(e: Event): void {
-  notePowerTransitionGeneration(e);
+  const generation = notePowerTransitionGeneration(e);
+  fanHostLifecycle.observePowerBoundary('resuming', generation);
   if (resumeVideoTimer !== null) {
     window.clearTimeout(resumeVideoTimer);
     resumeVideoTimer = null;
   }
   suspendBackgroundVideo();
 }
+function onPowerResumeReady(generation: number | undefined): void {
+  const resumeGeneration = Number(generation) || 0;
+  if (resumeGeneration <= 0) return;
+  latestResumeGeneration = Math.max(latestResumeGeneration, resumeGeneration);
+  onFanResumeReady(resumeGeneration);
+  scheduleResumeTransaction(resumeGeneration);
+}
+
+/**
+ * FAN-938 R6.4: `power.resumed` is the durable native commit edge.  It is a
+ * valid Fan wake boundary even when the optional one-shot `fan.resume-ready`
+ * event was lost during WebView2/renderer recreation.  FanHost owns the
+ * idempotent resume promise and the HC/Open/OpenEvents chain; App only starts
+ * that Fan-local compensation and never treats it as an OEM acknowledgement.
+ */
+function requestFanCommittedResume(generation: number): void {
+  if (!Number.isSafeInteger(generation) || generation <= 0) return;
+  void fanHostLifecycle.resumeAfterCommittedPowerWake(generation).catch((error) => {
+    fanDiagnosticLog('lifecycle.resume-committed-wake-failed', {
+      generation,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  });
+}
+// FAN-938 R4: a Fan-only Ready notification must not restart the shared input/UI transaction.
+function onFanResumeReady(resumeGeneration: number): void {
+  if (!Number.isSafeInteger(resumeGeneration) || resumeGeneration <= 0) return;
+  if (resumeGeneration < fanHostLifecycle.coordinatorSnapshot.powerGeneration) return;
+  fanHostLifecycle.setPowerGeneration(resumeGeneration);
+  // F5 is the only pre-commit admission edge for the isolated FanHost. It is
+  // distinct from `resumed`, which native publishes after resumeComplete.
+  fanHostLifecycle.observePowerBoundary('resume-ready', resumeGeneration);
+  // HC SystemReady opens the device fire-and-forget: start the fan rebuild in
+  // the background and never gate the native Ready commit on it. The fan
+  // coordinator keeps the fan write gate closed until this rebuild completes;
+  // the guard/mount compensation recover a lost rebuild without blocking wake.
+  // FAN-932 §2.2：唤醒必须先**完成**现有 resume（含已有活动曲线的恢复），再按偏好自动启动。
+  // 本事件处理器保持非阻塞（按代异步事务），不改成同步等待；resume 失败/被取代时
+  // 本代**不做默认曲线 fallback**，也不覆盖用户曲线。
+  void fanHostLifecycle.resume().catch((error) => {
+    fanDiagnosticLog('lifecycle.resume-fire-and-forget-failed', {
+      generation: resumeGeneration,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return false as const;
+  }).then((resumeOk) => {
+    if (resumeOk === false) return; // resume 失败：本代不自动启动
+    if (fanHostLifecycle.hasControlIntent) return; // 已有曲线已恢复：不重复写
+    return ensureFanAutoStart('resume', resumeGeneration);
+  });
+}
 function onPowerResumed(e: Event): void {
-  const generation = powerEventGeneration(e);
-  // Fan recovery is intentionally not owned by wake or AC/DC notifications.
-  // Once armed, FanHostLifecycle keeps its ten-second guard alive and retries
-  // the same curve until the user disables it or the application exits.
-  if (generation > committedResumeGeneration) scheduleResumeTransaction(generation);
+  // A few native builds omitted the generation on the final commit event even
+  // though the preceding resume edge had already recorded it.  Reuse the
+  // durable latest generation instead of silently dropping Fan compensation.
+  const generation = powerEventGeneration(e) || latestResumeGeneration;
+  latestResumeGeneration = Math.max(latestResumeGeneration, generation);
+  fanHostLifecycle.setPowerGeneration(generation);
+  fanHostLifecycle.observePowerBoundary('resumed', generation);
+  // F5 is normally admitted by `power.resume-ready`, but that notification is
+  // one-shot and may be lost while WebView2 is recreated.  The committed
+  // native edge is the Fan-only compensation path; FanHost shares any already
+  // running F5 promise so this never opens HC twice.
+  requestFanCommittedResume(generation);
   scheduleSleepPowerPlanOptimization();
   if (resumeVideoTimer !== null) window.clearTimeout(resumeVideoTimer);
   resumeVideoTimer = window.setTimeout(() => {
@@ -701,16 +833,26 @@ function updateScale() {
   const widthCapped = window.innerWidth / BASE_W;
   setUiScale(Math.min(boosted, widthCapped));
 }
-const scalerStyle = computed(() => ({
-  width: BASE_W + 'px',
-  height: BASE_H + 'px',
-  // zoom 同时参与布局和命中测试；transform 只放大绘制层，会让 WebView2
-  // 看到的坐标与鼠标点击坐标分离，表现为内容区"看得到但点不到"。
-  zoom: uiScale.value,
-  // Keep the physical safe area proportional to the viewport, then convert
-  // it back to the zoomed layout coordinate space used by app-content.
-  '--gamepad-safe-bottom': `${Math.max(32, Math.min(64, viewportHeight.value * 0.06)) / Math.max(0.5, uiScale.value)}px`,
-}));
+const scalerStyle = computed(() => {
+  if (isStandaloneEditor.value) {
+    return {
+      width: '100%',
+      height: '100%',
+      zoom: 1,
+      '--gamepad-safe-bottom': '0px',
+    };
+  }
+  return {
+    width: BASE_W + 'px',
+    height: BASE_H + 'px',
+    // zoom 同时参与布局和命中测试；transform 只放大绘制层，会让 WebView2
+    // 看到的坐标与鼠标点击坐标分离，表现为内容区"看得到但点不到"。
+    zoom: uiScale.value,
+    // Keep the physical safe area proportional to the viewport, then convert
+    // it back to the zoomed layout coordinate space used by app-content.
+    '--gamepad-safe-bottom': `${Math.max(32, Math.min(64, viewportHeight.value * 0.06)) / Math.max(0.5, uiScale.value)}px`,
+  };
+});
 
 // M8: Start button toggles the debug panel via the same 'ipc:gamepad-start' event.
 function onGamepadStart() {
@@ -809,13 +951,16 @@ async function applyRtssLimitConfig(fps: number): Promise<void> {
   }
 }
 let stopGamepad: (() => void) | null = null;
+let stopGyroTelemetry: (() => void) | null = null;
 // 手柄后台（未开浮动时）调节 RTSS 帧率上限：setRtssLimit 较重（LoadProfile+UpdateProfiles），
 // 连发时每步重载会卡出转圈；2 秒尾随防抖，与 CPU 滑块 scheduleActivate 一致。
 // 壳订阅系统 AC/DC 插拔事件（推送式，已在 native 侧做 5s 尾防抖 + 频繁切换熔断），
 // 到达即刷新一次所有已挂载页面数据。
 let stopAcWatch: (() => void) | null = null;
 let stopPowerSourceWatch: (() => void) | null = null;
+let stopForegroundPowerSource: (() => void) | null = null;
 let stopResumeWatch: (() => void) | null = null;
+let stopFanResumeWatch: (() => void) | null = null;
 let stopSchemeWatch: (() => void) | null = null;
 let stopDynamicBackground: (() => void) | null = null;
 let stopUiVisibility: (() => void) | null = null;
@@ -888,6 +1033,62 @@ async function powerLifecycleReadyForWrites(): Promise<boolean> {
   return state?.phase === 'ready' && state.hardwareWritesAllowed === true;
 }
 
+// AC/DC broadcasts can arrive while Windows/native are still settling the
+// adapter state. A single read in that window can select the previous side and
+// make a dedicated game profile appear stuck on battery/AC. Coalesce rapid
+// events and only commit after the reported side is observed steadily enough;
+// a newer event invalidates every older attempt.
+const POWER_CHANGE_RETRY_DELAYS_MS = [0, 250, 750, 1500] as const;
+let powerChangeRestoreGeneration = 0;
+let powerChangeRestoreTimer: ReturnType<typeof setTimeout> | null = null;
+
+function schedulePowerChangePerformanceRestore(expectedSide: 'ac' | 'dc'): void {
+  const generation = ++powerChangeRestoreGeneration;
+  if (powerChangeRestoreTimer !== null) {
+    window.clearTimeout(powerChangeRestoreTimer);
+    powerChangeRestoreTimer = null;
+  }
+
+  const retry = (attempt: number): void => {
+    if (generation !== powerChangeRestoreGeneration) return;
+    const delay = POWER_CHANGE_RETRY_DELAYS_MS[attempt];
+    if (delay === undefined) return;
+    powerChangeRestoreTimer = window.setTimeout(() => {
+      powerChangeRestoreTimer = null;
+      void run(attempt);
+    }, delay);
+  };
+
+  const run = async (attempt: number): Promise<void> => {
+    if (generation !== powerChangeRestoreGeneration) return;
+    const actualSide = await detectPowerMode().catch(() => null);
+    if (actualSide !== expectedSide || !(await powerLifecycleReadyForWrites())) {
+      retry(attempt + 1);
+      return;
+    }
+
+    try {
+      const schemeOwner = await reconcileRememberedPowerScheme();
+      if (generation !== powerChangeRestoreGeneration) return;
+      // In manual Windows-scheme mode, inspect/apply only a game-exclusive
+      // entry. Do not let the ordinary global scheduler take ownership back.
+      const owner = await restorePerformanceScheduleIfConfigured(expectedSide, {
+        dedicatedOnly: schemeOwner !== 'auto',
+      });
+      if (generation !== powerChangeRestoreGeneration) return;
+      if (owner !== 'auto') await applyCpuAutoEnable().catch(() => {});
+    } catch (error) {
+      // A stale power-side read or an in-flight game/power transition is a
+      // retryable condition, not permission to leave the old AC/DC profile.
+      if (error instanceof SkipApplyError || attempt + 1 < POWER_CHANGE_RETRY_DELAYS_MS.length) {
+        retry(attempt + 1);
+      }
+    }
+  };
+
+  retry(0);
+}
+
 function scheduleResumeTransaction(generation: number): void {
   if (!resumeLifecycleActive || !Number.isFinite(generation) || generation <= 0) return;
   latestResumeGeneration = Math.max(latestResumeGeneration, generation);
@@ -909,6 +1110,10 @@ function scheduleResumeTransaction(generation: number): void {
     const daemonRequired = getFloatInfo().enabled ||
       (await getPerformanceScheduleOwnership().catch(() => 'none' as const)) === 'auto';
     const result = await runPowerResumeTransaction(targetGeneration, daemonRequired, {
+      // HC SystemReady is synchronous and opens the device fire-and-forget; the
+      // FanHost F5 already started from `power.resume-ready` and never gates the
+      // native Ready commit. The fan coordinator keeps the fan write gate closed
+      // until that background rebuild completes.
       resumeDaemon: resumeTdpDaemonAfterWake,
       completeResume: (resumeGeneration, meta) => powerLifecycle.completeResume(resumeGeneration, meta),
       isGenerationCurrent: isCurrent,
@@ -923,18 +1128,18 @@ function scheduleResumeTransaction(generation: number): void {
       return;
     }
 
-    // The application power transaction is the only owner of fan recovery.
-    // The resident ten-second guard only observes/report stale state; it must
-    // not race this HC-ordered resume with a second /api/resume or curve write.
-    fanHostLifecycle.setPowerGeneration(targetGeneration);
-    await fanHostLifecycle.resume();
+    // HC SystemReady does not wait for the device open; the fan rebuild runs in
+    // the background from `power.resume-ready`. The resident ten-second guard is
+    // observation-only and cannot race this generation with a second /api/resume
+    // or curve write after the coordinator admitted the rebuild.
 
     committedResumeGeneration = targetGeneration;
     resumeRetryCounts.delete(targetGeneration);
     const schemeOwner = await reconcileRememberedPowerScheme().catch(() => 'yeman' as const);
-    if (schemeOwner === 'auto') {
-      await restorePerformanceScheduleIfConfigured().catch(() => {});
-    } else {
+    const performanceOwner = await restorePerformanceScheduleIfConfigured(mode, {
+      dedicatedOnly: schemeOwner !== 'auto',
+    }).catch(() => null);
+    if (performanceOwner !== null && performanceOwner !== 'auto') {
       await applyCpuAutoEnable().catch(() => {});
       await applyAutoTdpIfNeeded('wake', mode).catch(() => {});
     }
@@ -1120,6 +1325,25 @@ function onDynamicBackgroundLoaded(e: Event): void {
   }).catch(() => {});
 }
 onMounted(async () => {
+  // A shortcut editor popup is another renderer owned by the same native
+  // process, not a second YMCC application instance. Do not start the main
+  // renderer's gamepad engine, FanHost lifecycle, tray/autostart jobs,
+  // background watchers, or power transaction listeners in this document.
+  // The editor itself talks to native IPC directly and still receives the
+  // broadcast recording events it needs.
+  if (isStandaloneEditor.value) {
+    window.dispatchEvent(new CustomEvent('app-startup-ready'));
+    return;
+  }
+  try {
+    aiFanMockActive = parseAiFanMockSession(await app.aiFanMockSession()) !== null;
+  } catch (error) {
+    if (!/^unknown: app\.aiFanMockSession$/.test(String(error instanceof Error ? error.message : error))) {
+      // Unknown capability state must not accidentally arm stored real fan intent.
+      aiFanMockActive = true;
+      fanDiagnosticLog('ai.mock-session-unreadable', { policy: 'fan-auto-start-suppressed' });
+    }
+  }
   resumeLifecycleActive = true;
   // Register the one-shot native wake events before the first awaited startup
   // operation. A controller recreated during S3 recovery can otherwise miss
@@ -1129,9 +1353,20 @@ onMounted(async () => {
   window.addEventListener('ipc:power.resumed', onPowerResumed as EventListener);
   window.addEventListener('fan:guard-state', onFanGuardState as EventListener);
   stopResumeWatch = on<{ generation?: number }>('power.resume-ready', ({ generation }) => {
-    scheduleResumeTransaction(Number(generation));
+    onPowerResumeReady(generation);
+  });
+  stopFanResumeWatch = on<{ generation?: number }>('fan.resume-ready', ({ generation }) => {
+    onFanResumeReady(Number(generation) || 0);
   });
   const lifecycleAtMountPromise = powerLifecycle.get().catch(() => null);
+  try {
+    const isolation = await app.aiCpuIsolatedSession() as any;
+    if (!isolation || isolation.schemaVersion !== 1 || typeof isolation.enabled !== 'boolean') throw new Error('AI_ISOLATION_CAPABILITY_INVALID');
+    aiCpuIsolated = isolation.enabled === true;
+    if (aiCpuIsolated && (isolation.physicalFeatureEvidence !== false || typeof isolation.sessionId !== 'string')) throw new Error('AI_ISOLATION_CAPABILITY_INVALID');
+  } catch (error) {
+    if (String(error instanceof Error ? error.message : error) !== 'unknown: app.aiCpuIsolatedSession') throw error;
+  }
   // Use the native-resolved PowerControl directory before startup recovery or
   // TDP calls. Native owns settings.write validation, so deriving this path
   // independently from exeDir can split the frontend/native settings contract
@@ -1144,8 +1379,16 @@ onMounted(async () => {
     if (dir) {
       setPowerControlDir(dir);
       setAutofloatPowerControlDir(dir);
+      setGyroVirtualFeatureAssetsRoot(dir);
     }
   } catch { /* fixed formal path remains the compatibility fallback */ }
+  // Provision the RTSS bridge at every main YMCC startup, not just when
+  // monitoring is enabled. This optional repair must not delay UI readiness,
+  // start/restart RTSS, or change the user's currently selected template.
+  if (!aiCpuIsolated) void ensureRtssOverlayInstalled().catch((error) => {
+    store.pushLog({ cmd: 'rtss.startup-install', args: {}, ok: false, error: String(error) });
+  });
+  // GP-926R3: sidebar/routes are resident. Do not probe optional input assets at shell startup.
   // Fan settings must load only after the native-resolved PowerControl path is
   // installed; otherwise a child NavRail mount could write defaults to the
   // compatibility path before native startup finishes resolving directories.
@@ -1160,6 +1403,9 @@ onMounted(async () => {
   window.addEventListener('ipc:gamepad.brightness', onGamepadBrightness as EventListener);
   window.addEventListener('ipc:gamepad.mouse-toggle', onGamepadMouseToggle as EventListener);
   stopGamepad = startGamepad({ router, onAction: (l) => store.pushGamepad(l) });
+  stopGyroTelemetry = on('gyro.telemetry', (data) => {
+    window.dispatchEvent(new CustomEvent('input:motion-telemetry', { detail: data }));
+  });
 
   // Finish settings and background initialization before the optional
   // FanHost handshake. The native splash waits for this signal, so the first
@@ -1187,7 +1433,12 @@ onMounted(async () => {
   lastFixedBackgroundState = initialBackgroundState;
   applyBackgroundState(initialBackgroundState, 'fixed');
   startDynamicBackgroundWatch();
+  // 专属配置的「选择手柄 / 陀螺仪开关」覆盖：常驻订阅，不随窗口可见性暂停，
+  // 否则游戏运行时窗口隐藏会让覆盖无法下发/恢复。
+  startGameInputOverrideWatch();
+  startGamePolicyRuntime();
   stopUiVisibility = onUiVisibilityChange(({ visible }) => {
+    uiVisible.value = visible;
     if (visible) {
       startDynamicBackgroundWatch();
       resumeBackgroundVideo();
@@ -1200,51 +1451,45 @@ onMounted(async () => {
   window.addEventListener('dynamic-background:loaded', onDynamicBackgroundLoaded as EventListener);
   window.addEventListener('ipc:game.rules.changed', onGameRulesChanged as EventListener);
   const initialPowerMode = await detectPowerModeReliable();
-  if (initialPowerMode) applyVideoPowerMode(initialPowerMode, true);
+  if (initialPowerMode) {
+    rememberPowerSourceMode(initialPowerMode);
+    applyVideoPowerMode(initialPowerMode, true);
+  }
   else onAcPower.value = (await detectPowerMode().catch(() => 'dc')) === 'ac';
   await reconcileBackgroundVideo();
   window.dispatchEvent(new CustomEvent('app-startup-ready'));
 
-  // Configure and start the resident Fan Host against the same
-  // native-resolved PowerControl directory used by the rest of the app. The
-  // Host itself performs a read-only handshake first; HC Open/lease/write is
-  // still deferred until the user enables a curve or preset in FanView.
+  // FAN-926R U2 / FAN-932 §2.3: shell admission itself stays inert. The renderer
+  // registers only the side-effect-free Fan configuration and the identity sink.
+  // This block does NOT spawn the Fan Host, call /api/handshake, open HC, acquire
+  // a lease or start any Fan timer. The preference-driven boot auto-start is a
+  // separate step that runs after the renderer reattach decision below; page entry
+  // remains a non-start path.
   try {
     const configuredFan = getFanFeatureSettings();
     if (nativePowerControlDir) fanHostLifecycle.setConfig(resolveFanHostConfig(nativePowerControlDir));
-    fanHostLifecycle.setSavedIdentity(configuredFan.deviceIdentity ?? null);
-    let handshakeIdentity = configuredFan.deviceIdentity ?? null;
-    fanHostLifecycle.setDeviceIdentitySink((identity) => {
-      handshakeIdentity = identity;
+    fanHostLifecycle.setSavedIdentity(aiFanMockActive ? null : configuredFan.deviceIdentity ?? null);
+    fanHostLifecycle.setDeviceIdentitySink(aiFanMockActive ? undefined : (identity) => {
       void rememberFanDevice(identity).catch(() => {});
     });
-    if (FAN_REAL_HOST_ENABLED && !FAN_FORCE_PREVIEW) {
-      const gate = await fanHostLifecycle.start();
-      await recordFanHandshake(gate.allowed, handshakeIdentity);
-      window.dispatchEvent(new CustomEvent('fan-feature:visibility'));
-      const startup = await readSettingsSection<{ fanControl?: boolean }>('startupDesired')
-        .catch((): { fanControl?: boolean } => ({ fanControl: false }));
-      if (startup.fanControl === true && gate.allowed && gate.writeReady) {
-        fanDiagnosticLog('lifecycle.startup-control-begin', { preset: configuredFan.preset });
-        try {
-          const state = await fanHostLifecycle.apply(configuredFan.nodes);
-          const active = state.hardwareWritesEnabled === true && state.hardwareWritesObserved === true;
-          setFanControlActive(active);
-          fanDiagnosticLog('lifecycle.startup-control-success', { active, preset: configuredFan.preset });
-        } catch (error) {
-          setFanControlActive(false);
-          fanDiagnosticLog('lifecycle.startup-control-failure', {
-            error: error instanceof Error ? error.message : String(error),
-          });
-        }
-      }
-    }
+    if (aiFanMockActive) stopAiFanService = await startAiFanService({
+      lifecycle: fanHostLifecycle, preset: getFanPresetCurve,
+      onError: (error) => {
+        // R11 T-04 / R12：只保留**显式枚举**的自有固定码（不是匹配 `AI_FAN_*` 形状），
+        // 其余一律折叠，避免未受信任载荷或原始异常进入诊断。
+        // 走免门有限责任收据（fanLifecycleEvidence），使默认关闭详细日志时"下一次失败"
+        // 依然落盘可判读，而不是整条消失。
+        fanLifecycleEvidence('ai.mock-request-failed', {
+          reason: projectAiFanErrorCode(error, 'AI_FAN_UNCLASSIFIED_FAILURE'),
+        });
+      },
+    });
+    fanDiagnosticLog('lifecycle.shell-admission-deferred', { phase: fanHostLifecycle.phase });
   } catch (error) {
-    // A remembered device must not make the Fan route visible after this
-    // process failed before completing its current-session handshake.
-    await recordFanHandshake(false);
-    window.dispatchEvent(new CustomEvent('fan-feature:visibility'));
-    fanDiagnosticLog('lifecycle.start-failure', {
+    // A configuration/identity wiring failure must never gate YMCC startup, the
+    // controller path or the fan entry. The fan page reports its own
+    // connect/permission state when the user asks for it.
+    fanDiagnosticLog('lifecycle.shell-admission-failure', {
       error: error instanceof Error ? error.message : String(error),
     });
   }
@@ -1255,6 +1500,11 @@ onMounted(async () => {
   window.addEventListener('ui-settings:changed', onUiSettingsLoaded as EventListener);
   stopPowerSourceWatch = on<{ ac: boolean; generation?: number }>('power.sourceChanged', ({ ac }) => {
     onVideoPowerSourceChanged(ac);
+    // sourceChanged is the immediate native notification; acChanged is a
+    // later 5-second tail-debounced confirmation. Start the dedicated
+    // profile restore here so a stable plug/unplug applies promptly, while
+    // the debounced event below still provides the final settling pass.
+    schedulePowerChangePerformanceRestore(Boolean(ac) ? 'ac' : 'dc');
   });
   // AC/DC 插拔：刷新数据；自动模式由性能调度重新应用当前电源侧组合。
   stopAcWatch = on<{ ac: boolean; generation?: number }>('power.acChanged', async ({ ac }) => {
@@ -1265,26 +1515,64 @@ onMounted(async () => {
     // Resume commit will perform one authoritative re-apply after AC/DC is
     // stable. Ignore intermediate broadcasts while native writes are gated.
     if (!await powerLifecycleReadyForWrites()) return;
-    // 性能调度已被用户启用时，优先应用新电源侧的组合；未启用才沿用独立 CPU 自动启用链路。
-    const schemeOwner = await reconcileRememberedPowerScheme().catch(() => 'yeman' as const);
-    if (schemeOwner === 'auto') {
-      await restorePerformanceScheduleIfConfigured().catch(() => {});
-    } else {
-      await applyCpuAutoEnable().catch(() => {});
-    }
+    // FAN-929（2026-09-27 用户裁决）：风扇控制的 AC/DC 电源档重放。原来由 Host 侧 1 Hz
+    // watchdog 轮询发现电源线变化（稳态恒定 CPU 成本），现改为事件驱动：由这里触发一次
+    // 曲线重放，Host 在写入点按当前电源档重新捕获模板并做 route 就绪校验。
+    void fanHostLifecycle.reapplyActiveCurve('ac-changed');
+    // 事件侧只负责发起一次有界、可取消的恢复；实际 AC/DC 侧确认和
+    // 专属优先级由 schedulePowerChangePerformanceRestore 串行完成。
+    schedulePowerChangePerformanceRestore(Boolean(ac) ? 'ac' : 'dc');
+  });
+  stopForegroundPowerSource = startForegroundPowerSourceRefresh((mode) => {
+    const changed = onAcPower.value !== (mode === 'ac');
+    applyVideoPowerMode(mode, true);
+    // A missed source notification must also restore the correct global/game
+    // profile. Reuse existing ownership/generation/write guards only on change;
+    // merely showing the same AC/DC side never replays fan/CPU/TDP settings.
+    if (changed) schedulePowerChangePerformanceRestore(mode);
   });
   // Compensate for a one-shot resume event that was emitted while WebView2
   // was being recreated.  The native lifecycle remains `resuming` until the
   // same commit path succeeds, so querying it is safe and idempotent.
   const lifecycleAtMount = await lifecycleAtMountPromise;
-  if (lifecycleAtMount?.phase === 'resuming') {
-    scheduleResumeTransaction(Number(lifecycleAtMount.generation));
+  if (lifecycleAtMount?.phase === 'resuming' && lifecycleAtMount.resumeReady === true) {
+    onPowerResumeReady(Number(lifecycleAtMount.generation));
+  } else if (lifecycleAtMount?.phase === 'ready' && lifecycleAtMount.resumeReady === true) {
+    // The durable native state can outlive the one-shot resume-ready event
+    // when the renderer is recreated after the native commit.  Rebind the
+    // Fan-local generation and let the idempotent committed-wake path restore
+    // any remembered curve; no shared sleep strategy or OEM proof is changed.
+    const committedGeneration = Number(lifecycleAtMount.generation) || 0;
+    if (committedGeneration > 0) {
+      latestResumeGeneration = Math.max(latestResumeGeneration, committedGeneration);
+      fanHostLifecycle.setPowerGeneration(committedGeneration);
+      fanHostLifecycle.observePowerBoundary('resumed', committedGeneration);
+      requestFanCommittedResume(committedGeneration);
+    }
+  } else if (lifecycleAtMount?.phase === 'resuming') {
+    // Native has not delivered F5 yet. Wait for its durable resume-ready
+    // event instead of letting a remounted renderer fabricate that boundary.
+    latestResumeGeneration = Math.max(latestResumeGeneration, Number(lifecycleAtMount.generation) || 0);
   } else if (lifecycleAtMount && lifecycleAtMount.phase !== 'ready') {
     latestResumeGeneration = Math.max(latestResumeGeneration, Number(lifecycleAtMount.generation) || 0);
   }
+  // FAN-927 §5（2026-09-27 用户批准）：渲染器重建 / 主程序非正常退出后重开的**唯一**事件入口。
+  // 依据完全来自 native 活动记录：本 run 已确认的意图只接上已有会话（不重开 HC、不重发曲线）；
+  // 崩溃前仍有效的记录才做一次有界恢复；无依据时零动作（不启动 Host、不发 HTTP）。
+  const fanReattach = fanHostLifecycle.reattachAfterRendererRestart().catch((error) => {
+    fanDiagnosticLog('lifecycle.renderer-restart-hook-failed', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return false;
+  });
+  // FAN-932 §2.1.4：偏好驱动的开机自动启动必须**等接续判定完成**后再执行（不能 `void` 发出
+  // reattach 后立刻另起自动启动，否则可能抢在接续前下发第二条曲线）。串进同一流程后再启动；
+  // 若接续已恢复活动曲线，ensureFanAutoStart 会因 hasControlIntent 直接 no-op。
+  void fanReattach.then(() => ensureFanAutoStart('boot'));
   // 性能调度统一负责自动模式 CPU/TDP 应用；不再加载或回刷 AC/DC CPU 锁定配置。
   // 性能调度由用户首次选择模式后才接管启动恢复；未配置时保持原 CPU 自动启用链路不变。
   stopSchemeWatch = on('power.schemeChanged', async () => {
+    if (aiCpuIsolated) return;
     scheduleSleepPowerPlanOptimization();
     // Intermediate broadcasts are expected while Windows restores a scheme.
     // The serialized resume transaction reconciles once after the gate opens.
@@ -1293,24 +1581,31 @@ onMounted(async () => {
       .then(async (schemeOwner) => {
         // Refresh the active page after reconciliation without changing ownership.
         globalRefreshKey.value++;
-        if (schemeOwner === 'auto') await restorePerformanceScheduleIfConfigured().catch(() => {});
+        const performanceOwner = await restorePerformanceScheduleIfConfigured(undefined, {
+          dedicatedOnly: schemeOwner !== 'auto',
+        }).catch(() => null);
+        if (performanceOwner !== null && performanceOwner !== 'auto') {
+          await applyCpuAutoEnable().catch(() => {});
+        }
       })
       .catch(() => {});
   });
   // A freshly recreated page can mount while native is still Resuming. Do not
   // let normal boot restoration race the gated wake transaction; the latter
   // performs one authoritative CPU/TDP re-apply after commit.
-  if (await powerLifecycleReadyForWrites()) {
+  if (!aiCpuIsolated && await powerLifecycleReadyForWrites()) {
     const schemeOwnerAtBoot = await reconcileRememberedPowerScheme().catch(() => 'yeman' as const);
-    if (schemeOwnerAtBoot === 'auto') {
-      await restorePerformanceScheduleIfConfigured().catch(() => {});
+    const performanceOwnerAtBoot = await restorePerformanceScheduleIfConfigured(undefined, {
+      dedicatedOnly: schemeOwnerAtBoot !== 'auto',
+    }).catch(() => null);
+    if (performanceOwnerAtBoot === 'auto' && schemeOwnerAtBoot === 'auto') {
       // Some boot tasks/OEM services rewrite the three hybrid-core values
       // after the first restore.  Reapply only the saved core mode after the
       // system settles; manual mode never enters this path.
       window.setTimeout(() => {
         void refreshPerformanceScheduleCoreMode().catch(() => {});
       }, 3000);
-    } else {
+    } else if (performanceOwnerAtBoot !== null && performanceOwnerAtBoot !== 'auto') {
       await applyCpuAutoEnable().catch(() => {});
       await applyProgramControls().catch(() => {});
     }
@@ -1321,20 +1616,22 @@ onMounted(async () => {
   // ── 音乐播放：启动期恢复已配置的音乐目录（不自动播放）──
   void initMusic();
   // ── 开机启动自愈：若用户曾开启但计划任务被误删，自动重建 ──
-  healBootTask().catch(() => {});
+  if (!aiCpuIsolated) healBootTask().catch(() => {});
 
   // ── CPU「30秒自行启用」：打开程序 30 秒后，按记录状态自动套用 CCD / 降压 ──
   // 延迟 30 秒是开机保护：避免降压过猛（如 risk 档）在开机瞬间直接死机。
-  sleepPlanOptimizationTimer = window.setTimeout(() => {
+  if (!aiCpuIsolated) sleepPlanOptimizationTimer = window.setTimeout(() => {
     sleepPlanOptimizationTimer = null;
     scheduleSleepPowerPlanOptimization();
   }, 30000);
-  window.setTimeout(() => {
+  if (!aiCpuIsolated) window.setTimeout(() => {
     applyCpuAutostart().catch(() => {});
   }, 30000);
 
 });
 onUnmounted(() => {
+  stopAiFanService?.();
+  stopAiFanService = null;
   videoPowerProbeGeneration++;
   if (videoPowerProbeTimer !== null) {
     window.clearTimeout(videoPowerProbeTimer);
@@ -1349,6 +1646,11 @@ onUnmounted(() => {
     clearTimeout(resumeRetryTimer);
     resumeRetryTimer = null;
   }
+  powerChangeRestoreGeneration++;
+  if (powerChangeRestoreTimer !== null) {
+    window.clearTimeout(powerChangeRestoreTimer);
+    powerChangeRestoreTimer = null;
+  }
   if (sleepPlanOptimizationTimer !== null) {
     window.clearTimeout(sleepPlanOptimizationTimer);
     sleepPlanOptimizationTimer = null;
@@ -1360,6 +1662,8 @@ onUnmounted(() => {
   }
   invalidateBackgroundMedia();
   stopDynamicBackgroundWatch();
+  stopGameInputOverrideWatch();
+  stopGamePolicyRuntime();
   stopUiVisibility?.();
   stopUiVisibility = null;
   window.removeEventListener('background:changed', onBackgroundChanged as EventListener);
@@ -1388,9 +1692,13 @@ onUnmounted(() => {
   window.removeEventListener('ipc:game.rules.changed', onGameRulesChanged as EventListener);
   document.removeEventListener('visibilitychange', onBackgroundVisibilityChange);
   stopGamepad?.();
+  stopGyroTelemetry?.();
   stopAcWatch?.();
   stopPowerSourceWatch?.();
+  stopForegroundPowerSource?.();
+  stopForegroundPowerSource = null;
   stopResumeWatch?.();
+  stopFanResumeWatch?.();
   stopSchemeWatch?.();
   // Fan Host shutdown has one canonical owner: the native app-exit boundary
   // (or NavRail.quit, which awaits the same lifecycle before app.exit).  A
@@ -1416,7 +1724,7 @@ onUnmounted(() => {
 
 <template>
   <div class="app-root">
-    <div class="app-stage" :style="scalerStyle">
+    <div class="app-stage" :data-ui-visible="uiVisible" :style="scalerStyle">
       <div v-if="!hasVisibleBackgroundMedia" class="empty-background" aria-hidden="true" />
       <video
         v-if="backgroundUrl && backgroundKind === 'video' && !backgroundVideoSuspended"
@@ -1444,7 +1752,7 @@ onUnmounted(() => {
         :style="backgroundStyle"
         aria-hidden="true"
       />
-      <div class="app-body">
+      <div v-if="!isStandaloneEditor" class="app-body">
         <NavRail />
         <main class="app-main">
           <!-- 顶部监控条：独立于页面滚动层，左右顶满 app-main，不受滚动条宽度影响 -->
@@ -1458,13 +1766,26 @@ onUnmounted(() => {
           </div>
         </main>
       </div>
+      <div v-else class="standalone-body">
+        <router-view v-slot="{ Component }">
+          <component :is="Component" />
+        </router-view>
+      </div>
     </div>
 
-    <DebugView v-if="showDebug" @close="showDebug = false" />
+    <DebugView v-if="showDebug && !isStandaloneEditor" @close="showDebug = false" />
   </div>
 </template>
 
 <style scoped>
+/* Native hiding/minimizing need not change document.visibilityState in WebView2.
+ * Pause decorative CSS clocks without removing animations or altering control.
+ * Resume preserves their phase; visible UI visuals and timing remain unchanged. */
+.app-stage[data-ui-visible="false"] :deep(*),
+.app-stage[data-ui-visible="false"] :deep(*::before),
+.app-stage[data-ui-visible="false"] :deep(*::after) {
+  animation-play-state: paused !important;
+}
 /* 顶层居中容器：viewport 内 grid place-items: center，整体应用壳视觉居中 */
 .app-root {
   position: fixed;
@@ -1508,6 +1829,15 @@ onUnmounted(() => {
   min-height: 0;
   position: relative;
   z-index: 1;
+}
+.standalone-body {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  position: relative;
+  z-index: 1;
+  overflow: hidden;
 }
 .app-main {
   flex: 1 1 auto;

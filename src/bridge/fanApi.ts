@@ -18,6 +18,11 @@ export interface FanVersionEvidence {
   reason?: string;
 }
 export interface FanHandshake {
+  protocolVersion?: number;
+  hostMode?: string;
+  mockZeroHardwareEvidence?: boolean;
+  hardwareWritesEnabled?: boolean;
+  hardwareWritesObserved?: boolean;
   ok: boolean;
   supported: boolean;
   deviceClass?: string;
@@ -45,12 +50,24 @@ export interface FanSuspendRequest {
   leaseId?: string;
   reason?: string;
 }
+export interface FanResumeRequest {
+  generation: number;
+  source: string;
+  leaseId?: string;
+  reason?: string;
+}
 export interface FanState {
   state: string;
   powerState?: string;
+  /** Protocol-2 Hosts attest the full HC lifecycle in each state snapshot. */
+  protocolVersion?: string | number;
   hardwareWrites: boolean;
   hardwareWritesEnabled?: boolean;
   hardwareWritesObserved?: boolean;
+  unknownState?: boolean;
+  /** HC Open() and OpenEvents() completion evidence from the resident Host. */
+  openCalled?: boolean;
+  openEventsCalled?: boolean;
   oemRestoreConfirmed?: boolean;
   /** HC virtual Close() returned; this is separate from physical OEM proof. */
   hcVirtualCloseReturned?: boolean;
@@ -92,7 +109,7 @@ export interface FanApiAdapter {
   releaseControl(leaseId: string): Promise<FanState>;
   restoreOem(leaseId?: string): Promise<FanState>;
   suspend(request: FanSuspendRequest): Promise<FanState>;
-  resume(): Promise<FanState>;
+  resume(request: FanResumeRequest): Promise<FanState>;
   close(): Promise<FanState>;
   /** Request the resident Host to exit only after close/restore succeeds. */
   shutdown(): Promise<void>;
@@ -189,7 +206,7 @@ export class DisabledFanApiAdapter implements FanApiAdapter {
   async releaseControl(_leaseId: string): Promise<FanState> { return clone(DISABLED_STATE); }
   async restoreOem(_leaseId?: string): Promise<FanState> { return clone(DISABLED_STATE); }
   async suspend(_request: FanSuspendRequest): Promise<FanState> { return clone(DISABLED_STATE); }
-  async resume(): Promise<FanState> { return clone(DISABLED_STATE); }
+  async resume(_request: FanResumeRequest): Promise<FanState> { return clone(DISABLED_STATE); }
   async close(): Promise<FanState> { return clone(DISABLED_STATE); }
   async shutdown(): Promise<void> { return; }
 }
@@ -211,6 +228,12 @@ export class HttpFanApiAdapter implements FanApiAdapter {
     // second Close or proves a physical OEM handoff.
     if (path === '/api/close') return 45000;
     if (path === '/api/restore' || path === '/api/suspend') return 10000;
+    // HC SystemReady keeps a 10-second device-readiness budget plus the
+    // Open/OpenEvents/lease/curve rebuild; the Host's automatic resume worker
+    // waits up to 15 seconds (WaitForAutomaticResumeAsync). A shorter bridge
+    // timeout would truncate a slow post-sleep rebuild into a false F5 failure
+    // and stall the wake transaction in native `resuming`.
+    if (path === '/api/resume') return 16000;
     return 5000;
   }
   private async request(path: string, method: 'GET' | 'POST', body?: unknown, timeoutMs?: number): Promise<any> {
@@ -304,7 +327,17 @@ export class HttpFanApiAdapter implements FanApiAdapter {
       ...(request.reason ? { reason: request.reason } : {}),
     });
   }
-  resume(): Promise<FanState> { return this.stateRequest('/api/resume'); }
+  resume(request: FanResumeRequest): Promise<FanState> {
+    if (!Number.isSafeInteger(request.generation) || request.generation <= 0 || !request.source.trim()) {
+      return Promise.reject(new Error('POWER_GENERATION_REQUIRED: Fan resume 需要有效 generation/source'));
+    }
+    return this.stateRequest('/api/resume', {
+      generation: request.generation,
+      source: request.source,
+      ...(request.leaseId ? { leaseId: request.leaseId } : {}),
+      ...(request.reason ? { reason: request.reason } : {}),
+    });
+  }
   close(): Promise<FanState> { return this.stateRequest('/api/close'); }
   async shutdown(): Promise<void> { await this.request('/api/shutdown', 'POST', {}); }
 }

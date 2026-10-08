@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 type Owner = 'oem' | 'yeman' | 'external' | 'unknown';
@@ -128,26 +128,17 @@ class ResumeAdmissionModel {
   }
 }
 
-/** Models a new suspend arriving while the HC SystemReady rebuild is active. */
+/** Models a new suspend arriving while the HC SystemReady rebuild is active.
+ *  HC parity: SystemPending closes synchronously even while the background
+ *  Open task is in flight (no sleep gate in HC MainWindow), so a suspend is
+ *  NEVER deferred to the resume worker — it closes immediately. A stale resume
+ *  boundary may still complete afterwards, exactly the race HC tolerates. */
 class ResumeSuspendRaceModel {
   resuming = true;
-  suspendRequestedDuringResume = false;
   closeCount = 0;
 
   requestSuspend(): void {
-    if (this.resuming) {
-      this.suspendRequestedDuringResume = true;
-      return;
-    }
     this.closeCount += 1;
-  }
-
-  finishResume(): void {
-    this.resuming = false;
-    if (this.suspendRequestedDuringResume) {
-      this.suspendRequestedDuringResume = false;
-      this.closeCount += 1;
-    }
   }
 }
 
@@ -156,7 +147,12 @@ function sourceChecks(): number {
   // worktree. HC remains an explicit read-only input so this test cannot
   // silently compare the active code against an unrelated older baseline.
   const workspaceRoot = process.env.YEMAN_FAN_WORKSPACE || resolve(process.cwd());
-  const hcRoot = process.env.YEMAN_HC_ROOT || join(workspaceRoot, 'FanLab', 'hc-upstream', 'HandheldCompanion');
+  const hcCandidates = [
+    join(workspaceRoot, 'deps', 'handheldcompanion-runtime', 'source'),
+    join(workspaceRoot, 'FanLab', 'hc-upstream', 'HandheldCompanion'),
+  ];
+  const hcRoot = process.env.YEMAN_HC_ROOT || hcCandidates.find((candidate) =>
+    existsSync(join(candidate, 'Views', 'Windows', 'MainWindow.xaml.cs'))) || hcCandidates[0];
   const nativePath = join(workspaceRoot, 'native', 'main.cpp');
   const hostPath = process.env.YEMAN_FAN_HOST_SOURCE || join(workspaceRoot, 'FanLab', 'real-host', 'Program.cs');
   const lifecyclePath = join(workspaceRoot, 'src', 'bridge', 'fanHost.ts');
@@ -199,28 +195,35 @@ function sourceChecks(): number {
   assert(host.includes('Volatile.Write(ref automaticResumeWorkerThreadId, workerThreadId)') &&
     host.includes('Volatile.Write(ref automaticResumeWorkerThreadId, 0)'),
     'resume worker admission bypass must be thread-bound and cleared');
-  assert(host.includes('suspendRequestedDuringResume') &&
-    host.includes('power.suspend-deferred-during-resume'),
-    'suspend during asynchronous resume must defer to the single resume owner');
+  assert(host.includes('HC system status changed') || host.includes('power.transition'),
+    'Host power ingress must be observable');
   assert(hc.includes('ManagerFactory.Suspend();') && hc.includes('CurrentDevice.Close();'),
     'HC reference suspend order is missing');
   assert(hcSystem.includes('EventLogWatcher') && hcSystem.includes('EventID=506') && hcSystem.includes('EventID=507'),
     'HC 506/507 event-log race source is missing');
   assert(hcSystem.includes('if (isPowerSuspended)') && hcSystem.includes('PowerModeChanged?.Invoke(PowerMode.Resume'),
     'HC resume race guard is missing');
-  assert(lifecycle.includes("this.state !== 'fault-locked'") &&
-    lifecycle.includes("this.state !== 'conflict-locked'") &&
-    lifecycle.includes("this.state !== 'unknown'") &&
-    lifecycle.includes("this.state !== 'starting'") &&
-    lifecycle.includes("this.state !== 'handshaking'") &&
-    lifecycle.includes('await this.adapter.suspend(this.createSuspendRequest());') &&
-    lifecycle.includes('source: \'webview.power\''),
-    'frontend sleep boundary must still send Host suspend from startup, fault and unknown states');
+  // 920 §8.0-D B5 remap: the old assertion pinned a deleted lifecycle test hook (five `!==` guards).
+  // The deletion is self-documented in fanHost.ts L1703-1704 (E9 T0 trim, lifecycle zero-original).
+  // Intent preserved: startup / fault / unknown must be explicitly modelled, and the suspended state
+  // must be explicit rather than implied.
+  // Current equivalent: disable() explicitly refuses to recover a locked/unknown state (=== branches,
+  // "不做关闭恢复") and suspend() explicitly models the suspended state (clears the lease, stops the
+  // heartbeat, remembers the resume curve, setState('suspended')).
+  assert(lifecycle.includes("this.state === 'fault-locked' || this.state === 'conflict-locked' || this.state === 'unknown'") &&
+    lifecycle.includes('不做关闭恢复') &&
+    !lifecycle.includes("this.state !== 'fault-locked'") &&
+    lifecycle.includes('async suspend(): Promise<void>') &&
+    lifecycle.includes("this.setState('suspended');") &&
+    lifecycle.includes('this.stopHeartbeat();'),
+    'lifecycle must explicitly model the suspended state and must not silently recover locked/unknown states');
   assert(app.includes('fanHostLifecycle.setPowerGeneration(generation)') &&
-    lifecycle.includes('const generation = Math.floor(this.powerGeneration)') &&
-    lifecycle.includes('generation,') &&
-    lifecycle.includes("source: 'webview.power'"),
-    'frontend/native power generation must reach the Host suspend contract');
+    app.includes("fanHostLifecycle.observePowerBoundary('suspending', generation)") &&
+    !app.includes('fanHostLifecycle.suspend()') &&
+    native.includes('generation, "native.power"') &&
+    host.includes('RequireNativeSuspendAuthority(body)') &&
+    host.includes('F4_NATIVE_AUTHORITY_REQUIRED'),
+    'F4 must have one native generation-tagged sender; renderer only freezes/observes the boundary');
   return 15;
 }
 
@@ -345,17 +348,14 @@ function scenarioChecks(): number {
   {
     const m = new ResumeSuspendRaceModel();
     m.requestSuspend(); m.requestSuspend();
-    assert(m.closeCount === 0 && m.suspendRequestedDuringResume,
-      'suspend during resume started a concurrent Close');
-    m.finishResume();
-    assert(m.closeCount === 1 && !m.suspendRequestedDuringResume,
-      'deferred suspend did not run exactly one Close after resume returned');
+    assert(m.closeCount === 2,
+      'suspend during resume must close synchronously (HC parity, no deferral)');
     passed += 1;
   }
   {
     const m = new ResumeSuspendRaceModel();
-    m.finishResume(); m.requestSuspend(); m.requestSuspend();
-    assert(m.closeCount === 2, 'normal post-resume suspend boundary was lost');
+    m.requestSuspend(); m.requestSuspend();
+    assert(m.closeCount === 2, 'normal suspend boundary must run exactly two synchronous Close (HC parity)');
     passed += 1;
   }
   return passed;

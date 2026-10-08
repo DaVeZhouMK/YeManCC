@@ -1,0 +1,21 @@
+import { PhysicalInputOwnership } from '../src/bridge/physicalInputOwnership';
+
+const ownership = new PhysicalInputOwnership();
+let s = ownership.transition('summon');
+if (s.owner !== 'ymcc-frontend' || !s.frontendSummonVirtualControl) throw new Error('summon did not transfer ownership');
+if (!ownership.canConsume('ymcc-frontend', s.epoch) || ownership.canConsume('game-consumer', s.epoch)) throw new Error('double consumer admitted');
+if (ownership.routeFrame(s.epoch) !== 'ymcc-semantic-only') throw new Error('foreground frame was not restricted to YMCC semantics');
+s = ownership.transition('dismiss');
+if (s.owner !== 'game-consumer' || !ownership.canConsume('game-consumer', s.epoch)) throw new Error('dismiss did not restore game owner');
+if (ownership.routeFrame(s.epoch) !== 'game-report') throw new Error('dismiss did not restore game report route');
+s = ownership.transition('summon');
+s = ownership.transition('modal-open');
+if (s.owner !== 'none' || !s.releaseRequired || ownership.canConsume('ymcc-frontend', s.epoch)) throw new Error('modal did not revoke frame owner');
+if (ownership.routeFrame(s.epoch) !== 'drop') throw new Error('modal transition leaked a frame');
+s = ownership.transition('release');
+s = ownership.transition('summon');
+s = ownership.transition('suspend');
+if (s.owner !== 'none' || !s.releaseRequired || ownership.canConsume('game-consumer', s.epoch)) throw new Error('suspend did not fail closed');
+s = ownership.transition('release');
+if (s.releaseRequired || s.owner !== 'none') throw new Error('release proof state invalid');
+console.log('physical input ownership selftest: PASS');

@@ -1,0 +1,139 @@
+﻿using System;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.Runtime.CompilerServices;
+using System.Threading.Tasks;
+using System.Windows.Input;
+
+namespace HandheldCompanion.ViewModels
+{
+    public class BaseViewModel : INotifyPropertyChanged, IDisposable
+    {
+        public event PropertyChangedEventHandler? PropertyChanged;
+        private bool _disposed = false; // Track whether Dispose has been called
+
+        protected readonly object _collectionLock = new object();
+        protected readonly object _collectionLock2 = new object();
+        protected readonly object _collectionLock3 = new object();
+        protected readonly object _collectionLock4 = new object();
+        protected readonly object _collectionLock5 = new object();
+        protected readonly object _collectionLock6 = new object();
+        protected readonly object _collectionLock7 = new object();
+
+        ~BaseViewModel()
+        {
+            Dispose(false);
+        }
+
+        protected bool SetProperty<T>(ref T storage, T value, Action? onChanged = null, [CallerMemberName] string? propertyName = null)
+        {
+            // If the value hasn't changed, do nothing
+            if (EqualityComparer<T>.Default.Equals(storage, value))
+                return false;
+
+            storage = value;
+            onChanged?.Invoke();
+            OnPropertyChanged(propertyName);
+            return true;
+        }
+
+        protected virtual void Dispose(bool disposing)
+        {
+            if (_disposed) return;
+
+            if (disposing)
+            {
+                // Free any managed resources here
+                PropertyChanged = null; // Unsubscribe all event handlers to avoid memory leaks
+            }
+
+            _disposed = true;
+        }
+
+        public virtual void Dispose()
+        {
+            Dispose(true);
+            GC.SuppressFinalize(this);
+        }
+
+        public virtual void OnPropertyChanged(string? propertyName) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+    }
+
+    public class DelegateCommand : ICommand
+    {
+        private Action _action;
+
+        public DelegateCommand(Action action)
+        {
+            this._action = action;
+        }
+
+        public bool CanExecute(object? parameter)
+        {
+            return true;
+        }
+
+        public void Execute(object? parameter)
+        {
+            _action();
+        }
+
+        public event EventHandler? CanExecuteChanged;
+        public void OnCanExecuteChanged()
+        {
+            CanExecuteChanged?.Invoke(this, EventArgs.Empty);
+        }
+    }
+
+    class AsyncDelegateCommand : ICommand
+    {
+        private readonly Func<Task> _action;
+
+        public AsyncDelegateCommand(Func<Task> action)
+        {
+            _action = action;
+        }
+
+        public bool CanExecute(object? parameter) => true;
+
+        public async void Execute(object? parameter)
+        {
+            await _action();
+        }
+
+        public event EventHandler? CanExecuteChanged;
+        public void OnCanExecuteChanged()
+        {
+            CanExecuteChanged?.Invoke(this, EventArgs.Empty);
+        }
+    }
+
+    public class DelegateCommand<T> : ICommand
+    {
+        private readonly Action<T> _action;
+
+        public DelegateCommand(Action<T> action)
+        {
+            _action = action;
+        }
+
+        public bool CanExecute(object? parameter)
+        {
+            return true;
+        }
+
+        public void Execute(object? parameter)
+        {
+            if (parameter is T tParam)
+                _action(tParam);
+            else
+                _action(default!); // Or throw
+        }
+
+        public event EventHandler? CanExecuteChanged;
+        public void OnCanExecuteChanged()
+        {
+            CanExecuteChanged?.Invoke(this, EventArgs.Empty);
+        }
+    }
+}

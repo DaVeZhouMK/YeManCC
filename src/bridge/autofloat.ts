@@ -1,11 +1,12 @@
 // autofloat.ts — 自动浮动优化桥层（CPU主频调度 + TDP节能联动）
 //
-// 架构：native monitor daemon（与顶部监控共用一个线程）
-//   · 有真实游戏时：每 1 秒把 { ts, fps, fps1, game, pid } 写入 fps-status.json；
+// 架构（196 后）：数据经统一入口 src/bridge/monitorData.ts（新 native 走内存快照 monitor.snapshot；
+// 旧 native 自动回退原四文件通路）。数据语义与历史一致：
+//   · 有真实游戏时：native 每秒产出 { ts, fps, fps1, gpu, packagePower, game, pid }（fps-status 语义）；
 //     帧率来自 HWiNFO 共享内存的 "Framerate Presented (avg)" / "(1%)"（不再依赖 RTSS，RTSS 易崩）。
-//   · 未检测到游戏时：每 10 秒扫一次，且不在记录任何数据（只写心跳 fps-monitor.hb，不写状态文件）。
-// 前端每 1 秒轮询：先看 fps-status.json（有游戏时的真数据），再看 fps-monitor.hb
-// （区分"守护存活但空闲"与"守护已死"），并在 CpuView 里跑控制循环（先积极性后主频），
+//   · 未检测到游戏时：按既有降频 cadence 扫描，只出心跳（fps-monitor.hb 语义），不产出状态数据。
+// 前端每秒取数（readStatus，经统一入口）：先看真实游戏数据（<5s 且含 game），再看心跳
+// （<15s 区分"守护存活但空闲"与"守护已死"），并在 CpuView 里跑控制循环（先积极性后主频），
 // 通过逐条 applyFloatPowerParams 写入 —— 原有全部联动（最小CPU三联动、
 // EPP、节流状态等）自动一起生效。
 //
@@ -16,12 +17,13 @@
 // 以上数据全部来自 HWiNFO 共享内存，不再用 RTSS / Win32_Perf（易崩/不准）。
 // 真实游戏识别由 native 游戏识别阀门完成；HWiNFO 帧率只决定浮动输出是否可用。
 //
-// 守护生命周期：
-//   start/stop = native IPC 切换 FPS 输出，保留 fps-status.json/fps-monitor.hb 契约
+// 守护生命周期（196）：start/stop = 统一入口的需求登记（fps 需求 ⇒ monitor.start/stop {fps:true}），
+// 与展示端需求互不干扰；fps-status.json/fps-monitor.hb 契约仅在兼容（文件）通路存在。
 
 import { fs } from './api';
 import { invoke } from './ipc';
-import { readSettingsSection, saveSettingsSection } from './settingsRepository';
+import { acquireMonitorDemand, monitorDemandConfirmed, readMonitorSnapshot, setMonitorDataPowerControlDir } from './monitorData';
+import { getSettingsGeneration, assertSettingsGeneration, readSettingsSection, saveSettingsSection } from './settingsRepository';
 import {
   applyFloatPowerParams,
   readPowerParams,
@@ -41,10 +43,8 @@ import {
 } from './yeman';
 
 let PC_DIR = 'C:\\SOFT\\YeMan\\PowerControl';
-let STATUS = PC_DIR + '\\fps-status.json';
-let HB = PC_DIR + '\\fps-monitor.hb';
-// HWiNFO 健康标记（守护每轮写入，前端据此判断 HWiNFO 共享内存是否可用）
-let HWINFO_OK = PC_DIR + '\\hwinfo-ok';
+// 196：fps-status.json / fps-monitor.hb / hwinfo-ok 的读取已并入统一数据入口
+// （monitorData.ts，路径由 setMonitorDataPowerControlDir 同步），本文件不再直接读。
 // 持久化配置：记住「帧数目标 + 调度档位 + TDP向下浮动策略」，跨重启保留上次选择
 let CONFIG = PC_DIR + '\\autofloat.json';
 // 浮动运行标志：native 手柄后台（Start+方向）据此判断浮动是否接管，运行时只转发按键事件
@@ -52,9 +52,8 @@ let FLOAT_ACTIVE = PC_DIR + '\\float-active';
 
 export function setAutofloatPowerControlDir(dir: string): void {
   PC_DIR = dir.replace(/\//g, '\\').replace(/\\+$/, '');
-  STATUS = PC_DIR + '\\fps-status.json';
-  HB = PC_DIR + '\\fps-monitor.hb';
-  HWINFO_OK = PC_DIR + '\\hwinfo-ok';
+  // 统一入口（含旧 native 的四文件回退通路）必须使用同一目录。
+  setMonitorDataPowerControlDir(PC_DIR);
   CONFIG = PC_DIR + '\\autofloat.json';
   FLOAT_ACTIVE = PC_DIR + '\\float-active';
 }
@@ -96,7 +95,6 @@ function safeTdpStrategy(v: string): TdpFloatStrategy {
 
 // 读取持久化配置（失败回退默认 关闭/平衡/小幅度）
 async function readConfig(): Promise<{ target: FpsTarget; profile: FloatProfile; tdpStrategy: TdpFloatStrategy }> {
-  try {
     const tdp = await readSettingsSection<any>('tdp');
     const j = (tdp.float || {}) as { target?: number; profile?: string; tdpStrategy?: string };
     return {
@@ -104,17 +102,30 @@ async function readConfig(): Promise<{ target: FpsTarget; profile: FloatProfile;
       profile: safeProfile(String(j.profile)),
       tdpStrategy: safeTdpStrategy(String(j.tdpStrategy)),
     };
-  } catch {
-    return { target: 0, profile: 'bal', tdpStrategy: 'small' };
-  }
 }
 
 // 写入当前 帧数目标 + 调度档位 + TDP 策略：同一路径串行原子保存，后提交值不会被旧请求反向覆盖。
 let configWriteQueue: Promise<void> = Promise.resolve();
 function writeConfig(): Promise<void> {
-  const next = configWriteQueue.then(() => saveSettingsSection('tdp', {
-    float: { target: curTarget, profile: curProfile, tdpStrategy: curTdpStrategy },
-  }));
+  const generation = getSettingsGeneration();
+  const snapshot = { float: { target: curTarget, profile: curProfile, tdpStrategy: curTdpStrategy } };
+  const next = configWriteQueue.then(async () => {
+    try { await saveSettingsSection('tdp', snapshot, generation); }
+    catch (error) {
+      // Restore selection from durable settings only if no newer submission
+      // owns it. No rollback is allowed to clobber a later user's selection.
+      if (getSettingsGeneration() === generation && curTarget === snapshot.float.target && curProfile === snapshot.float.profile && curTdpStrategy === snapshot.float.tdpStrategy) {
+        try {
+          const durable = await readConfig();
+          curTarget = durable.target;
+          curProfile = durable.profile;
+          curTdpStrategy = durable.tdpStrategy;
+          notify();
+        } catch { /* A read failure must not manufacture persisted defaults. */ }
+      }
+      throw error;
+    }
+  });
   configWriteQueue = next.catch(() => {});
   return next;
 }
@@ -250,12 +261,15 @@ export interface FloatStatus {
 
 // 启动守护（shell.hidden 隐藏窗口直接拉起 ps1，无 VBS 中转，避免 LOLBin 拦截）
 let monitorStartInFlight: Promise<void> | null = null;
+// 196：控制需求（fps）登记到统一入口；与顶部/内页的展示需求互不干扰。
+let fpsDemandRelease: (() => void) | null = null;
 export async function startMonitor(): Promise<void> {
   if (monitorStartInFlight) return monitorStartInFlight;
-  // 清掉旧停止标志，避免刚启动就被自己停掉
   monitorStartInFlight = (async () => {
-    await invoke('monitor.start', { fps: true });
-    monitorLaunched = true; // 标记已拉起；tick 失联重拉前先看此标志，避免反复重启抖动
+    if (!fpsDemandRelease) fpsDemandRelease = acquireMonitorDemand('autofloat', { fps: true });
+    // 196/197：只有 native 回执确认才算已启动；仅登记需求不得置为已拉起
+    //（未确认时 tick 的失联分支按既有冷却/突发上限继续重试，不造成重启风暴）。
+    monitorLaunched = monitorDemandConfirmed().fps;
   })();
   try {
     await monitorStartInFlight;
@@ -264,9 +278,12 @@ export async function startMonitor(): Promise<void> {
   }
 }
 
-// 停止守护（写停止标志，守护 1 秒内自清理退出）
+// 释放控制需求（全端释放后 native 才停 fps 标志）
 export async function stopMonitor(): Promise<void> {
-  await invoke('monitor.stop', { fps: true });
+  if (fpsDemandRelease) {
+    fpsDemandRelease();
+    fpsDemandRelease = null;
+  }
   monitorLaunched = false; // 显式停止 → 允许后续按需重拉
 }
 
@@ -276,30 +293,30 @@ export async function stopMonitor(): Promise<void> {
 //      → 返回合成空闲状态（game:null），前端据此待机、不再重拉守护
 //   3) 心跳也缺失/过期 → 守护已死 → null（前端会重拉）
 export async function readStatus(): Promise<FloatStatus | null> {
-  try {
-    const txt = await fs.readTextFile(STATUS);
-    const raw = JSON.parse(txt) as Partial<FloatStatus>;
-    const st: FloatStatus = {
-      ts: Number(raw.ts) || 0,
-      fps: Number(raw.fps) || 0,
-      fps1: Number(raw.fps1) || 0,
-      gpu: Number(raw.gpu) || 0,
-      packagePower: Number(raw.packagePower) || 0,
-      game: typeof raw.game === 'string' ? raw.game : null,
-      pid: Number(raw.pid) || 0,
+  const view = await readMonitorSnapshot();
+  if (!view) return null;
+  if (view.fps && view.fps.ts > 0 && Date.now() - view.fps.ts <= 5000 && view.fps.game) {
+    return {
+      ts: view.fps.ts,
+      fps: view.fps.fps,
+      fps1: view.fps.fps1,
+      gpu: view.fps.gpu,
+      packagePower: view.fps.packagePower,
+      game: view.fps.game,
+      pid: view.fps.pid,
     };
-    if (typeof st.ts === 'number' && Date.now() - st.ts <= 5000 && st.game) return st;
-  } catch {
-    /* 无状态文件 / JSON 损坏 */
   }
-  try {
-    const hbTxt = await fs.readTextFile(HB);
-    const hb = JSON.parse(hbTxt) as { ts?: number };
-    if (typeof hb.ts === 'number' && Date.now() - hb.ts < 15000) {
-      return { ts: hb.ts, fps: 0, fps1: 0, gpu: 0, packagePower: 0, game: null, pid: 0, idle: true };
-    }
-  } catch {
-    /* 无心跳 */
+  if (view.heartbeatAt !== null && Date.now() - view.heartbeatAt < 15000) {
+    return {
+      ts: view.heartbeatAt,
+      fps: 0,
+      fps1: 0,
+      gpu: 0,
+      packagePower: 0,
+      game: null,
+      pid: 0,
+      idle: true,
+    };
   }
   return null;
 }
@@ -308,13 +325,8 @@ export async function readStatus(): Promise<FloatStatus | null> {
 // 恢复动作只由 native 数据读取链路在故障边沿触发一次；前端只观察健康标记，
 // 禁止额外枚举进程、启动脚本或高频轮询恢复，避免重新干扰 UI 渲染。
 async function hwinfoStatus(): Promise<boolean> {
-  try {
-    const txt = await fs.readTextFile(HWINFO_OK);
-    const ts = Number(txt.trim());
-    return Number.isFinite(ts) && Date.now() - ts < 6000;
-  } catch {
-    return false;
-  }
+  const view = await readMonitorSnapshot();
+  return view !== null && view.hwinfoOkAt !== null && Date.now() - view.hwinfoOkAt < 6000;
 }
 
 const HWINFO_RECOVERY_GRACE_MS = 30000;
@@ -969,7 +981,7 @@ export async function enableFloat(target: FpsTarget, profile: FloatProfile, tdpS
   curProfile = profile;
   curTdpStrategy = tdpStrategy;
   // 配置保存只负责记忆 UI 选择，不能成为 CPU powercfg 写入的前置条件。
-  await writeConfig().catch(() => {});
+  await writeConfig();
   if (target <= 0) {
     if (timer !== null || starting) {
       await disableFloat({ unlockRtss: true });
@@ -1124,7 +1136,7 @@ export async function applyFloatSettings(
 // 切换档位：立即钳到新范围
 export async function setFloatProfile(profile: FloatProfile): Promise<void> {
   curProfile = profile;
-  void writeConfig();
+  await writeConfig();
   if (timer !== null || starting) {
     if (profile === 'none') {
       // 无压制：只取消浮动控制；CPU 挡位写入由调度入口负责。
@@ -1149,9 +1161,9 @@ export async function setFloatTarget(target: FpsTarget): Promise<void> {
   notify();
 }
 
-export function setTdpFloatStrategy(strategy: TdpFloatStrategy): void {
+export async function setTdpFloatStrategy(strategy: TdpFloatStrategy): Promise<void> {
   curTdpStrategy = safeTdpStrategy(strategy);
-  void writeConfig();
+  await writeConfig();
   notify();
 }
 
@@ -1197,7 +1209,7 @@ export async function adjustFloatTarget(dir: 1 | -1): Promise<number> {
   next = Math.max(FPS_TARGET_MIN, Math.min(FPS_TARGET_MAX, next));
   if (next === curTarget) return curTarget;
   curTarget = next;
-  void writeConfig();
+  await writeConfig();
   notify();
   scheduleRtssSync(next); // 尾随 2 秒防抖，避免手柄连发时每步重载 RTSS 卡顿
   return next;

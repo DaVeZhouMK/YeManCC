@@ -44,6 +44,7 @@ const fpsCeiling = ref(200); // 下拉上限（滑块最大值）
 const tasks = reactive({ bootRtss: false });
 type TaskKey = keyof typeof tasks;
 const overlay = ref<'W' | 'L' | 'J'>('W');
+let overlayRevision = 0;
 // 自动浮动优化「自动启用」模式：ac/always 时会接管插电调度与锁帧逻辑。
 // （插电恢复锁帧任务已移除、DC 电池模式锁帧任务已移除：锁帧节能完全交给自动浮动优化）
 const autoEnableMode = ref<string>('never');
@@ -56,9 +57,9 @@ const monitorHint = ref('');
 const zoomPct = ref(100); // OSD 缩放百分比（= ZoomRatio × 20），默认 100%
 const zoomHint = ref('');
 
-// ── 游戏运行中拦截：关闭 RTSS / 切换布局（RTSS 重启）/ 复位 都会让游戏闪退。
+// ── 游戏运行中拦截：关闭 RTSS / 复位会卸载钩子，可能让游戏闪退。
 // 检测到游戏时延迟执行该操作，顶部条幅提示并轮询；游戏关闭后自动继续，用户可取消。
-type PendingRtssAction = 'stopRtss' | 'changeOverlay' | 'toggleMonitor' | 'reset';
+type PendingRtssAction = 'stopRtss' | 'reset';
 const gameRunningWarn = ref<{ game: DetectedGame; pending: PendingRtssAction; pendingArg?: 'W' | 'L' | 'J' | 'off' } | null>(null);
 let gameWatchTimer: number | null = null;
 let stopUiVisibility: (() => void) | null = null;
@@ -85,11 +86,6 @@ function startGameWatch() {
       gameRunningWarn.value = null;
       stopGameWatch();
       if (pending === 'stopRtss') await doToggleRtssOff();
-      else if (pending === 'changeOverlay' && arg && arg !== 'off') await doSetOverlay(arg);
-      else if (pending === 'toggleMonitor' && arg) {
-        await setOverlayLayout(arg);
-        monOn.value = arg !== 'off';
-      }
       else if (pending === 'reset') { confirmingReset.value = true; await doReset(); }
     } else {
       // 仍在跑：刷新当前游戏信息
@@ -128,6 +124,8 @@ async function safeExists(name: string): Promise<boolean> {
 }
 
 async function refresh() {
+  if (busy.value) return;
+  const revision = overlayRevision;
   errMsg.value = '';
   // 并行异步加载所有数据（不串行等待，不阻塞渲染）
   const [rtssRes, monRes, limRes, fpsCfgRes, layRes, bootTaskRes, zoomRes, aeRes] = await Promise.allSettled([
@@ -142,7 +140,7 @@ async function refresh() {
   ]);
   // 逐项赋值（不阻塞 UI）
   if (rtssRes.status === 'fulfilled') rtssOn.value = rtssRes.value;
-  if (monRes.status === 'fulfilled') monOn.value = monRes.value;
+  if (!busy.value && revision === overlayRevision && monRes.status === 'fulfilled') monOn.value = monRes.value;
   if (fpsCfgRes.status === 'fulfilled' && fpsCfgRes.value != null) {
     const configured = fpsCfgRes.value;
     fps.value = configured > 0 ? configured : 90;
@@ -152,8 +150,11 @@ async function refresh() {
   }
   fpsCeiling.value = smallestFpsCeiling(fps.value);
   if (limRes.status === 'fulfilled') lockOn.value = limRes.value > 0;
-  if (layRes.status === 'fulfilled') {
-    overlay.value = layRes.value === 'YeManOBS-L-1.ovl' ? 'L' : layRes.value === 'YeManOBS-JJ-1.ovl' ? 'J' : 'W';
+  if (!busy.value && revision === overlayRevision && layRes.status === 'fulfilled') {
+    if (layRes.value === 'YeManOBS-L-1.ovl') overlay.value = 'L';
+    else if (layRes.value === 'YeManOBS-JJ-1.ovl') overlay.value = 'J';
+    else if (layRes.value === 'YeManOBS-W-1.ovl') overlay.value = 'W';
+    // Empty.ovl must not discard the last visible choice in this page.
   }
   if (bootTaskRes.status === 'fulfilled') tasks.bootRtss = bootTaskRes.value;
   if (aeRes.status === 'fulfilled') autoEnableMode.value = aeRes.value.autoEnable?.mode || 'never';
@@ -241,40 +242,40 @@ async function doToggleRtssOff() {
 }
 
 async function onOverlay(v: 'W' | 'L' | 'J') {
+  if (busy.value) return;
+  ++overlayRevision;
   errMsg.value = '';
-  // 切换布局会让 RTSS 重启 → 同样会让运行中的游戏闪退
-  if (await guardGameRunning('changeOverlay', v)) return;
-  await doSetOverlay(v);
-}
-
-async function doSetOverlay(v: 'W' | 'L' | 'J') {
+  busy.value = true;
   try {
+    const result = await setOverlayLayout(v);
     overlay.value = v;
-    await setOverlayLayout(v);
-    monitorHint.value = '监控样式已切换，RTSS 重启中（约 1~2 秒后生效）';
+    monOn.value = true; // Choosing a visible template also enables monitoring.
+    monitorHint.value = result.mode === 'live' ? '监控样式已完整切换，无需重启' : '监控样式已保存，将在 RTSS 启动后生效';
     setTimeout(() => (monitorHint.value = ''), 6000);
   } catch (e) {
     errMsg.value = '布局切换失败：' + (e as Error).message;
+  } finally {
+    busy.value = false;
   }
 }
 
 async function toggleMonitor() {
+  if (busy.value) return;
+  ++overlayRevision;
   errMsg.value = '';
-  // 开关监控也会重启 RTSS，运行中的游戏无法安全承受钩子卸载/重载。
-  const target = monOn.value ? 'off' : 'W';
-  if (await guardGameRunning('toggleMonitor', target)) return;
-  const wasOff = !monOn.value;
+  busy.value = true;
+  const enable = !monOn.value;
   try {
-    await setOverlayLayout(target);
-    monOn.value = !monOn.value;
-    if (wasOff && monOn.value) {
-      monitorHint.value = '监控数据已开启，需重启已开启的游戏才能显示监控';
-      setTimeout(() => (monitorHint.value = ''), 6000);
-    } else {
-      monitorHint.value = '';
-    }
+    const result = await setOverlayLayout(enable ? overlay.value : 'off');
+    monOn.value = enable;
+    monitorHint.value = result.mode === 'live'
+      ? (enable ? '监控数据已实时开启，无需重启' : '监控数据已实时关闭，无需重启')
+      : '监控状态已保存，将在 RTSS 启动后生效';
+    setTimeout(() => (monitorHint.value = ''), 6000);
   } catch (e) {
     errMsg.value = '监控切换失败：' + (e as Error).message;
+  } finally {
+    busy.value = false;
   }
 }
 
@@ -393,7 +394,7 @@ onUnmounted(() => {
       <div class="game-warn-text">
         <InlineIcon name="warning" />
         检测到游戏「<strong>{{ gameRunningWarn.game.name }}</strong>」正在运行（PID {{ gameRunningWarn.game.pid }}）。
-        当前操作会导致游戏闪退（停止 RTSS / 切换布局 / 复位）。请先关闭游戏，正在监控等待…
+        当前操作会导致游戏闪退（停止 RTSS / 复位）。请先关闭游戏，正在监控等待…
       </div>
       <button class="action-btn ghost" @click="cancelGameWatch">取消</button>
     </div>
@@ -473,7 +474,8 @@ onUnmounted(() => {
         @commit="onZoomCommit"
       />
       <SegButton
-        v-model="overlay"
+        :model-value="overlay"
+        :disabled="busy"
         :options="[
           { value: 'W', label: '横版监控' },
           { value: 'L', label: '竖版监控' },

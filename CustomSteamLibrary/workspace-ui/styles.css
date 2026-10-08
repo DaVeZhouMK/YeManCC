@@ -266,6 +266,7 @@
 .edit-form .edit-actions .button { flex:1 1 135px; }
 .artwork-pane-actions { display:none; }
 .game-card.selection-enabled:focus-visible { outline:3px solid #fff; outline-offset:3px; }
+.game-card.steam-id-pending { cursor:default; }
 @media (max-width:980px) {
   .library-menu-row { grid-template-columns:1fr; }
   .library-menu-row .steam-bar { justify-content:flex-start; }
@@ -523,22 +524,71 @@
   color:#e6aeb4;
 }
 
-/* Keep the editor usable on a 720p-height viewport without changing the
-   desktop proportions. The modal itself remains scrollable as a fallback. */
+/* Keep the library chrome compact on a 720p-height viewport. The editor no
+   longer needs overrides here: it scales as one proportional unit. */
 @media (max-height:760px) {
   .app-shell { padding-top:20px; padding-bottom:38px; }
   .library-heading { margin-bottom:9px; }
   .library-menu-row { top:6px; margin-top:9px; }
   .modal { padding:14px; }
-  .modal-card.edit-modal-card { max-height:96vh; padding:16px; }
-  .edit-layout { gap:14px; margin-top:12px; }
-  .edit-artwork-panel,
-  .edit-form { padding:12px; }
-  .edit-section-heading h3 { font-size:21px; }
-  .edit-artwork-panel .artwork-dropzone { min-height:250px; }
-  .edit-artwork-panel .artwork-dropzone img { height:250px; }
-  .edit-artwork-panel .artwork-pane[data-artwork-type="wallpaper"] .artwork-dropzone { min-height:160px; margin-top:50px; }
-  .edit-artwork-panel .artwork-pane[data-artwork-type="wallpaper"] .artwork-dropzone img { height:160px; }
+}
+
+/* Three editable artwork slots: a reduced portrait cover and its matching
+   landscape cover share the left column, while the wallpaper spans the
+   unchanged full board height on the right. */
+.edit-artwork-panel .artwork-panes {
+  grid-template-columns:minmax(133px, .238fr) minmax(0, 1fr);
+  grid-template-rows:minmax(170px, 1fr) minmax(100px, .54fr);
+  gap:10px;
+  align-items:stretch;
+}
+.edit-artwork-panel .artwork-pane[data-artwork-type="cover"] { grid-column:1; grid-row:1; }
+.edit-artwork-panel .artwork-pane[data-artwork-type="long"] { grid-column:1; grid-row:2; }
+.edit-artwork-panel .artwork-pane[data-artwork-type="wallpaper"] { grid-column:2; grid-row:1 / span 2; }
+.edit-artwork-panel .artwork-pane[data-artwork-type="cover"],
+.edit-artwork-panel .artwork-pane[data-artwork-type="long"],
+.edit-artwork-panel .artwork-pane[data-artwork-type="wallpaper"] {
+  display:grid;
+  grid-template-rows:auto minmax(0, 1fr);
+  min-height:0;
+}
+.edit-artwork-panel .artwork-pane[data-artwork-type="cover"] .artwork-dropzone,
+.edit-artwork-panel .artwork-pane[data-artwork-type="long"] .artwork-dropzone,
+.edit-artwork-panel .artwork-pane[data-artwork-type="wallpaper"] .artwork-dropzone {
+  width:100%;
+  height:100%;
+  min-height:0;
+  margin:0;
+}
+.edit-artwork-panel .artwork-pane[data-artwork-type="cover"] .artwork-dropzone img {
+  width:auto;
+  height:auto;
+  max-width:100%;
+  max-height:100%;
+  object-fit:contain;
+}
+.edit-artwork-panel .artwork-pane[data-artwork-type="long"] .artwork-dropzone img {
+  width:100%;
+  height:100%;
+  object-fit:cover;
+}
+.edit-artwork-panel .artwork-pane[data-artwork-type="wallpaper"] .artwork-dropzone img {
+  width:100%;
+  height:100%;
+  object-fit:contain;
+}
+.edit-artwork-panel .artwork-pane[data-artwork-type="wallpaper"] .artwork-dropzone {
+  border-style:solid;
+  border-color:rgba(101,216,255,.2);
+}
+@media (max-width:760px) {
+  .edit-artwork-panel .artwork-panes { grid-template-columns:minmax(0, 1fr); grid-template-rows:auto; }
+  .edit-artwork-panel .artwork-pane[data-artwork-type="cover"],
+  .edit-artwork-panel .artwork-pane[data-artwork-type="long"],
+  .edit-artwork-panel .artwork-pane[data-artwork-type="wallpaper"] { grid-column:1; grid-row:auto; }
+  .edit-artwork-panel .artwork-pane[data-artwork-type="cover"] .artwork-dropzone { min-height:260px; }
+  .edit-artwork-panel .artwork-pane[data-artwork-type="long"] .artwork-dropzone,
+  .edit-artwork-panel .artwork-pane[data-artwork-type="wallpaper"] .artwork-dropzone { min-height:180px; }
 }
 
 /* High-resolution displays: keep the 720P layout unchanged, but use the
@@ -721,27 +771,10 @@
   filter:brightness(.5) saturate(.55);
 }
 
-/* The editor is compacted only on the 720p-height target. `zoom` reduces the
-   visual footprint by 6%; the remaining vertical values keep the content
-   inside the viewport so the editor itself does not grow a scrollbar. */
-@media (max-height:760px) {
-  #edit-modal { padding:8px; overflow:hidden; }
-  #edit-modal .modal-card.edit-modal-card { width:min(1180px,calc(100vw - 16px)); max-height:calc(100vh - 16px); padding:13px; overflow:hidden; zoom:.94; }
-  #edit-modal .modal-heading h2 { font-size:22px; }
-  #edit-modal .edit-layout { gap:10px; margin-top:10px; }
-  #edit-modal .edit-artwork-panel,
-  #edit-modal .edit-form { padding:10px; }
-  #edit-modal .edit-section-heading { margin-bottom:8px; }
-  #edit-modal .edit-section-heading h3 { font-size:19px; }
-  #edit-modal .edit-artwork-panel .artwork-panes { gap:10px; }
-  #edit-modal .edit-artwork-panel .artwork-dropzone { min-height:230px; }
-  #edit-modal .edit-artwork-panel .artwork-dropzone img { height:230px; }
-  #edit-modal .edit-artwork-panel .artwork-pane[data-artwork-type="wallpaper"] .artwork-dropzone { min-height:140px; margin-top:38px; }
-  #edit-modal .edit-artwork-panel .artwork-pane[data-artwork-type="wallpaper"] .artwork-dropzone img { height:140px; }
-  #edit-modal .edit-form .field { margin-top:9px; }
-  #edit-modal .edit-form .form-help { margin-top:4px; }
-  #edit-modal .edit-form .modal-actions { margin-top:10px; }
-}
+/* The former 720p-height compaction block lived here. It is replaced by the
+   proportional editor scaling layer at the end of this file: the editor is now
+   one design box scaled by --edit-zoom, so short viewports need no pixel-level
+   overrides of their own. */
 
 /* Final editor artwork tuning: keep the cover high and give the wallpaper a
    real wide preview without reintroducing the 720p scrollbar. */
@@ -761,11 +794,6 @@
 .artwork-action-buttons .button { min-height:52px; font-size:16px; font-weight:850; }
 #artwork-action-modal { z-index:80; }
 @media (max-height:760px) {
-  #edit-modal .edit-artwork-panel .artwork-pane[data-artwork-type="cover"] { transform:translateY(-5px); }
-  #edit-modal .edit-artwork-panel .artwork-pane[data-artwork-type="cover"] .artwork-dropzone { min-height:250px; }
-  #edit-modal .edit-artwork-panel .artwork-pane[data-artwork-type="cover"] .artwork-dropzone img { height:250px; }
-  #edit-modal .edit-artwork-panel .artwork-pane[data-artwork-type="wallpaper"] .artwork-dropzone { min-height:210px; margin-top:0; }
-  #edit-modal .edit-artwork-panel .artwork-pane[data-artwork-type="wallpaper"] .artwork-dropzone img { height:210px; object-fit:cover; }
   .artwork-action-card { padding:18px; }
   .artwork-action-buttons { margin-top:12px; }
 }
@@ -880,54 +908,6 @@
     grid-template-columns:repeat(2,minmax(0,1fr));
   }
 }
-@media (max-height:760px) {
-  #edit-modal .modal-card.edit-modal-card {
-    zoom:.94;
-  }
-  #edit-modal .edit-layout {
-    gap:8px;
-    margin-top:8px;
-  }
-  #edit-modal .edit-artwork-panel {
-    padding:10px;
-  }
-  #edit-modal .edit-artwork-panel .artwork-panes {
-    grid-template-columns:minmax(190px,.72fr) minmax(0,1.8fr);
-    gap:8px;
-  }
-  #edit-modal .edit-artwork-panel .artwork-pane {
-    padding:8px;
-  }
-  #edit-modal .edit-artwork-panel .artwork-pane[data-artwork-type="cover"] .artwork-dropzone,
-  #edit-modal .edit-artwork-panel .artwork-pane[data-artwork-type="wallpaper"] .artwork-dropzone {
-    height:clamp(190px,30vh,250px);
-    min-height:190px;
-  }
-  #edit-modal .edit-form,
-  #edit-modal .edit-details-grid {
-    gap:8px;
-  }
-  #edit-modal .edit-detail-block {
-    padding:9px;
-  }
-  #edit-modal .edit-detail-block .field {
-    margin-top:7px;
-  }
-  #edit-modal .edit-detail-block .form-help {
-    margin-top:5px;
-  }
-  #edit-modal .edit-form .modal-actions.edit-actions {
-    gap:8px;
-    padding:8px;
-  }
-  #edit-modal .edit-artwork-panel .artwork-pane[data-artwork-type="cover"] .artwork-dropzone img,
-  #edit-modal .edit-artwork-panel .artwork-pane[data-artwork-type="wallpaper"] .artwork-dropzone img {
-    height:100%;
-  }
-  #edit-modal .edit-form .edit-actions .button {
-    min-height:42px;
-  }
-}
 
 /* Compact editor polish: the artwork heading is descriptive metadata rather
    than a control, so keep it available to the section label but reclaim its
@@ -975,59 +955,6 @@
 .edit-identity-block .identity-name-row .workspace-dropdown-trigger {
   min-width:0;
 }
-@media (max-height:760px) {
-  #edit-modal .modal-card.edit-modal-card {
-    padding:10px;
-  }
-  #edit-modal .modal-heading h2 {
-    font-size:21px;
-  }
-  #edit-modal .edit-layout {
-    gap:7px;
-    margin-top:6px;
-  }
-  #edit-modal .edit-artwork-panel {
-    padding:8px;
-  }
-  #edit-modal .edit-artwork-panel .artwork-panes {
-    gap:7px;
-  }
-  #edit-modal .edit-artwork-panel .artwork-pane {
-    padding:7px;
-  }
-  #edit-modal .edit-artwork-panel .artwork-pane[data-artwork-type="cover"] .artwork-dropzone,
-  #edit-modal .edit-artwork-panel .artwork-pane[data-artwork-type="wallpaper"] .artwork-dropzone {
-    height:clamp(175px,27vh,225px);
-    min-height:175px;
-  }
-  #edit-modal .edit-form,
-  #edit-modal .edit-details-grid {
-    gap:7px;
-  }
-  #edit-modal .edit-detail-block {
-    padding:8px;
-  }
-  #edit-modal .edit-identity-block .game-action-summary {
-    min-height:38px;
-    padding:6px 8px;
-  }
-  #edit-modal .edit-detail-block .field {
-    margin-top:6px;
-    gap:4px;
-  }
-  #edit-modal .edit-detail-block .form-help {
-    margin-top:4px;
-  }
-  #edit-modal .edit-form .modal-actions.edit-actions {
-    gap:7px;
-    padding:7px;
-  }
-  #edit-modal .edit-form .edit-actions .button {
-    min-height:38px;
-    padding-block:6px;
-  }
-}
-
 /* Final editor alignment: verification sits beside the title, not inside
    the lower identity bubble. Keep the two information bubbles at 3:7. */
 .edit-modal-card .modal-heading {
@@ -1074,20 +1001,106 @@
   max-height:100%;
   object-fit:contain;
 }
-@media (max-height:760px) {
-  #edit-modal .edit-artwork-panel .artwork-panes {
-    --artwork-preview-height:clamp(175px,27vh,225px);
-  }
-  #edit-modal .edit-heading-status {
-    min-width:210px;
-    padding:5px 8px;
-  }
-}
 @media (max-width:700px) {
   .edit-heading-status {
     min-width:0;
     max-width:52%;
   }
+}
+
+/* The internal wallpaper slot remains for host compatibility, but this editor
+   now presents it as Steam's horizontal Big Picture cover below the portrait. */
+.edit-artwork-panel .edit-section-heading { display:flex; }
+.edit-artwork-panel .artwork-panes {
+  grid-template-columns:minmax(0, 1fr);
+  gap:14px;
+  align-items:start;
+}
+.edit-artwork-panel .artwork-pane[data-artwork-type="cover"] .artwork-dropzone {
+  width:min(100%, 230px);
+  height:clamp(250px, 34vh, 340px);
+  min-height:0;
+  margin-inline:auto;
+}
+.edit-artwork-panel .artwork-pane[data-artwork-type="wallpaper"] .artwork-dropzone {
+  width:100%;
+  height:auto;
+  min-height:0;
+  aspect-ratio:2.15 / 1;
+}
+.edit-artwork-panel .artwork-pane[data-artwork-type="cover"] .artwork-dropzone img {
+  width:100%;
+  height:100%;
+  object-fit:contain;
+}
+.edit-artwork-panel .artwork-pane[data-artwork-type="wallpaper"] .artwork-dropzone img {
+  width:100%;
+  height:100%;
+  object-fit:cover;
+}
+
+/* Editor artwork board: keep the compact two-column relationship used by the
+   original workspace, with the portrait and landscape assets stacked on the
+   left and the wallpaper visible on the right. */
+.edit-artwork-panel .artwork-panes {
+  grid-template-columns:minmax(190px, .34fr) minmax(0, 1fr);
+  grid-template-rows:minmax(230px, 1fr) minmax(135px, .52fr);
+  gap:10px;
+  align-items:stretch;
+}
+.edit-artwork-panel .artwork-pane[data-artwork-type="cover"] { grid-column:1; grid-row:1; }
+.edit-artwork-panel .artwork-pane[data-artwork-type="wallpaper"] { grid-column:1; grid-row:2; }
+.edit-artwork-panel .artwork-pane[data-artwork-type="hero"] { grid-column:2; grid-row:1 / span 2; }
+.edit-artwork-panel .artwork-pane[data-artwork-type="cover"],
+.edit-artwork-panel .artwork-pane[data-artwork-type="wallpaper"],
+.edit-artwork-panel .artwork-pane[data-artwork-type="hero"] {
+  display:grid;
+  grid-template-rows:auto minmax(0, 1fr);
+  min-height:0;
+}
+.edit-artwork-panel .artwork-pane[data-artwork-type="cover"] .artwork-dropzone,
+.edit-artwork-panel .artwork-pane[data-artwork-type="wallpaper"] .artwork-dropzone,
+.edit-artwork-panel .artwork-pane[data-artwork-type="hero"] .artwork-dropzone {
+  width:100%;
+  height:100%;
+  min-height:0;
+  margin:0;
+}
+.edit-artwork-panel .artwork-pane[data-artwork-type="cover"] .artwork-dropzone img {
+  width:auto;
+  height:auto;
+  max-width:100%;
+  max-height:100%;
+  object-fit:contain;
+}
+.edit-artwork-panel .artwork-pane[data-artwork-type="wallpaper"] .artwork-dropzone img {
+  width:100%;
+  height:100%;
+  object-fit:cover;
+}
+.edit-artwork-panel .artwork-pane[data-artwork-type="hero"] .artwork-dropzone img {
+  width:100%;
+  height:100%;
+  object-fit:contain;
+}
+.edit-artwork-panel .artwork-pane[data-artwork-type="hero"] .artwork-dropzone {
+  border-style:solid;
+  border-color:rgba(101,216,255,.2);
+}
+@media (max-width:760px) {
+  .edit-artwork-panel .artwork-panes {
+    grid-template-columns:minmax(0, 1fr);
+    grid-template-rows:auto;
+  }
+  .edit-artwork-panel .artwork-pane[data-artwork-type="cover"],
+  .edit-artwork-panel .artwork-pane[data-artwork-type="wallpaper"],
+  .edit-artwork-panel .artwork-pane[data-artwork-type="hero"] {
+    grid-column:1;
+    grid-row:auto;
+  }
+  .edit-artwork-panel .artwork-pane[data-artwork-type="cover"] .artwork-dropzone { min-height:260px; }
+  .edit-artwork-panel .artwork-pane[data-artwork-type="wallpaper"] .artwork-dropzone,
+  .edit-artwork-panel .artwork-pane[data-artwork-type="hero"] .artwork-dropzone { min-height:180px; }
 }
 
 /* Editor text hierarchy: keep only the actionable status badge beside the
@@ -1126,20 +1139,59 @@
 .edit-modal-card #edit-primary-current {
   display:none;
 }
-@media (max-height:760px) {
-  #edit-modal .edit-title-group h2,
-  #edit-modal .edit-modal-card #edit-title {
-    font-size:26px;
-  }
-  #edit-modal .edit-modal-card #edit-path {
-    margin-top:5px;
-    font-size:12px;
-  }
-  #edit-modal .edit-modal-card .edit-heading-status {
-    margin-top:18px;
-  }
-  #edit-modal .edit-modal-card .edit-heading-status #edit-status {
-    padding:6px 11px;
-    font-size:15px;
-  }
+/* Final editor artwork geometry.  These rules follow legacy editor styles
+   so the three editable slots retain the intended proportions. */
+.edit-artwork-panel .artwork-panes {
+  grid-template-columns:minmax(133px, .238fr) minmax(0, 1fr);
+  grid-template-rows:minmax(170px, 1fr) minmax(100px, .54fr);
+  gap:10px;
+  align-items:stretch;
+}
+.edit-artwork-panel .artwork-pane[data-artwork-type="cover"] { grid-column:1; grid-row:1; }
+.edit-artwork-panel .artwork-pane[data-artwork-type="long"] { grid-column:1; grid-row:2; }
+.edit-artwork-panel .artwork-pane[data-artwork-type="wallpaper"] { grid-column:2; grid-row:1 / span 2; }
+.edit-artwork-panel .artwork-pane[data-artwork-type="cover"],
+.edit-artwork-panel .artwork-pane[data-artwork-type="long"],
+.edit-artwork-panel .artwork-pane[data-artwork-type="wallpaper"] { display:grid; grid-template-rows:auto minmax(0, 1fr); min-height:0; }
+.edit-artwork-panel .artwork-pane[data-artwork-type="cover"] .artwork-dropzone,
+.edit-artwork-panel .artwork-pane[data-artwork-type="long"] .artwork-dropzone,
+.edit-artwork-panel .artwork-pane[data-artwork-type="wallpaper"] .artwork-dropzone { width:100%; height:100%; min-height:0; margin:0; }
+.edit-artwork-panel .artwork-pane[data-artwork-type="cover"] .artwork-dropzone img { width:auto; height:auto; max-width:100%; max-height:100%; object-fit:contain; }
+.edit-artwork-panel .artwork-pane[data-artwork-type="long"] .artwork-dropzone img { width:100%; height:100%; object-fit:cover; }
+.edit-artwork-panel .artwork-pane[data-artwork-type="wallpaper"] .artwork-dropzone img { width:100%; height:100%; object-fit:contain; }
+.edit-artwork-panel .artwork-pane[data-artwork-type="wallpaper"] .artwork-dropzone { border-style:solid; border-color:rgba(101,216,255,.2); }
+@media (max-width:760px) {
+  .edit-artwork-panel .artwork-panes { grid-template-columns:minmax(0, 1fr); grid-template-rows:auto; }
+  .edit-artwork-panel .artwork-pane[data-artwork-type="cover"],
+  .edit-artwork-panel .artwork-pane[data-artwork-type="long"],
+  .edit-artwork-panel .artwork-pane[data-artwork-type="wallpaper"] { grid-column:1; grid-row:auto; }
+  .edit-artwork-panel .artwork-pane[data-artwork-type="cover"] .artwork-dropzone { min-height:260px; }
+  .edit-artwork-panel .artwork-pane[data-artwork-type="long"] .artwork-dropzone,
+  .edit-artwork-panel .artwork-pane[data-artwork-type="wallpaper"] .artwork-dropzone { min-height:180px; }
+}
+
+/* Editor proportional scaling, replacing the former per-breakpoint compaction.
+   The editor is one fixed design box: 840px tall, which is 94% of the 894px
+   WebView viewport measured on a 1080p host window (1040px work area - 100px
+   host margin - 46px titlebar). app.js publishes viewport/894 as --edit-zoom,
+   so 1080p renders 1:1 and a 1280x720 host (574px viewport) renders at 0.64:
+   type, spacing and artwork keep the same physical proportions at both sizes
+   and the editor never grows a scrollbar. Rows inside the fixed box stay
+   elastic, so a wrapped game title or EXE path shrinks the artwork previews
+   instead of overflowing the modal. */
+.modal-card.edit-modal-card {
+  display:grid;
+  grid-template-rows:auto auto minmax(0,1fr);
+  height:840px;
+  max-height:840px;
+  zoom:var(--edit-zoom,1);
+}
+.edit-layout {
+  grid-template-rows:minmax(0,1fr) auto;
+  min-height:0;
+}
+.edit-artwork-panel {
+  display:grid;
+  grid-template-rows:auto minmax(0,1fr) auto;
+  min-height:0;
 }

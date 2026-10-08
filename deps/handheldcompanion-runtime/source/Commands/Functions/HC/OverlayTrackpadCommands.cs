@@ -1,0 +1,53 @@
+﻿using System;
+
+namespace HandheldCompanion.Commands.Functions.HC
+{
+    [Serializable]
+    public class OverlayTrackpadCommands : FunctionCommands
+    {
+        public OverlayTrackpadCommands()
+        {
+            base.Name = Properties.Resources.Hotkey_overlayTrackpads;
+            base.Description = Properties.Resources.Hotkey_overlayTrackpadsDesc;
+            base.Glyph = "\uEDA4";
+            base.OnKeyUp = true;
+
+            App.overlayTrackpad.IsVisibleChanged += IsVisibleChanged;
+        }
+
+        private void IsVisibleChanged(object sender, System.Windows.DependencyPropertyChangedEventArgs e)
+        {
+            base.Execute(OnKeyDown, OnKeyUp, true);
+        }
+
+        public override void Execute(bool IsKeyDown, bool IsKeyUp, bool IsBackground)
+        {
+            App.overlayTrackpad.ToggleVisibility();
+
+            base.Execute(IsKeyDown, IsKeyUp, false);
+        }
+
+        public override bool IsToggled => App.overlayTrackpad.Visibility == System.Windows.Visibility.Visible;
+
+        public override object Clone()
+        {
+            OverlayTrackpadCommands commands = new()
+            {
+                commandType = this.commandType,
+                Name = this.Name,
+                Description = this.Description,
+                Glyph = this.Glyph,
+                OnKeyUp = this.OnKeyUp,
+                OnKeyDown = this.OnKeyDown
+            };
+
+            return commands;
+        }
+
+        public override void Dispose()
+        {
+            App.overlayTrackpad.IsVisibleChanged -= IsVisibleChanged;
+            base.Dispose();
+        }
+    }
+}

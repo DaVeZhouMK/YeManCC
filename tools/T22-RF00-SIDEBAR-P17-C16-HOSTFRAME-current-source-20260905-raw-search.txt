@@ -1,0 +1,445 @@
+## YMCC native input/host telemetry
+4840-}
+4841-
+4842:static Microsoft::WRL::ComPtr<ISensor> inputCaptureFirstSensor(REFSENSOR_TYPE_ID type) {
+4843-    Microsoft::WRL::ComPtr<ISensor> sensor;
+4844-    if (!g_sensorManager) return sensor;
+--
+4908-static GmGetSpace g_gmWorld = nullptr;
+4909-static void* g_gm = nullptr;
+4910:static GmProcess g_gmProcess = nullptr;
+4911-static GmGet3 g_gmGetCal = nullptr;
+4912-static GmGetOffset g_gmGetOffset = nullptr;
+--
+4935-    g_gmResetCal = (GmStartCal)GetProcAddress(g_gmDll, "ResetContinuousCalibration");
+4936-    g_gmSetOffset = (GmSetOffset)GetProcAddress(g_gmDll, "SetCalibrationOffset");
+4937:    g_gmProcess = (GmProcess)GetProcAddress(g_gmDll, "ProcessMotion");
+4938-    g_gmGetCal = (GmGet3)GetProcAddress(g_gmDll, "GetCalibratedGyro");
+4939-    g_gmPlayer = (GmGetSpace)GetProcAddress(g_gmDll, "GetPlayerSpaceGyro");
+--
+4942-    g_gmGetConf = (GmGetConf)GetProcAddress(g_gmDll, "GetAutoCalibrationConfidence");
+4943-    g_gmIsSteady = (GmIsSteady)GetProcAddress(g_gmDll, "GetAutoCalibrationIsSteady");
+4944:    if (!create || !g_gmProcess || !g_gmGetCal || !g_gmSetMode || !g_gmResetCal || !g_gmSetOffset || !g_gmGetOffset) {
+4945:        FreeLibrary(g_gmDll); g_gmDll = nullptr; g_gmProcess = nullptr; return;
+4946-    }
+4947-    g_gm = create();
+--
+5163-    for (const auto& id : cycle) hidHideCycleInstance(id);
+5164-}
+5165:static void hidHideLegacyUnadmittedGamingScan() {
+5166-    wchar_t module[MAX_PATH]{};
+5167-    GetModuleFileNameW(nullptr, module, MAX_PATH);
+--
+5239-    for (const auto& id : unique) hidHideCycleInstance(id);
+5240-}
+5241:static bool inputHostWrite(const json& rec) {
+5242-    if (g_inputHostStatePath.empty()) return false;
+5243-    const std::wstring tmp = g_inputHostStatePath + L".tmp";
+--
+5257-        // this is not a release proof; it only preserves the required local
+5258-        // ordering before any physical visibility restore.
+5259:        inputHostWrite({{"alive", false}, {"neutral", true}});
+5260-    }
+5261-    if (g_inputHostProcess) {
+--
+5280-    if (GetFileAttributesW(exe.c_str()) == INVALID_FILE_ATTRIBUTES) return;
+5281-    g_inputHostStatePath = app_data_dir() + L"\\input-host-state.json";
+5282:    inputHostWrite({{"alive", true}, {"neutral", true}, {"buttons", 0}, {"lx", 0}, {"ly", 0}, {"rx", 0}, {"ry", 0}, {"lt", 0}, {"rt", 0}});
+5283-    std::wstring cmd = L"\"" + exe + L"\" --state \"" + g_inputHostStatePath + L"\" --persona dualshock4";
+5284-    STARTUPINFOW si{}; si.cb = sizeof(si); si.dwFlags = STARTF_USESHOWWINDOW; si.wShowWindow = SW_HIDE;
+--
+5299-    // auditable snapshot/diff, or a restore transaction. It cannot prove
+5300-    // anything about the ROG XboxGip/XInput plane.
+5301:    writeLog("INFO", "hidhide.p-hid-deferred status=unadmitted reason=T13-not-ready");
+5302-}
+5303-static short inputHostClampShort(double v) {
+--
+5317-    return posAbs;
+5318-}
+5319:static json inputHostSubmitPad(const XINPUT_GAMEPAD& pad, double cgx, double cgy, double cgz, float psx, float psy, float wsx, float wsy, bool steady, bool calLocked) {
+5320-    if (!g_inputHostProcess) {
+5321-        return {
+--
+5360-    // This is a native state-file write receipt only. It proves neither that
+5361-    // InputHost consumed the file nor that a HID/game consumer observed it.
+5362:    const bool stateWrite = inputHostWrite(state);
+5363-    return {
+5364-        {"stateWrite", stateWrite ? "written" : "write-failed"},
+--
+5380-}
+5381-
+5382:static void inputCaptureStop() {
+5383-    g_inputCaptureStop.store(true, std::memory_order_release);
+5384-    if (g_inputCaptureThread) {
+--
+5409-    }
+5410-    (void)CoCreateInstance(CLSID_SensorManager, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&g_sensorManager));
+5411:    g_gyroSensor = inputCaptureFirstSensor(SENSOR_TYPE_GYROMETER_3D);
+5412:    g_accelSensor = inputCaptureFirstSensor(SENSOR_TYPE_ACCELEROMETER_3D);
+5413-    if (!g_inputCaptureSink) g_inputCaptureSink = new InputCaptureSensorSink();
+5414-    g_inputCaptureSink->ResetSamples();
+--
+5457-    // YMCC has no HC-equivalent physical calibration identity/key yet, so this
+5458-    // fixed default must not be claimed as complete HC threshold parity.
+5459:    auto hcClip = [](double v) { return fabs(v) >= 2000.0 ? 0.0 : v; };
+5460:    gx = hcClip(gx); gy = hcClip(gy); gz = hcClip(gz);
+5461-    double mgx = gx, mgy = gy, mgz = gz, maxa = ax, may = ay, maz = az;
+5462-    // HC selects its matrix from the SMBIOS-backed current device class.
+--
+5475-    // values by guesswork: missing proof is SAFE_STOP for GamepadMotion and
+5476-    // virtual gyro output. Physical buttons/sticks remain forwarded below.
+5477:    const bool pairProven = false;
+5478:    if (g_gm && gyro && accel && !pairProven && !g_gmPairUnprovenLogged) {
+5479-        g_gmPairUnprovenLogged = true;
+5480-        inputCaptureAppend({
+--
+5484-        });
+5485-    }
+5486:    if (g_gm && g_gmProcess && g_gmGetCal && gyro && accel && pairProven) {
+5487-        float dt = 0.016f;
+5488-        if (g_gmLastTick != 0 && now > g_gmLastTick) dt = (float)(now - g_gmLastTick) / 1000.0f;
+--
+5490-        if (dt > 0.1f) dt = 0.1f;
+5491-        g_gmLastTick = now;
+5492:        g_gmProcess(g_gm, (float)mgx, (float)mgy, (float)mgz, (float)maxa, (float)may, (float)maz, dt);
+5493-        float cx=0, cy=0, cz=0;
+5494-        g_gmGetCal(g_gm, &cx, &cy, &cz);
+--
+5573-    };
+5574-    inputCaptureAppend(rec);
+5575:    // pairProven and calibration lock are both required before motion is
+5576-    // admitted to the direct HIDMaestro GyroDps path. Keep the raw and mapped
+5577-    // values in capture telemetry for diagnosis, but fail closed for the Host
+5578-    // state-file so unpaired/uncalibrated samples cannot bypass the virtual-
+5579-    // stick safe-zero gate.
+5580:    const bool gyroSubmitAllowed = pairProven && g_gmLocked;
+5581:    const json hostFrame = inputHostSubmitPad(
+5582-        pad,
+5583-        gyroSubmitAllowed ? cgx : 0.0,
+--
+5599-            // `output` is the exact normalized right-stick value written by
+5600-            // native into the state-file, not a HID or consumer readback.
+5601:            {"output", hostFrame.value("rightStick", json{{"x", 0.0}, {"y", 0.0}})},
+5602:            {"outputKind", "native-state-file-frame"},
+5603:            {"hostFrame", hostFrame}
+5604-        });
+5605-    }
+--
+20208-    case WM_DESTROY:
+20209-            rogEnsureXboxFaceEnabled("destroy");
+20210:            inputCaptureStop();
+20211-            appendNativeLifecycleLog("window-destroy", {{"exitRequested", g_exitRequested.load()}});
+20212-        // 正常退出时恢复当前游戏原始的 CPU Set/亲和性；异常强退无法保证
+
+## YMCC UI event and display chain
+src/bridge/inputContracts.ts-30-  // a HID, Steam, or game-consumer observation.
+src/bridge/inputContracts.ts-31-  outputKind: 'unknown' | 'native-state-file-frame';
+src/bridge/inputContracts.ts:32:  hostFrame?: {
+src/bridge/inputContracts.ts:33:    stateWrite: 'not-running' | 'write-failed' | 'written';
+src/bridge/inputContracts.ts-34-    persona: string;
+src/bridge/inputContracts.ts-35-    rightStick: { x: number; y: number };
+--
+src/bridge/inputContracts.ts-60-export function normalizeGyroTelemetry(value: unknown): GyroTelemetryV1 | null {
+src/bridge/inputContracts.ts-61-  if (!value || typeof value !== 'object') return null;
+src/bridge/inputContracts.ts:62:  const raw = value as { gyro?: Record<string, unknown>; playerSpace?: Record<string, unknown>; worldSpace?: Record<string, unknown>; accel?: Record<string, unknown>; output?: Record<string, unknown>; outputKind?: unknown; hostFrame?: Record<string, unknown>; sequence?: unknown; timestampUtc?: unknown; timestamp?: unknown };
+src/bridge/inputContracts.ts-63-  if (!raw.gyro && !raw.output) return null;
+src/bridge/inputContracts.ts-64-  const finite = (input: unknown): number => {
+--
+src/bridge/inputContracts.ts-70-  const timestamp = typeof raw.timestampUtc === 'string' ? raw.timestampUtc : typeof raw.timestamp === 'string' ? raw.timestamp : new Date().toISOString();
+src/bridge/inputContracts.ts-71-  const space = (input: Record<string, unknown> | undefined) => input ? { x: finite(input.x), y: finite(input.y) } : undefined;
+src/bridge/inputContracts.ts:72:  const hostState = raw.hostFrame?.stateWrite;
+src/bridge/inputContracts.ts:73:  const stateWrite: 'not-running' | 'write-failed' | 'written' | null =
+src/bridge/inputContracts.ts-74-    hostState === 'not-running' || hostState === 'write-failed' || hostState === 'written' ? hostState : null;
+src/bridge/inputContracts.ts:75:  const hostFrame = stateWrite
+src/bridge/inputContracts.ts-76-    ? {
+src/bridge/inputContracts.ts:77:        stateWrite,
+src/bridge/inputContracts.ts:78:        persona: typeof raw.hostFrame?.persona === 'string' ? raw.hostFrame.persona : 'unknown',
+src/bridge/inputContracts.ts:79:        rightStick: { x: clampUnit((raw.hostFrame?.rightStick as Record<string, unknown> | undefined)?.x), y: clampUnit((raw.hostFrame?.rightStick as Record<string, unknown> | undefined)?.y) },
+src/bridge/inputContracts.ts:80:        gyroDps: { x: finite((raw.hostFrame?.gyroDps as Record<string, unknown> | undefined)?.x), y: finite((raw.hostFrame?.gyroDps as Record<string, unknown> | undefined)?.y), z: finite((raw.hostFrame?.gyroDps as Record<string, unknown> | undefined)?.z) },
+src/bridge/inputContracts.ts-81-      }
+src/bridge/inputContracts.ts-82-    : undefined;
+src/bridge/inputContracts.ts:83:  return { schemaVersion: 1, sequence, timestampUtc: timestamp, gyro: { x: finite(raw.gyro?.x), y: finite(raw.gyro?.y), z: finite(raw.gyro?.z) }, playerSpace: space(raw.playerSpace as Record<string, unknown> | undefined), worldSpace: space(raw.worldSpace as Record<string, unknown> | undefined), accel: raw.accel ? { x: finite(raw.accel.x), y: finite(raw.accel.y), z: finite(raw.accel.z) } : undefined, output: { x: clampUnit(raw.output?.x), y: clampUnit(raw.output?.y) }, outputKind: raw.outputKind === 'native-state-file-frame' ? 'native-state-file-frame' : 'unknown', hostFrame };
+src/bridge/inputContracts.ts-84-}
+src/bridge/inputContracts.ts-85-
+--
+src/views/GyroMotionView.vue-8-import { compareAndSwapInputSettings, loadSettings, type InputSettingsSnapshot } from '@/bridge/settingsRepository';
+src/views/GyroMotionView.vue-9-import { normalizeGyroTelemetry } from '@/bridge/inputContracts';
+src/views/GyroMotionView.vue:10:import { mapGyroSample } from '@/bridge/gyroMotionMapperMock';
+src/views/GyroMotionView.vue:11:import { assembleCanonicalFrame } from '@/bridge/virtualReportAssembler';
+src/views/GyroMotionView.vue-12-
+src/views/GyroMotionView.vue-13-const snapshot = ref<InputSettingsSnapshot | null>(null);
+--
+src/views/GyroMotionView.vue-45-const sampleTimestamp = ref<string | null>(null);
+src/views/GyroMotionView.vue-46-const gyroAxes = ref({ x: 0, y: 0, z: 0 });
+src/views/GyroMotionView.vue:47:const hostOutputAxes = ref({ x: 0, y: 0 });
+src/views/GyroMotionView.vue:48:const hostFrameState = ref<'not-running' | 'write-failed' | 'written' | 'unavailable'>('unavailable');
+src/views/GyroMotionView.vue-49-const outputAxes = ref({ x: 0, y: 0 });
+src/views/GyroMotionView.vue-50-
+--
+src/views/GyroMotionView.vue-109-  if (sampleSequence.value === detail.sequence && sampleTimestamp.value === detail.timestampUtc) return;
+src/views/GyroMotionView.vue-110-  gyroAxes.value = detail.gyro;
+src/views/GyroMotionView.vue:111:  hostOutputAxes.value = detail.hostFrame?.rightStick ?? { x: 0, y: 0 };
+src/views/GyroMotionView.vue:112:  hostFrameState.value = detail.hostFrame?.stateWrite ?? 'unavailable';
+src/views/GyroMotionView.vue:113:  const preview = mapGyroSample(
+src/views/GyroMotionView.vue-114-    { runId: 'ui-preview', epoch: 1, powerGeneration: 1, targetId: 'preview', configRevision: 1 },
+src/views/GyroMotionView.vue-115-    {
+--
+src/views/GyroMotionView.vue-129-  let stick = { x: 0, y: 0 };
+src/views/GyroMotionView.vue-130-  if (preview.ok) {
+src/views/GyroMotionView.vue:131:    const assembled = assembleCanonicalFrame({
+src/views/GyroMotionView.vue-132-      runId: 'ui-preview', epoch: 1, powerGeneration: 1, targetId: 'preview', persona: 'xbox360', configRevision: 1,
+src/views/GyroMotionView.vue-133-      inputSequence: detail.sequence, timestamp: 0, buttons: 0, axes: {}, triggers: {}, rightStick: { x: 0, y: 0 },
+--
+src/views/GyroMotionView.vue-149-});
+src/views/GyroMotionView.vue-150-const hostLiveDot = computed(() => ({
+src/views/GyroMotionView.vue:151:  left: `${50 + hostOutputAxes.value.x * 38}%`,
+src/views/GyroMotionView.vue:152:  top: `${50 - hostOutputAxes.value.y * 38}%`,
+src/views/GyroMotionView.vue-153-}));
+src/views/GyroMotionView.vue-154-const previewLiveDot = computed(() => ({
+--
+src/views/GyroMotionView.vue-156-  top: outputAxis.value === 'x' ? '50%' : `${50 - outputAxes.value.y * 38}%`,
+src/views/GyroMotionView.vue-157-}));
+src/views/GyroMotionView.vue:158:const hostFrameHint = computed(() => {
+src/views/GyroMotionView.vue:159:  if (hostFrameState.value === 'written') return '已写入 InputHost 状态文件；尚无 Host、HID 或游戏回读。';
+src/views/GyroMotionView.vue:160:  if (hostFrameState.value === 'write-failed') return 'InputHost 状态文件写入失败；未提交帧。';
+src/views/GyroMotionView.vue:161:  if (hostFrameState.value === 'not-running') return 'InputHost 未运行；没有可提交的 Host 帧。';
+src/views/GyroMotionView.vue-162-  return '尚未收到 native Host 帧 telemetry。';
+src/views/GyroMotionView.vue-163-});
+--
+src/views/GyroMotionView.vue-262-], () => queueSave());
+src/views/GyroMotionView.vue-263-onMounted(() => {
+src/views/GyroMotionView.vue:264:  window.addEventListener('input:motion-telemetry', telemetry);
+src/views/GyroMotionView.vue:265:  window.addEventListener('ipc:gyro.telemetry', telemetry);
+src/views/GyroMotionView.vue-266-  void load().catch((error) => { status.value = `读取失败：${(error as Error).message}`; });
+src/views/GyroMotionView.vue-267-});
+src/views/GyroMotionView.vue-268-onBeforeUnmount(() => {
+src/views/GyroMotionView.vue-269-  if (saveTimer) window.clearTimeout(saveTimer);
+src/views/GyroMotionView.vue:270:  window.removeEventListener('input:motion-telemetry', telemetry);
+src/views/GyroMotionView.vue:271:  window.removeEventListener('ipc:gyro.telemetry', telemetry);
+src/views/GyroMotionView.vue-272-});
+src/views/GyroMotionView.vue-273-</script>
+--
+src/views/GyroMotionView.vue-295-          <span class="axis-tag tag-y">Y</span>
+src/views/GyroMotionView.vue-296-          <span class="axis-tag tag-z">Z</span>
+src/views/GyroMotionView.vue:297:          <b class="dot host-dot" :class="{ inactive: hostFrameState !== 'written' }" :style="hostLiveDot" aria-label="native InputHost 状态帧"></b>
+src/views/GyroMotionView.vue-298-          <b class="dot preview-dot" :style="previewLiveDot" aria-label="本地模拟预览"></b>
+src/views/GyroMotionView.vue-299-        </div>
+--
+src/views/GyroMotionView.vue-302-          <div class="chip"><span>Y</span><b>{{ gyroAxes.y.toFixed(1) }}</b></div>
+src/views/GyroMotionView.vue-303-          <div class="chip"><span>Z</span><b>{{ gyroAxes.z.toFixed(1) }}</b></div>
+src/views/GyroMotionView.vue:304:          <p class="telemetry-label"><i class="legend-dot host-legend"></i>Host 状态帧 RX {{ hostOutputAxes.x.toFixed(3) }} / RY {{ hostOutputAxes.y.toFixed(3) }}</p>
+src/views/GyroMotionView.vue-305-          <p class="telemetry-label"><i class="legend-dot preview-legend"></i>本地模拟预览（不写入设备）</p>
+src/views/GyroMotionView.vue:306:          <p class="host-frame-hint">{{ hostFrameHint }}</p>
+src/views/GyroMotionView.vue-307-        </div>
+src/views/GyroMotionView.vue-308-      </div>
+--
+src/App.vue-1177-  window.addEventListener('ipc:gamepad.mouse-toggle', onGamepadMouseToggle as EventListener);
+src/App.vue-1178-  stopGamepad = startGamepad({ router, onAction: (l) => store.pushGamepad(l) });
+src/App.vue:1179:  stopGyroTelemetry = on('gyro.telemetry', (data) => {
+src/App.vue:1180:    window.dispatchEvent(new CustomEvent('input:motion-telemetry', { detail: data }));
+src/App.vue-1181-  });
+src/App.vue-1182-
+
+## HC lifecycle/motion authority
+HandheldCompanion/Managers/SensorsManager.cs-326-
+HandheldCompanion/Managers/SensorsManager.cs-327-            // process motion
+HandheldCompanion/Managers/SensorsManager.cs:328:            gamepadMotion.ProcessMotion(gyro.X, gyro.Y, gyro.Z, accel.X, accel.Y, accel.Z, delta);
+HandheldCompanion/Managers/SensorsManager.cs-329-        }
+HandheldCompanion/Managers/SensorsManager.cs-330-
+--
+HandheldCompanion/Managers/SensorsManager.cs-403-
+HandheldCompanion/Managers/SensorsManager.cs-404-        Close:
+HandheldCompanion/Managers/SensorsManager.cs:405:            dialog.Hide();
+HandheldCompanion/Managers/SensorsManager.cs-406-        }
+HandheldCompanion/Managers/SensorsManager.cs-407-    }
+--
+HandheldCompanion/Controllers/IController.cs-243-        }
+HandheldCompanion/Controllers/IController.cs-244-
+HandheldCompanion/Controllers/IController.cs:245:        public virtual bool IsGaming()
+HandheldCompanion/Controllers/IController.cs-246-        {
+HandheldCompanion/Controllers/IController.cs-247-            if (Details is not null)
+--
+HandheldCompanion/Controllers/IController.cs-473-                            }
+HandheldCompanion/Controllers/IController.cs-474-
+HandheldCompanion/Controllers/IController.cs:475:                            currentCts.Dispose();
+HandheldCompanion/Controllers/IController.cs-476-                        }
+HandheldCompanion/Controllers/IController.cs-477-                    }
+--
+HandheldCompanion/Controllers/IController.cs-502-            }
+HandheldCompanion/Controllers/IController.cs-503-
+HandheldCompanion/Controllers/IController.cs:504:            try { cts?.Dispose(); }
+HandheldCompanion/Controllers/IController.cs-505-            catch { }
+HandheldCompanion/Controllers/IController.cs-506-
+--
+HandheldCompanion/Controllers/IController.cs-534-        }
+HandheldCompanion/Controllers/IController.cs-535-
+HandheldCompanion/Controllers/IController.cs:536:        public virtual void Hide(bool powerCycle = true)
+HandheldCompanion/Controllers/IController.cs-537-        {
+HandheldCompanion/Controllers/IController.cs-538-            HideHID();
+--
+HandheldCompanion/Controllers/IController.cs-545-        }
+HandheldCompanion/Controllers/IController.cs-546-
+HandheldCompanion/Controllers/IController.cs:547:        public virtual void Unhide(bool powerCycle = true)
+HandheldCompanion/Controllers/IController.cs-548-        {
+HandheldCompanion/Controllers/IController.cs-549-            UnhideHID();
+--
+HandheldCompanion/Controllers/IController.cs-946-        }
+HandheldCompanion/Controllers/IController.cs-947-
+HandheldCompanion/Controllers/IController.cs:948:        public virtual void Dispose()
+HandheldCompanion/Controllers/IController.cs-949-        {
+HandheldCompanion/Controllers/IController.cs:950:            Dispose(true);
+HandheldCompanion/Controllers/IController.cs-951-            GC.SuppressFinalize(this);
+HandheldCompanion/Controllers/IController.cs-952-        }
+HandheldCompanion/Controllers/IController.cs-953-
+HandheldCompanion/Controllers/IController.cs:954:        protected virtual void Dispose(bool disposing)
+HandheldCompanion/Controllers/IController.cs-955-        {
+HandheldCompanion/Controllers/IController.cs-956-            if (Interlocked.Exchange(ref disposeState, 1) != 0)
+--
+HandheldCompanion/Controllers/IController.cs-971-
+HandheldCompanion/Controllers/IController.cs-972-                // Dispose Inputs
+HandheldCompanion/Controllers/IController.cs:973:                Inputs?.Dispose();
+HandheldCompanion/Controllers/IController.cs-974-                Inputs = null!;
+HandheldCompanion/Controllers/IController.cs-975-
+HandheldCompanion/Controllers/IController.cs:976:                InjectedButtons?.Dispose();
+HandheldCompanion/Controllers/IController.cs-977-                InjectedButtons = null!;
+HandheldCompanion/Controllers/IController.cs-978-
+HandheldCompanion/Controllers/IController.cs-979-                // Dispose gamepad motions
+HandheldCompanion/Controllers/IController.cs-980-                foreach (var gamepadMotion in gamepadMotions.Values)
+HandheldCompanion/Controllers/IController.cs:981:                    gamepadMotion.Dispose();
+HandheldCompanion/Controllers/IController.cs-982-                gamepadMotions.Clear();
+HandheldCompanion/Controllers/IController.cs-983-
+--
+HandheldCompanion/Managers/VirtualManager.cs-299-
+HandheldCompanion/Managers/VirtualManager.cs-300-                VIIPERTarget target = CreateTemporaryControllerTarget();
+HandheldCompanion/Managers/VirtualManager.cs:301:                if (!target.Connect())
+HandheldCompanion/Managers/VirtualManager.cs-302-                {
+HandheldCompanion/Managers/VirtualManager.cs:303:                    target.Dispose();
+HandheldCompanion/Managers/VirtualManager.cs-304-                    continue;
+HandheldCompanion/Managers/VirtualManager.cs-305-                }
+--
+HandheldCompanion/Managers/VirtualManager.cs-322-                    try
+HandheldCompanion/Managers/VirtualManager.cs-323-                    {
+HandheldCompanion/Managers/VirtualManager.cs:324:                        target.Disconnect();
+HandheldCompanion/Managers/VirtualManager.cs-325-                    }
+HandheldCompanion/Managers/VirtualManager.cs-326-                    catch { }
+--
+HandheldCompanion/Managers/VirtualManager.cs-328-                    try
+HandheldCompanion/Managers/VirtualManager.cs-329-                    {
+HandheldCompanion/Managers/VirtualManager.cs:330:                        target.Dispose();
+HandheldCompanion/Managers/VirtualManager.cs-331-                    }
+HandheldCompanion/Managers/VirtualManager.cs-332-                    catch { }
+--
+HandheldCompanion/Managers/VirtualManager.cs-451-                vTarget.Vibrated -= OnTargetVibrated;
+HandheldCompanion/Managers/VirtualManager.cs-452-                vTarget.StatusChanged -= OnTargetConnectStatusChanged;
+HandheldCompanion/Managers/VirtualManager.cs:453:                bool success = vTarget.Disconnect();
+HandheldCompanion/Managers/VirtualManager.cs:454:                vTarget.Dispose();
+HandheldCompanion/Managers/VirtualManager.cs-455-                vTarget = null;
+HandheldCompanion/Managers/VirtualManager.cs-456-                NotifyMasterIntervalOverrideChanged();
+--
+HandheldCompanion/Managers/VirtualManager.cs-544-                        break;
+HandheldCompanion/Managers/VirtualManager.cs-545-
+HandheldCompanion/Managers/VirtualManager.cs:546:                    success = vTarget.IsConnected || vTarget.Connect();
+HandheldCompanion/Managers/VirtualManager.cs-547-                    break;
+HandheldCompanion/Managers/VirtualManager.cs-548-                case HIDstatus.Disconnected:
+HandheldCompanion/Managers/VirtualManager.cs:549:                    success = !vTarget.IsConnected || vTarget.Disconnect();
+HandheldCompanion/Managers/VirtualManager.cs-550-                    break;
+HandheldCompanion/Managers/VirtualManager.cs-551-            }
+--
+HandheldCompanion/Managers/ControllerManager.cs-512-                            {
+HandheldCompanion/Managers/ControllerManager.cs-513-                                if (controller.IsHidden())
+HandheldCompanion/Managers/ControllerManager.cs:514:                                    controller.Hide(false);
+HandheldCompanion/Managers/ControllerManager.cs-515-                                else
+HandheldCompanion/Managers/ControllerManager.cs:516:                                    controller.Unhide(false);
+HandheldCompanion/Managers/ControllerManager.cs-517-                            }
+HandheldCompanion/Managers/ControllerManager.cs-518-                        }
+--
+HandheldCompanion/Managers/ControllerManager.cs-632-
+HandheldCompanion/Managers/ControllerManager.cs-633-                            if (isPhysical && HIDuncloakondisconnect)
+HandheldCompanion/Managers/ControllerManager.cs:634:                                controller.Unhide(false);
+HandheldCompanion/Managers/ControllerManager.cs-635-
+HandheldCompanion/Managers/ControllerManager.cs-636-                            if (isPhysical && ClearTargetIfMatch(controller.GetInstanceId()))
+HandheldCompanion/Managers/ControllerManager.cs-637-                                PickTargetController();
+HandheldCompanion/Managers/ControllerManager.cs-638-                            else
+HandheldCompanion/Managers/ControllerManager.cs:639:                                controller.Dispose();
+HandheldCompanion/Managers/ControllerManager.cs-640-                        }
+HandheldCompanion/Managers/ControllerManager.cs-641-                    }
+--
+HandheldCompanion/Managers/ControllerManager.cs-683-                        {
+HandheldCompanion/Managers/ControllerManager.cs-684-                            if (controller.IsHidden())
+HandheldCompanion/Managers/ControllerManager.cs:685:                                controller.Hide(false);
+HandheldCompanion/Managers/ControllerManager.cs-686-                            else
+HandheldCompanion/Managers/ControllerManager.cs:687:                                controller.Unhide(false);
+HandheldCompanion/Managers/ControllerManager.cs-688-                        }
+HandheldCompanion/Managers/ControllerManager.cs-689-
+--
+HandheldCompanion/Managers/ControllerManager.cs-840-
+HandheldCompanion/Managers/ControllerManager.cs-841-                        if (isPhysical && HIDuncloakondisconnect)
+HandheldCompanion/Managers/ControllerManager.cs:842:                            controller.Unhide(false);
+HandheldCompanion/Managers/ControllerManager.cs-843-
+HandheldCompanion/Managers/ControllerManager.cs-844-                        if (isPhysical && ClearTargetIfMatch(controller.GetInstanceId()))
+HandheldCompanion/Managers/ControllerManager.cs-845-                            PickTargetController();
+HandheldCompanion/Managers/ControllerManager.cs-846-                        else
+HandheldCompanion/Managers/ControllerManager.cs:847:                            controller.Dispose();
+HandheldCompanion/Managers/ControllerManager.cs-848-                    }
+HandheldCompanion/Managers/ControllerManager.cs-849-                }
+--
+HandheldCompanion/Managers/ControllerManager.cs-889-                        {
+HandheldCompanion/Managers/ControllerManager.cs-890-                            if (controller.IsHidden())
+HandheldCompanion/Managers/ControllerManager.cs:891:                                controller.Hide(false);
+HandheldCompanion/Managers/ControllerManager.cs-892-                            else
+HandheldCompanion/Managers/ControllerManager.cs:893:                                controller.Unhide(false);
+HandheldCompanion/Managers/ControllerManager.cs-894-                        }
+HandheldCompanion/Managers/ControllerManager.cs-895-
+--
+HandheldCompanion/Managers/ControllerManager.cs-1061-                    {
+HandheldCompanion/Managers/ControllerManager.cs-1062-                        // Remove from the dictionary first so PickTargetController and any
+HandheldCompanion/Managers/ControllerManager.cs:1063:                        // callbacks triggered by Gone()/Dispose() never see this controller.
+HandheldCompanion/Managers/ControllerManager.cs-1064-                        Controllers.TryRemove(details.baseContainerDeviceInstanceId, out _);
+HandheldCompanion/Managers/ControllerManager.cs-1065-
+--
+HandheldCompanion/Managers/ControllerManager.cs-1069-
+HandheldCompanion/Managers/ControllerManager.cs-1070-                        if (isPhysical && HIDuncloakondisconnect)
+HandheldCompanion/Managers/ControllerManager.cs:1071:                            controller.Unhide(false);
+HandheldCompanion/Managers/ControllerManager.cs-1072-
+HandheldCompanion/Managers/ControllerManager.cs-1073-                        // Atomically check-and-clear under targetLock to avoid clearing a
+--
+HandheldCompanion/Managers/ControllerManager.cs-1076-                            PickTargetController();
+HandheldCompanion/Managers/ControllerManager.cs-1077-                        else
+HandheldCompanion/Managers/ControllerManager.cs:1078:                            controller.Dispose();
+HandheldCompanion/Managers/ControllerManager.cs-1079-                    }
+HandheldCompanion/Managers/ControllerManager.cs-1080-                }
+--
+HandheldCompanion/Managers/ControllerManager.cs-1161-            // uncloak on close, if requested
+HandheldCompanion/Managers/ControllerManager.cs-1162-            if (HIDuncloakonclose)
+HandheldCompanion/Managers/ControllerManager.cs:1163:                controller.Unhide(!controller.IsBluetooth());
+HandheldCompanion/Managers/ControllerManager.cs-1164-
+HandheldCompanion/Managers/ControllerManager.cs-1165-            // dispose controller
+HandheldCompanion/Managers/ControllerManager.cs:1166:            // controller.Dispose();
+HandheldCompanion/Managers/ControllerManager.cs-1167-        }
+HandheldCompanion/Managers/ControllerManager.cs-1168-
+--
+HandheldCompanion/Managers/ControllerManager.cs-1638-
+HandheldCompanion/Managers/ControllerManager.cs-1639-            if (isPhysical && HIDuncloakondisconnect)
+HandheldCompanion/Managers/ControllerManager.cs:1640:                controller.Unhide(false);
+HandheldCompanion/Managers/ControllerManager.cs-1641-
+HandheldCompanion/Managers/ControllerManager.cs-1642-            if (isPhysical && ClearTargetIfMatch(controller.GetInstanceId()))
+HandheldCompanion/Managers/ControllerManager.cs-1643-                PickTargetController();
+HandheldCompanion/Managers/ControllerManager.cs-1644-            else
+HandheldCompanion/Managers/ControllerManager.cs:1645:                controller.Dispose();
+HandheldCompanion/Managers/ControllerManager.cs-1646-        }
+HandheldCompanion/Managers/ControllerManager.cs-1647-        catch { }
+--
+HandheldCompanion/Managers/ControllerManager.cs-2313-                    }
+HandheldCompanion/Managers/ControllerManager.cs-2314-
+HandheldCompanion/Managers/ControllerManager.cs:2315:                    // Capture for post-lock call: Hide() -> CyclePort() can block for seconds
+HandheldCompanion/Managers/ControllerManager.cs-2316-                    // and fires IsBusy which dispatches to the UI thread — invoking it while
+HandheldCompanion/Managers/ControllerManager.cs-2317-                    // holding targetLock deadlocks if the UI thread is also waiting for the lock.
+--
+HandheldCompanion/Managers/ControllerManager.cs-2345-        }
+HandheldCompanion/Managers/ControllerManager.cs-2346-
+HandheldCompanion/Managers/ControllerManager.cs:2347:        // Hide() -> CyclePort() blocks for up to 3 s (Bluetooth) and fires IsBusy/StateChanged
+HandheldCompanion/Managers/ControllerManager.cs-2348-        // which marshals OnPropertyChanged to the UI thread. Must run after releasing targetLock.
+HandheldCompanion/Managers/ControllerManager.cs:2349:        controllerToHide?.Hide(hideWithPowerCycle);
+HandheldCompanion/Managers/ControllerManager.cs-2350-
+HandheldCompanion/Managers/ControllerManager.cs-2351-        try
+

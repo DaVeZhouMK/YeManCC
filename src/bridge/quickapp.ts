@@ -5,7 +5,7 @@
 //  - 游戏识别统一走 `bridge/gamedetect`（原 quickapp 内的逻辑已迁出，RTSS 等共用）。
 //  - 启动 LS：优先 C:\SOFT\Lossless.Scaling\LosslessScaling.exe；缺失时自动回退 Steam 库。
 
-import { fs, shell, registry } from './api';
+import { app, fs, shell, registry } from './api';
 
 export const LS_PRIMARY = 'C:\\SOFT\\Lossless.Scaling\\LosslessScaling.exe';
 const LS_APPID = 993090;
@@ -105,7 +105,9 @@ async function getLocalAppData(): Promise<string> {
       return p;
     })();
   }
-  return localAppDataCache;
+  const task = localAppDataCache;
+  try { return await task; }
+  catch (error) { if (localAppDataCache === task) localAppDataCache = null; throw error; }
 }
 
 function xmlEscape(s: string): string {
@@ -168,7 +170,13 @@ function buildProfileXml(title: string, path: string): string {
 }
 
 // 确保 Settings.xml 中存在该游戏的 Profile（字符串插入，保留原始格式/命名空间/缩进）
-export async function ensureLsProfile(gamePath: string): Promise<void> {
+let lsSettingsQueue: Promise<void> = Promise.resolve();
+export function ensureLsProfile(gamePath: string): Promise<void> {
+  const run = lsSettingsQueue.then(() => ensureLsProfileUnlocked(gamePath));
+  lsSettingsQueue = run.catch(() => {});
+  return run;
+}
+async function ensureLsProfileUnlocked(gamePath: string, attempt = 0): Promise<void> {
   const localAppData = await getLocalAppData();
   const settingsPath = joinPath(
     localAppData,
@@ -186,11 +194,11 @@ export async function ensureLsProfile(gamePath: string): Promise<void> {
 
   const original = await fs.readTextFile(settingsPath);
 
-  // 安全网：写之前先复制一份原文件 .ymccbak（万一再次出错可手动恢复）
-  try {
-    await fs.writeTextFile(settingsPath + '.ymccbak', original);
-  } catch {
-    /* 备份失败不阻塞主流程 */
+  if (!original.includes('</Settings>') || !original.includes('</GameProfiles>'))
+    throw new Error('Settings.xml 格式异常，已保留原文件和备份');
+  if (typeof DOMParser !== 'undefined') {
+    const document = new DOMParser().parseFromString(original, 'application/xml');
+    if (document.querySelector('parsererror')) throw new Error('Settings.xml 无效，已保留原文件和备份');
   }
 
   let xml = original;
@@ -221,7 +229,14 @@ export async function ensureLsProfile(gamePath: string): Promise<void> {
   // 必须用 xml.slice(idx) 完整保留 marker 及其后续内容。
   xml = xml.slice(0, idx) + '\n' + profileXml + xml.slice(idx);
 
-  await fs.writeTextFile(settingsPath, xml);
+  // LS itself may have saved while we prepared the profile. Retry from its
+  // newer document instead of intentionally overwriting an observed change.
+  if (await fs.readTextFile(settingsPath) !== original) {
+    if (attempt >= 2) throw new Error('Lossless Scaling 配置正在变化，请稍后重试');
+    return ensureLsProfileUnlocked(gamePath, attempt + 1);
+  }
+  await fs.writeTextFileAtomic(settingsPath + '.ymccbak', original);
+  await fs.writeTextFileAtomic(settingsPath, xml);
 }
 
 // ───────────────────────── 一键插帧（写 XML → 启动 LS） ─────────────────────────
@@ -306,21 +321,10 @@ async function resolveOptiCtlExe(): Promise<string> {
   if (optiCtlExeCache) return optiCtlExeCache;
   const candidates = [TDPCTL_EXE_OPTI];
   try {
-    const cwdResult = await shell.run('powershell', [
-      '-NoProfile',
-      '-Command',
-      '(Get-Location).Path',
-    ], 5000);
-    const cwd = (cwdResult.stdout || '').trim();
-    if (cwd) {
-      candidates.unshift(
-        joinPath(cwd, 'PowerControl', 'pawnio', 'YeManTdpCtl.exe'),
-        joinPath(cwd, '..', 'PowerControl', 'pawnio', 'YeManTdpCtl.exe'),
-        joinPath(cwd, '..', '..', 'PowerControl', 'pawnio', 'YeManTdpCtl.exe'),
-      );
-    }
+    const powerControlDir = await app.powerControlDir();
+    if (powerControlDir) candidates.unshift(joinPath(powerControlDir, 'pawnio', 'YeManTdpCtl.exe'));
   } catch {
-    /* use the production fallback */
+    /* older shells use the canonical production path */
   }
   for (const candidate of candidates) {
     if (await fs.exists(candidate).catch(() => false)) {
@@ -349,6 +353,7 @@ export interface OptiStatus {
 }
 
 export type OptiBackend = 'fsr' | 'xess';
+export type OptiAction = OptiBackend | 'client' | 'uninstall';
 
 export interface OptiAnalysis {
   ok: boolean;
@@ -364,6 +369,8 @@ export interface OptiAnalysis {
   source?: string;
   version?: string;
   missing?: string[];
+  warnings?: string[];
+  antiCheat?: boolean;
 }
 
 function parseOptiBackend(value: unknown): OptiBackend | null {
@@ -378,7 +385,7 @@ export async function optiscalerStatus(gamePath: string): Promise<OptiStatus> {
     if (!txt) return { ok: false, installed: false, msgs: [(r.stderr || 'OptiScaler 状态读取无输出').trim()] };
     const obj = JSON.parse(txt);
     return {
-      ok: obj?.ok !== false,
+      ok: r.exitCode === 0 && obj?.ok === true,
       installed: !!obj?.installed,
       reason: typeof obj?.reason === 'string' ? obj.reason : undefined,
       msgs: Array.isArray(obj?.msgs) ? obj.msgs.map(String) : undefined,
@@ -402,7 +409,7 @@ export async function optiscalerAnalyze(gamePath: string): Promise<OptiAnalysis>
     if (!txt) return { ok: false, missing: [(r.stderr || 'OptiScaler 分析无输出').trim()] };
     const obj = JSON.parse(txt);
     return {
-      ok: obj?.ok !== false,
+      ok: r.exitCode === 0 && obj?.ok === true,
       gameDir: typeof obj?.game_dir === 'string' ? obj.game_dir : gameDir,
       api: typeof obj?.api === 'string' ? obj.api : 'unknown',
       engine: typeof obj?.engine === 'string' ? obj.engine : 'unknown',
@@ -416,7 +423,14 @@ export async function optiscalerAnalyze(gamePath: string): Promise<OptiAnalysis>
       reasons: Array.isArray(obj?.reasons) ? obj.reasons.map(String) : [],
       source: typeof obj?.source === 'string' ? obj.source : undefined,
       version: typeof obj?.version === 'string' ? obj.version : undefined,
-      missing: Array.isArray(obj?.missing) ? obj.missing.map(String) : [],
+      missing: [
+        ...(Array.isArray(obj?.missing) ? obj.missing.map(String) : []),
+        ...(Array.isArray(obj?.msgs) ? obj.msgs.map(String) : []),
+        ...((r.exitCode !== 0 || obj?.ok !== true) && !obj?.missing?.length && !obj?.msgs?.length
+          ? [(r.stderr || `OptiScaler 分析失败（退出码 ${r.exitCode}）`).trim()] : []),
+      ],
+      warnings: Array.isArray(obj?.warnings) ? obj.warnings.map(String) : [],
+      antiCheat: obj?.anti_cheat === true,
     };
   } catch (e) {
     return { ok: false, missing: [(e as Error).message] };
@@ -434,6 +448,7 @@ export interface OptiResult {
   restored?: number;
   backend?: OptiBackend;
   analysis?: OptiAnalysis;
+  warnings?: string[];
 }
 
 // uninstall=true 卸载（还原原文件），false 安装。安装时 backend 必须由界面
@@ -455,8 +470,9 @@ export async function oneClickOptiScaler(
     }
     const obj = JSON.parse(txt);
     return {
-      ok: !!(obj && obj.ok),
-      msgs: obj.msgs,
+      ok: r.exitCode === 0 && obj?.ok === true,
+      msgs: Array.isArray(obj?.msgs) ? obj.msgs.map(String)
+        : (r.exitCode !== 0 || obj?.ok !== true) ? [(r.stderr || `OptiScaler 操作失败（退出码 ${r.exitCode}）`).trim()] : [],
       via: obj.via,
       source: obj.source,
       version: obj.version,
@@ -465,8 +481,23 @@ export async function oneClickOptiScaler(
       restored: obj.restored,
       backend: parseOptiBackend(obj?.backend) || undefined,
       analysis: obj?.analysis,
+      warnings: Array.isArray(obj?.warnings) ? obj.warnings.map(String) : [],
     };
   } catch (e) {
     return { ok: false, msgs: [(e as Error).message] };
   }
+}
+
+// OPT 客户端是独立的打开快捷方式：不轮询、不关闭进程、不修改游戏文件。
+export const OPTISCALER_CLIENT_DIR = 'C:\\SOFT\\OptiscalerClient';
+export const OPTISCALER_CLIENT_EXE = 'C:\\SOFT\\OptiscalerClient\\OptiscalerClient.exe';
+export const OPTISCALER_CLIENT_URL = 'https://github.com/Optiscaler-Client/Optiscaler-Client/releases';
+
+export async function optiConsoleInstalled(): Promise<boolean> {
+  return fs.exists(OPTISCALER_CLIENT_EXE).catch(() => false);
+}
+
+// GUI 程序必须用 shell.execute；重复点击仍然只发送打开请求。
+export async function openOptiConsole(): Promise<void> {
+  await shell.execute(OPTISCALER_CLIENT_EXE, []);
 }

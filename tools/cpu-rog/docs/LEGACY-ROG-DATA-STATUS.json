@@ -1,0 +1,31 @@
+{
+  "schema": "legacy-rog-evidence-status-v10.1",
+  "date": "2026-10-04",
+  "v9": {
+    "reportReceived": true,
+    "rawFilesReceived": false,
+    "rawFilesReportedPresentOnRog": true,
+    "toolPass": "REPORTED_PENDING_RAW",
+    "preflight": "REPORTED_BLOCKED",
+    "realSampling": "NOT_RUN_PER_REPORT",
+    "productCpuAcceptance": false
+  },
+  "v10": {
+    "reportSha256": "AB1FB3424831695FBC9EB714F237C23997C2153D12B9B68109E9DB0090DE5254",
+    "validateRawSha256": "0A8AD268B64F155AD02C73E1AD13103AEA70A40CD466733ED170856ABC1D582D",
+    "validateRawReceived": true,
+    "validateIntegrityScopeAccepted": true,
+    "collectorRawReceived": false,
+    "runnerRawReceived": false,
+    "reportedCollector": "PASS 41/41 checks758 exit0",
+    "reportedRunner": "FAIL 138/140 exit1",
+    "rootCauseIndependentlySupported": true,
+    "realProductOrCpuAcceptance": false
+  },
+  "v10_1": {
+    "rogToolRegression": "NOT_RUN",
+    "rogProductRegression": "NOT_RUN",
+    "rogCpuAB": "NOT_RUN"
+  },
+  "rule": "Existing raw files on ROG must be copied back, not re-created by product actions. Different versions/machines/scopes never merge into a CPU regression pass."
+}

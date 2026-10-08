@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { ref, reactive, computed, inject, watch, nextTick, onMounted, onBeforeUnmount, type Ref } from 'vue';
+import { ref, reactive, computed, inject, watch, nextTick, onMounted, onActivated, onDeactivated, onBeforeUnmount, type Ref } from 'vue';
 import Toggle from '@/components/Toggle.vue';
 import Slider from '@/components/Slider.vue';
 import SegButton from '@/components/SegButton.vue';
 import Dropdown from '@/components/Dropdown.vue';
 import InlineIcon from '@/components/InlineIcon.vue';
-import { focusGamepadElement } from '@/gamepad/focus';
+import { focusGamepadElement, getGamepadPopupPlacement } from '@/gamepad/focus';
+import { wakePassword } from '@/bridge/api';
 import {
   sleepGuardGet,
   sleepGuardSet,
@@ -36,6 +37,7 @@ const cfg = reactive<SleepGuardStatus>({
   pauseGameOnSleep: true,
   retryOnEntryFailure: true,
   retryOnNonUserWake: true,
+  steamOverlayOffFix: false,
   joyXoffAutoClose: true,
 });
 
@@ -43,6 +45,10 @@ const cfg = reactive<SleepGuardStatus>({
 const acBtnIdx = ref<PowerBtnIdx>(2);
 const dcBtnIdx = ref<PowerBtnIdx>(2);
 const sleepPowerPlanOptimizationEnabled = ref(true);
+// Default off, but do not read/apply Windows indices until a user toggles it.
+// Reuse the existing sleepGuard snapshot for the remembered UI choice only.
+const wakePasswordOn = ref(false);
+let wakePasswordRevision = 0;
 
 // Windows 11“屏幕、睡眠和休眠超时”卡片：数值统一使用分钟，0=从不。
 const timeoutExpanded = ref(false);
@@ -110,7 +116,7 @@ function closeTimeoutMenu(): void {
 }
 
 function onTimeoutGamepadBack(event: Event): void {
-  if (!timeoutExpanded.value) return;
+  if (event.defaultPrevented || steamOverlayConfirmOpen.value || !timeoutExpanded.value) return;
   // 下拉选项菜单优先消费 B；只有下拉已关闭时，B 才收起这一层气泡。
   if (document.querySelector('[data-gp-timeout-body] [aria-expanded="true"][aria-haspopup="listbox"]')) return;
   event.preventDefault();
@@ -197,9 +203,38 @@ async function refreshSleepTimeouts() {
   }
 }
 
+async function onWakePassword(enabled: boolean) {
+  if (busy.value) return;
+  const previous = wakePasswordOn.value;
+  ++wakePasswordRevision; // An older sleep-config refresh must not override ACK.
+  busy.value = true;
+  msg.value = '';
+  try {
+    const state = await wakePassword.set(enabled);
+    if (!state.ok || !state.known || state.ac !== Number(enabled) || state.dc !== Number(enabled)) {
+      wakePasswordOn.value = state.known ? state.enabled : previous;
+      msg.value = '唤醒密码设置失败：错误 ' + state.win32Error +
+        (state.stage ? '，' + state.stage : '') +
+        (state.rollbackOk === false ? '；恢复原值失败，请重试' : '') +
+        '；无效可能是组策略锁定了';
+      return;
+    }
+    wakePasswordOn.value = state.enabled;
+    if (state.preferenceSaved === false) msg.value = '电源计划已设置，但开关状态记忆保存失败；下次打开可能显示默认值。';
+  } catch (e) {
+    wakePasswordOn.value = previous;
+    msg.value = '唤醒密码设置失败：' + (e as Error).message + '；无效可能是组策略锁定了';
+  } finally {
+    ++wakePasswordRevision; // Also invalidate snapshots taken during the write.
+    busy.value = false;
+  }
+}
+
 async function refresh() {
   // 与整页其他检测解耦：AC/DC、电源方案或内存 IPC 异常不能拖死系统休眠开关。
   const hibernateRefresh = refreshHibernateState();
+  const wakeRevision = wakePasswordRevision;
+  const steamRevision = steamOverlayRevision;
   try {
     const s = await sleepGuardGet();
     cfg.enabled = s.enabled;
@@ -208,7 +243,9 @@ async function refresh() {
     cfg.pauseGameOnSleep = s.pauseGameOnSleep;
     cfg.retryOnEntryFailure = s.retryOnEntryFailure;
     cfg.retryOnNonUserWake = s.retryOnNonUserWake;
+    if (steamRevision === steamOverlayRevision && !steamOverlaySaving.value) cfg.steamOverlayOffFix = s.steamOverlayOffFix;
     cfg.joyXoffAutoClose = true;
+    if (wakeRevision === wakePasswordRevision && !busy.value) wakePasswordOn.value = s.wakePasswordEnabled === true;
   } catch {
     /* 检测不到保持现状，绝不假定关闭 */
   }
@@ -295,6 +332,114 @@ async function onNonUserWake(v: boolean) {
     busy.value = false;
   }
 }
+
+// Steam repair is opt-in (default off). Only confirm saves a parameter and
+// queues a background attempt. Rendering/opening/cancelling never inspects Steam.
+const steamOverlayConfirmOpen = ref(false);
+const steamOverlayConfirmTarget = ref(false);
+const steamOverlayConfirmAbove = ref(false);
+const steamOverlayConfirmStyle = ref<Record<string, string>>({});
+const steamOverlayTriggerEl = ref<HTMLElement | null>(null);
+const steamOverlayPanelEl = ref<HTMLElement | null>(null);
+const steamOverlayCancelEl = ref<HTMLElement | null>(null);
+const steamOverlaySaving = ref(false);
+let steamOverlayRevision = 0;
+const steamOverlayConfirmTitle = computed(() => steamOverlayConfirmTarget.value ? '确认开启' : '确认关闭');
+const steamOverlayConfirmDescription = computed(() => steamOverlayConfirmTarget.value
+  ? '影响Steam监控和触摸板转盘显示'
+  : '学习版手柄唤醒容易卡界面');
+
+function restoreSteamOverlayFocus() {
+  // pointerdown cancellation runs before the browser's default focus transfer.
+  // Restore once in the next frame, after that transfer; no timer/polling loop.
+  nextTick(() => requestAnimationFrame(() => {
+    if (steamOverlayConfirmOpen.value) return;
+    const trigger = steamOverlayTriggerEl.value?.querySelector<HTMLElement>('button.switch');
+    if (trigger && !trigger.hasAttribute('disabled')) focusGamepadElement(trigger);
+  }));
+}
+
+function onSteamOverlayOffFix(v: boolean) {
+  if (busy.value || steamOverlayConfirmOpen.value || v === cfg.steamOverlayOffFix) return;
+  const trigger = steamOverlayTriggerEl.value?.querySelector<HTMLElement>('button.switch');
+  const placement = getGamepadPopupPlacement(trigger?.getBoundingClientRect() ?? null,
+    Math.min(420, window.innerWidth - 16), 190, 10);
+  steamOverlayConfirmTarget.value = v;
+  steamOverlayConfirmAbove.value = placement.above;
+  steamOverlayConfirmStyle.value = placement.style;
+  steamOverlayConfirmOpen.value = true;
+  nextTick(() => { if (steamOverlayConfirmOpen.value) focusGamepadElement(steamOverlayCancelEl.value); });
+}
+
+function cancelSteamOverlayConfirm(restoreFocus = true) {
+  if (!steamOverlayConfirmOpen.value) return;
+  steamOverlayConfirmOpen.value = false;
+  if (restoreFocus) restoreSteamOverlayFocus();
+}
+
+async function confirmSteamOverlayChange() {
+  if (!steamOverlayConfirmOpen.value || busy.value) return;
+  const target = steamOverlayConfirmTarget.value;
+  steamOverlayConfirmOpen.value = false;
+  await applySteamOverlayOffFix(target);
+}
+
+async function applySteamOverlayOffFix(v: boolean) {
+  if (busy.value) return;
+  const previous = cfg.steamOverlayOffFix;
+  ++steamOverlayRevision;
+  busy.value = true;
+  steamOverlaySaving.value = true;
+  msg.value = '';
+  try {
+    // Do not resend pause/retry/mode fields or request a live Steam status.
+    await sleepGuardSetConfig({ steamOverlayOffFix: v });
+    cfg.steamOverlayOffFix = v;
+  } catch (e) {
+    cfg.steamOverlayOffFix = previous;
+    msg.value = 'Steam修复参数保存失败：' + (e as Error).message;
+  } finally {
+    ++steamOverlayRevision;
+    steamOverlaySaving.value = false;
+    busy.value = false;
+    restoreSteamOverlayFocus();
+  }
+}
+
+function onSteamOverlayConfirmBack(event: Event) {
+  if (event.defaultPrevented || !steamOverlayConfirmOpen.value) return;
+  event.preventDefault();
+  cancelSteamOverlayConfirm();
+}
+function onSteamOverlayConfirmOutside(event: PointerEvent) {
+  if (!steamOverlayConfirmOpen.value || steamOverlayPanelEl.value?.contains(event.target as Node)) return;
+  cancelSteamOverlayConfirm();
+}
+function onSteamOverlayConfirmEscape(event: KeyboardEvent) {
+  if (event.key !== 'Escape' || !steamOverlayConfirmOpen.value) return;
+  event.preventDefault();
+  cancelSteamOverlayConfirm();
+}
+function registerSteamOverlayConfirmListeners() {
+  window.addEventListener('ipc:gamepad-back', onSteamOverlayConfirmBack);
+  document.addEventListener('pointerdown', onSteamOverlayConfirmOutside);
+  window.addEventListener('keydown', onSteamOverlayConfirmEscape);
+}
+function unregisterSteamOverlayConfirmListeners() {
+  window.removeEventListener('ipc:gamepad-back', onSteamOverlayConfirmBack);
+  document.removeEventListener('pointerdown', onSteamOverlayConfirmOutside);
+  window.removeEventListener('keydown', onSteamOverlayConfirmEscape);
+}
+onMounted(registerSteamOverlayConfirmListeners);
+onActivated(registerSteamOverlayConfirmListeners);
+onDeactivated(() => {
+  cancelSteamOverlayConfirm(false);
+  unregisterSteamOverlayConfirmListeners();
+});
+onBeforeUnmount(() => {
+  cancelSteamOverlayConfirm(false);
+  unregisterSteamOverlayConfirmListeners();
+});
 
 async function onSleepPowerPlanOptimization(v: boolean) {
   const previous = sleepPowerPlanOptimizationEnabled.value;
@@ -632,6 +777,13 @@ refresh();
     <div class="card">
       <h3 class="card-title"><InlineIcon name="sleep" /> 睡眠操作</h3>
       <Toggle
+        :model-value="wakePasswordOn"
+        label="唤醒需要密码"
+        description="无效可能是组策略锁定了"
+        :disabled="busy"
+        @update:model-value="onWakePassword"
+      />
+      <Toggle
         :model-value="cfg.pauseGameOnSleep"
         label="睡眠时暂停游戏"
         description="只冻结本轮标记的游戏 PID，唤醒时只恢复同一批 PID"
@@ -659,13 +811,48 @@ refresh();
         :disabled="busy"
         @update:model-value="onNonUserWake"
       />
+      <div ref="steamOverlayTriggerEl">
+        <Toggle
+          :model-value="cfg.steamOverlayOffFix"
+          label="Steam大屏唤醒手柄卡死修复"
+          description="Steam设置-游戏中-Steam叠加画面关闭"
+          :disabled="busy"
+          @update:model-value="onSteamOverlayOffFix"
+        />
+      </div>
     </div>
+    <!-- Match PerformanceScheduleView's configuration-reset dialog style. -->
+    <Teleport to="body">
+      <Transition name="rc-pop" @before-leave="disableLeavingTimeoutBody">
+        <div
+          v-if="steamOverlayConfirmOpen"
+          ref="steamOverlayPanelEl"
+          class="reset-confirm steam-overlay-confirm"
+          :class="{ above: steamOverlayConfirmAbove }"
+          :style="steamOverlayConfirmStyle"
+          role="alertdialog"
+          aria-modal="true"
+          :aria-label="steamOverlayConfirmTitle + 'Steam大屏唤醒手柄卡死修复'"
+          data-gp-modal
+          @pointerdown.stop
+          @keydown.esc.prevent="cancelSteamOverlayConfirm()"
+        >
+          <div class="rc-title"><InlineIcon name="warning" />{{ steamOverlayConfirmTitle }}</div>
+          <p class="rc-desc">{{ steamOverlayConfirmDescription }}</p>
+          <div class="rc-actions" data-gp-group="steam-overlay-confirm">
+            <button ref="steamOverlayCancelEl" type="button" data-gp-group="steam-overlay-confirm" @click="cancelSteamOverlayConfirm()">取消</button>
+            <button type="button" class="danger" data-gp-group="steam-overlay-confirm" @click="confirmSteamOverlayChange">{{ steamOverlayConfirmTitle }}</button>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
   </div>
 </template>
 
 <style scoped>
 .sleep-guard { padding: 2px; }
 .muted { color: var(--text-dim); }
+
 
 .card {
   background: color-mix(in srgb, var(--bg-panel) 72%, transparent);
@@ -857,6 +1044,95 @@ refresh();
   .timeout-grid-head,
   .timeout-row { grid-template-columns: minmax(0, 1fr) minmax(96px, 96px) minmax(96px, 96px); gap: 6px; padding-left: 8px; padding-right: 8px; }
   .timeout-row :deep(.dd-trigger) { min-height: 36px; }
+}
+
+/* ── 配置重制确认浮层（自绘，锚定触发按钮）── */
+.reset-confirm {
+  z-index: 1200;
+  background: #161d29;
+  border: 1px solid #2a3342;
+  border-radius: 12px;
+  padding: 18px 20px 17px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: calc(100vw - 16px);
+  min-height: 0;
+  overflow-y: auto;
+}
+.reset-confirm::before {
+  content: '';
+  position: absolute;
+  width: 13px;
+  height: 13px;
+  background: #161d29;
+  border-left: 1px solid #2a3342;
+  border-top: 1px solid #2a3342;
+  transform: rotate(45deg);
+  top: -7px;
+  right: 32px;
+}
+.reset-confirm.above::before {
+  top: auto;
+  bottom: -7px;
+  border-left: none;
+  border-top: none;
+  border-right: 1px solid #2a3342;
+  border-bottom: 1px solid #2a3342;
+}
+.rc-title {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text);
+}
+.rc-title :deep(svg) {
+  width: 20px;
+  height: 20px;
+  color: var(--danger);
+}
+.rc-desc {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 14px;
+  line-height: 1.6;
+}
+.rc-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 3px;
+}
+.rc-actions button {
+  min-height: 44px;
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 9px;
+  background: var(--bg-input);
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.rc-actions button.danger {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 46%, transparent);
+  background: color-mix(in srgb, var(--danger) 8%, var(--bg-input));
+}
+.rc-actions button.danger:hover {
+  background: color-mix(in srgb, var(--danger) 16%, var(--bg-input));
+  border-color: var(--danger);
+}
+.rc-pop-enter-active,
+.rc-pop-leave-active {
+  transition: opacity 0.14s ease, transform 0.14s ease;
+}
+.rc-pop-enter-from,
+.rc-pop-leave-to {
+  opacity: 0;
+  transform: translateY(-5px);
 }
 
 </style>

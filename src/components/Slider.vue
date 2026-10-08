@@ -8,6 +8,10 @@ const props = withDefaults(
     min?: number;
     max?: number;
     step?: number;
+    /** Optional step-grid origin; snap only user input, never existing values. */
+    stepBase?: number;
+    /** Keep existing accelerated keyboard behavior unless explicitly disabled. */
+    accelerate?: boolean;
     label?: string;
     icon?: string;
     unit?: string;
@@ -19,7 +23,7 @@ const props = withDefaults(
     gpRow?: number | string;
     gpCol?: number | string;
   }>(),
-  { min: 0, max: 100, step: 1, color: 'accent', disabled: false }
+  { min: 0, max: 100, step: 1, color: 'accent', disabled: false, accelerate: true }
 );
 
 const displayValue = computed(() => props.valueText ?? String(props.modelValue));
@@ -42,11 +46,23 @@ const thumbGlow = computed(() =>
   props.color === 'dc' ? 'color-mix(in srgb, var(--dc-accent) 32%, transparent)' : 'rgba(46, 166, 255, 0.32)'
 );
 
+// Explicit stepBase avoids a min=1 native range shifting the 5% grid.
+// Use native free movement only for opted-in sliders, then snap user events.
+const rangeStep = computed(() => props.stepBase === undefined ? props.step : 'any');
+function inputValue(e: Event): number {
+  const input = e.target as HTMLInputElement;
+  const raw = Number(input.value);
+  if (props.stepBase === undefined) return raw;
+  const snapped = props.stepBase + Math.round((raw - props.stepBase) / (props.step || 1)) * (props.step || 1);
+  const value = Math.max(props.min, Math.min(props.max, snapped));
+  input.value = String(value);
+  return value;
+}
 function onInput(e: Event) {
-  emit('update:modelValue', Number((e.target as HTMLInputElement).value));
+  emit('update:modelValue', inputValue(e));
 }
 function onChange(e: Event) {
-  emit('commit', Number((e.target as HTMLInputElement).value));
+  emit('commit', inputValue(e));
 }
 // 键盘左右/上下：加快100%（基础×2）+ 线性加速；仅在滑块聚焦时生效（@keydown 仅对聚焦元素触发）
 let keyAccelStart = 0;
@@ -60,8 +76,14 @@ function onKeydown(e: KeyboardEvent) {
   const now = performance.now();
   if (keyAccelStart === 0) keyAccelStart = now;
   const elapsed = (now - keyAccelStart) / 1000;
-  const steps = Math.min(12, 2 + Math.floor(elapsed * 4)); // 基础2步，每秒+4，上限12
+  const steps = props.accelerate ? Math.min(12, 2 + Math.floor(elapsed * 4)) : 1; // 基础2步，每秒+4，上限12
   let v = props.modelValue + dir * step * steps;
+  if (props.stepBase !== undefined) {
+    const index = (props.modelValue - props.stepBase) / step;
+    // An existing off-grid Steam value moves to the next grid point in the
+    // requested direction; merely mounting the slider never changes it.
+    v = props.stepBase + (dir > 0 ? Math.floor(index) + steps : Math.ceil(index) - steps) * step;
+  }
   v = Math.max(props.min, Math.min(props.max, v));
   emit('update:modelValue', v);
 }
@@ -90,12 +112,15 @@ function onKeyup(e: KeyboardEvent) {
         type="range"
         :min="min"
         :max="max"
-        :step="step"
+        :step="rangeStep"
         :value="modelValue"
         :disabled="disabled"
         :aria-label="label || '滑块'"
         :data-gp-row="gpRow"
         :data-gp-col="gpCol"
+        :data-gp-step="stepBase === undefined ? undefined : step"
+        :data-gp-step-base="stepBase"
+        :data-gp-accelerate="accelerate ? undefined : 'false'"
         @input="onInput"
         @change="onChange"
         @keydown="onKeydown"

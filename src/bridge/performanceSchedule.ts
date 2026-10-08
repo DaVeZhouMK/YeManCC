@@ -1,5 +1,6 @@
 import { fs, powerLifecycle } from './api';
-import { readSettingsSection, replaceSettingsSection, saveSettingsSection } from './settingsRepository';
+import { getSettingsGeneration, assertSettingsGeneration, mergeSettings, readSettingsSection, replaceSettingsSection, saveSettingsSection } from './settingsRepository';
+import { detectPolicyGame, isPolicyTargetCurrent } from './gamePolicyTarget';
 import { detectGame } from './gamedetect';
 import {
   detectPowerMode,
@@ -66,6 +67,8 @@ export interface PerformanceScheduleWarning {
 }
 
 export interface PerformanceScheduleTarget {
+  /** Automatic owners validate the shared confirmed lease, not transient foreground. */
+  policyTarget?: boolean;
   pid: number;
   processCreated: string;
 }
@@ -314,8 +317,9 @@ let scheduleWriteQueue: Promise<void> = Promise.resolve();
 
 function queueScheduleWrite(config: PerformanceScheduleConfig): Promise<void> {
   const snapshot = normalizeConfig(config);
+  const generation = getSettingsGeneration();
   const next = scheduleWriteQueue.then(async () => {
-    await saveSettingsSection('performanceSchedule', snapshot as any);
+    await saveSettingsSection('performanceSchedule', snapshot as any, generation);
     configCache = snapshot;
     emitPerformanceSchedule(snapshot);
   });
@@ -325,7 +329,9 @@ function queueScheduleWrite(config: PerformanceScheduleConfig): Promise<void> {
 
 function emitPerformanceSchedule(config: PerformanceScheduleConfig): void {
   const snapshot = structuredClone(config);
-  for (const listener of [...configListeners]) listener(snapshot);
+  for (const listener of [...configListeners]) {
+    try { listener(structuredClone(snapshot)); } catch { /* Observer failure is not a persistence failure. */ }
+  }
   // 非浏览器上下文（测试/后台进程）下没有 window，需守卫（2026-08-05 修复）
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('performance-schedule:changed', { detail: snapshot }));
@@ -341,12 +347,7 @@ export function onPerformanceScheduleChanged(
 }
 
 export async function loadPerformanceSchedule(): Promise<PerformanceScheduleConfig> {
-  if (configCache) return structuredClone(configCache);
-  try {
-    configCache = normalizeConfig(await readSettingsSection('performanceSchedule'));
-  } catch {
-    configCache = defaultPerformanceScheduleConfig();
-  }
+  configCache = normalizeConfig(await readSettingsSection('performanceSchedule'));
   return structuredClone(configCache);
 }
 
@@ -565,6 +566,11 @@ async function applyPerformanceScheduleUnsafe(
 
 export type PerformanceScheduleOwnership = 'none' | 'manual' | 'auto';
 
+export interface PerformanceScheduleRestoreOptions {
+  /** Only inspect/apply an active game-custom owner; never take over global manual mode. */
+  dedicatedOnly?: boolean;
+}
+
 export async function disablePerformanceSchedule(config?: PerformanceScheduleConfig): Promise<void> {
   return withScheduleOp(false, async () => {
     const current = config ? normalizeConfig(config) : await loadPerformanceSchedule();
@@ -584,10 +590,54 @@ export async function getPerformanceScheduleOwnership(): Promise<PerformanceSche
   return config.enabled ? 'auto' : 'manual';
 }
 
-export async function restorePerformanceScheduleIfConfigured(): Promise<PerformanceScheduleOwnership> {
+export async function restorePerformanceScheduleIfConfigured(
+  expectedSide?: PowerSide,
+  options: PerformanceScheduleRestoreOptions = {},
+): Promise<PerformanceScheduleOwnership> {
   return withScheduleOp(true, async () => {
     const config = await loadPerformanceSchedule();
+
+    // 系统级恢复必须独立于性能调度页是否激活：启动、唤醒、AC/DC 切换时，
+    // 当前游戏存在自定义档位则优先恢复自定义；否则才应用普通自动档位。
+    // 专属配置是独立的 owner，即使全局性能调度已经切到手动，也不能被这里
+    // 的“关闭自动优化”提前返回吞掉。
+    const game = await detectPolicyGame();
+    if (game) {
+      const custom = await loadGameCustomConfig();
+      const fromPath = game.path ? game.path.split(/[\\/]/).pop() : '';
+      const key = (fromPath || game.name || '').toLowerCase().trim();
+      const entry = key ? custom.entries[key.endsWith('.exe') ? key : `${key}.exe`] : undefined;
+      if (entry && entry.enabled !== false) {
+        // Dedicated profiles are allowed to take ownership independently of
+        // the global scheduler, so make sure writes land on the remembered
+        // YeMan scheme even when the user had left the global page in manual.
+        assertScheduleOpCurrent();
+        await ensureRememberedYemanSchemeActive();
+        assertScheduleOpCurrent();
+        const side = await detectPowerMode();
+        if (expectedSide && side !== expectedSide) throw new SkipApplyError();
+        const resolved = resolveGameCustomProfiles(entry, config);
+        const applied = await applyGameCustomProfilesUnsafe(side, resolved.ac, resolved.dc, {
+          pid: game.pid,
+          processCreated: game.processCreated,
+          policyTarget: true,
+        });
+        if (!applied) throw new SkipApplyError();
+        // “auto” 表示当前硬件已经由性能策略 owner（这里是专属 owner）接管，
+        // 调用方不应再紧接着执行普通 CPU 自动档覆盖它。
+        return 'auto';
+      }
+    }
+
     if (!config.configured) return 'none';
+
+    if (options.dedicatedOnly) {
+      // The caller has already reconciled a manually-owned Windows scheme. If
+      // there is no dedicated entry, leave that owner untouched; the caller
+      // may continue with the normal manual CPU recovery path.
+      return 'manual';
+    }
+
     if (!config.enabled) {
       assertScheduleOpCurrent();
       if (getFloatInfo().enabled) await disableFloat();
@@ -595,26 +645,8 @@ export async function restorePerformanceScheduleIfConfigured(): Promise<Performa
       return 'manual';
     }
 
-    // 系统级恢复必须独立于性能调度页是否激活：启动、唤醒、AC/DC 切换时，
-    // 当前游戏存在自定义档位则优先恢复自定义；否则才应用普通自动档位。
-    const game = await detectGame(true).catch(() => null);
-    if (game) {
-      const custom = await loadGameCustomConfig();
-      const fromPath = game.path ? game.path.split(/[\\/]/).pop() : '';
-      const key = (fromPath || game.name || '').toLowerCase().trim();
-      const entry = key ? custom.entries[key.endsWith('.exe') ? key : `${key}.exe`] : undefined;
-      if (entry && entry.enabled !== false) {
-        const side = await detectPowerMode();
-        const resolved = resolveGameCustomProfiles(entry, config);
-        await applyGameCustomProfilesUnsafe(side, resolved.ac, resolved.dc, {
-          pid: game.pid,
-          processCreated: game.processCreated,
-        });
-        return 'auto';
-      }
-    }
-
     const side = await detectPowerMode();
+    if (expectedSide && side !== expectedSide) throw new SkipApplyError();
     const mode = config.active[side];
     await applyPerformanceScheduleUnsafe(side, mode, config);
     return 'auto';
@@ -638,7 +670,7 @@ export async function refreshPerformanceScheduleCoreMode(): Promise<boolean> {
     assertScheduleOpCurrent();
     const config = await loadPerformanceSchedule();
     if (!config.configured || !config.enabled) return false;
-    const game = await detectGame(true).catch(() => null);
+    const game = await detectPolicyGame();
     if (game) {
       const custom = await loadGameCustomConfig();
       const fromPath = game.path ? game.path.split(/[\\/]/).pop() : '';
@@ -646,9 +678,10 @@ export async function refreshPerformanceScheduleCoreMode(): Promise<boolean> {
       const entry = key ? custom.entries[key.endsWith('.exe') ? key : `${key}.exe`] : undefined;
       if (entry && entry.enabled !== false) {
         const side = await detectPowerMode();
-        const current = await detectGame(true).catch(() => null);
+        const current = await detectPolicyGame();
         if (!current || current.pid !== game.pid || current.processCreated !== game.processCreated) return false;
-        return applyCoreModeIfHybrid(side, entry[side].coreMode);
+        const resolved = resolveGameCustomProfiles(entry, config);
+        return applyCoreModeIfHybrid(side, resolved[side].coreMode);
       }
     }
     const side = await detectPowerMode();
@@ -670,7 +703,7 @@ export async function cyclePerformanceScheduleMode(direction: 1 | -1): Promise<{
     const config = await loadPerformanceSchedule();
     const side = await detectPowerMode();
     if (!config.configured || !config.enabled) return { applied: false, side, blocked: 'disabled' };
-    const game = await detectGame(true).catch(() => null);
+    const game = await detectPolicyGame();
     if (game) {
       const custom = await loadGameCustomConfig();
       const fromPath = game.path ? game.path.split(/[\\/]/).pop() : '';
@@ -712,6 +745,13 @@ export interface GameCustomProfile {
   corePolicyMode?: 'default' | 'only-big' | 'big-small' | 'only-small' | 'small-super-small' | 'all';
   hyperThreadPolicyEnabled?: boolean;
   hyperThreadPolicy?: 'default' | 'on' | 'off';
+  // 2026-09-29 用户裁决：顶部专属菜单可覆盖全局手柄人格与陀螺仪开关。
+  // 'follow' = 不干预，沿用 YMCC「手柄 / 陀螺仪」页面设置；其余值优先于全局。
+  // 追加在末尾，缺失的旧条目回落 'follow'，因此旧配置文件完全兼容。
+  padPersona?: 'follow' | 'disabled' | 'steamdeck' | 'dualsense-edge' | 'elite';
+  // 2026-09-30 用户裁决：陀螺仪下拉直接用陀螺仪页的四个预设——选预设 = 启用陀螺仪
+  // 并展开该预设参数。'on' 为旧档值（下拉不再提供，仅在当前生效时如实显示）。
+  gyroOverride?: 'follow' | 'off' | 'on' | 'fps' | 'racing' | 'custom' | 'steam';
 }
 
 export interface GameCustomRtssProfile {
@@ -720,12 +760,28 @@ export interface GameCustomRtssProfile {
   dcFps: number;
 }
 
+/**
+ * Legacy-only snapshot from the old destructive override implementation.
+ * Migrated once into the base; new game overlays never create this field.
+ */
+export interface GameInputRestoreSnapshot {
+  persona: string;
+  buttonMappingEnabled: boolean;
+  gyroEnabled: boolean;
+  motionEnabled: boolean;
+  // 2026-09-30：陀螺仪预设覆盖会改写 gyroMotion 顶层参数，恢复时整对象写回
+  // （深合并即可还原全部字段；预设覆盖不新增 schema 之外的键）。
+  gyroMotion?: Record<string, unknown>;
+}
+
 export interface GameCustomConfig {
   version: 1;
   entries: Record<string, GameCustomProfile>;
   // Independent RTSS-only linkage. This never activates the full custom
   // TDP/CPU/core/automatic-schedule profile.
   rtss: Record<string, GameCustomRtssProfile>;
+  // 旧版覆写本机设置留下的恢复快照；新版本仅用于一次性迁移，不再创建。
+  inputRestore?: GameInputRestoreSnapshot;
 }
 
 const GAME_CUSTOM_PATH = 'C:\\SOFT\\YeMan\\PowerControl\\game-custom.json';
@@ -746,6 +802,14 @@ function normalizeCustomProfile(raw: unknown, fallback: ScheduleProfile): GameCu
   const hyperThreadPolicy = hyperThreadModes.includes(r.hyperThreadPolicy as typeof hyperThreadModes[number])
     ? r.hyperThreadPolicy as typeof hyperThreadModes[number]
     : 'default';
+  const padPersonas = ['follow', 'disabled', 'steamdeck', 'dualsense-edge', 'elite'] as const;
+  const gyroOverrides = ['follow', 'on', 'off', 'fps', 'racing', 'custom', 'steam'] as const;
+  const padPersona = padPersonas.includes(r.padPersona as typeof padPersonas[number])
+    ? r.padPersona as typeof padPersonas[number]
+    : 'follow';
+  const gyroOverride = gyroOverrides.includes(r.gyroOverride as typeof gyroOverrides[number])
+    ? r.gyroOverride as typeof gyroOverrides[number]
+    : 'follow';
   return {
     displayName: typeof r.displayName === 'string' ? r.displayName : '',
     // Legacy entries were implicitly active; only an explicit false disables them.
@@ -758,6 +822,8 @@ function normalizeCustomProfile(raw: unknown, fallback: ScheduleProfile): GameCu
     corePolicyMode,
     hyperThreadPolicyEnabled: r.hyperThreadPolicyEnabled === true,
     hyperThreadPolicy,
+    padPersona,
+    gyroOverride,
   };
 }
 
@@ -787,32 +853,90 @@ function normalizeGameCustom(value: unknown): GameCustomConfig {
       dcFps: Math.max(0, Math.round(Number(r.dcFps) || 0)),
     };
   }
-  return { version: 1, entries, rtss };
+  const restoreRaw = raw.inputRestore && typeof raw.inputRestore === 'object'
+    ? (raw.inputRestore as Record<string, unknown>)
+    : null;
+  const restorePersonas = ['disabled', 'dualshock4', 'xbox360', 'steamdeck', 'dualsense', 'elite', 'dualsense-edge'];
+  const inputRestore: GameInputRestoreSnapshot | undefined = restoreRaw && restorePersonas.includes(String(restoreRaw.persona))
+    ? {
+        persona: String(restoreRaw.persona),
+        buttonMappingEnabled: restoreRaw.buttonMappingEnabled === true,
+        gyroEnabled: restoreRaw.gyroEnabled === true,
+        motionEnabled: restoreRaw.motionEnabled === true,
+      }
+    : undefined;
+  return inputRestore ? { version: 1, entries, rtss, inputRestore } : { version: 1, entries, rtss };
 }
 
 let gameCustomCache: GameCustomConfig | null = null;
 
-async function readStandaloneGameCustom(path: string): Promise<GameCustomConfig | null> {
-  try {
-    const raw = await fs.readTextFile(path, GAME_CUSTOM_MAX_BYTES);
-    return normalizeGameCustom(JSON.parse(raw));
-  } catch {
-    return null;
+type GameCustomConfigListener = (config: GameCustomConfig) => void;
+const gameCustomConfigListeners = new Set<GameCustomConfigListener>();
+
+function notifyGameCustomConfigChanged(config: GameCustomConfig): void {
+  for (const listener of gameCustomConfigListeners) {
+    try {
+      listener(structuredClone(config));
+    } catch {
+      // A stale UI listener must never make a successfully persisted config fail.
+    }
   }
 }
 
+/** Subscribe to successful dedicated-profile saves within this renderer session. */
+export function onGameCustomConfigChanged(listener: GameCustomConfigListener): () => void {
+  gameCustomConfigListeners.add(listener);
+  return () => gameCustomConfigListeners.delete(listener);
+}
+
+function parseStandaloneGameCustom(raw: string): GameCustomConfig | null {
+  try {
+    const parsed = JSON.parse(raw.charCodeAt(0) === 0xFEFF ? raw.slice(1) : raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed) ||
+        !parsed.entries || typeof parsed.entries !== 'object' || Array.isArray(parsed.entries)) return null;
+    return normalizeGameCustom(parsed);
+  } catch { return null; }
+}
+async function readStandaloneGameCustom(path: string): Promise<GameCustomConfig | null> {
+  let raw: string;
+  try { raw = await fs.readTextFile(path, GAME_CUSTOM_MAX_BYTES); }
+  catch (error) {
+    if (await fs.exists(path)) throw new Error(`读取游戏配置失败：${path}；${(error as Error).message}`);
+    return null;
+  }
+  return parseStandaloneGameCustom(raw);
+}
+
 async function writeStandaloneGameCustom(config: GameCustomConfig): Promise<void> {
-  await fs.writeTextFileAtomic(GAME_CUSTOM_PATH, JSON.stringify(config, null, 2));
+  let previous: Record<string, any> = {};
+  if (await fs.exists(GAME_CUSTOM_PATH)) {
+    const raw = await fs.readTextFile(GAME_CUSTOM_PATH, GAME_CUSTOM_MAX_BYTES);
+    if (parseStandaloneGameCustom(raw)) previous = JSON.parse(raw.charCodeAt(0) === 0xFEFF ? raw.slice(1) : raw);
+  }
+  const next = { ...previous, ...config };
+  // Known maps are replacements so deletions remain durable. For retained
+  // entries only, recursively retain forward-compatible opaque fields.
+  for (const field of ['entries', 'rtss'] as const) {
+    const submitted = config[field] || {};
+    const retained: Record<string, any> = {};
+    for (const [key, value] of Object.entries(submitted)) {
+      const priorKey = Object.keys(previous[field] || {}).find(candidate => candidate.toLowerCase() === key.toLowerCase());
+      retained[key] = mergeSettings(priorKey ? previous[field][priorKey] : {}, value);
+    }
+    next[field] = retained;
+  }
+  if (!config.inputRestore) delete next.inputRestore;
+  else next.inputRestore = mergeSettings(previous.inputRestore || {}, config.inputRestore);
+  await fs.writeTextFileAtomic(GAME_CUSTOM_PATH, JSON.stringify(next, null, 2));
 }
 
 export function getGameCustomConfig(): GameCustomConfig {
   return gameCustomCache ? structuredClone(gameCustomCache) : defaultGameCustomConfig();
 }
 
-export async function loadGameCustomConfig(): Promise<GameCustomConfig> {
-  if (gameCustomCache) return structuredClone(gameCustomCache);
+async function loadGameCustomConfigUnlocked(): Promise<GameCustomConfig> {
 
-  const standaloneExists = await fs.exists(GAME_CUSTOM_PATH).catch(() => false);
+  const standaloneExists = await fs.exists(GAME_CUSTOM_PATH);
   if (standaloneExists) {
     const standalone = await readStandaloneGameCustom(GAME_CUSTOM_PATH);
     if (standalone) {
@@ -831,24 +955,28 @@ export async function loadGameCustomConfig(): Promise<GameCustomConfig> {
 
   // One-time migration only. Once the standalone document exists, it is the
   // sole runtime source and the old unified section can never revive entries.
-  let migrated: GameCustomConfig;
-  try {
-    migrated = normalizeGameCustom(await readSettingsSection('gameCustom'));
-  } catch {
-    migrated = defaultGameCustomConfig();
-  }
-  try {
-    await writeStandaloneGameCustom(migrated);
-    await replaceSettingsSection('gameCustom', defaultGameCustomConfig() as any);
-  } catch {
-    // Keep the migrated snapshot usable for this session. The next save or
-    // startup will retry persistence instead of making the UI unusable.
-  }
+  const migrated = normalizeGameCustom(await readSettingsSection('gameCustom'));
+  await writeStandaloneGameCustom(migrated);
+  await replaceSettingsSection('gameCustom', defaultGameCustomConfig() as any);
   gameCustomCache = migrated;
   return structuredClone(gameCustomCache);
 }
 
 let gameCustomWriteQueue: Promise<void> = Promise.resolve();
+let gameCustomLoad: Promise<GameCustomConfig> | null = null;
+
+export async function loadGameCustomConfig(): Promise<GameCustomConfig> {
+  if (!gameCustomLoad) {
+    // Cold migration/read participates in the file queue: an older load can
+    // neither overwrite a successful save nor publish a stale cached snapshot.
+    const run = gameCustomWriteQueue.then(loadGameCustomConfigUnlocked);
+    gameCustomWriteQueue = run.then(() => {}, () => {});
+    gameCustomLoad = run;
+  }
+  const task = gameCustomLoad;
+  try { return structuredClone(await task); }
+  finally { if (gameCustomLoad === task) gameCustomLoad = null; }
+}
 
 export async function saveGameCustomConfig(config: GameCustomConfig): Promise<void> {
   const snapshot = normalizeGameCustom(config);
@@ -858,12 +986,32 @@ export async function saveGameCustomConfig(config: GameCustomConfig): Promise<vo
     // Preserve the previous standalone document before replacing it. This is
     // deliberately independent from yeman-settings.json so deleting an entry
     // cannot be undone by a later unified-settings merge.
-    if (await fs.exists(GAME_CUSTOM_PATH).catch(() => false)) {
+    if (await fs.exists(GAME_CUSTOM_PATH)) {
       const previous = await fs.readTextFile(GAME_CUSTOM_PATH, GAME_CUSTOM_MAX_BYTES);
-      await fs.writeTextFileAtomic(GAME_CUSTOM_BACKUP_PATH, previous);
+      if (parseStandaloneGameCustom(previous)) {
+        await fs.writeTextFileAtomic(GAME_CUSTOM_BACKUP_PATH, previous);
+      } else {
+        // Never overwrite the last valid backup with corrupt main bytes.
+        await fs.writeTextFileAtomic(`${GAME_CUSTOM_PATH}.corrupt-${Date.now()}`, previous);
+      }
     }
     await writeStandaloneGameCustom(snapshot);
     gameCustomCache = snapshot;
+    notifyGameCustomConfigChanged(snapshot);
+  });
+  gameCustomWriteQueue = run.catch(() => {});
+  await run;
+}
+
+/** Legacy migration clears ONLY the restore field under the existing config queue. */
+export async function clearGameInputRestoreSnapshot(expected: GameInputRestoreSnapshot): Promise<void> {
+  const run = gameCustomWriteQueue.then(async () => {
+    const current = await loadGameCustomConfigUnlocked();
+    if (JSON.stringify(current.inputRestore) !== JSON.stringify(expected)) return;
+    const next = { ...current, inputRestore: undefined };
+    await writeStandaloneGameCustom(next);
+    gameCustomCache = next;
+    notifyGameCustomConfigChanged(next);
   });
   gameCustomWriteQueue = run.catch(() => {});
   await run;
@@ -918,7 +1066,8 @@ async function applyGameCustomProfilesUnsafe(
 
   const targetStillCurrent = async (): Promise<boolean> => {
     if (!expectedTarget) return true;
-    const current = await detectGame(true).catch(() => null);
+    if (expectedTarget.policyTarget) return isPolicyTargetCurrent(expectedTarget);
+    const current = await detectGame(true, expectedTarget.pid).catch(() => null);
     return !!current && current.pid === expectedTarget.pid &&
       current.processCreated === expectedTarget.processCreated;
   };

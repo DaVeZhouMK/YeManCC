@@ -1,7 +1,8 @@
 import { createApp, nextTick } from 'vue';
 import { createPinia } from 'pinia';
 import App from './App.vue';
-import { router } from './router';
+import { router, preloadStartupRoutes } from './router';
+import { initialPageWork, settleStartup } from './robust/startupReadiness';
 import { useDebugStore } from './stores/debug';
 import { invoke, isNativeRuntime } from './bridge/ipc';
 import { reportFrontendError } from './robust/frontendDiagnostics';
@@ -33,8 +34,10 @@ useDebugStore().installLogSink();
 // JS 错误本身不会让 WebView2 进程崩溃，但未捕获的异常可能让某个异步
 // 处理器停在中间状态（例如后续赋值未执行）。这里集中兜住，打印到控制台
 // （WebView2 DevTools 可见）并写入调试总线，便于将来定位"静默坏状态"。
+let lastSettingsStartupError = '';
 function reportError(where: string, err: unknown) {
   const msg = err instanceof Error ? `${err.message}\n${err.stack ?? ''}` : String(err);
+  if (/配置|settings|schema|JSON|目录/i.test(msg)) lastSettingsStartupError = msg;
   // eslint-disable-next-line no-console
   console.error(`[YeManCC] ${where}:`, msg);
   try {
@@ -47,7 +50,7 @@ function reportError(where: string, err: unknown) {
 
 app.config.errorHandler = (err, _instance, info) => {
   reportError(`vue.${info}`, err);
-  showRouteFallback('页面组件发生异常', router.currentRoute.value.fullPath);
+  showRouteFallback('页面组件发生异常', router.currentRoute.value.fullPath, false, err instanceof Error ? err.message : String(err));
 };
 
 // Lazy chunks and async component setup can fail after the shell itself is
@@ -78,15 +81,27 @@ router.onError((error, to) => {
   }
 });
 
+// A hidden startup document may throttle rAF. The bounded fallback permits
+// checking committed DOM only; native still requires both readiness signals.
+function waitForRenderFrame(): Promise<void> {
+  return new Promise<void>((resolve) => {
+    let done = false;
+    const finish = () => { if (!done) { done = true; clearTimeout(timer); cancelAnimationFrame(raf); resolve(); } };
+    const timer = window.setTimeout(finish, 250);
+    const raf = requestAnimationFrame(finish);
+  });
+}
+
 // A route-ready signal is emitted after Vue has committed the route and a
 // browser paint opportunity has passed. Native can distinguish this from its
 // older DOM-child-count probe and can accept route-degraded as a visible,
 // bounded fallback state.
-router.afterEach((to) => {
+router.afterEach((to, _from, failure) => {
+  if (failure) return;
   const epoch = ++routeEpoch;
   void (async () => {
     await nextTick();
-    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    await waitForRenderFrame();
     if (epoch !== routeEpoch) return;
     const detail = { route: to.fullPath, routeName: String(to.name || ''), epoch, status: 'route-ready' } as const;
     window.dispatchEvent(new CustomEvent('route-ready', { detail }));
@@ -113,59 +128,57 @@ window.addEventListener('unhandledrejection', (e) => {
 
 app.mount('#app');
 
-// NavigationCompleted can precede the first usable compositor frame on a cold
-// WebView2 launch. Tell the native host after Vue has mounted, the first route
-// has reported ready/degraded, and two browser paint opportunities are ready.
+// Acknowledgement is durable in this document as well as sent over IPC.
+// Native's lost-message probe checks this exact navigation-bound receipt;
+// DOM children alone are never readiness evidence.
 async function signalInitialRenderReady(): Promise<void> {
   if (!isNativeRuntime) return;
   try {
+    const startupWork = (async () => {
+      const [routeReady, appReady] = await Promise.all([
+        initialRouteReady,
+        appStartupReady,
+        // Editor popups are not a second main application.
+        router.isReady().then(() => router.currentRoute.value.name === 'button-mapping-shortcuts'
+          ? undefined : preloadStartupRoutes()),
+      ]);
+      await nextTick();
+      const pageReady = await initialPageWork.settle();
+      return routeReady && appReady && pageReady;
+    })();
+    const ready = await settleStartup(startupWork, 30000);
+    if (!ready) {
+      showRouteFallback('启动页面未能完成加载', router.currentRoute.value.fullPath, true, lastSettingsStartupError);
+      reportError('startup.readiness', new Error('Route, page initialization or app startup failed/timed out'));
+    }
     await nextTick();
-    await new Promise<void>((resolve) => {
-      const deadline = performance.now() + 250;
-      const waitForShell = () => {
-        const appRoot = document.getElementById('app');
-        if ((appRoot?.childElementCount ?? 0) > 0 || performance.now() >= deadline) {
-          resolve();
-          return;
-        }
-        requestAnimationFrame(waitForShell);
-      };
-      waitForShell();
-    });
-    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-    const routeReady = await Promise.race([
-      initialRouteReady,
-      new Promise<boolean>((resolve) => window.setTimeout(() => resolve(false), 1200)),
-    ]);
-    // App.vue performs settings/background initialization asynchronously.
-    // Keep the native splash until that work has settled, but cap the wait so
-    // a broken optional startup dependency cannot leave the window hidden.
-    const startupReady = await Promise.race([
-      appStartupReady,
-      new Promise<boolean>((resolve) => window.setTimeout(() => resolve(false), 5000)),
-    ]);
+    await waitForRenderFrame();
+    await waitForRenderFrame();
+    const content = document.querySelector('.app-content, .standalone-body');
+    const contentReady = ready && !!content?.firstElementChild &&
+      !document.getElementById('yemancc-route-fallback');
+    if (!contentReady) {
+      showRouteFallback('启动页面未能完成加载', router.currentRoute.value.fullPath, true, lastSettingsStartupError);
+      await nextTick();
+      await waitForRenderFrame();
+    }
     const context = await invoke<{ generation?: string; navigationId?: string }>(
-      'window.renderContext',
-      {},
-      { timeoutMs: 1500 },
+      'window.renderContext', {}, { timeoutMs: 1500 },
     );
     if (!context?.generation || !context?.navigationId || context.navigationId === '0') return;
-    await invoke(
-      'window.renderReady',
-      {
-        generation: context.generation,
-        navigationId: context.navigationId,
-        routeReady: routeReady && startupReady,
-        routeStatus: routeReady && startupReady ? 'route-ready' : 'route-degraded',
-        routeEpoch,
-      },
-      { timeoutMs: 1500 },
-    );
+    const receipt = {
+      generation: context.generation,
+      navigationId: context.navigationId,
+      routeReady: contentReady,
+      routeStatus: contentReady ? 'route-ready' : 'route-degraded',
+      fallbackVisible: !!document.getElementById('yemancc-route-fallback'),
+      routeEpoch,
+    };
+    (window as Window & { __YMCC_STARTUP_READY__?: typeof receipt }).__YMCC_STARTUP_READY__ = receipt;
+    await invoke('window.renderReady', receipt, { timeoutMs: 1500 });
   } catch (error) {
-    // Native has a bounded DOM probe + recovery fallback. Logging here keeps a
-    // lost handshake observable without blocking the UI bootstrap.
     console.warn('[YeManCC] initial render-ready handshake failed', error);
+    reportError('startup.handshake', error);
   }
 }
 

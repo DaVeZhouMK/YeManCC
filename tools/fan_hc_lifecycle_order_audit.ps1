@@ -36,8 +36,12 @@ function Require-Order([string]$name, [string]$text, [string[]]$tokens) {
 function Slice([string]$text, [string]$startToken, [string]$endToken) {
   $start = $text.IndexOf($startToken, [StringComparison]::Ordinal)
   if ($start -lt 0) { throw "Missing source boundary: $startToken" }
+  $startHits = ([regex]::Matches($text, [regex]::Escape($startToken))).Count
+  if ($startHits -ne 1) { throw "Ambiguous source boundary ($startHits hits): $startToken" }
   $end = $text.IndexOf($endToken, $start + $startToken.Length, [StringComparison]::Ordinal)
-  if ($end -lt 0) { $end = $text.Length }
+  # §2（FAN-926R 裁决）：endToken 缺失时**必须报错**，不能把"全文尾部"当合法函数体。
+  if ($end -lt 0) { throw "Missing source boundary (end): $endToken after $startToken" }
+  if ($end -le $start) { throw "Source boundary order invalid: $startToken -> $endToken" }
   return $text.Substring($start, $end - $start)
 }
 
@@ -95,11 +99,19 @@ Require-Order 'YeMan Open' $hostOpen @(
   'CaptureOemBaseline();'
 )
 if ($hostOpen.Contains('StartHcDeviceManager();')) { throw 'YeMan fan-only Open must not start HC DeviceManager' }
-$hostEvents = Slice $hostText 'private void OpenEventsCore()' 'private void SubscribeExternalProfileEvents()'
+# §2（FAN-926R 裁决）：旧要求（独立 `private void OpenEventsCore()`）已被**现行合同取代** ——
+# HC OpenEvents 的生产入口现为 `private HcDeviceOpenNeed OpenEventsBeginCore()`，由
+# `RealHcBackend.OpenEvents()` 经 `OnStaBounded` 调用。断言内容不变，只重定位入口。
+$hostEvents = Slice $hostText 'private HcDeviceOpenNeed OpenEventsBeginCore()' 'private void OpenEventsFinalizeCore()'
+# 旧要求（`Invoke` 之后再轮询 `EnsureHcDeviceOpenForRestore()`）已被 920-v1.14 §25 **正式取代**：
+# 现合同 = **调用前**确证 HC 会话/路由就绪（`EnsureHcSessionReadyForOpenEvents()`）+ **调用后**
+# 以正式收据开始设备打开（`BeginHcDeviceOpenForRestore()`）。`tools\fan_host_lifecycle_selftest.ts`
+# 与 `tools\fan_payload_selftest.ps1` 已记录该取代；本条门此前漏同步（FAN-926R 裁决 §2 修正）。
 Require-Order 'YeMan OpenEvents' $hostEvents @(
-  'Invoke(device!, "OpenEvents");',
-  'EnsureHcDeviceOpenForRestore();'
+  'EnsureHcSessionReadyForOpenEvents();',
+  'Invoke(device!, "OpenEvents");'
 )
+if (-not $hostEvents.Contains('BeginHcDeviceOpenForRestore();')) { throw 'YeMan OpenEvents must begin the formal HC device-open receipt after invoking OpenEvents' }
 $hostClose = Slice $hostText 'private void CloseCore(bool stopDeviceManager)' 'private void CloseHcDevice()'
 Require-Order 'YeMan Close' $hostClose @(
   'StopCpuTemperatureMonitor();',

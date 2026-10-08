@@ -1,0 +1,110 @@
+{
+  "schema": 1,
+  "name": "sleep-forms-library",
+  "version": "v1 (2026-09-22) - promoted from the fan-task scratch tool to tools/ymcc_sim/domains/sleep",
+  "generatedBy": "ymcc_sim sleep domain (masked-testing line); analytical extraction only, no product data was modified",
+  "purpose": "The REAL sleep/wake forms + densities observed on this machine, used as the evidence base for the sleep domain of the global simulator.",
+  "dataSources": [
+    {
+      "path": "C:\\SOFT\\YeMan\\PowerControl\\Sleep\\sleep-facts.log.previous",
+      "producer": "YeManCC native SG_FACT_LOG (native/main.cpp:871)",
+      "bytes": 1048647,
+      "sha256": "C53A6CD174C59F98582C4264C90BCDC1AB56324E3BC8A81E16699FFD165EFD8B",
+      "records": 5060,
+      "window": "2026-09-17 19:32:53.731 -> 2026-09-19 23:27:38.505"
+    },
+    {
+      "path": "C:\\SOFT\\YeMan\\PowerControl\\Sleep\\sleep-facts.log",
+      "bytes": 37110,
+      "sha256": "A7EFBA68D1D7CBC4C599382CBBC78886EED6E6FF60BA80D0096B87E606B91261",
+      "records": 219
+    },
+    {
+      "path": "C:\\Users\\DaVe\\Desktop\\CPU优化\\YeManCC-logs-20260919-234247.zip!sleep-facts.log",
+      "role": "operator-supplied historical log archive: one complete real sleep/wake cycle with the app running",
+      "entryBytes": 12563,
+      "entrySha256": "B961E364F177C2CB7C33742E22DDA3C138452A1DC119FD6B3F133102450E2C49",
+      "records": 70,
+      "window": "2026-09-19 23:31:23.360 -> 23:40:46.856"
+    }
+  ],
+  "realCycleMeasured": {
+    "window": "2026-09-19 23:31:47.153 -> 23:32:06.856",
+    "sleepDurationSec": 19.1,
+    "sleepSide": [
+      "power-broadcast code=4 (PBT_APMSUSPEND) generation=1",
+      "suspend-keep-writer generation=2 (the writer is KEPT across this sleep)",
+      "handheld-sleep-sensors-only reason=suspend-confirmed",
+      "kernel-power-506 userInitiatedSleep=true 23:31:48.085",
+      "s0-intent-joined-existing-suspend generation=2 -> the SAME physical sleep arriving twice is JOINED, never duplicated"
+    ],
+    "wakeSide": [
+      "power-broadcast code=18 (PBT_APMRESUMEAUTOMATIC) 23:32:05.853",
+      "handheld-keep-playing reason=resume_auto_handheld / pbt-resume-keep-writer generation=2",
+      "power-broadcast code=7 (PBT_APMRESUMESUSPEND) 23:32:06.165",
+      "kernel-power 507 23:32:06.855",
+      "s0-wake-message acceptedUserWake=true 23:32:06.856 -> three joined notifications reach the host as ONE resume edge"
+    ],
+    "afterWakeBursts": "4-5 device-change rows inside 60-70 ms were evaluated as 意外唤醒 but NOT re-slept (intentAgeEligible=false)"
+  },
+  "density": {
+    "deviceChangeTotal": 2270,
+    "peakPerSecond": 19,
+    "interEventGapLe200msRatio": 0.884,
+    "reading": "88.4% of consecutive device-change rows arrive within 200 ms = the burst shape the C4 form replays (upper bound)"
+  },
+  "sleepDurationsAsRestartGaps": {
+    "samples": 169,
+    "minutes": { "min": 0.36, "p25": 1.4, "median": 2.4, "p75": 5.1, "max": 529.02 },
+    "bins": { "lt1min": 31, "1to5min": 95, "5to30min": 28, "ge30min": 14 },
+    "reading": "18% flash cycles, 56% short (1-5 min), 17% medium, 8% long (>=30 min) => the long-sleep form must exist"
+  },
+  "codeConstants": [
+    { "name": "SG_ENTRY_RETRY_DELAYS_MS", "valueMs": [500, 1000, 2000], "file": "native/main.cpp:822", "meaning": "re-sleep ladder after entry failure and after a confirmed 意外唤醒" },
+    { "name": "SG_MAX_ENTRY_RETRIES", "value": 3, "file": "native/main.cpp:826" },
+    { "name": "SG_USER_STANDBY_DEVICE_DELAY_MS", "valueMs": 120000, "file": "native/main.cpp:828" },
+    { "name": "SG_LONG_SLEEP_MIN_EPOCH_DELTA", "valueSec": 1800, "file": "native/main.cpp:906" },
+    { "name": "SG_LONG_SLEEP_RESUME_GRACE_MS", "valueMs": 3000, "file": "native/main.cpp:907" },
+    { "name": "host lease TTL", "valueMs": 15000, "file": "FanLab/real-host/Program.cs:7946" },
+    { "name": "front-end lease renewal", "valueMs": 5000, "file": "src/bridge/fanHost.ts:27" },
+    { "name": "host long-sleep resume grace", "valueMs": 3000, "file": "FanLab/real-host/Program.cs:8786-8791" },
+    { "name": "host recovery retry", "valueMs": 2000, "maxAttempts": 30, "windowMs": 60000, "file": "FanLab/real-host/Program.cs:6867-6869" }
+  ],
+  "hostProtocol": {
+    "suspend": { "endpoint": "POST /api/suspend", "required": ["generation>0", "source in {native.power, selftest.native}"], "authority": "FanLab/real-host/Program.cs:11079-11094,11210-11217" },
+    "resume": { "endpoint": "POST /api/resume", "required": ["generation>0", "source non-empty"], "noopShape": "200 with resumeNoop=true + reason (not-suspended|host-stopped)", "supersededShape": "409 HC_RESUME_SUPERSEDED" },
+    "staleShape": "409 POWER_EVENT_STALE (same-gen suspend after a Ready edge, or any lower generation)",
+    "closedShape": "409 POWER_CLOSE_PENDING",
+    "auth": { "header": "X-YeMan-Fan-Session", "source": "FanLab/real-host/Program.cs:11329-11337", "missingToken": "401 API_SESSION_REQUIRED" }
+  },
+  "forms": [
+    { "id": "P1", "name": "无令牌请求（fail-closed 门）", "class": "protocol-gate", "expect": "401 API_SESSION_REQUIRED", "source": "hostProtocol.auth" },
+    { "id": "P2", "name": "缺 generation（fail-closed 门）", "class": "protocol-gate", "expect": "400 POWER_GENERATION_REQUIRED", "source": "hostProtocol.suspend.required" },
+    { "id": "P3", "name": "非 native authority 入睡（fail-closed 门）", "class": "protocol-gate", "expect": "403 F4_NATIVE_AUTHORITY_REQUIRED", "source": "hostProtocol.suspend.authority" },
+    { "id": "P7", "name": "缺 source（fail-closed 门）", "class": "protocol-gate", "expect": "400 POWER_GENERATION_REQUIRED", "source": "hostProtocol.suspend.required" },
+    { "id": "P4", "name": "同代次过时入睡（跨代拒绝）", "class": "protocol-gate", "expect": "409 POWER_EVENT_STALE + 状态不变", "source": "hostProtocol.staleShape" },
+    { "id": "P5", "name": "更低代次入睡（跨代拒绝）", "class": "protocol-gate", "expect": "409 POWER_EVENT_STALE", "source": "hostProtocol.staleShape" },
+    { "id": "P6", "name": "更低代次唤醒（跨代拒绝）", "class": "protocol-gate", "expect": "409 POWER_EVENT_STALE", "source": "hostProtocol.staleShape" },
+    { "id": "B1", "name": "正常短睡（1.5 s 压缩自真实 1–5 min）", "class": "boundary", "expect": "入睡 Suspended → 唤醒 AwaitingControl/On（真实边界）", "source": "sleepDurationsAsRestartGaps (56% 落在 1-5 min)" },
+    { "id": "B2", "name": "长睡（>=30 min 门槛）", "class": "boundary", "expect": "压缩模式不触发 Host 内部门槛（SKIP）；真实等待需 -LongSleepReal", "source": "codeConstants.SG_LONG_SLEEP_MIN_EPOCH_DELTA / host long-sleep resume grace" },
+    { "id": "B3", "name": "重复边沿幂等（双次投递）", "class": "idempotency", "expect": "同代次第二次入睡 200+deduplicated；第二次唤醒绑定收据不二次重建", "source": "realCycleMeasured.sleepSide (s0-intent-joined-existing-suspend)" },
+    { "id": "B4", "name": "空转唤醒（无匹配入睡，fail-closed）", "class": "fail-closed", "expect": "409 HC_RESUME_RESULT_EXPIRED，状态不动", "source": "Program.cs:11162-11176 / native/main.cpp:32835-32858" },
+    { "id": "B5", "name": "重复唤醒收据绑定（同代次）", "class": "idempotency", "expect": "200 + 既有终态；不第二次 open/open-events", "source": "Program.cs:11162-11176" },
+    { "id": "B6", "name": "幻影唤醒（更高代次、无入睡）", "class": "fail-closed", "expect": "409 HC_RESUME_RESULT_EXPIRED", "source": "Phantom wake after a host restart during sleep" },
+    { "id": "C1", "name": "误唤醒→瞬间重睡阶梯（500/1000/2000 ms）", "class": "real-density", "expect": "入睡→误唤醒→按阶梯重睡，全部 200", "source": "codeConstants.SG_ENTRY_RETRY_DELAYS_MS / misWake.label=意外唤醒" },
+    { "id": "C2", "name": "瞬间双次睡眠（闪醒后立刻第二次入睡）", "class": "real-density", "expect": "两次入睡在用户可感知的一次闪动内完成（<=3 s）", "source": "sleepDurationsAsRestartGaps.lt1min=31 (18% flash cycles)" },
+    { "id": "C3", "name": "双观察者双次入睡投递", "class": "real-density", "expect": "第二次（新代次）被吸收为 deduplicated，不第二次 Close", "source": "realCycleMeasured.sleepSide + afterWakeBursts" },
+    { "id": "C4", "name": "密集风暴（10 循环 @150 ms，真实峰值 19/s）", "class": "real-density", "expect": "全部接受、无 503；风暴后状态一致", "source": "density.peakPerSecond / interEventGapLe200msRatio" },
+    { "id": "D1", "name": "带会话睡眠（无曲线，干净入睡/唤醒）", "class": "lifecycle", "expect": "入睡边界释放租约；唤醒回到 AwaitingControl 且不伪造重开会话", "source": "Program.cs:9606-9611 (null backend => !HardwareWritesObserved)" },
+    { "id": "D2", "name": "曲线会话睡眠（safe/mock 无法证明 OEM 恢复 ⇒ fail-closed）", "class": "lifecycle", "expect": "入睡成 FaultLocked（powerState=Unknown）；唤醒 409 HC_RESUME_REBUILD_FAILED；mock 恢复不得伪装成物理读回", "source": "Program.cs:9777-9790" },
+    { "id": "D3", "name": "入睡中关闭竞争（晚到唤醒被 fail-closed）", "class": "lifecycle", "expect": "close 后晚到唤醒 409 POWER_CLOSE_PENDING；终态 Stopped", "source": "hostProtocol.closedShape" }
+  ],
+  "notImplemented": [
+    { "scenario": "native-race", "status": "NOT_AVAILABLE", "reason": "native\\testrun\\wake_race_test 的测试 exe 不在盘上（tools\\wake_race_sim_test.ps1 需要先构建）", "future": "接进本域可覆盖 native 层唤醒竞争" },
+    { "scenario": "native-watchdog", "status": "NOT_AVAILABLE", "reason": "native\\testrun\\wake_watchdog_test 的测试 exe 不在盘上（tools\\wake_watchdog_sim_test.ps1 需要先构建）", "future": "接进本域可覆盖 native 层看门狗" },
+    { "scenario": "real-sleep", "status": "NOT_IMPLEMENTED", "reason": "本域绝不触发真实系统睡眠（不做 SetSuspendState）；真实睡眠只能由操作者手动执行", "future": "保持不实现（安全边界）" }
+  ],
+  "unverifiedAssumption": [
+    "The restart-gap proxy for sleep duration assumes the app auto-starts at logon after every wake; a manual app restart inside an awake session also produces a user-standby-cleared(process-start) row. The bins are therefore an upper bound on short cycles."
+  ]
+}

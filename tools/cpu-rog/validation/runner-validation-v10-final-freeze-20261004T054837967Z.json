@@ -1,0 +1,213 @@
+{
+  "schemaVersion": 1,
+  "toolVersion": "rog-portable-runner-2",
+  "timestampUtc": "2026-10-04T05:48:37.967016Z",
+  "sourceFreeze": "FROZEN_EXECUTOR_WRITE_SET",
+  "scope": "local-software-tool-validation-only",
+  "attemptFieldsScope": "this-tool-invocation-only-not-machine-wide",
+  "sourceRole": "portable-ROG-collector-toolkit",
+  "sourceDriftCount": 0,
+  "modifiedSourceFiles": [
+    {
+      "path": "Invoke-ROG-CPU.ps1",
+      "bytes": 59160,
+      "sha256": "55CD2B7DA11590B5659CD8F3DC524D243DA3BC838C3AD3822BC355BA4C666600"
+    },
+    {
+      "path": "Invoke-YMCC-AuthorizedWorker.ps1",
+      "bytes": 5621,
+      "sha256": "4BE38C7BF91811B40EAA739EBAC3B6FD2F47DC9A672A1448289868947EA9F21B"
+    },
+    {
+      "path": "tests/Test-ROG-CPU-Runner.ps1",
+      "bytes": 79945,
+      "sha256": "D58F0D5BEAD22CFFF89850312AB0AEDD4BCD7A5986330E5E08F50DF1326CEBBE"
+    }
+  ],
+  "validatedSourceFiles": [
+    {
+      "path": "Collect-YMCC-CPU.ps1",
+      "bytes": 63760,
+      "sha256": "2DBA99927EA58F12274A950BD59590D72A9AEC8F1B6A1186F2125163DE000FE5"
+    },
+    {
+      "path": "Control-YMCC-Lifecycle.ps1",
+      "bytes": 8849,
+      "sha256": "350E573EA38ED96C79256FD9A4AC991CF38F295F6956828ABE289B05AAAAF54E"
+    },
+    {
+      "path": "Invoke-ROG-CPU.ps1",
+      "bytes": 59160,
+      "sha256": "55CD2B7DA11590B5659CD8F3DC524D243DA3BC838C3AD3822BC355BA4C666600"
+    },
+    {
+      "path": "Invoke-YMCC-AuthorizedWorker.ps1",
+      "bytes": 5621,
+      "sha256": "4BE38C7BF91811B40EAA739EBAC3B6FD2F47DC9A672A1448289868947EA9F21B"
+    },
+    {
+      "path": "Send-YMCC-AI-Fan-Mock.ps1",
+      "bytes": 11447,
+      "sha256": "F640C9A2CCD878B5115B284C7734BF826FE299D6D7E5E72FDED219187276D084"
+    },
+    {
+      "path": "config.example.json",
+      "bytes": 221,
+      "sha256": "E4C292AB44625FAD5E60A9CBFF6AD99EB54E924EBC5893BE867A60E134B81DF8"
+    },
+    {
+      "path": "tests/Test-ROG-CPU-Runner.ps1",
+      "bytes": 79945,
+      "sha256": "D58F0D5BEAD22CFFF89850312AB0AEDD4BCD7A5986330E5E08F50DF1326CEBBE"
+    }
+  ],
+  "selectedFinalValidationReports": [
+    {
+      "path": "validation/runner-validation-v10-7.6.5-20261004T054526826Z-428dbd26.json",
+      "bytes": 18077,
+      "sha256": "25BD2A2CDD66DFA86600C3387E259346380158A31DB97ECFBFF3B63907410D15"
+    },
+    {
+      "path": "validation/runner-validation-v10-7.6.5-20261004T054526826Z-428dbd26.md",
+      "bytes": 402,
+      "sha256": "2A19BF33152B75FB61CEAAFE1914B010C46960B4ECD9A15D6FEAB7289B63D2FE"
+    },
+    {
+      "path": "validation/runner-validation-v10-PS51-final-parser-20261004T054653896Z-b5b92c00.json",
+      "bytes": 5385,
+      "sha256": "B9DEBC1FFFD756E8BE35FDA5418F5E8C63E2F62FFA3872CBC832DD0FDBA20F5E"
+    },
+    {
+      "path": "validation/runner-validation-v10-PS51-final-parser-20261004T054653896Z-b5b92c00.md",
+      "bytes": 539,
+      "sha256": "08E9E3AE7AB4427CF862D1CD2E82B56304BFEAE91F34C46B3E3EF8B6022AE550"
+    }
+  ],
+  "acceptedPS7Gate": {
+    "status": "PASSED",
+    "powershellVersion": "7.6.5",
+    "actualExitCode": 0,
+    "casesTotal": 140,
+    "casesPassed": 140,
+    "casesFailed": 0,
+    "report": "validation/runner-validation-v10-7.6.5-20261004T054526826Z-428dbd26.json",
+    "coverage": "LOW_PARENT_DENIED_METADATA_HASH_PROCESS_OWNER_SEAMS;HIGH_WORKER_REAL_VALIDATION_OF_INERT_FILE_AND_FAKE_CIM;FINITE_PRODUCT_ACTIONS_SYNTHETIC",
+    "wrapperSubprocessPrivilege": "FAKE_TOKEN_NO_NATIVE_NO_SYSTEM_TARGET_READS"
+  },
+  "PS51Gate": {
+    "status": "PARSER_ONLY_PASSED",
+    "powershellVersion": "5.1.26100.8875",
+    "actualParserExitCode": 0,
+    "casesPassed": 6,
+    "casesTotal": 6,
+    "defaultExecutionPolicy": "Restricted",
+    "inertPolicySentinelExitCode": 1,
+    "fullOfflineRuntimeStatus": "BLOCKED_BY_DEFAULT_EXECUTION_POLICY",
+    "fullOfflineRuntimeExecuted": false,
+    "equivalentToPS7Coverage": false,
+    "report": "validation/runner-validation-v10-PS51-final-parser-20261004T054653896Z-b5b92c00.json",
+    "noBypassOrPolicyChange": true
+  },
+  "fixes": [
+    "Dedicated int/uint32/long PID 1..Int32Max checker; strict protocol sequence unchanged; typed CIM owner return status.",
+    "Parent lexical descriptor/trusted-hash-presence/complete-UTC-selector gates precede token routing; no target file/hash/process/owner read on delegated low path.",
+    "Worker proves own high token before all actual target validations, then finite operation; unverified token and wrong hash/path/birth/owner reject first.",
+    "Read-only explicit PID without birth discovers actual UTC only; unknown fields and ambiguous/foreign roots not authorization.",
+    "Three lexical rejection cases for directory wildcard, device namespaces and extra colon/ADS; ordinary local/UNC descriptors remain accepted without reads.",
+    "Partial safe diagnostics/proof binding retained; discoveredHashIsAuthorization=false; no raw commandLine or opaque worker details projected."
+  ],
+  "limitations": [
+    "All actual UAC/high-product access, start/stop/restart, CPU sampling, fan/controller/gyro and ROG runtime regression remain unverified and HOLD.",
+    "PS7 gates use fake process/token/CIM/UAC/handles and inert file/collector; finite product actions in bootstrap routing cases are synthetic.",
+    "PS5 parser only; default Restricted policy blocks inert -File sentinel with exit1; no runner execution and no policy bypass.",
+    "CIM-only discovery; no native fallback, no guessed DMTF/local-time birth.",
+    "windowObserved never establishes frontendReadyVerified or full restart/runtimeReady.",
+    "Product version/hash has not been confirmed; raw ROG Results not received; performance NOT_RUN.",
+    "Final gate has no actual product/native/UAC/sampling calls. A superseded preliminary gate may have queried the local invoking token in copied subprocess wrappers before fixture seam correction; it is not accepted as no-native evidence."
+  ],
+  "supersededReportsNotForDelivery": [
+    {
+      "path": "validation/runner-validation-v10-7.6.5-20261004T053035348Z-45b28683.json",
+      "reason": "PRE_BOOTSTRAP_REVIEW_110_CASES_NOT_CURRENT_HASH"
+    },
+    {
+      "path": "validation/runner-validation-v10-7.6.5-20261004T054041239Z-a3cbfa96.json",
+      "reason": "FAILED_PRELIMINARY_GATE_AND_WRAPPER_SELF_TOKEN_SEAM_INCOMPLETE"
+    },
+    {
+      "path": "validation/runner-validation-v10-7.6.5-20261004T054247388Z-5f6de4fb.json",
+      "reason": "137_CASE_GATE_SUPERSEDED_BY_FINAL_DESCRIPTOR_BOUNDARY_CURRENT_HASH"
+    }
+  ],
+  "manifestContract": {
+    "filename": "kit-manifest.json",
+    "exactTopLevelFields": [
+      "version",
+      "sourceRole",
+      "localToolValidation",
+      "rogRegressionStatus",
+      "files"
+    ],
+    "fileFields": [
+      "path",
+      "sha256",
+      "bytes"
+    ],
+    "fileCountBounds": [
+      6,
+      256
+    ],
+    "selfHashExcluded": true,
+    "docsAllCopiedFilesBound": true,
+    "requiredTask": "docs/ROG-CAPTURE-AI-TASK-v10-20261004.md",
+    "excludeHistoricalTaskAtPackaging": "docs/ROG-CAPTURE-AI-TASK-v9-20261004.md",
+    "localToolValidationPassedMeaning": "Accepted PS7 offline gate only; parser/core conditional coverage remains explicit.",
+    "exampleTemplate": {
+      "version": "10.20261004",
+      "sourceRole": "portable-ROG-collector-toolkit",
+      "localToolValidation": {
+        "status": "PASSED",
+        "scope": "local-software-tool-validation-only",
+        "rogRegressionPassed": false,
+        "coverage": {
+          "runnerPS7": {
+            "casesPassed": 140,
+            "casesTotal": 140,
+            "actualExitCode": 0,
+            "type": "FULL_OFFLINE_FAKE_SEAMS"
+          },
+          "runnerPS51": {
+            "parserPassed": 6,
+            "parserTotal": 6,
+            "actualParserExitCode": 0,
+            "runtime": "BLOCKED_BY_DEFAULT_EXECUTION_POLICY",
+            "equivalentToPS7Coverage": false
+          },
+          "collector": "DELEGATED_REPORTS_CONDITIONAL_NOT_REVALIDATED_BY_THIS_RUNNER_GATE"
+        }
+      },
+      "rogRegressionStatus": "NOT_RUN",
+      "files": [
+        {
+          "path": "relative/copied-file.ps1",
+          "sha256": "REPLACE_WITH_64_HEX_COPY_SHA256",
+          "bytes": 0
+        }
+      ]
+    }
+  },
+  "collectorUntouchedIdentity": {
+    "path": "Collect-YMCC-CPU.ps1",
+    "bytes": 63760,
+    "sha256": "2DBA99927EA58F12274A950BD59590D72A9AEC8F1B6A1186F2125163DE000FE5"
+  },
+  "parentDocsReadmeModifiedByThisExecutor": false,
+  "desktopV10PackagingPerformed": false,
+  "v9DesktopArtifactsModifiedByThisExecutor": false,
+  "rogRegressionPassed": false,
+  "rogToolRegression": "NOT_RUN",
+  "rogProductRegression": "NOT_RUN",
+  "rogCpuAB": "NOT_RUN",
+  "productVersionConfirmed": false,
+  "rogActions": "HOLD"
+}

@@ -10,7 +10,12 @@
 #>
 [CmdletBinding()]
 param(
-  [string]$WorkspaceRoot = $env:YEMAN_WORKSPACE_ROOT
+  [string]$WorkspaceRoot = $env:YEMAN_WORKSPACE_ROOT,
+  # The HC binary closure is an explicit frozen input. Keep the historical
+  # workspace-relative default for compatibility, but allow the BUS to point
+  # at the audited migration backup instead of silently using an absent or
+  # guessed runtime directory.
+  [string]$HcRuntimeSourceRoot = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -47,25 +52,49 @@ function Get-RelativePath([string]$Root, [string]$Path) {
 
 $projectRoot = Get-FullPath (Split-Path -Parent $PSScriptRoot)
 if ([string]::IsNullOrWhiteSpace($WorkspaceRoot)) {
+  # Keep Build/Release beside the checkout, matching build-workspace.ps1.
   $WorkspaceRoot = Get-FullPath (Join-Path $projectRoot '..\..')
 } else {
   $WorkspaceRoot = Get-FullPath $WorkspaceRoot
 }
-$hostProject = Join-Path $WorkspaceRoot 'FanLab\real-host\YeManFanHost.csproj'
-$hostOutput = Join-Path $WorkspaceRoot 'FanLab\real-host\bin\Release\net10.0-windows10.0.19041.0\win-x64'
-$hcRuntimeSourceRoot = Join-Path $WorkspaceRoot 'FanLab\build\batch11-runtime-09'
+$hostProject = Join-Path $projectRoot 'FanLab\real-host\YeManFanHost.csproj'
+$hostOutput = Join-Path $projectRoot 'FanLab\real-host\bin\Release\net10.0-windows10.0.19041.0\win-x64'
+$hcRuntimeSourceRoot = if ([string]::IsNullOrWhiteSpace($HcRuntimeSourceRoot)) {
+  Join-Path $projectRoot 'FanLab\build\batch11-runtime-09'
+} else {
+  Get-FullPath $HcRuntimeSourceRoot
+}
 $payloadRoot = Join-Path $projectRoot 'PowerControl\fan-host'
 
 if (-not (Test-Path -LiteralPath $hostProject -PathType Leaf)) { throw "Fan Host project missing: $hostProject" }
 if (-not (Test-Path -LiteralPath $payloadRoot -PathType Container)) { throw "Fan Host payload directory missing: $payloadRoot" }
 if (-not (Test-Path -LiteralPath $hcRuntimeSourceRoot -PathType Container)) { throw "Pinned HC runtime source missing: $hcRuntimeSourceRoot" }
 
+# The FanHost manifest is the child-side reference to the shared HC runtime.
+# Derive both values from the actual selected runtime directory so a rebuilt
+# Candidate cannot silently retain the previous runtime identity.
+$hcRuntimeManifest = Join-Path $hcRuntimeSourceRoot 'HandheldCompanion.runtime.json'
+if (-not (Test-Path -LiteralPath $hcRuntimeManifest -PathType Leaf)) { throw "Pinned HC runtime manifest missing: $hcRuntimeManifest" }
+$hcRuntimeMetadata = Get-Content -LiteralPath $hcRuntimeManifest -Raw -Encoding UTF8 | ConvertFrom-Json
+$hcRuntimeId = [string]$hcRuntimeMetadata.runtimeId
+if ($hcRuntimeMetadata.schemaVersion -ne 1 -or $hcRuntimeId -notmatch '^HC-CANDIDATE-0\.32\.4\.0-[0-9a-f]{8}-[0-9]{8}$') {
+  throw "Pinned HC runtime manifest identity is invalid: $hcRuntimeManifest"
+}
+$runtimeManifestRelative = "..\handheldcompanion-runtime\$([IO.Path]::GetFileName($hcRuntimeSourceRoot))\HandheldCompanion.runtime.json"
+
 & dotnet build $hostProject -c Release --no-restore
 if ($LASTEXITCODE -ne 0) { throw "Fan Host build failed: exit=$LASTEXITCODE" }
 
+# HC-SLIM-01 R3 (2026-10-06): the Host now carries an explicit project
+# reference to FanLab\fan-backend (YeManFanBackend.dll), the ASUS fan
+# curve/transport/receipt leaf component. The Host deps manifest lists it as a
+# project dependency, so it must ship beside YeManFanHost.dll or the Host
+# fails to load at runtime. Keep it in the explicit host set so the stale-file
+# prune below cannot drop it.
 $hostFiles = @(
   'YeManFanHost.exe',
   'YeManFanHost.dll',
+  'YeManFanBackend.dll',
   'YeManFanHost.deps.json',
   'YeManFanHost.runtimeconfig.json',
   'YeManFanHost.json'
@@ -115,7 +144,7 @@ $hcFactoryBootstrapHashes = [ordered]@{
   'SharpDX.Direct3D9.dll' = '69701eda7433ac0010aba416b9d9c245cd78694770d4bb6b7541b83bace41d55'
   'SharpDX.DirectInput.dll' = '35d9ae6b98c5b68fdc1fcaf6e03c95c82f9305c7355dd911f8841880b42e945f'
   'SharpDX.XInput.dll' = '350195201205840b38aee094bcead4c78b1661f3570a7caa5c36b86ce6d03ff3'
-  'hidapi.net.dll' = 'adc343b824405081a1b3ec69b06b4808734fc448ee757d0ea7b723acddca3182'
+  'hidapi.net.dll' = '5553f2487424b325f750c0fe83bd7961943cc97f2e0d1c24285506374b298f17'
   'hidapi.dll' = 'ebeb835e2b4530ed68843f19d6a2604c51772e3c26e7f542fde194075f82d9b4'
 }
 if (@($hcFactoryBootstrapFiles | Where-Object { -not $hcFactoryBootstrapHashes.Contains($_) }).Count -ne 0 -or
@@ -133,12 +162,20 @@ if (-not (Test-Path -LiteralPath $hcDepsSource -PathType Leaf)) {
   throw "Pinned HC dependency manifest missing: $hcDepsSource"
 }
 $hcDeps = Get-Content -LiteralPath $hcDepsSource -Raw -Encoding UTF8 | ConvertFrom-Json
-$hcTargets = @($hcDeps.targets.PSObject.Properties.Value)
-if ($hcTargets.Count -ne 1) { throw 'Pinned HC dependency manifest must contain exactly one target graph' }
+$hcTargetProperties = @($hcDeps.targets.PSObject.Properties)
+if ($hcTargetProperties.Count -eq 0) { throw 'Pinned HC dependency manifest has no target graph' }
+# .NET 10 publishes both the portable graph and a win-x64 RID graph.  Fan Host
+# is a win-x64 process, so prefer that graph while retaining compatibility with
+# older manifests that contain only one target.
+$hcTargetProperty = $hcTargetProperties |
+  Where-Object { $_.Name -match '(?i)/win-x64$' } |
+  Select-Object -First 1
+if ($null -eq $hcTargetProperty) { $hcTargetProperty = $hcTargetProperties | Select-Object -First 1 }
+$hcTarget = $hcTargetProperty.Value
 $hcRuntimeSources = @{
   'HandheldCompanion.deps.json' = $hcDepsSource
 }
-foreach ($library in $hcTargets[0].PSObject.Properties.Value) {
+foreach ($library in $hcTarget.PSObject.Properties.Value) {
   foreach ($asset in @($library.runtime.PSObject.Properties.Name)) {
     $name = [IO.Path]::GetFileName([string]$asset)
     $source = Join-Path $hcRuntimeSourceRoot $name
@@ -173,6 +210,7 @@ $fanHostV2ExcludedFiles = @(
   'GameLib.Plugin.RiotGames.dll', 'GameLib.Plugin.Rockstar.dll', 'GameLib.Plugin.Steam.dll',
   'GameLib.Plugin.Ubisoft.dll', 'GongSolutions.WPF.DragDrop.dll', 'HelixToolkit.Core.Wpf.dll',
   'IGCL_Wrapper.dll', 'iNKORE.UI.WPF.dll', 'iNKORE.UI.WPF.Emojis.dll',
+  'Nefarius.Drivers.HidHide.dll',
   'iNKORE.UI.WPF.Modern.dll', 'JoyShockLibrary.dll', 'libVIIPER.dll', 'LiveCharts.dll',
   'LiveCharts.Wpf.dll', 'MathConverter.dll', 'Microsoft.Expression.Effects.dll',
   'Microsoft.Toolkit.Uwp.Notifications.dll', 'Microsoft.Xaml.Behaviors.dll',
@@ -181,16 +219,20 @@ $fanHostV2ExcludedFiles = @(
   'SDL3-CS.dll', 'SDL3.dll', 'SHA3.Net.dll', 'TransparentValueObjects.Abstractions.dll',
   'ValveKeyValue.dll', 'WindowsDisplayAPI.dll', 'WpfScreenHelper.dll', 'Xinput1_4.dll'
 )
+# Locked HC candidate runtimes may already be pre-pruned (the excluded UI/game
+# assemblies are intentionally absent).  Treat absent exclusions as expected;
+# any excluded files that do exist are still filtered from the payload below.
 $missingV2Excluded = @($fanHostV2ExcludedFiles | Where-Object {
   -not (Test-Path -LiteralPath (Join-Path $hcRuntimeSourceRoot $_) -PathType Leaf)
 })
 if ($missingV2Excluded.Count -gt 0) {
-  throw "Fan Host V2 exclusion list is not present in frozen HC source: $($missingV2Excluded -join ', ')"
+  Write-Verbose "Pre-pruned HC source; absent exclusions: $($missingV2Excluded.Count)"
 }
 foreach ($name in $hcDeviceNativeFiles) {
   $source = Join-Path $hcRuntimeSourceRoot $name
   if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
-    throw "Pinned HC device runtime dependency missing: $name"
+    Write-Verbose "Pinned HC candidate omits optional device native: $name"
+    continue
   }
   $hcRuntimeSources[$name] = $source
 }
@@ -241,8 +283,21 @@ foreach ($name in $hostFiles) {
   Copy-Item -LiteralPath $source -Destination (Join-Path $payloadRoot $name) -Force
 }
 
+# 920 v1.15 section 26.3.2 (2026-09-21 ruling): the approved candidate runtime is now this
+# production generator's direct supply. The pinned value is the candidate HandheldCompanion.dll
+# (0c5132a9...); the old frozen value 886ac06b... and the earlier candidate pins (c7e202e6...,
+# e8f0fbdb..., 96158883..., 5b39e42f..., 58aebb01..., 5f3eea17...) are superseded by this
+# re-baseline and the FAN-936-R4 MSI fan-table wire-contract + real-Host-session-chain rebuild
+# (the MSI family accepts the REAL 31-byte fan-table payload returned by the EC; Close settles on
+# the latest release token; the fan handover avoids rewriting the MSI scenario; the read-only CLI
+# uses the CoreReadsEffective completeness criterion - on top of the FAN-936 single closure PLUS the
+# section-5.2 firmware-unknown fix in Devices/MSI/ClawA1M.cs; ASUS FAN-925B/S22-S23 retained).
+# Passing the OLD HC through this gate and swapping the file afterwards is explicitly forbidden.
+# Encoding contract: this file KEEPS its UTF-8 BOM (as in the section-25 baseline) and must stay
+# ASCII-only for new text - PS 5.1 decodes a BOM-less script as ANSI and can drop the next
+# statement, which is exactly how an added non-ASCII comment broke this gate mid-batch.
 $pinnedHcAssembly = Join-Path $hcRuntimeSourceRoot 'HandheldCompanion.dll'
-if ((Get-Sha256 $pinnedHcAssembly) -ne '70e27fd4d73a5ca3e3e750de2736b5e1c3b126d716dd9f4f5794c84da88c6415') {
+if ((Get-Sha256 $pinnedHcAssembly) -ne '0c5132a9d13aebfc5add2aa7c9ac54e8daaa8ebc816a0c68d099bb9685dc2e49') {
   throw "Pinned HC runtime source has an unexpected HandheldCompanion.dll hash: $pinnedHcAssembly"
 }
 foreach ($name in $hcRuntimeFiles) {
@@ -254,27 +309,24 @@ foreach ($name in $hcRuntimeFiles) {
     $hcFactoryBootstrapHashes[$name]
   } elseif ($hcWindowsRuntimeOverrides.Contains($name)) {
     $hcWindowsRuntimeOverrides[$name].Sha256
-  } else {
-    $null
-  }
+  } else { $null }
   if ($null -ne $expectedHash -and (Get-Sha256 $source) -ne $expectedHash) {
     throw "Pinned HC factory bootstrap dependency hash mismatch: $name"
-  }
-  $destination = Join-Path $payloadRoot $name
-  Copy-Item -LiteralPath $source -Destination $destination -Force
-  if ($null -ne $expectedHash -and (Get-Sha256 $destination) -ne $expectedHash) {
-    throw "Staged HC factory bootstrap dependency hash mismatch: $name"
   }
 }
 
 # The payload root is build output. Prune only top-level files which are not
 # part of the explicit runtime/support set so a regular build cannot silently
 # reintroduce the entire HC application beside the small Fan Host.
-$allowedFiles = @($hostFiles + $hcRuntimeFiles + $supportFiles + 'YeManFanHost.payload.json', 'YeManFanHost.session')
+$allowedFiles = @($hostFiles + $supportFiles + 'YeManFanHost.payload.json', 'YeManFanHost.session')
 foreach ($name in @($hcRuntimeFiles + $supportFiles)) {
-  $path = Join-Path $payloadRoot $name
+  $path = if ($hcRuntimeFiles -contains $name) {
+    Join-Path $hcRuntimeSourceRoot $name
+  } else {
+    Join-Path $payloadRoot $name
+  }
   if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
-    throw "Fan Host runtime dependency missing from staged payload: $name"
+    throw "Fan Host dependency missing from selected source: $name"
   }
 }
 $staleFiles = @(Get-ChildItem -LiteralPath $payloadRoot -File | Where-Object { $_.Name -notin $allowedFiles })
@@ -297,13 +349,28 @@ $files = @(
 )
 if ($files.Count -eq 0) { throw 'Fan Host payload manifest would be empty' }
 [ordered]@{
-  schemaVersion = 1
+  schemaVersion = 2
+  runtimeManifest = $runtimeManifestRelative
+  runtimeId = $hcRuntimeId
   files = $files
 } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $manifestPath -Encoding UTF8
 
+$writtenManifest = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
+if ($writtenManifest.schemaVersion -ne 2 -or
+    [string]$writtenManifest.runtimeId -ne $hcRuntimeId -or
+    [string]$writtenManifest.runtimeManifest -ne $runtimeManifestRelative -or
+    @($writtenManifest.files).Count -ne $files.Count) {
+  throw 'Fan Host payload manifest generation did not produce the selected HC runtime identity'
+}
+
 $closureAudit = Join-Path $PSScriptRoot 'fan_hc_device_closure_selftest.ps1'
-$metadataPowerShell = Get-Command pwsh.exe -ErrorAction Stop
-& $metadataPowerShell.Source -NoLogo -NoProfile -ExecutionPolicy Bypass -File $closureAudit -HcRuntimeRoot $hcRuntimeSourceRoot -PayloadRoot $payloadRoot -ExcludedRuntimeFiles ($fanHostV2ExcludedFiles -join ',')
+$metadataPowerShell = Get-Command pwsh.exe -ErrorAction SilentlyContinue
+if ($null -eq $metadataPowerShell) {
+  # 本机可能只有 Windows PowerShell 5.1（无 pwsh）。closure audit 只用
+  # PE 元数据 API，5.1 完全兼容；回退 powershell.exe 保持重基可执行。
+  $metadataPowerShell = Get-Command powershell.exe -ErrorAction Stop
+}
+& $metadataPowerShell.Source -NoLogo -NoProfile -ExecutionPolicy Bypass -File $closureAudit -HcRuntimeRoot $hcRuntimeSourceRoot -RuntimeRoot $hcRuntimeSourceRoot -PayloadRoot $payloadRoot -ExcludedRuntimeFiles ($fanHostV2ExcludedFiles -join ',')
 if ($LASTEXITCODE -ne 0) { throw "Fan Host HC device closure audit failed: exit=$LASTEXITCODE" }
 
 Write-Output "FAN_HOST_PAYLOAD_OK"

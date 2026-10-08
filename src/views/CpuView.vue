@@ -112,6 +112,8 @@ const smtOn = ref(false); // 当前运行态（真实检测）
 const smtCores = ref(0); // 物理核心数
 const smtLogical = ref(0); // 逻辑处理器数
 const smtConfigOn = ref<boolean | null>(null); // 下次启动态（null=未知/需管理员）
+const smtSupported = ref(false);
+const smtSupportReason = ref('');
 const smtBusy = ref(false);
 const smtPending = ref<'' | 'on' | 'off'>(''); // 已预约但尚未重启生效的变更
 const smtErr = ref('');
@@ -210,6 +212,8 @@ async function refresh() {
     smtCores.value = s.physicalCores;
     smtLogical.value = s.logicalProcs;
     smtConfigOn.value = s.configOn;
+    smtSupported.value = s.supported;
+    smtSupportReason.value = s.supportReason || '';
     if (smtPending.value === 'off' && !s.liveOn) smtPending.value = '';
     if (smtPending.value === 'on' && s.liveOn) smtPending.value = '';
   }
@@ -417,7 +421,10 @@ function onCoreCountCommit() {
 }
 // 超线程 / SMT：点击 Toggle 先弹窗提示"需重启生效"，确认后才预约（注册表 FeatureSettingsOverride 0x40 位，需重启生效）
 function onSmt(v: boolean) {
-  if (!isYemanScheme.value || !paramsOk.value) return;
+  if (!isYemanScheme.value || !paramsOk.value || !smtSupported.value) {
+    smtErr.value = smtSupportReason.value || '当前处理器拓扑不支持 SMT 算法';
+    return;
+  }
   smtDialogTarget.value = v;
   smtDialogOpen.value = true;
   nextTick(() => focusGamepadElement(smtCancelEl.value));
@@ -683,7 +690,7 @@ onMounted(() =>
               :label="'超线程'"
               :description="smtOn ? '已开启' : '已关闭'"
               color="accent"
-              :disabled="!isYemanScheme || !paramsOk || smtBusy"
+              :disabled="!isYemanScheme || !paramsOk || !smtSupported || smtBusy"
               @update:model-value="onSmt"
               compact
             />
@@ -709,6 +716,7 @@ onMounted(() =>
       <div v-if="smtPending" class="core-smt-hint"><InlineIcon name="warning" /> 已预约{{ smtPending === 'off' ? '关闭' : '开启' }}，重启后生效</div>
       <div v-if="smtInfo" class="core-smt-info">{{ smtInfo }}</div>
       <div v-if="smtErr" class="core-smt-err">{{ smtErr }}</div>
+      <div v-if="!smtSupported && smtSupportReason" class="core-smt-err">SMT 不支持：{{ smtSupportReason }}</div>
     </section>
 
     <!-- 超线程 / SMT 重启提示弹窗 -->

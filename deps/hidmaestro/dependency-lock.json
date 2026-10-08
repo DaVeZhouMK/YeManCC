@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "description": "InputHost repository-local dependencies. Exact approved bytes; no runtime version changes.",
+  "files": [
+    {
+      "path": "deps/hidmaestro/HIDMaestro.Core.dll",
+      "bytes": 40755712,
+      "sha256": "bd42a99bcb260435ce25796c54a4b792f8a2ced6ab78659c0cf926011663938e"
+    },
+    {
+      "path": "PowerControl/handheldcompanion-runtime/HC-CANDIDATE-0.32.4.0-06c0b954-20260902/Nefarius.Utilities.DeviceManagement.dll",
+      "bytes": 328192,
+      "sha256": "b5eaf086634438f2774f6b65dd14254aaa078bf1ebfeb004f997314b61272b7c"
+    },
+    {
+      "path": "PowerControl/handheldcompanion-runtime/HC-CANDIDATE-0.32.4.0-06c0b954-20260902/Nefarius.Drivers.HidHide.dll",
+      "bytes": 223232,
+      "sha256": "0a59c8a7c5d921a8561b47b2d9d2657a998676efe1a3e8e31991e9721ab0d88f"
+    }
+  ]
+}

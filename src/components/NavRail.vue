@@ -5,12 +5,12 @@ import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { app, shell, windowApi } from '@/bridge/api';
 import AppIcon from '@/components/AppIcon.vue';
 import { fanHostLifecycle } from '@/bridge/fanHost';
+import { residentNavigationRoutes } from '@/bridge/residentNavigation';
 import {
   loadPerformanceSchedule,
   onPerformanceScheduleChanged,
 } from '@/bridge/performanceSchedule';
 import {
-  fanFeatureEnabled,
   fanNavigationMotion,
   fanNavigationSpinDuration,
 } from '@/bridge/fanFeature';
@@ -20,12 +20,8 @@ const route = useRoute();
 const quickModeEnabled = ref(false);
 let stopScheduleWatch: (() => void) | null = null;
 
-const visibleRoutes = computed(() => ROUTES.filter((item) => {
-  if (item.hidden) return false;
-  if (item.feature === 'fan' && !fanFeatureEnabled.value) return false;
-  if (!quickModeEnabled.value) return true;
-  return item.path !== '/tdp' && item.path !== '/cpu';
-}));
+// Entry visibility is not hardware readiness; inner-page actions retain native admission.
+const visibleRoutes = computed(() => residentNavigationRoutes(ROUTES, quickModeEnabled.value));
 
 onMounted(async () => {
   const config = await loadPerformanceSchedule().catch(() => null);
@@ -93,7 +89,7 @@ async function quit() {
         :class="{ active: route.path === r.path }"
         @click="go(r.path)"
       >
-        <span class="nav-icon"><AppIcon :name="r.icon" :class="{ spinning: r.path === '/fan' && fanNavigationMotion }" :style="r.path === '/fan' ? { '--fan-spin-duration': fanNavigationSpinDuration } : undefined" /></span>
+        <span class="nav-icon"><AppIcon :name="r.icon" :stroke-width="['gauge', 'gamepad', 'rotate'].includes(r.icon) ? 1.2 : undefined" :class="{ spinning: r.path === '/fan' && fanNavigationMotion }" :style="r.path === '/fan' ? { '--fan-spin-duration': fanNavigationSpinDuration } : undefined" /></span>
         <span class="nav-label">{{ r.title }}</span>
       </button>
     </div>

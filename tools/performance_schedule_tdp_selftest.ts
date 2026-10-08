@@ -1,3 +1,4 @@
+import { reactive } from 'vue';
 import './mock-shell';
 import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
@@ -125,6 +126,11 @@ async function main(): Promise<void> {
     // Simulate the affected class of machine: a battery device currently on DC.
     config.active.dc = 'balanced';
     config.profiles.dc.balanced.cpuPreset = 'balanced';
+
+    // Reactive saves in unrelated pages must not poison the shared settings
+    // cache used by real CPU/TDP mode application. Hardware remains mocked.
+    await settings.saveSettingsSection('fan', { deviceIdentity: reactive({ manufacturer: 'fixture', model: 'test' }) });
+    await settings.saveSettingsSection('quickApps', { apps: reactive([{ name: 'fixture', path: 'fixture.exe' }]) });
 
     const autoApplied = await schedule.applyPerformanceSchedule('dc', 'balanced', config);
     assert(autoApplied, 'TDP rc=6 不应让手动→自动切换返回失败');

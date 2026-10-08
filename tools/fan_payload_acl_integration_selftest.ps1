@@ -57,6 +57,23 @@ foreach ($sourceItem in Get-ChildItem -LiteralPath $sourcePayloadRoot -Force) {
 $manifest = Get-Content -LiteralPath (Join-Path $payloadRoot 'YeManFanHost.payload.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $files = @($manifest.files | ForEach-Object { [string]$_.path })
 
+# FanHost is intentionally a thin payload. Recreate the sibling shared HC
+# runtime selected by its manifest so the fixture exercises the real installer
+# contract instead of the obsolete monolithic fan-host layout.
+$runtimeManifestRelative = [string]$manifest.runtimeManifest
+if ([string]::IsNullOrWhiteSpace($runtimeManifestRelative) -or [IO.Path]::IsPathRooted($runtimeManifestRelative)) {
+  throw 'Fan Host payload runtimeManifest is missing or must be relative.'
+}
+$sourceRuntimeManifest = [IO.Path]::GetFullPath((Join-Path $sourcePayloadRoot $runtimeManifestRelative))
+if (-not (Test-Path -LiteralPath $sourceRuntimeManifest -PathType Leaf)) {
+  throw "Source shared HC runtime manifest missing: $sourceRuntimeManifest"
+}
+$sourceRuntimeRoot = Split-Path -Parent $sourceRuntimeManifest
+$fixtureRuntimeManifest = [IO.Path]::GetFullPath((Join-Path $payloadRoot $runtimeManifestRelative))
+$fixtureRuntimeRoot = Split-Path -Parent $fixtureRuntimeManifest
+New-Item -ItemType Directory -Force -Path (Split-Path -Parent $fixtureRuntimeRoot) | Out-Null
+Copy-Item -LiteralPath $sourceRuntimeRoot -Destination $fixtureRuntimeRoot -Recurse -Force
+
 # Reproduce the deployment bug found in the ROG feedback: inherited broad
 # access and stale old runtime files beside a valid manifest payload.
 & icacls.exe $payloadRoot '/grant', '*S-1-5-11:(OI)(CI)(M)', '/T', '/C', '/Q' | Out-Null
@@ -91,6 +108,8 @@ $evidence = [ordered]@{
   quarantineRoot = $quarantineRoot
   installerReportedRecursiveValidation = $true
   checkedFiles = $files.Count + 2
+  sharedRuntimeRoot = $fixtureRuntimeRoot
+  sharedRuntimeManifest = $fixtureRuntimeManifest
   hardwareWritesObserved = $false
 }
 $evidence | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $fixtureRoot 'result.json') -Encoding UTF8

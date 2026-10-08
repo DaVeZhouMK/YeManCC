@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    YeMan 灯光设置器（2026-09-16，HC 机型库适配 L1 方案 B）：
+    一次性灯光设置进程——直驱 HC 程序集（HandheldCompanion.dll）执行
+    SetLedColor / SetLedBrightness / SetLedStatus，覆盖 HC 支持的全部机型
+    （各机型 EC/HID/USB 协议由 HC 内部处理）。灯光为低频操作，无需常驻。
+    与 YeManFanHost 同构：WPF 运行时（HC 依赖链需要）、win-x64、零警告。
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <!-- 2026-09-16 用户裁决：不用 windows10.x SDK 版 TFM。
+         本进程自身零 WinRT 调用（只碰 BCL/System.Drawing）；而 HC 程序集需要的
+         Microsoft.Windows.SDK.NET / WinRT.Runtime 由 Program.ResolveDependency 从
+         hc-runtime-root（HC 运行库目录，自带这两个 DLL）解析 ⇒ 无需随包复制。
+         效果：light-setter 目录少 24.2MB（23.73 + 0.50）。 -->
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>YeManLightSetter</AssemblyName>
+    <RootNamespace>YeManLightSetter</RootNamespace>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+  <!-- HC 依赖链（Shared.LogManager / Serilog）按"入口程序集名.json"读配置：
+       与 YeManFanHost.json 同构，缺它 LightSetter 会在启动时报
+       "The configuration file 'YeManLightSetter.json' was not found and is not optional."
+       （2026-09-16 实机复现后发现并补齐）。 -->
+  <ItemGroup>
+    <Content Include="YeManLightSetter.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

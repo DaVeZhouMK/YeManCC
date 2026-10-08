@@ -1,0 +1,23 @@
+{
+  "name": "sleeptype-s4-mislabeled",
+  "expect": {
+    "type": "S4_MISLABELED_AS_S3",
+    "confidence": "high",
+    "downgrade": false
+  },
+  "facts": {
+    "pcfgA": "The following sleep states are available on this system:\n    Standby (S3)\n    Hibernate\n\n    The following sleep states are not available on this system:\n    Standby (S0 Low Power Idle)",
+    "requested": "s4",
+    "events42": [
+      {
+        "targetState": 3,
+        "effectiveState": 3,
+        "sleepReason": "Application API"
+      }
+    ],
+    "hiberfilExists": true,
+    "hiberfilUpdated": true,
+    "gapSeconds": 40
+  },
+  "note": "operator ruling: S4 may be MISLABELED as S3 on some platforms; writing hiberfil inside the window + a long gap is the hard evidence that S4 actually ran"
+}

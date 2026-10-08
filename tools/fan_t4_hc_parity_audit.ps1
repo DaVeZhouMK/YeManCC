@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
   T4 read-only audit for the complete YeMan Fan lifecycle around frozen HC.
 
@@ -36,8 +36,9 @@ function Slice([string]$text, [string]$start, [string]$end) {
   return $text.Substring($s, $e - $s)
 }
 
+$appSource = Join-Path (Split-Path -Parent (Split-Path -Parent $FrontendSource)) 'App.vue'
 $required = @(
-  $HostSource, $NativeSource, $FrontendSource, $ApiSource, $NavSource,
+  $HostSource, $NativeSource, $FrontendSource, $appSource, $ApiSource, $NavSource,
   (Join-Path $HcRoot 'Views\Windows\MainWindow.xaml.cs'),
   (Join-Path $HcRoot 'Devices\IDevice.cs'),
   (Join-Path $HcRoot 'Devices\ASUS\ROGAlly.cs')
@@ -54,6 +55,7 @@ $hcRog = Read-Utf8 $hcRogPath
 $hostText = Read-Utf8 $HostSource
 $native = Read-Utf8 $NativeSource
 $front = Read-Utf8 $FrontendSource
+$app = Read-Utf8 $appSource
 $api = Read-Utf8 $ApiSource
 $nav = Read-Utf8 $NavSource
 
@@ -79,48 +81,99 @@ Require-All 'T4-HC-CLOSE-04' 'HC ROG Close follows AsusACPI/controller/HID/base 
   'AsusACPI.Close();', 'ConfigureController(false);', 'hidDevice.Dispose();', 'base.Close();')
 
 # Host/native HTTP and single-owner exit contract.
-Require-All 'T4-HOST-AUTH-01' 'Host authenticates every loopback request before dispatch' $hostText @(
-  'if (!IsAuthorizedRequest(context.Request))', 'X-YeMan-Fan-Session', 'CryptographicOperations.FixedTimeEquals')
+# §2（FAN-926R 裁决）：接受现行**带 `rejectionCategory` 的**调用签名；参数个数变化**不得**被
+# 当成撤掉认证检查。仍须证明：认证在业务分派链**之前**、保留同会话头、定长比较、发出 auth.rejected。
+$authCheck = $hostText.IndexOf('if (!IsAuthorizedRequest(context.Request, out var rejectionCategory))', [StringComparison]::Ordinal)
+$dispatchChain = $hostText.IndexOf('if (method == "GET" && path == "/health")', [StringComparison]::Ordinal)
+if ($authCheck -ge 0 -and $dispatchChain -gt $authCheck -and
+    (Has $hostText 'private bool IsAuthorizedRequest(HttpListenerRequest request, out string rejectionCategory)') -and
+    (Has $hostText 'X-YeMan-Fan-Session') -and
+    (Has $hostText 'CryptographicOperations.FixedTimeEquals') -and
+    (Has $hostText 'auth.rejected')) {
+  Pass 'T4-HOST-AUTH-01' 'Host authenticates every loopback request before dispatch' 'IsAuthorizedRequest(context.Request, out rejectionCategory) precedes the /health dispatch chain; X-YeMan-Fan-Session; FixedTimeEquals; auth.rejected'
+} else { Fail 'T4-HOST-AUTH-01' 'Host authentication (current signature) must precede the dispatch chain' 'auth-call-order/constant-time/header/rejection boundary' }
 Require-All 'T4-HOST-BOUNDARY-01' 'Host claims one Close boundary and blocks writes before lock' $hostText @(
   'BlockWritesForClose();', 'Interlocked.Exchange(ref closeBoundaryClaimed, 1);', 'HC_CLOSE_PENDING', 'PARENT_EXIT_HANDOFF')
 Require-All 'T4-HOST-PARENT-01' 'Parent-exit handoff is asynchronous and observer-owned' $hostText @(
   'public object BeginParentExitHandoff()', 'Task.Run(CompleteParentExitHandoff)', 'engine recovery timer is the sole', 'ParentRecoveryIsSafeToFinalize')
+# FAN-931 P1.3：看门狗改为"一次绑定可信父实例 + 等待退出"，身份（启动时间/映像）比对
+# 仍在绑定处执行 ⇒ 以 TryBindParentProcess 及其拒绝原因作为等价锚点，不降标。
 Require-All 'T4-HOST-WATCHDOG-01' 'Watchdog verifies parent start/path identity' $hostText @(
-  'parentStartTimeUtc', 'parentExecutablePath', 'CaptureParentIdentity', 'IsProcessAlive')
+  'parentStartTimeUtc', 'parentExecutablePath', 'CaptureParentIdentity', 'TryBindParentProcess', 'parent-start-time-mismatch', 'parent-image-mismatch')
 Require-All 'T4-HOST-SLEEP-01' 'Host power callback only marks/queues and does not block' $hostText @(
   'MarkSystemSuspendPending()', 'Channel.CreateUnbounded<PowerTransition>', 'powerTransitions.Writer.TryWrite', 'ProcessPowerTransitionsAsync')
+# R1（FAN-926R 唤醒租约裁决 §3.2.5）**因本裁决改要求**：`ExpireLease` 现在必须按
+# "创建它的那个租约"自证身份（签名带 callbackLeaseId/generation），迟到回调不得处置新租约。
+# 断言内容不变（租约到期/心跳都走 HC profile 释放、不走虚拟 Close），只重定位到现行入口。
 Require-All 'T4-HOST-LEASE-01' 'Lease expiry and heartbeat use HC profile release without virtual Close' $hostText @(
-  'VerifyActiveCurveSession()', 'RestoreHardware(close: false)', 'ExpireLease()', 'EnsureLeaseFromBody')
+  'VerifyActiveCurveSession()', 'RestoreHardware(close: false)', 'private void ExpireLease(string callbackLeaseId, long callbackLeaseGeneration)', 'EnsureLeaseFromBody')
 Require-All 'T4-HOST-RESUME-01' 'Automatic resume rebuilds Open -> OpenEvents -> lease -> curve' $hostText @(
-  'StartAutomaticResumeUnlocked()', 'Open();', 'OpenEvents();', 'AcquireControl();', 'Enable(document.RootElement)')
+  'StartAutomaticResumeUnlocked(', 'Open();', 'OpenEvents();', 'AcquireControl();', 'Enable(document.RootElement)')
 Require-All 'T4-NATIVE-SLEEP-01' 'Native sleep callback schedules only asynchronous Host work' $native @(
   'fanHostScheduleEmergencySuspend("suspend-confirmed", currentPowerGeneration())', 'std::thread([reasonText', '}).detach();')
 Require-All 'T4-NATIVE-EXIT-01' 'Native exit uses parent-exit first and only legacy-fallbacks on 404/405' $native @(
   'L"/api/parent-exit"', 'handoffStatus != 404 && handoffStatus != 405', 'L"/api/close"', 'L"/api/shutdown"')
 Require-All 'T4-NATIVE-EXIT-02' 'Native exit verifies state before shutdown/force stop' $native @(
-  'fanHostEmergencyPost(L"/api/shutdown", "app-exit", 1, false)', 'fanHostCleanupForAppExit()', 'fanHostExactProcessRunning()')
+  'fanHostEmergencyPost(L"/api/shutdown", "app-exit", 1, false,', 'fanHostCleanupForAppExit()', 'fanHostExactProcessRunning()')
+Require-All 'T4-NATIVE-RESUME-01' 'Native triggers the Host resume rebuild itself (HC: SystemReady attempts Open outside SystemPending)' $native @(
+  'fanHostEmergencyResume(', 'L"/api/resume"', 'fanLeaseKeepaliveArm(leaseId, "native.power-resume")')
+Require-All 'T4-NATIVE-RESUME-02' 'Native completes the wake commit itself; renderer IPC stays an idempotent second caller (HC: SystemReady completes in-process)' $native @(
+  'static bool commitPowerResume(', '"native.resume-ready"', 'commitPowerResume(current, "renderer.resumeComplete")',
+  'power resumeComplete already_ready')
+Require-All 'T4-NATIVE-EPOCH-01' 'Native keepalive survives renderer rebuilds via a bounded epoch grace and never fails silently' $native @(
+  'g_fanKeepaliveRendererEpoch', 'FAN_LEASE_RENDERER_GRACE_MS', 'renderer-epoch-grace-expired',
+  'fan-host-identity-unverified', 'kHttpSysListenerOwnerPid')
 Require-All 'T4-API-01' 'Frontend HTTP adapter has long Close timeout and request telemetry' $api @(
   "if (path === '/api/close') return 45000;", 'requestId', 'api.transport-failure')
 
 # Frontend recovery/exit contract. These are intentionally strict because an
 # await on close failure bypasses native parent-exit safety.
 $safeAbort = Slice $front 'private async safeAbortAfterStart()' 'private async stopProcessOnly()'
-$lockedRecovery = Slice $front 'private async recoverLockedHostBeforeStart()' 'private async recoverAfterMutationFailure()'
 $safeAbortCloseCount = @([regex]::Matches($safeAbort, 'adapter\.close\(\)')).Count
-$lockedCloseCount = @([regex]::Matches($lockedRecovery, 'closeHostAfterRestore\(\)')).Count
+# 920 §8.0-D B5 remap: waitForHostRecovery(true) was deleted in E9 and the deletion is self-documented
+# inside this very slice ("不再 waitForHostRecovery"). The current read-only observation is
+# assertHcSessionClosed on the returned evidence, still with exactly one Close and no retry loop.
 if ((Has $safeAbort 'const closed = await this.adapter.close();') -and
     $safeAbortCloseCount -eq 1 -and
-    (Has $safeAbort 'waitForHostRecovery(true)')) {
-  Pass 'T4-FRONT-CLOSE-01' 'Startup rollback sends one Close then observes recovery' 'safeAbortAfterStart'
+    (Has $safeAbort 'assertHcSessionClosed(') -and
+    (Has $safeAbort '不再 waitForHostRecovery')) {
+  Pass 'T4-FRONT-CLOSE-01' 'Startup rollback sends one Close then validates the returned evidence read-only' 'safeAbortAfterStart'
 } else { Fail 'T4-FRONT-CLOSE-01' 'Startup rollback has a duplicate Close path' 'safeAbortAfterStart source boundary' }
-if ((Has $lockedRecovery 'await this.closeHostAfterRestore();') -and (Has $lockedRecovery 'waitForHostRecovery(true)') -and
-    $lockedCloseCount -eq 1) {
-  Pass 'T4-FRONT-CLOSE-02' 'Fault-locked recovery uses one Close then read-only observation' 'recoverLockedHostBeforeStart'
-} else { Fail 'T4-FRONT-CLOSE-02' 'Fault-locked recovery may duplicate Close' 'recoverLockedHostBeforeStart source boundary' }
+# 920 §8.0-D B5 remap: recoverLockedHostBeforeStart was deleted (fanHost.ts L1923-1924 self-documents
+# the four removed symbols). Intent preserved: a locked/unknown Host must not gain a second Close path.
+# Current equivalent: disable() explicitly refuses to recover those states and performs no Close there.
+$lockedRefusal = Slice $front "if (this.state === 'fault-locked' || this.state === 'conflict-locked' || this.state === 'unknown')" "this.revokeCoordinatorWrites('disable');"
+$lockedRefusalCloseCount = @([regex]::Matches($lockedRefusal, 'closeHostAfterRestore\(\)|adapter\.close\(\)')).Count
+if ((Has $front 'recoverLockedHostBeforeStart / recoverAfterMutationFailure / recoverAfterHidRemoval / isObservedRouteLoss 已删') -and
+    (Has $lockedRefusal '不做关闭恢复') -and $lockedRefusalCloseCount -eq 0) {
+  Pass 'T4-FRONT-CLOSE-02' 'Fault-locked states are refused with no Close of their own; one Close owner remains' 'locked-state refusal boundary'
+} else { Fail 'T4-FRONT-CLOSE-02' 'Fault-locked recovery may duplicate Close' 'locked-state refusal boundary' }
 Require-All 'T4-FRONT-LEASE-01' 'Frontend heartbeat/mutation failure recovery is serialized and observer-only after transport loss' $front @(
-  'recoverAfterMutationFailure', 'restoreAndRelease', 'waitForHostRecovery(false)', 'scheduleHeartbeat')
-Require-All 'T4-FRONT-SLEEP-01' 'Frontend suspend/resume closes and recreates HC session' $front @(
-  'await this.adapter.suspend(this.createSuspendRequest());', 'assertHcSessionSuspended', "this.state === 'suspended'", 'await this.adapter.resume();', 'this.resumeCurve = curveToResume', 'await this.applyMutation(curve)')
+  'restoreAndRelease', 'startHeartbeat', 'stopHeartbeat', '不再 recoverAfterMutationFailure', '不再 waitForHostRecovery')
+$systemPending = Slice $hostText 'private object SuspendUnlocked()' 'private ResumeAdmission StartAutomaticResumeUnlocked('
+if ((Has $native 'generation, "native.power"') -and
+    (Has $hostText 'RequireNativeSuspendAuthority(body);') -and
+    (Has $hostText 'F4_NATIVE_AUTHORITY_REQUIRED') -and
+    (Has $systemPending 'CloseForSystemPending()') -and
+    !(Has $systemPending 'RestoreHardware(close: true') -and
+    !(Has $systemPending 'RestoreOem(') -and
+    # ★ 因 FAN-926R 裁决 §3-D1 **改要求**：旧要求 = SystemPending 一律 `skipOemRestore: true`
+    # （"strict HC Close-first"）。新要求 = 有写历史且会话可操作时，由唯一 owner 在进入 HC Close
+    # **之前**有界执行一次现成默认模式恢复；通知路径本身仍不得直接发起 HC 长调用、不得夺取
+    # DeviceManager，也不得以写 0 替代系统睡眠。
+    (Has $hostText 'skipOemRestore: !preCloseReleaseAttempted') -and
+    (Has $hostText 'power.suspend-preclose-release-decision') -and
+    (Has $hostText 'state.OemRestoreEvidence = "not-observed"') -and
+    !(Has $app 'fanHostLifecycle.suspend()') -and
+    # ★ 因 FAN-926R 执行单 §3.3 **改要求**：resume 的"准入 + 单次入队执行"统一由
+    # mutateWithBoundedRetry 承担，重放体抽到 replayResumeCurve()；曲线写入仍是同一个
+    # applyMutation(desiredCurve)。断言语义不变：渲染侧只做 F5 重建、走同一写入路径。
+    (Has $front '() => this.replayResumeCurve(generation, intentRevision)') -and
+    (Has $front 'this.applyMutation(this.desiredCurve as readonly FanNode[])') -and
+    (Has $front 'this.resumeCurve = curveToResume') -and
+    (Has $front 'await this.applyMutation(curve)')) {
+  Pass 'T4-FRONT-SLEEP-01' 'F4 is native-only; the single owner performs ONE bounded default-mode release BEFORE the HC Close (D1); renderer coordinates F5 rebuild' 'native.power; CloseForSystemPending; power.suspend-preclose-release-decision; renderer observation only; F5 resume'
+} else { Fail 'T4-FRONT-SLEEP-01' 'F4/F5 ownership or the D1 release-before-close order drifted' 'native/Host/App/fanHost source boundary' }
 if ((Has $nav 'void fanHostLifecycle.close().catch(() => {});') -and
     (Has $nav 'await app.exit(0);') -and !(Has $nav 'await fanHostLifecycle.close();')) {
   Pass 'T4-FRONT-EXIT-01' 'Exit button hands off immediately to native parent-exit safety' 'NavRail.quit'

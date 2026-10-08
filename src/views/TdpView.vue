@@ -42,8 +42,10 @@ import { getPerformanceScheduleOwnership } from '@/bridge/performanceSchedule';
 import { readSettingsSection, saveSettingsSection } from '@/bridge/settingsRepository';
 import { readTdpAutoApply, writeTdpAutoApply } from '@/bridge/tdpAutoApply';
 import InlineIcon from '@/components/InlineIcon.vue';
+import { powerSourceMode } from '@/bridge/powerSource';
 
-const powerMode = ref<'ac' | 'dc'>('ac');
+const detectedPowerMode = ref<'ac' | 'dc'>('ac');
+const powerMode = computed(() => powerSourceMode.value ?? detectedPowerMode.value);
 const cpuName = ref('检测中…');
 const vendor = ref<Vendor>('unknown');
 const activeSchemeGuid = ref('');
@@ -66,7 +68,7 @@ async function refreshModeAndCpu() {
     detectCpuName(),
     detectVendor(),
   ]);
-  if (modeRes.status === 'fulfilled') powerMode.value = modeRes.value;
+  if (modeRes.status === 'fulfilled') detectedPowerMode.value = modeRes.value;
   if (cpuRes.status === 'fulfilled') cpuName.value = cpuRes.value;
   if (vendorRes.status === 'fulfilled') vendor.value = vendorRes.value;
 }
@@ -153,23 +155,50 @@ async function scheduleOwnsTdp(): Promise<boolean> {
 // 开机/唤醒才把程序记录的 TDP 最大值重新下发硬件。
 const bootApplyTdp = ref(true);
 const wakeApplyTdp = ref(true);
-async function loadAutoApply() {
+const autoApplyLoaded = ref(false);
+const autoApplySaving = ref(false);
+const durableAutoApply = { boot: true, wake: true };
+let autoApplyGeneration = 0;
+async function loadAutoApply(restoreAfterFailure = false) {
+  const generation = autoApplyGeneration;
   try {
     const cfg = await readTdpAutoApply();
+    if (generation !== autoApplyGeneration || (autoApplySaving.value && !restoreAfterFailure)) return;
+    Object.assign(durableAutoApply, cfg);
     bootApplyTdp.value = cfg.boot;
     wakeApplyTdp.value = cfg.wake;
-  } catch {
-    /* 保持默认开启 */
+    autoApplyLoaded.value = true;
+  } catch (error) {
+    if (generation !== autoApplyGeneration) return;
+    autoApplyLoaded.value = false;
+    errMsg.value = '自动应用 TDP 配置读取失败：' + (error as Error).message;
   }
 }
-async function onBootApplyTdp(v: boolean) {
-  bootApplyTdp.value = v;
-  await writeTdpAutoApply({ boot: v, wake: wakeApplyTdp.value }).catch(() => {});
+async function saveAutoApplySwitch(key: 'boot' | 'wake', value: boolean) {
+  const field = key === 'boot' ? bootApplyTdp : wakeApplyTdp;
+  if (!autoApplyLoaded.value || autoApplySaving.value) {
+    field.value = durableAutoApply[key];
+    return;
+  }
+  const previous = durableAutoApply[key];
+  ++autoApplyGeneration;
+  autoApplySaving.value = true;
+  field.value = value;
+  try {
+    // Own only the submitted switch; never write the sibling from stale UI.
+    await writeTdpAutoApply({ [key]: value });
+    durableAutoApply[key] = value;
+    field.value = value;
+  } catch (error) {
+    field.value = previous;
+    await loadAutoApply(true);
+    errMsg.value = '自动应用 TDP 配置保存失败：' + (error as Error).message;
+  } finally {
+    autoApplySaving.value = false;
+  }
 }
-async function onWakeApplyTdp(v: boolean) {
-  wakeApplyTdp.value = v;
-  await writeTdpAutoApply({ boot: bootApplyTdp.value, wake: v }).catch(() => {});
-}
+async function onBootApplyTdp(v: boolean) { await saveAutoApplySwitch('boot', v); }
+async function onWakeApplyTdp(v: boolean) { await saveAutoApplySwitch('wake', v); }
 
 // ── 统一刷新入口（供全局触发器调用）──
 async function refresh() {
@@ -285,7 +314,8 @@ async function onFloatTarget(v: number) {
   // 滑块只负责设置并保存帧数目标；是否启用浮动完全由电池栏目（autoEnable）决定，
   // 移动滑块不得自行启用浮动（否则会绕过 autoEnable 的逻辑）。
   floatInfo.value = { ...floatInfo.value, target: t };
-  await setFloatTarget(t);
+  try { await setFloatTarget(t); }
+  catch (error) { errMsg.value = `浮动目标保存失败：${(error as Error).message}`; return; }
   floatInfo.value = getFloatInfo();
   // 仅当浮动已由 autoEnable 逻辑启用时，实时把新目标应用到 RTSS 锁帧。
   // 0 已在桥层闭环为停止浮动 + 解除锁帧，不再把它送进控制循环。
@@ -300,14 +330,16 @@ async function onFloatProfile(v: string) {
   if (Number(floatInfo.value.target) <= 0) return;
   const p = v as FloatProfile;
   floatInfo.value = { ...floatInfo.value, profile: p };
-  void setFloatProfile(p);
+  try { await setFloatProfile(p); }
+  catch (error) { errMsg.value = `浮动档位保存失败：${(error as Error).message}`; }
 }
 async function onTdpStrategy(v: string) {
   if (await scheduleOwnsTdp()) return;
   if (Number(floatInfo.value.target) <= 0) return;
   const strategy = v as TdpFloatStrategy;
   floatInfo.value = { ...floatInfo.value, tdpStrategy: strategy };
-  setTdpFloatStrategy(strategy);
+  try { await setTdpFloatStrategy(strategy); }
+  catch (error) { errMsg.value = `浮动策略保存失败：${(error as Error).message}`; }
 }
 
 const FLOAT_ACTION_TEXT: Record<string, string> = {
@@ -509,6 +541,7 @@ onMounted(async () => {
       <div class="quick-auto">
         <Toggle
           v-model="bootApplyTdp"
+          :disabled="!autoApplyLoaded || autoApplySaving"
           label="启动自动应用TDP"
           description="开机后自动把当前 TDP 最大值下发硬件"
           color="accent"
@@ -516,6 +549,7 @@ onMounted(async () => {
         />
         <Toggle
           v-model="wakeApplyTdp"
+          :disabled="!autoApplyLoaded || autoApplySaving"
           label="唤醒自动应用TDP"
           description="从睡眠/休眠唤醒后自动应用 TDP 最大值"
           color="accent"

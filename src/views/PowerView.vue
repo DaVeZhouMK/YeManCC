@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, onUnmounted, onActivated, nextTick, inject, watch, type Ref } from 'vue';
 import Toggle from '@/components/Toggle.vue';
+import Dropdown from '@/components/Dropdown.vue';
+import { normalizeInputStartupPreferences, STARTUP_PAD_OPTIONS, STARTUP_GYRO_OPTIONS,
+  type StartupPadPersona, type StartupGyroPreset } from '@/bridge/inputStartupPolicy';
 import WarnBar from '@/components/WarnBar.vue';
 import {
   taskExists,
@@ -33,6 +36,41 @@ import InlineIcon from '@/components/InlineIcon.vue';
 const BOOT_TASK = BOOT_CONTROL_CENTER_TASK;
 const BOOT_CFG = 'C:\\SOFT\\YeMan\\PowerControl\\boot_config.json';
 const bootOn = ref(false);
+const startupPad = ref<StartupPadPersona>('disabled');
+const startupGyro = ref<StartupGyroPreset>('off');
+const startupInputLoaded = ref(false);
+const startupInputBusy = ref(false);
+let startupInputGeneration = 0;
+async function refreshInputStartup(): Promise<void> {
+  const generation = ++startupInputGeneration;
+  const raw = await readSettingsSection('startupDesired');
+  if (generation !== startupInputGeneration || startupInputBusy.value) return;
+  const preferences = normalizeInputStartupPreferences(raw);
+  startupPad.value = preferences.virtualGamepadPersona;
+  startupGyro.value = preferences.gyroPreset;
+  startupInputLoaded.value = true;
+}
+async function saveInputStartup(rawPad: string | number, rawGyro: string | number): Promise<void> {
+  if (!startupInputLoaded.value || startupInputBusy.value || busy.value) return;
+  const next = normalizeInputStartupPreferences({ virtualGamepadPersona: rawPad, gyroPreset: rawGyro });
+  startupInputGeneration += 1;
+  startupInputBusy.value = true; errMsg.value = '';
+  try {
+    // Save boot intent only. Never alter the currently running input/persona.
+    await saveSettingsSection('startupDesired', next);
+    startupPad.value = next.virtualGamepadPersona; startupGyro.value = next.gyroPreset;
+  } catch (error) {
+    errMsg.value = '输入开机启动设置失败：' + (error as Error).message;
+  } finally { startupInputBusy.value = false; }
+}
+function onStartupPad(raw: string | number): void {
+  if (!STARTUP_PAD_OPTIONS.some(option => option.value === raw)) return;
+  void saveInputStartup(raw, startupGyro.value);
+}
+function onStartupGyro(raw: string | number): void {
+  if (startupPad.value === 'disabled' || !STARTUP_GYRO_OPTIONS.some(option => option.value === raw)) return;
+  void saveInputStartup(startupPad.value, raw);
+}
 const fanControlOnBoot = ref(false);
 const rtssBootOn = ref(false);
 
@@ -154,6 +192,7 @@ async function onXboxSuiteToggle(enabled: boolean): Promise<void> {
 
 async function refresh() {
   errMsg.value = '';
+  void refreshInputStartup().catch((error) => { errMsg.value = '读取输入开机配置失败：' + (error as Error).message; });
   // 清理旧版本遗留的 AMD395 任务，避免它继续在开机时执行。
   await toggleTask('Bug修复-AMD-395', false).catch(() => {});
   // 并行异步加载（不串行等待，不阻塞渲染）
@@ -206,10 +245,10 @@ async function onBootToggle(v: boolean) {
   const prev = bootOn.value;
   bootOn.value = v; // 乐观更新
   try {
-    await saveSettingsSection('startupDesired', { bootControlCenter: v }).catch(() => {});
+    await saveSettingsSection('startupDesired', { bootControlCenter: v });
     await toggleBootMirror(v);
   } catch (e) {
-    bootOn.value = prev; // 失败回滚
+    bootOn.value = (await readSettingsSection<any>('startupDesired').catch(() => ({ bootControlCenter: prev }))).bootControlCenter === true; // Display the durable preference, including saved-but-not-applied intent.
     errMsg.value = '设置失败：' + (e as Error).message + '（创建开机任务需管理员权限，请右键以管理员身份运行 YeManCC）';
   } finally {
     busy.value = false;
@@ -309,7 +348,7 @@ async function onTrayResident(v: boolean) {
       errMsg.value = '关闭任务栏常驻后，无法在 Xbox 全屏游戏模式呼出野蛮系统控制中心。';
     }
   } catch (e) {
-    trayResident.value = prev; // 失败回滚
+    trayResident.value = await readTrayResident().catch(() => prev); // Do not claim rollback unless it persisted.
     errMsg.value = '任务栏常驻设置失败：' + (e as Error).message;
   }
 }
@@ -500,6 +539,16 @@ onActivated(() => {
 
     <section class="card">
       <h3 class="card-title"><InlineIcon name="star" /> 开机启动项</h3>
+      <div class="startup-input-row" data-input-startup="pad">
+        <span>开机启动虚拟手柄</span>
+        <Dropdown :model-value="startupPad" :options="STARTUP_PAD_OPTIONS" aria-label="开机启动虚拟手柄"
+          :disabled="busy || startupInputBusy || !startupInputLoaded" @update:model-value="onStartupPad" />
+      </div>
+      <div class="startup-input-row" data-input-startup="gyro" :class="{ disabled: startupPad === 'disabled' }">
+        <span>开机启动陀螺仪</span>
+        <Dropdown :model-value="startupPad === 'disabled' ? 'off' : startupGyro" :options="STARTUP_GYRO_OPTIONS" aria-label="开机启动陀螺仪"
+          :disabled="busy || startupInputBusy || !startupInputLoaded || startupPad === 'disabled'" @update:model-value="onStartupGyro" />
+      </div>
       <Toggle
         v-model="bootOn"
         label="开机启动野蛮控制中心"
@@ -510,8 +559,8 @@ onActivated(() => {
       />
       <Toggle
         v-model="fanControlOnBoot"
-        label="风扇控制"
-        description="在支持的设备上启用风扇控制"
+        label="开机/休眠唤醒启动风扇"
+        description="根据适配机型自动启动风扇"
         color="accent"
         :disabled="busy"
         @update:model-value="onFanControlBootToggle"
@@ -545,6 +594,11 @@ onActivated(() => {
 </template>
 
 <style scoped>
+.startup-input-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:9px 0}
+.startup-input-row>span{flex:0 0 auto;font-size:12px}
+.startup-input-row :deep(.dd){width:180px;max-width:55%;flex:0 1 180px}
+.startup-input-row.disabled>span{opacity:.45}
+
 .steam-xbox-title {
   font-size: 16px;
   font-weight: 700;

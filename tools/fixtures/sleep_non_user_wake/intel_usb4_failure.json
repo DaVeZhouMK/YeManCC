@@ -1,0 +1,152 @@
+{
+  "source": "intel user USB4 failure sleep-facts.log",
+  "recordedFrom": "2026-09-30 23:13:46.000",
+  "expectedWakeCycles": 0,
+  "events": [
+    {
+      "time": "2026-09-30 23:14:49.024",
+      "kind": "acdc",
+      "ac": false,
+      "atMs": 73024
+    },
+    {
+      "time": "2026-09-30 23:14:51.068",
+      "kind": "broadcast",
+      "code": 4,
+      "atMs": 75068
+    },
+    {
+      "time": "2026-09-30 23:14:57.497",
+      "kind": "kernel",
+      "id": 506,
+      "reason": 1,
+      "eventTime": "2026-09-30 23:14:50.000",
+      "atMs": 81497,
+      "eventAtMs": 74000
+    },
+    {
+      "time": "2026-09-30 23:14:57.557",
+      "kind": "acdc",
+      "ac": true,
+      "atMs": 81557
+    },
+    {
+      "time": "2026-09-30 23:14:57.564",
+      "kind": "broadcast",
+      "code": 18,
+      "atMs": 81564
+    },
+    {
+      "time": "2026-09-30 23:14:57.577",
+      "kind": "broadcast",
+      "code": 7,
+      "atMs": 81577
+    },
+    {
+      "time": "2026-09-30 23:14:58.500",
+      "kind": "kernel",
+      "id": 507,
+      "reason": 5,
+      "eventTime": "2026-09-30 23:14:57.000",
+      "atMs": 82500,
+      "eventAtMs": 81000
+    },
+    {
+      "time": "2026-09-30 23:15:03.488",
+      "kind": "acdc",
+      "ac": false,
+      "atMs": 87488
+    },
+    {
+      "time": "2026-09-30 23:15:06.206",
+      "kind": "broadcast",
+      "code": 4,
+      "atMs": 90206
+    },
+    {
+      "time": "2026-09-30 23:15:11.841",
+      "kind": "kernel",
+      "id": 506,
+      "reason": 1,
+      "eventTime": "2026-09-30 23:15:05.000",
+      "atMs": 95841,
+      "eventAtMs": 89000
+    },
+    {
+      "time": "2026-09-30 23:15:11.870",
+      "kind": "acdc",
+      "ac": true,
+      "atMs": 95870
+    },
+    {
+      "time": "2026-09-30 23:15:11.875",
+      "kind": "broadcast",
+      "code": 18,
+      "atMs": 95875
+    },
+    {
+      "time": "2026-09-30 23:15:11.887",
+      "kind": "broadcast",
+      "code": 7,
+      "atMs": 95887
+    },
+    {
+      "time": "2026-09-30 23:15:12.613",
+      "kind": "kernel",
+      "id": 507,
+      "reason": 5,
+      "eventTime": "2026-09-30 23:15:11.000",
+      "atMs": 96613,
+      "eventAtMs": 95000
+    },
+    {
+      "time": "2026-09-30 23:15:15.852",
+      "kind": "acdc",
+      "ac": false,
+      "atMs": 99852
+    },
+    {
+      "time": "2026-09-30 23:15:18.885",
+      "kind": "broadcast",
+      "code": 4,
+      "atMs": 102885
+    },
+    {
+      "time": "2026-09-30 23:15:25.645",
+      "kind": "kernel",
+      "id": 506,
+      "reason": 1,
+      "eventTime": "2026-09-30 23:15:18.000",
+      "atMs": 109645,
+      "eventAtMs": 102000
+    },
+    {
+      "time": "2026-09-30 23:15:25.676",
+      "kind": "acdc",
+      "ac": true,
+      "atMs": 109676
+    },
+    {
+      "time": "2026-09-30 23:15:25.679",
+      "kind": "broadcast",
+      "code": 18,
+      "atMs": 109679
+    },
+    {
+      "time": "2026-09-30 23:15:25.681",
+      "kind": "broadcast",
+      "code": 7,
+      "atMs": 109681
+    },
+    {
+      "time": "2026-09-30 23:15:26.647",
+      "kind": "kernel",
+      "id": 507,
+      "reason": 5,
+      "eventTime": "2026-09-30 23:15:25.000",
+      "atMs": 110647,
+      "eventAtMs": 109000
+    }
+  ],
+  "policy": "All supplied wakes occur before 120 seconds and are intentionally ignored."
+}

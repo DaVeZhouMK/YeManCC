@@ -1,0 +1,79 @@
+{
+  "schema": "cpu-collector-delivery-status-v10.1",
+  "date": "2026-10-04",
+  "toolVersion": "10.1.20261004",
+  "overallProductTask": {
+    "state": "USER_ACTIVATED_R6",
+    "executor": "separate-user-appointed-AI",
+    "thisThreadWriteScope": "tools/cpu-rog only",
+    "toolFixMustNotFreezeProductTask": true
+  },
+  "scope": "this-toolkit-revision-local-preparation-and-offline-validation-only",
+  "localToolValidation": {
+    "status": "ACCEPTED_LOCAL_SOFTWARE_GATE_ONLY",
+    "ps7": {
+      "runtime": "7.6.5",
+      "casesTotal": 144,
+      "casesPassed": 144,
+      "casesFailed": 0,
+      "actualProcessExitCode": 0,
+      "runtimeMilliseconds": 11442.8886,
+      "fixtureOnly": true,
+      "report": "validation/runner-validation-v10.1-7.6.5-20261004T065752701Z-25070b1f.json",
+      "execution": "validation/v10.1-ps7-20261004T065741321Z-4707d366-execution.json"
+    },
+    "ps51": {
+      "runtime": "5.1.26100.8875",
+      "parserPassed": 7,
+      "parserTotal": 7,
+      "parserOnly": true,
+      "effectivePolicy": "Restricted",
+      "fullRuntime": "BLOCKED_BY_DEFAULT_EXECUTION_POLICY",
+      "fullRuntimeCasesExecuted": 0,
+      "fullRuntimeFileExitCode": 1,
+      "inertSentinelExitCode": 1,
+      "policyOverride": false,
+      "equivalentToPs7Coverage": false,
+      "report": "validation/runner-validation-v10.1-PS51-parser7-6068f48e.json",
+      "boundary": "validation/v10.1-ps51-20261004T065839488Z-22d3943b-boundary.json"
+    },
+    "collector": {
+      "runtime": "7.6.5",
+      "casesTotal": 41,
+      "casesPassed": 41,
+      "checks": 758,
+      "actualReportedExitCode": 0,
+      "rerunForThisRevision": true,
+      "sourceSha256": "2DBA99927EA58F12274A950BD59590D72A9AEC8F1B6A1186F2125163DE000FE5",
+      "testSha256": "011436592C519F05B41E25FC26603F693F834A9D8D026A9B83CAA8D8F4813E3E",
+      "report": "validation/collector-validation-v10.1-ps7-6abc6b9eaa8c47989e3b6b81daf736e2.json"
+    }
+  },
+  "priorRogV10": {
+    "validate": "RAW_RECEIVED_ACCEPTED_IN_INTEGRITY_SCOPE",
+    "collector": "REPORTED_PASS_41_OF_41_758_CHECKS_PENDING_RAW_JSON",
+    "runner": "REPORTED_FAIL_138_OF_140_PENDING_RAW_JSON",
+    "rootCause": "SUPPORTED_BY_CURRENT_SOURCE_AND_LOCAL_PS51_PURE_PATH_API_PROBE"
+  },
+  "thisRevisionRogToolRegression": "NOT_RUN",
+  "thisRevisionRogProductRegression": "NOT_RUN",
+  "thisRevisionRogCpuAB": "NOT_RUN",
+  "productIncluded": false,
+  "realProductActionPerformedByThisToolPreparation": false,
+  "realElevationPerformedByThisToolPreparation": false,
+  "realCpuSamplingPerformedByThisToolPreparation": false,
+  "productVersionSelection": "MANAGED_BY_SEPARATE_PRODUCT_EXECUTOR_NOT_SELECTED_BY_THIS_TOOL_DELIVERY",
+  "defaultSampleMilliseconds": 250,
+  "maxExplicitLogFiles": 32,
+  "sourceFreeze": "validation/runner-validation-v10.1-final-freeze-20261004.json",
+  "negativeControl": {
+    "auditCopyOnly": true,
+    "sharedSourceReordered": false,
+    "expectedExitCode": 1,
+    "actualExitCode": 1,
+    "expectedFailures": 2,
+    "actualFailures": 2,
+    "orderingRegressionCaught": true,
+    "report": "validation/v10.1-order-negative-control-20261004T070012617Z-f2267c99-execution.json"
+  }
+}

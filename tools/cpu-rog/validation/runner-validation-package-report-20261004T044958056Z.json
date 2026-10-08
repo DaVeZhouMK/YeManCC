@@ -1,0 +1,396 @@
+{
+  "schemaVersion": 1,
+  "timestampUtc": "2026-10-04T04:49:58.0373476Z",
+  "status": "PACKAGED_WITH_EXPLICIT_LIMITATIONS",
+  "scope": "file-packaging-and-local-offline-software-tool-validation-only",
+  "allPackageChecksPassed": true,
+  "rogRegressionPassed": false,
+  "rogToolRegression": "NOT_RUN",
+  "rogProductRegression": "NOT_RUN",
+  "rogCpuAB": "NOT_RUN",
+  "productAcceptancePassed": false,
+  "realProductActionPerformed": false,
+  "realElevationPerformed": false,
+  "realCpuSamplingPerformed": false,
+  "packagingPolicyOverrideUsed": false,
+  "executionPolicyChanged": false,
+  "legacyCpuFilesReadOrCopied": false,
+  "sourceCodeOrDocsModified": false,
+  "packageDirectory": "C:\\Users\\DaVe\\Desktop\\CPU\\ROG-CPU-COLLECTOR-20261004-v9",
+  "zipPath": "C:\\Users\\DaVe\\Desktop\\CPU\\ROG-CPU-COLLECTOR-20261004-v9.zip",
+  "zipRoot": "ROG-CPU-COLLECTOR-20261004-v9",
+  "zipBytes": 103728,
+  "zipSha256": "528462d45772d99d12340ec63fe7a774935743600870c9402906d0241eb13173",
+  "manifestPath": "C:\\Users\\DaVe\\Desktop\\CPU\\ROG-CPU-COLLECTOR-20261004-v9\\kit-manifest.json",
+  "manifestSha256": "75738bf6f3ea791130d59611ef191b4c11d80729612bed7624ed7a8905a937d6",
+  "payloadFileCount": 24,
+  "manifestFileCount": 1,
+  "totalFileCount": 25,
+  "zipEntryCount": 25,
+  "docsFileCount": 8,
+  "testsFileCount": 2,
+  "safeValidationFileCount": 7,
+  "sourceSelectionSnapshot": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\cpu-rog\\validation\\runner-validation-package-selection-20261004T044500892Z.json",
+  "selectedSourceFiles": [
+    {
+      "bytes": 63760,
+      "sha256": "2dba99927ea58f12274a950bd59590d72a9aec8f1b6a1186f2125163de000fe5",
+      "path": "Collect-YMCC-CPU.ps1"
+    },
+    {
+      "bytes": 221,
+      "sha256": "e4c292ab44625fad5e60a9cbff6ad99eb54e924ebc5893be867a60e134b81df8",
+      "path": "config.example.json"
+    },
+    {
+      "bytes": 8849,
+      "sha256": "350e573ea38ed96c79256fd9a4ac991cf38f295f6956828abe289b05aaaaf54e",
+      "path": "Control-YMCC-Lifecycle.ps1"
+    },
+    {
+      "bytes": 1601,
+      "sha256": "521dc73cd24e951dc79dfb7679f49078ab8ab409a43027848757cdd3e0d827d8",
+      "path": "docs/DELIVERY-STATUS.json"
+    },
+    {
+      "bytes": 3926,
+      "sha256": "d21fe925a7a82950ca3acf54ff444bf3fe266cb7c17551849321c116814713f5",
+      "path": "docs/DELIVERY-STATUS.md"
+    },
+    {
+      "bytes": 2206,
+      "sha256": "3b876ac87e318b3d694d8f030e0ed1d9c7eadbfb428cfff1c59f5a210257e6d3",
+      "path": "docs/KNOWN-CAPTURE-ERRORS-AND-FIXES.md"
+    },
+    {
+      "bytes": 3460,
+      "sha256": "7aac93dc05919e21bc5d53b4c5a126e26a376e7f726be68e166de54b86338785",
+      "path": "docs/LEGACY-ROG-DATA-STATUS.json"
+    },
+    {
+      "bytes": 10006,
+      "sha256": "2a91d52ca9a175b67b763c63a9ea432a5b88ea165b12c3ef52856df11474f0fc",
+      "path": "docs/OPERATOR-COMMANDS.md"
+    },
+    {
+      "bytes": 7653,
+      "sha256": "6066c2562bd11566a176a05d7cd99c097fab4976b077f713d08ed8c78cb32200",
+      "path": "docs/ROG-CAPTURE-AI-TASK-v9-20261004.md"
+    },
+    {
+      "bytes": 2239,
+      "sha256": "96c9e603ab6135ef445f8e0cb66a0cbb2a31a53aa061cdcc78213730d4aa5d84",
+      "path": "docs/ROG-RETURN-CHECKLIST.md"
+    },
+    {
+      "bytes": 2785,
+      "sha256": "769617c1d28a9d057b771c3ac70b012cd99e5befbcd80aefe38a0f20df787ec7",
+      "path": "docs/START-HERE.md"
+    },
+    {
+      "bytes": 39371,
+      "sha256": "4010e1c5e7f1fa76f2ff16d8a5718a2d974505f5542d1853dfdb9f352af31503",
+      "path": "Invoke-ROG-CPU.ps1"
+    },
+    {
+      "bytes": 4432,
+      "sha256": "619067090e798c3d1c6ff7ddcc63bb2288d6765a71fc63cdd7a2f2e34e808c57",
+      "path": "Invoke-YMCC-AuthorizedWorker.ps1"
+    },
+    {
+      "bytes": 1182,
+      "sha256": "09401ced6f7f4bfe8a91388e3e64ebe791a4e8606f5cfa3ef1d382d1e9b19d14",
+      "path": "README.md"
+    },
+    {
+      "bytes": 11447,
+      "sha256": "f640c9a2ccd878b5115b284c7734bf826fe299d6d7e5e72fded219187276d084",
+      "path": "Send-YMCC-AI-Fan-Mock.ps1"
+    },
+    {
+      "bytes": 35429,
+      "sha256": "bf16ed1f0550bdec38cc2ba7164635dd48f370c01c91d222821a83cf36791bce",
+      "path": "tests/Test-ROG-CPU-Runner.ps1"
+    },
+    {
+      "bytes": 36673,
+      "sha256": "011436592c519f05b41e25fc26603f693f834a9d8d026a9b83caa8d8f4813e3e",
+      "path": "tests/Test-YMCC-CPU-Collector.ps1"
+    },
+    {
+      "bytes": 122796,
+      "sha256": "afffddd89878357aa9760f0d2b1f13cd8fc8f4279dc0a312acce7e980315a98d",
+      "path": "validation/collector-validation-ps5-20261004.json"
+    },
+    {
+      "bytes": 67923,
+      "sha256": "b51d047cad32a9147934c03db9485a4c9ea839d131e2e5808569a43d88716213",
+      "path": "validation/collector-validation-ps7-20261004.json"
+    },
+    {
+      "bytes": 8537,
+      "sha256": "645bfa31c2d0fe357c5f2d57d2bc7874e26537e00eae8f229821bfaae24eff39",
+      "path": "validation/runner-validation-7.6.5-20261004T043111155Z-9307abcb.json"
+    },
+    {
+      "bytes": 400,
+      "sha256": "ab8d2e617a3472ae676461361b1c91584b247dd1b29044df66ec4a9283e1a46f",
+      "path": "validation/runner-validation-7.6.5-20261004T043111155Z-9307abcb.md"
+    },
+    {
+      "bytes": 2093,
+      "sha256": "80596d28c373dd959795d5240daac25953d1837c5bd3ba14c3eed446ea7e26a9",
+      "path": "validation/runner-validation-FROZEN-20261004.json"
+    },
+    {
+      "bytes": 7471,
+      "sha256": "2abafbcd96a624fedd2af225fa8cd8070fcfdac1e7e5d2d2fd11b0881b9f9d93",
+      "path": "validation/runner-validation-FROZEN-20261004.md"
+    },
+    {
+      "bytes": 3848,
+      "sha256": "dc455c19fbf2f0d9fa57e63bf0564703d689b01a64d25057ad600eeaee1c268f",
+      "path": "validation/runner-validation-PS51-final-parser-20261004T043351454Z.json"
+    }
+  ],
+  "sourceDeliveryTemporaryDriftCount": 0,
+  "zipHashMismatchCount": 0,
+  "desktopPackageHasResults": false,
+  "desktopPackageHasWorkerRequest": false,
+  "desktopPackageHasFixture": false,
+  "desktopPackageHasProductExe": false,
+  "temporaryValidationRoot": "C:\\Users\\DaVe\\AppData\\Local\\Temp\\YMCC v9 搬运验证 中文 空格 0683a0b90c2140c0803a281cadd7e273",
+  "temporaryOutputsPackaged": false,
+  "packagingValidation": {
+    "ps7Validate": {
+      "productTouched": false,
+      "policyOverrideUsed": false,
+      "manifestVerified": true,
+      "manifestFileCount": 24,
+      "exitCode": 0,
+      "resultPath": "C:\\Users\\DaVe\\AppData\\Local\\Temp\\YMCC v9 搬运验证 中文 空格 0683a0b90c2140c0803a281cadd7e273\\ROG-CPU-COLLECTOR-20261004-v9\\Results\\session-20261004T044607442Z-e7e42af693184aeebb59c1f218f93eae\\repeat-dfece4ec304544158aeb4ff7c557a80a\\result.json",
+      "rogRegressionPassed": false
+    },
+    "ps7Collector": {
+      "exitCode": 0,
+      "policyOverrideUsed": false,
+      "failedCheckCount": 0,
+      "realCapturePerformed": false,
+      "casesPassed": 41,
+      "casesTotal": 41,
+      "rogRegressionPassed": false,
+      "reportPath": "C:\\Users\\DaVe\\AppData\\Local\\Temp\\YMCC v9 搬运验证 中文 空格 0683a0b90c2140c0803a281cadd7e273\\ROG-CPU-COLLECTOR-20261004-v9\\validation\\collector-validation-package-ps7-7ddf46c8ac02456b90c3da6736ed5e4a.json",
+      "checkCount": 758
+    },
+    "ps51Parser": {
+      "functionsOrWrappersExecuted": false,
+      "version": "5.1.26100.8875",
+      "exitCode": 0,
+      "fullSuiteStatus": "NOT_RUN_RESTRICTED_POLICY_PREVIOUSLY_BLOCKED",
+      "policyOverrideUsed": false,
+      "casesTotal": 7,
+      "casesPassed": 7,
+      "rogRegressionPassed": false,
+      "policyChanged": false,
+      "scope": "local-software-tool-parser-only",
+      "executionPolicy": "Restricted",
+      "priorPackagingHelperAttempt": {
+        "fix": "EXPLICIT_UTF8_READ_HELPER_ONLY_NO_DELIVERABLE_CHANGED",
+        "exitCode": 1,
+        "reason": "BOMLESS_UTF8_STATE_READ_WITH_PS51_DEFAULT_CODEPAGE_MANGLED_CHINESE_TEMP_PATH"
+      },
+      "realProductActionPerformed": false,
+      "restrictedScriptsExecuted": false,
+      "checks": [
+        {
+          "passed": true,
+          "file": "Invoke-ROG-CPU.ps1",
+          "parserErrors": 0
+        },
+        {
+          "passed": true,
+          "file": "Invoke-YMCC-AuthorizedWorker.ps1",
+          "parserErrors": 0
+        },
+        {
+          "passed": true,
+          "file": "Control-YMCC-Lifecycle.ps1",
+          "parserErrors": 0
+        },
+        {
+          "passed": true,
+          "file": "Send-YMCC-AI-Fan-Mock.ps1",
+          "parserErrors": 0
+        },
+        {
+          "passed": true,
+          "file": "Collect-YMCC-CPU.ps1",
+          "parserErrors": 0
+        },
+        {
+          "passed": true,
+          "file": "tests\\Test-ROG-CPU-Runner.ps1",
+          "parserErrors": 0
+        },
+        {
+          "passed": true,
+          "file": "tests\\Test-YMCC-CPU-Collector.ps1",
+          "parserErrors": 0
+        }
+      ],
+      "failed": 0
+    },
+    "ps7Runner": {
+      "realCpuSamplingPerformed": false,
+      "reportPath": "C:\\Users\\DaVe\\AppData\\Local\\Temp\\YMCC v9 搬运验证 中文 空格 0683a0b90c2140c0803a281cadd7e273\\runner-offline-output\\runner-validation-7.6.5-20261004T044615684Z-792150a6.json",
+      "casesTotal": 68,
+      "casesFailed": 0,
+      "realElevationPerformed": false,
+      "realProductProcessesTouched": false,
+      "casesPassed": 68,
+      "rogRegressionPassed": false,
+      "exitCode": 0,
+      "policyOverrideUsed": false
+    }
+  },
+  "includedReportConditions": {
+    "acceptedPassedScope": "PS7_RUNNER_OFFLINE_SOFTWARE_TOOLS_ONLY",
+    "reportsDoNotCertifyProduct": true,
+    "runnerPS51": "SOURCE_FINAL_PARSER_6_OF_6_EXIT0_ONLY_FULL_SUITE_BLOCKED_EXIT1",
+    "collectorPS51": "SOURCE_REPORT_41_CASES_758_CHECKS_EXIT0_USED_SUBPROCESS_EXECUTIONPOLICY_BYPASS_NOT_DEFAULT_POLICY_FULL_ENTRY"
+  },
+  "notVerified": [
+    "PS51 runner full function/wrapper execution under default Restricted policy",
+    "ROG tool preflight and real capture",
+    "ROG product normal start/stop/restart, frontend-ready and owned Host/runtime chains",
+    "Native process permissions/FILETIME and physical hardware behavior",
+    "Actual sampling overhead/jitter and CPU S0-S4/AB acceptance"
+  ],
+  "zipEntries": [
+    {
+      "path": "ROG-CPU-COLLECTOR-20261004-v9/Collect-YMCC-CPU.ps1",
+      "bytes": 63760,
+      "sha256": "2dba99927ea58f12274a950bd59590d72a9aec8f1b6a1186f2125163de000fe5"
+    },
+    {
+      "path": "ROG-CPU-COLLECTOR-20261004-v9/config.example.json",
+      "bytes": 221,
+      "sha256": "e4c292ab44625fad5e60a9cbff6ad99eb54e924ebc5893be867a60e134b81df8"
+    },
+    {
+      "path": "ROG-CPU-COLLECTOR-20261004-v9/Control-YMCC-Lifecycle.ps1",
+      "bytes": 8849,
+      "sha256": "350e573ea38ed96c79256fd9a4ac991cf38f295f6956828abe289b05aaaaf54e"
+    },
+    {
+      "path": "ROG-CPU-COLLECTOR-20261004-v9/docs/DELIVERY-STATUS.json",
+      "bytes": 1601,
+      "sha256": "521dc73cd24e951dc79dfb7679f49078ab8ab409a43027848757cdd3e0d827d8"
+    },
+    {
+      "path": "ROG-CPU-COLLECTOR-20261004-v9/docs/DELIVERY-STATUS.md",
+      "bytes": 3926,
+      "sha256": "d21fe925a7a82950ca3acf54ff444bf3fe266cb7c17551849321c116814713f5"
+    },
+    {
+      "path": "ROG-CPU-COLLECTOR-20261004-v9/docs/KNOWN-CAPTURE-ERRORS-AND-FIXES.md",
+      "bytes": 2206,
+      "sha256": "3b876ac87e318b3d694d8f030e0ed1d9c7eadbfb428cfff1c59f5a210257e6d3"
+    },
+    {
+      "path": "ROG-CPU-COLLECTOR-20261004-v9/docs/LEGACY-ROG-DATA-STATUS.json",
+      "bytes": 3460,
+      "sha256": "7aac93dc05919e21bc5d53b4c5a126e26a376e7f726be68e166de54b86338785"
+    },
+    {
+      "path": "ROG-CPU-COLLECTOR-20261004-v9/docs/OPERATOR-COMMANDS.md",
+      "bytes": 10006,
+      "sha256": "2a91d52ca9a175b67b763c63a9ea432a5b88ea165b12c3ef52856df11474f0fc"
+    },
+    {
+      "path": "ROG-CPU-COLLECTOR-20261004-v9/docs/ROG-CAPTURE-AI-TASK-v9-20261004.md",
+      "bytes": 7653,
+      "sha256": "6066c2562bd11566a176a05d7cd99c097fab4976b077f713d08ed8c78cb32200"
+    },
+    {
+      "path": "ROG-CPU-COLLECTOR-20261004-v9/docs/ROG-RETURN-CHECKLIST.md",
+      "bytes": 2239,
+      "sha256": "96c9e603ab6135ef445f8e0cb66a0cbb2a31a53aa061cdcc78213730d4aa5d84"
+    },
+    {
+      "path": "ROG-CPU-COLLECTOR-20261004-v9/docs/START-HERE.md",
+      "bytes": 2785,
+      "sha256": "769617c1d28a9d057b771c3ac70b012cd99e5befbcd80aefe38a0f20df787ec7"
+    },
+    {
+      "path": "ROG-CPU-COLLECTOR-20261004-v9/Invoke-ROG-CPU.ps1",
+      "bytes": 39371,
+      "sha256": "4010e1c5e7f1fa76f2ff16d8a5718a2d974505f5542d1853dfdb9f352af31503"
+    },
+    {
+      "path": "ROG-CPU-COLLECTOR-20261004-v9/Invoke-YMCC-AuthorizedWorker.ps1",
+      "bytes": 4432,
+      "sha256": "619067090e798c3d1c6ff7ddcc63bb2288d6765a71fc63cdd7a2f2e34e808c57"
+    },
+    {
+      "path": "ROG-CPU-COLLECTOR-20261004-v9/kit-manifest.json",
+      "bytes": 5740,
+      "sha256": "75738bf6f3ea791130d59611ef191b4c11d80729612bed7624ed7a8905a937d6"
+    },
+    {
+      "path": "ROG-CPU-COLLECTOR-20261004-v9/README.md",
+      "bytes": 1182,
+      "sha256": "09401ced6f7f4bfe8a91388e3e64ebe791a4e8606f5cfa3ef1d382d1e9b19d14"
+    },
+    {
+      "path": "ROG-CPU-COLLECTOR-20261004-v9/Send-YMCC-AI-Fan-Mock.ps1",
+      "bytes": 11447,
+      "sha256": "f640c9a2ccd878b5115b284c7734bf826fe299d6d7e5e72fded219187276d084"
+    },
+    {
+      "path": "ROG-CPU-COLLECTOR-20261004-v9/tests/Test-ROG-CPU-Runner.ps1",
+      "bytes": 35429,
+      "sha256": "bf16ed1f0550bdec38cc2ba7164635dd48f370c01c91d222821a83cf36791bce"
+    },
+    {
+      "path": "ROG-CPU-COLLECTOR-20261004-v9/tests/Test-YMCC-CPU-Collector.ps1",
+      "bytes": 36673,
+      "sha256": "011436592c519f05b41e25fc26603f693f834a9d8d026a9b83caa8d8f4813e3e"
+    },
+    {
+      "path": "ROG-CPU-COLLECTOR-20261004-v9/validation/collector-validation-ps5-20261004.json",
+      "bytes": 122796,
+      "sha256": "afffddd89878357aa9760f0d2b1f13cd8fc8f4279dc0a312acce7e980315a98d"
+    },
+    {
+      "path": "ROG-CPU-COLLECTOR-20261004-v9/validation/collector-validation-ps7-20261004.json",
+      "bytes": 67923,
+      "sha256": "b51d047cad32a9147934c03db9485a4c9ea839d131e2e5808569a43d88716213"
+    },
+    {
+      "path": "ROG-CPU-COLLECTOR-20261004-v9/validation/runner-validation-7.6.5-20261004T043111155Z-9307abcb.json",
+      "bytes": 8537,
+      "sha256": "645bfa31c2d0fe357c5f2d57d2bc7874e26537e00eae8f229821bfaae24eff39"
+    },
+    {
+      "path": "ROG-CPU-COLLECTOR-20261004-v9/validation/runner-validation-7.6.5-20261004T043111155Z-9307abcb.md",
+      "bytes": 400,
+      "sha256": "ab8d2e617a3472ae676461361b1c91584b247dd1b29044df66ec4a9283e1a46f"
+    },
+    {
+      "path": "ROG-CPU-COLLECTOR-20261004-v9/validation/runner-validation-FROZEN-20261004.json",
+      "bytes": 2093,
+      "sha256": "80596d28c373dd959795d5240daac25953d1837c5bd3ba14c3eed446ea7e26a9"
+    },
+    {
+      "path": "ROG-CPU-COLLECTOR-20261004-v9/validation/runner-validation-FROZEN-20261004.md",
+      "bytes": 7471,
+      "sha256": "2abafbcd96a624fedd2af225fa8cd8070fcfdac1e7e5d2d2fd11b0881b9f9d93"
+    },
+    {
+      "path": "ROG-CPU-COLLECTOR-20261004-v9/validation/runner-validation-PS51-final-parser-20261004T043351454Z.json",
+      "bytes": 3848,
+      "sha256": "dc455c19fbf2f0d9fa57e63bf0564703d689b01a64d25057ad600eeaee1c268f"
+    }
+  ]
+}

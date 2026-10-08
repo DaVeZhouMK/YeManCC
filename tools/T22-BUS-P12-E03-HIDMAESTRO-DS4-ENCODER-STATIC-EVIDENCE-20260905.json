@@ -1,0 +1,70 @@
+{
+  "schemaVersion": "T22-BUS-HidMaestroDs4EncoderStaticEvidence.v1",
+  "evidenceId": "T22-BUS-P12-E03-HIDMAESTRO-DS4-ENCODER-STATIC-20260905",
+  "capturedUtc": "2026-09-05",
+  "captureMode": "PE metadata/resource/IL read only. HIDMaestro.Core.dll was not loaded as an assembly; no HIDMaestro object, driver, InputHost, virtual controller, physical device, Steam or game was run.",
+  "runtimeClosure": "UNENCLOSED",
+  "lockedCore": {
+    "path": "InputHost/bin/Release/net10.0-windows/HIDMaestro.Core.dll",
+    "bytes": 40755712,
+    "sha256": "BD42A99BCB260435CE25796C54A4B792F8A2CED6AB78659C0CF926011663938E",
+    "mvid": "c61e2715-47ae-4cf3-87f7-244c330ef80e",
+    "assembly": "HIDMaestro.Core, Version=1.7.0.0, Culture=neutral, PublicKeyToken=null"
+  },
+  "fieldMetadata": {
+    "HMGamepadState": {
+      "GyroPitch": "int16 (field signature 06-06)",
+      "GyroYaw": "int16 (field signature 06-06)",
+      "GyroRoll": "int16 (field signature 06-06)",
+      "AccelX": "int16 (field signature 06-06)",
+      "AccelY": "int16 (field signature 06-06)",
+      "AccelZ": "int16 (field signature 06-06)",
+      "GyroDpsX": "float32 (field signature 06-0C)",
+      "GyroDpsY": "float32 (field signature 06-0C)",
+      "GyroDpsZ": "float32 (field signature 06-0C)"
+    }
+  },
+  "profileAndEncoderProof": {
+    "profile": "dualshock-4-v2 extended report uses gyroPitch/gyroYaw/gyroRoll at int16-le bytes 15/17/19 and accelX/accelY/accelZ at int16-le bytes 21/23/25.",
+    "compile": [
+      "VendorBlobProgram.Compile IL_0606/065E/0674/06B6/06CC/06E2 compares semantic strings gyroPitch/gyroYaw/gyroRoll/accelX/accelY/accelZ.",
+      "The corresponding IL_0785/078A/078F/0795/079B/07A1 assigns source values 7/8/9/10/11/12."
+    ],
+    "submit": [
+      "HMController.SubmitState IL_0249..02A1 selects the extended-report path only when profile ExtendedReport, buffer, encoder state and _extendedModeArmed are present, then calls VendorBlobCodec.EncodeInput.",
+      "The non-extended HidReportBuilder path only receives axes/hat/buttons; it is not the DS4 IMU encoder."
+    ],
+    "encode": [
+      "VendorBlobCodec.EncodeInput IL_0399..0426 subtracts 7 from the compiled source, switches six cases, reads HMGamepadState GyroPitch/GyroYaw/GyroRoll/AccelX/AccelY/AccelZ in that order, and writes low byte then high byte to B and B+1.",
+      "This statically proves profile semantic -> same-named HMGamepadState int16 field -> signed little-endian report field for this locked DS4 encoder.",
+      "Whole-assembly reference scan finds HMGamepadState GyroDpsX/Y/Z direct field reads in SwitchProPacker::BuildBody, not in VendorBlobCodec::EncodeInput."
+    ]
+  },
+  "hcReference": {
+    "source": "Isolated/HC-Candidate-0.32.4.0-06c0b954-20260902/HandheldCompanion/Targets/DualShock4Target.cs:87-128",
+    "semanticContract": [
+      "HC reads GamepadMotion.GetRawGyro and GetRawAcceleration (or DSU gyro/accel fallback), not a calibrated-gyro-only substitute.",
+      "Each raw gyro axis is RoundClampToShort(Clamp(axis, -2048, 2048) * 16).",
+      "Each raw acceleration axis is RoundClampToShort(Clamp(axis * 9.81, -64, 64) * 512)."
+    ],
+    "wireBoundary": "HC writes these values to a different 31-byte VIIPER report; those HC byte offsets must not be reused for HIDMaestro's 64-byte DS4 v2 report."
+  },
+  "currentProductMismatch": {
+    "inputHost": "InputHost/Program.cs:127-136 assigns only float GyroDpsX/Y/Z from gx/gy/gz. It assigns none of the six int16 fields consumed by HIDMaestro's DS4 extended encoder.",
+    "nativeTransport": "native/main.cpp:5319-5368 transports gx/gy/gz only. It transports no ax/ay/az.",
+    "sourceSemantics": "native/main.cpp:5486-5495 would replace cgx/cgy/cgz with g_gmGetCal (calibrated gyro) if pairProven became true. That is not the same HC target source as GetRawGyro plus paired raw acceleration.",
+    "currentSafety": "pairProven is presently hard-coded false at native/main.cpp:5477, so current direct gyro submission is fail-zero. This prevents a nonzero report today but does not repair the future DS4 encoder/transport mismatch."
+  },
+  "conclusion": [
+    "The locked HIDMaestro DS4 encoder axis/index/field-width/endianness ambiguity is closed statically for gyroPitch/gyroYaw/gyroRoll/accelX/accelY/accelZ.",
+    "Current product GyroDpsX/Y/Z assignments cannot encode DS4 extended IMU bytes. If that path were later admitted, the unassigned six int16 fields would remain default zero.",
+    "A local GyroDps-to-short patch is not HC parity: it would still lack paired raw acceleration and would use calibrated gyro where HC's DS4 target uses raw gyro. Keep direct DS4 IMU safe-stopped until a T12 canonical paired raw gyro+accel transport and descriptor-specific HC scale conversion are implemented and independently decoded."
+  ],
+  "stillUnproven": [
+    "physical provider identity, matrix, axis/sign normalization and same-epoch gyro/accel pairing",
+    "InputHost product lifecycle/ACK/first-frame/release",
+    "encoded report capture plus independent decoder/readback",
+    "driver/OS enumeration, Steam/game/consumer observation and recovery"
+  ],
+  "safeStop": "dualshock4 direct DS4 IMU remains transport-source-and-readback-unverified; xbox360 remains persona-motion-unsupported."
+}

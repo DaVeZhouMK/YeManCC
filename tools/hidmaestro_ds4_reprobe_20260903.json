@@ -1,0 +1,26 @@
+{
+  "evidenceId": "A1-R1-HIDMAESTRO-DS4-REPROBE-20260903",
+  "status": "PASS",
+  "assetLockId": "HC-GYRO-VIRTUAL-MAINLINE-LOCK-20260903",
+  "asset": {
+    "assetId": "HIDMaestro-1.7.0",
+    "isolatedExecutable": "G:\\YeManCC-Work\\Temp\\hidmaestro-probe-20260903-01\\HIDMaestroTest\\HIDMaestroTest.exe"
+  },
+  "command": "HIDMaestroTest.exe emulate dualshock-4-v2",
+  "observed": {
+    "profilesLoaded": 231,
+    "submissionRate": "250 Hz",
+    "driverInstall": "OK",
+    "create": "dualshock-4-v2 created in 154 ms",
+    "cleanup": "slot 0 disposed in 5398 ms; total cleanup 5415 ms"
+  },
+  "postCleanup": {
+    "hidMaestroOrDs4PresentOnlyDevices": 0
+  },
+  "scope": "Isolated DS4 virtual-device test. HC was not loaded, HidHide was not changed, no YeManCC product path was used, and no physical-controller input or game/Steam/HIDAPI consumer was asserted.",
+  "remaining": [
+    "Descriptor field-level encode/decode parity is not proven by this probe.",
+    "No YeManCC-to-HIDMaestro adapter exists.",
+    "HidHide and external consumer isolation remain UNENCLOSED."
+  ]
+}

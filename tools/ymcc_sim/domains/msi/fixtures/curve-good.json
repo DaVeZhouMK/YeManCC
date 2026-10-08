@@ -1,0 +1,8 @@
+{
+  "name": "curve-good",
+  "kind": "curve",
+  "expect": { "ok": true, "blockIndex": 1, "duties": [40, 49, 58, 67, 75, 75], "payload7": 75, "boundaryPreserved": true, "asRpm": false },
+  "raw": [1, 40, 49, 58, 67, 75, 75, 75, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+  "readSuccess": true,
+  "note": "HC default table {40,0,40,49,58,67,75,75}: payload[1..6] hold the six duty slots, payload[7] is the kept byte"
+}

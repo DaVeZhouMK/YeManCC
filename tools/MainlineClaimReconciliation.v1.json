@@ -1,0 +1,649 @@
+{
+    "schemaVersion":  1,
+    "artifactId":  "T21-MAINLINE-CLAIM-RECONCILIATION-P20-20260906",
+    "status":  "T21-CURRENT-SOURCE-STATIC-REAUDIT-P20 / T10-SOURCE-IMPLEMENTED / RUNTIME-BLOCKED",
+    "authority":  "Docs/Tasks/GyroVirtual/TASK.md#2026-09-04-HC-parity-drift-BUS",
+    "scope":  "BUS-P20/T21 current-source static re-audit. Sole snapshot: T22-RF00-20260906-T10-I-HC-ROUTE-STATIC-SNAPSHOT, 74-key scope, sourceDigest 41FF57702ECF777BD409B1D7FE5820A81F9891B1C34CB0E9CB1E2F6861B5B80C. It includes current T10 native/Host lifecycle source, documentation and capture tooling. No runtime action is part of this audit.",
+    "claims":  [
+                   {
+                       "claimId":  "REC-01",
+                       "source":  "TASK.md AF plus P20 P01/P02/P03/P06/P07 static evidence and T10 implementation evidence",
+                       "claim":  "T10 named-pipe / locked-asset Host lifecycle is SOURCE-IMPLEMENTED and no-driver protocol-tested; T11-T13 parameter/pair/descriptor/owner work and all runtime evidence remain UNENCLOSED / RUNTIME-BLOCKED",
+                       "sourceOrCallGraph":  [
+                                                 "native/main.cpp::inputHostStart/inputHostSubmitPad/inputHostStopLocked",
+                                                 "InputHost/Program.cs::HostSession",
+                                                 "tools/T10-HC-INPUTHOST-PROTOCOL-IMPLEMENTATION-EVIDENCE-20260905.md"
+                                             ],
+                       "evidenceTier":  "source-implemented / static-and-no-driver-protocol-tested / evidence-incomplete",
+                       "reconciliation":  "current T10 source retires state-file, implicit install and forced-kill paths; no UI parameter consumption, descriptor readback or external consumer closure is inferred",
+                       "result":  "T10 Host boundary source-implemented; retain RUNTIME-BLOCKED",
+                       "relationToDgf":  [
+                                             "DGF-06",
+                                             "DGF-08",
+                                             "DGF-10",
+                                             "DGF-11",
+                                             "DGF-15"
+                                         ],
+                       "manifestId":  "T22-RF00-20260906-T10-I-HC-ROUTE-STATIC-SNAPSHOT",
+                       "sourceDigest":  "41FF57702ECF777BD409B1D7FE5820A81F9891B1C34CB0E9CB1E2F6861B5B80C",
+                       "staticEvidence":  [
+                                              "T22-P20-P01",
+                                              "T22-P20-P02",
+                                              "T22-P20-P03",
+                                              "T22-P20-P06",
+                                              "T10-I source implementation"
+                                          ],
+                       "runtimeUpgrade":  false
+                   },
+                   {
+                       "claimId":  "REC-02",
+                       "source":  "TASK.md 主程序内部前端 owner/语义隔离范围 plus T22 P05 mock-producer boundary",
+                       "claim":  "YMCC frontend owner/semantic isolation has an independently observed scope",
+                       "sourceOrCallGraph":  [
+                                                 "src/bridge/inputOwnerRuntime.ts",
+                                                 "tools/input_owner_runtime_integration_selftest.ts",
+                                                 "Docs/Tasks/GyroVirtual/29-ATOMIC-OWNER-AND-GAME-CONSUMER-ISOLATION-20260903.md"
+                                             ],
+                       "evidenceTier":  "R1-runtime-observed limited to named YMCC route",
+                       "reconciliation":  "does not establish P-HID or P-XINPUT isolation",
+                       "result":  "retain limited P-OWNER wording; external consumers UNENCLOSED",
+                       "relationToDgf":  [
+                                             "DGF-04",
+                                             "DGF-14"
+                                         ],
+                       "manifestId":  "T22-RF00-20260906-T10-I-HC-ROUTE-STATIC-SNAPSHOT",
+                       "sourceDigest":  "41FF57702ECF777BD409B1D7FE5820A81F9891B1C34CB0E9CB1E2F6861B5B80C",
+                       "staticEvidence":  [
+                                              "T22-P20-P05"
+                                          ],
+                       "runtimeUpgrade":  false
+                   },
+                   {
+                       "claimId":  "REC-03",
+                       "source":  "TASK.md BUS P07-04/P07-05 plus T22 P04/P05/P06 static evidence; historical ROG package sections remain non-current",
+                       "claim":  "ROG fallback/test package or a prior observation can demonstrate summon/game isolation",
+                       "sourceOrCallGraph":  [
+                                                 "native/main.cpp::gamepad fallback",
+                                                 "historical package SHA/Steam observations"
+                                             ],
+                       "evidenceTier":  "product-candidate or historical observation",
+                       "reconciliation":  "ROG multi-slot and P-XINPUT recovery remain unclosed; packages are not current runtime proof",
+                       "result":  "do not upgrade; scope any observation to its device/consumer/recovery",
+                       "relationToDgf":  [
+                                             "DGF-03",
+                                             "DGF-04",
+                                             "DGF-12",
+                                             "DGF-14"
+                                         ],
+                       "manifestId":  "T22-RF00-20260906-T10-I-HC-ROUTE-STATIC-SNAPSHOT",
+                       "sourceDigest":  "41FF57702ECF777BD409B1D7FE5820A81F9891B1C34CB0E9CB1E2F6861B5B80C",
+                       "staticEvidence":  [
+                                              "T22-P20-P04",
+                                              "T22-P20-P05",
+                                              "T22-P20-P06"
+                                          ],
+                       "runtimeUpgrade":  false
+                   },
+                   {
+                       "claimId":  "REC-04",
+                       "source":  "30-GYRO-PARAMETER-SHIELD-RESET-ACCEL-CONTRACT-20260904.md and T22 P20 P02/P06 current-source evidence",
+                       "claim":  "native candidate only allows confidence==1 Manual and holds pairProven=false",
+                       "sourceOrCallGraph":  [
+                                                 "native/main.cpp::inputCaptureOnGamepad"
+                                             ],
+                       "evidenceTier":  "source-located",
+                       "reconciliation":  "current candidate safety boundary is visible but missing provider matrix, epoch binding, active transaction and R1 evidence",
+                       "result":  "safe-zero / RUNTIME-BLOCKED",
+                       "relationToDgf":  [
+                                             "DGF-01",
+                                             "DGF-02",
+                                             "DGF-07"
+                                         ],
+                       "manifestId":  "T22-RF00-20260906-T10-I-HC-ROUTE-STATIC-SNAPSHOT",
+                       "sourceDigest":  "41FF57702ECF777BD409B1D7FE5820A81F9891B1C34CB0E9CB1E2F6861B5B80C",
+                       "staticEvidence":  [
+                                              "T22-P20-P02",
+                                              "T22-P20-P06"
+                                          ],
+                       "runtimeUpgrade":  false
+                   },
+                   {
+                       "claimId":  "REC-05",
+                       "source":  "30-GYRO-PARAMETER-SHIELD-RESET-ACCEL-CONTRACT-20260904.md and T22 P20 P01 current-source evidence",
+                       "claim":  "T10 parameters require request/revoke/neutral/exact ACK/same-revision first frame",
+                       "sourceOrCallGraph":  [
+                                                 "src/bridge/settingsRepository.ts",
+                                                 "src/bridge/inputConfigHash.ts",
+                                                 "src/bridge/gyroConfigActivation.ts",
+                                                 "native/main.cpp::inputHostSubmitPad",
+                                                 "InputHost/Program.cs::RunFile"
+                                             ],
+                       "evidenceTier":  "ui-cas and source-located",
+                       "reconciliation":  "UI bookkeeping exists; current named-pipe tuple/receipt uses a fixed canonical adapter config and does not consume UI motion revision/hash or HC selected-plane/profile/layout parameters",
+                       "result":  "parameter-not-consumed / RUNTIME-BLOCKED",
+                       "relationToDgf":  [
+                                             "DGF-06",
+                                             "DGF-10",
+                                             "DGF-11",
+                                             "DGF-15"
+                                         ],
+                       "manifestId":  "T22-RF00-20260906-T10-I-HC-ROUTE-STATIC-SNAPSHOT",
+                       "sourceDigest":  "41FF57702ECF777BD409B1D7FE5820A81F9891B1C34CB0E9CB1E2F6861B5B80C",
+                       "staticEvidence":  [
+                                              "T22-P20-P01",
+                                              "T10-I config-safe-pending boundary"
+                                          ],
+                       "runtimeUpgrade":  false
+                   },
+                   {
+                       "claimId":  "REC-06",
+                       "source":  "30-GYRO-PARAMETER-SHIELD-RESET-ACCEL-CONTRACT-20260904.md and T22 P20 P03 current-source evidence",
+                       "claim":  "DS4 gyro/accel candidate or API field location proves DS4 IMU report parity",
+                       "sourceOrCallGraph":  [
+                                                 "InputHost/Program.cs::HMGamepadState.GyroDpsX/Y/Z",
+                                                 "HC Targets/DualShock4Target.cs::BuildReport",
+                                                 "tools/PersonaDescriptorParity.v1.json"
+                                             ],
+                       "evidenceTier":  "source-located",
+                       "reconciliation":  "HIDMaestro descriptor/reportId/length/offset/endianness/decode/submit/consumer proof are absent",
+                       "result":  "descriptor-unverified / RUNTIME-BLOCKED",
+                       "relationToDgf":  [
+                                             "DGF-05",
+                                             "DGF-09"
+                                         ],
+                       "manifestId":  "T22-RF00-20260906-T10-I-HC-ROUTE-STATIC-SNAPSHOT",
+                       "sourceDigest":  "41FF57702ECF777BD409B1D7FE5820A81F9891B1C34CB0E9CB1E2F6861B5B80C",
+                       "staticEvidence":  [
+                                              "T22-P20-P03"
+                                          ],
+                       "runtimeUpgrade":  false
+                   },
+                   {
+                       "claimId":  "REC-07",
+                       "source":  "30-GYRO-PARAMETER-SHIELD-RESET-ACCEL-CONTRACT-20260904.md, TASK.md BUS K, and T22 P20 P04/P05/P06 current-source evidence",
+                       "claim":  "HidHide P-HID hide is XInput/Steam/game isolation",
+                       "sourceOrCallGraph":  [
+                                                 "native/main.cpp::inputHostStart",
+                                                 "src/bridge/physicalVisibilityTransaction.ts",
+                                                 "tools/RogVisibilityTopology.v1.json"
+                                             ],
+                       "evidenceTier":  "source-located/mock artifact",
+                       "reconciliation":  "default native start logs p-hid-deferred; P-XINPUT is explicitly UNENCLOSED and ROG OEM Disable is prohibited",
+                       "result":  "P-HID unadmitted; P-XINPUT do-not-claim-isolation",
+                       "relationToDgf":  [
+                                             "DGF-03",
+                                             "DGF-04",
+                                             "DGF-12",
+                                             "DGF-14"
+                                         ],
+                       "manifestId":  "T22-RF00-20260906-T10-I-HC-ROUTE-STATIC-SNAPSHOT",
+                       "sourceDigest":  "41FF57702ECF777BD409B1D7FE5820A81F9891B1C34CB0E9CB1E2F6861B5B80C",
+                       "staticEvidence":  [
+                                              "T22-P20-P04",
+                                              "T22-P20-P05",
+                                              "T22-P20-P06"
+                                          ],
+                       "runtimeUpgrade":  false
+                   },
+                   {
+                       "claimId":  "REC-08",
+                       "source":  "30-GYRO-PARAMETER-SHIELD-RESET-ACCEL-CONTRACT-20260904.md, T10-E01..T13-E02 artifacts, and T22 P07 evidence-quality index v2",
+                       "claim":  "self-declared MOCK-READY JSON establishes a mock-pass or runtime conclusion",
+                       "sourceOrCallGraph":  [
+                                                 "tools/gyro_config_activation_selftest.ts",
+                                                 "tools/gyro_calibration_session_selftest.ts",
+                                                 "tools/motion_sample_selftest.ts",
+                                                 "tools/physical_visibility_transaction_selftest.ts"
+                                             ],
+                       "evidenceTier":  "source-located",
+                       "reconciliation":  "the JSON records do not preserve the mandated provenance bundle; source/test presence cannot prove native integration or runtime",
+                       "result":  "retain source-located until an archival evidence bundle exists",
+                       "relationToDgf":  [
+                                             "DGF-08",
+                                             "DGF-13",
+                                             "DGF-15"
+                                         ],
+                       "manifestId":  "T22-RF00-20260906-T10-I-HC-ROUTE-STATIC-SNAPSHOT",
+                       "sourceDigest":  "41FF57702ECF777BD409B1D7FE5820A81F9891B1C34CB0E9CB1E2F6861B5B80C",
+                       "staticEvidence":  [
+                                              "T22-P20-P07"
+                                          ],
+                       "runtimeUpgrade":  false
+                   },
+                   {
+                       "claimId":  "REC-09",
+                       "source":  "TASK.md#DGF-01…DGF-15 主线偏差台账, 30-GYRO-PARAMETER-SHIELD-RESET-ACCEL-CONTRACT-20260904.md#C1 文档交叉引用裁决 and tools/HCParityDriftLedger.v2.json",
+                       "claim":  "C1 option-2 resolved: the current ledger is strictly DGF-01 through DGF-15 and no DGF-16 is created",
+                       "sourceOrCallGraph":  [
+                                                 "TASK.md",
+                                                 "tools/HCParityDriftLedger.v2.json"
+                                             ],
+                       "evidenceTier":  "source-located",
+                       "reconciliation":  "C1 option 2 corrected the former 30-to-31 cross-reference. TASK and 30 now use only DGF-01…DGF-15; the standalone 31/32 files are deleted.",
+                       "result":  "resolved docs-only reference correction / no DGF-16 created",
+                       "relationToDgf":  [
+
+                                         ],
+                       "manifestId":  "T22-RF00-20260906-T10-I-HC-ROUTE-STATIC-SNAPSHOT",
+                       "sourceDigest":  "41FF57702ECF777BD409B1D7FE5820A81F9891B1C34CB0E9CB1E2F6861B5B80C",
+                       "staticEvidence":  [
+                                              "T22-P20-P07",
+                                              "TASK.md C1 option-2/DGF-01鈥GF-15 cross-reference check"
+                                          ],
+                       "runtimeUpgrade":  false
+                   }
+               ],
+    "provenanceReaudit":  {
+                              "runId":  "T19-T20-T21-PROVENANCE-REAUDIT-P20-T10-I-20260906",
+                              "date":  "2026-09-05",
+                              "actor":  "Codex BUS",
+                              "scope":  "static-read-hash-documentation-only; no runtime/device action in RF00/T20/T21/T14",
+                              "currentSourceFingerprint":  {
+                                                               "gitCommit":  "aa8f38b83cc960267d2f68bf78d0e8adaca2234f",
+                                                               "canonicalFileCount":  74,
+                                                               "aggregateSha256":  "41FF57702ECF777BD409B1D7FE5820A81F9891B1C34CB0E9CB1E2F6861B5B80C",
+                                                               "captureStatus":  "P20 static snapshot captures current T10 named-pipe/Host lifecycle source and the T10 implementation evidence. Mutable reconciliation/ledger/report outputs are excluded from sourceDigest and bind only after capture."
+                                                           },
+                              "t22CurrentSource":  {
+                                                       "manifest":  {
+                                                                        "path":  "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\T22-RF00-T10-I-CURRENT-SOURCE-20260906-manifest.json",
+                                                                        "sha256":  "9B9F24C82B567609781DBEE3B8E5D12216B147773879599AB689258167BBEE86",
+                                                                        "manifestId":  "T22-RF00-20260906-T10-I-HC-ROUTE-STATIC-SNAPSHOT",
+                                                                        "sourceDigest":  "41FF57702ECF777BD409B1D7FE5820A81F9891B1C34CB0E9CB1E2F6861B5B80C",
+                                                                        "keyFileCount":  74,
+                                                                        "ymccHead":  "aa8f38b83cc960267d2f68bf78d0e8adaca2234f",
+                                                                        "hcHead":  "06c0b9544db2b1f39abf9cd3796225ccfb096103",
+                                                                        "hcWorktreeClean":  true
+                                                                    },
+                                                       "porcelain":  {
+                                                                         "path":  "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\T22-RF00-T10-I-CURRENT-SOURCE-20260906-porcelain.raw.txt",
+                                                                         "sha256":  "466C1A7E4B6DD275D3A97F2922E0380169D2DE04C5C6853EC626864FFE67B248",
+                                                                         "entryCount":  521,
+                                                                         "currentTextMatchesRaw":  true,
+                                                                         "currentTextMatchesRawAtCapture":  true,
+                                                                         "postCaptureNote":  "P20 output artifacts and this reconciliation are self-excluded; raw porcelain is an exact capture record, not a later live-status assertion."
+                                                                     },
+                                                       "evidenceIndex":  {
+                                                                             "path":  "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\T22-RF00-T10-I-CURRENT-SOURCE-20260906-line-map.md",
+                                                                             "sha256":  "959D2B4E602A87460A4AD49F2F125EDEB92BD4445B395169BF84B6C0B755DDD5",
+                                                                             "p05Disposition":  "Host-local telemetry/receipt exists; external game-consumer measurement remains absent / not-a-consumer-measurement."
+                                                                         },
+                                                       "claimEvidenceMap":  {
+                                                                                "REC-01":  [
+                                                                                               "T22-P20-P01",
+                                                                                               "T22-P20-P02",
+                                                                                               "T22-P20-P03",
+                                                                                               "T22-P20-P06",
+                                                                                               "T10-I source implementation"
+                                                                                           ],
+                                                                                "REC-02":  [
+                                                                                               "T22-P20-P05"
+                                                                                           ],
+                                                                                "REC-03":  [
+                                                                                               "T22-P20-P04",
+                                                                                               "T22-P20-P05",
+                                                                                               "T22-P20-P06"
+                                                                                           ],
+                                                                                "REC-04":  [
+                                                                                               "T22-P20-P02",
+                                                                                               "T22-P20-P06"
+                                                                                           ],
+                                                                                "REC-05":  [
+                                                                                               "T22-P20-P01",
+                                                                                               "T10-I config-safe-pending boundary"
+                                                                                           ],
+                                                                                "REC-06":  [
+                                                                                               "T22-P20-P03"
+                                                                                           ],
+                                                                                "REC-07":  [
+                                                                                               "T22-P20-P04",
+                                                                                               "T22-P20-P05",
+                                                                                               "T22-P20-P06"
+                                                                                           ],
+                                                                                "REC-08":  [
+                                                                                               "T22-P20-P07"
+                                                                                           ],
+                                                                                "REC-09":  [
+                                                                                               "T22-P20-P07",
+                                                                                               "TASK.md C1 option-2/DGF-01鈥GF-15 cross-reference check"
+                                                                                           ]
+                                                                            },
+                                                       "commandProvenance":  {
+                                                                                 "argv":  "git -C \u003cYMCC\u003e rev-parse HEAD; git -C \u003cYMCC\u003e status --porcelain=v1; Get-FileHash -Algorithm SHA256 74 key files; git -C \u003cHC\u003e rev-parse HEAD; git -C \u003cHC\u003e status --porcelain=v1; static Select-String evidence capture",
+                                                                                 "cwd":  "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC",
+                                                                                 "exitCode":  0,
+                                                                                 "stdout":  "P20 captured 74 key files, sourceDigest 41FF57702ECF777BD409B1D7FE5820A81F9891B1C34CB0E9CB1E2F6861B5B80C, 521-entry porcelain raw, and clean HC 06c0b9544db2b1f39abf9cd3796225ccfb096103; no build/test/runtime operation in this re-audit.",
+                                                                                 "stderr":  ""
+                                                                             },
+                                                       "result":  "T21 P20 current-source static re-audit records T10 pipe/Host lifecycle source implementation only. Host-local ACK/first-frame/release facts remain below HID, PnP, Steam/game or runtime closure; runtimeUpgrade=false."
+                                                   },
+                              "readOnlyCommands":  [
+                                                       {
+                                                           "argv":  "powershell -NoProfile -Command Get-Content TASK.md; Get-Content HistoricalClaimInventory.v1.json; Get-Content MainlineClaimReconciliation.v1.json; rg DGF/31/32 references",
+                                                           "cwd":  "G:\\YeManCC-Work",
+                                                           "exitCode":  0,
+                                                           "stdout":  "Current TASK authority located; former 31/32 files absent; TASK records option-2 correction and requires re-audit of the two source JSON artifacts.",
+                                                           "stderr":  ""
+                                                       },
+                                                       {
+                                                           "argv":  "powershell -NoProfile -Command Get-FileHash selected source/artifact files; git rev-parse HEAD; git status --porcelain=v1",
+                                                           "cwd":  "G:\\YeManCC-Work",
+                                                           "exitCode":  0,
+                                                           "stdout":  "Captured current commit aa8f38b83cc960267d2f68bf78d0e8adaca2234f and the non-contemporaneous 21-file aggregate SHA-256 fingerprint.",
+                                                           "stderr":  ""
+                                                       },
+                                                       {
+                                                           "argv":  "powershell -NoProfile -Command enumerate Build/Validation/GyroVirtual T10-E01..T19-E01 artifacts; Get-FileHash; read native-build.log",
+                                                           "cwd":  "G:\\YeManCC-Work",
+                                                           "exitCode":  0,
+                                                           "stdout":  "Located T10-E01 through T19-E01 artifacts and native-build.log. Artifact location/self-declared status alone remains below mock-pass/runtime.",
+                                                           "stderr":  ""
+                                                       }
+                                                   ],
+                              "priorAuditErrors":  [
+                                                       {
+                                                           "errorId":  "PROV-ERR-01",
+                                                           "tasks":  [
+                                                                         "T16",
+                                                                         "T17"
+                                                                     ],
+                                                           "argv":  [
+                                                                        "pnpm run test:calibration-safety-delta",
+                                                                        "pnpm run test:persona-descriptor-parity"
+                                                                    ],
+                                                           "exitCode":  1,
+                                                           "reason":  "The first audit-script runs resolved the frozen HC source from Mainline\\Isolated instead of the actual workspace-level Isolated directory.",
+                                                           "handling":  "The test-script source path was corrected before later successful reruns. This was an audit-script path error only; it did not touch a product runtime, driver, device or virtual target.",
+                                                           "evidenceImpact":  "The first-run raw stdout/stderr is not durably archived; final successful artifacts remain source-located/evidence-incomplete until a future authorized provenance-complete run."
+                                                       },
+                                                       {
+                                                           "errorId":  "PROV-ERR-02",
+                                                           "tasks":  [
+                                                                         "T18"
+                                                                     ],
+                                                           "argv":  "pnpm run test:rog-visibility-topology",
+                                                           "exitCode":  1,
+                                                           "reason":  "The first static assertion rejected any native text containing 0x02 and therefore matched an unrelated mouse usage/comment rather than a ROG Disable report write.",
+                                                           "handling":  "The static check was narrowed to reject report[4] = 0x02 and the later rerun passed. This was an audit-script assertion error only; no ROG OEM write or system mutation occurred.",
+                                                           "evidenceImpact":  "The first-run raw stdout/stderr is not durably archived; final successful artifact remains source-located/evidence-incomplete until a future authorized provenance-complete run."
+                                                       }
+                                                   ],
+                              "historicalExecutionRecords":  [
+                                                                 {
+                                                                     "task":  "T10",
+                                                                     "argv":  "pnpm run test:gyro-config-activation",
+                                                                     "cwd":  "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC",
+                                                                     "exitCode":  0,
+                                                                     "artifact":  {
+                                                                                      "path":  "G:\\YeManCC-Work\\Mainline\\Build\\Validation\\GyroVirtual\\T10-E01-gyro-config-activation-mock-20260904.json",
+                                                                                      "sha256":  "7B95F537E818A95D3C0EE3FF6D44A8962D562AEB80C04FC666E6AC601C12D46E",
+                                                                                      "selfDeclaredStatus":  "MOCK-READY"
+                                                                                  },
+                                                                     "stdout":  {
+                                                                                    "status":  "not durably archived",
+                                                                                    "observed":  "Prior interactive command reported PASS and artifact path; no separate raw stdout file is available."
+                                                                                },
+                                                                     "stderr":  {
+                                                                                    "status":  "not captured separately"
+                                                                                },
+                                                                     "sourceDigestAtExecution":  {
+                                                                                                     "status":  "unknown"
+                                                                                                 },
+                                                                     "tierAfterReaudit":  "source-located / evidence-incomplete"
+                                                                 },
+                                                                 {
+                                                                     "task":  "T11",
+                                                                     "argv":  "pnpm run test:gyro-calibration-session",
+                                                                     "cwd":  "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC",
+                                                                     "exitCode":  0,
+                                                                     "artifact":  {
+                                                                                      "path":  "G:\\YeManCC-Work\\Mainline\\Build\\Validation\\GyroVirtual\\T11-E01-gyro-calibration-session-mock-20260904.json",
+                                                                                      "sha256":  "6B003409CB97628EE0F33D28EDF4DAB94483BB66DA3C29FF2017E920E1BE793F",
+                                                                                      "selfDeclaredStatus":  "MOCK-READY"
+                                                                                  },
+                                                                     "stdout":  {
+                                                                                    "status":  "not durably archived",
+                                                                                    "observed":  "Prior interactive command reported PASS and artifact path; no separate raw stdout file is available."
+                                                                                },
+                                                                     "stderr":  {
+                                                                                    "status":  "not captured separately"
+                                                                                },
+                                                                     "sourceDigestAtExecution":  {
+                                                                                                     "status":  "unknown"
+                                                                                                 },
+                                                                     "tierAfterReaudit":  "source-located / evidence-incomplete"
+                                                                 },
+                                                                 {
+                                                                     "task":  "T12",
+                                                                     "argv":  "pnpm run test:motion-sample",
+                                                                     "cwd":  "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC",
+                                                                     "exitCode":  0,
+                                                                     "artifact":  {
+                                                                                      "path":  "G:\\YeManCC-Work\\Mainline\\Build\\Validation\\GyroVirtual\\T12-E01-motion-sample-mock-20260904.json",
+                                                                                      "sha256":  "4458551D51669E96B99BECDF235204BE8481EB5013F3F81D83860558923AAC01",
+                                                                                      "selfDeclaredStatus":  "MOCK-READY"
+                                                                                  },
+                                                                     "stdout":  {
+                                                                                    "status":  "not durably archived",
+                                                                                    "observed":  "Prior interactive command reported PASS and artifact path; no separate raw stdout file is available."
+                                                                                },
+                                                                     "stderr":  {
+                                                                                    "status":  "not captured separately"
+                                                                                },
+                                                                     "sourceDigestAtExecution":  {
+                                                                                                     "status":  "unknown"
+                                                                                                 },
+                                                                     "tierAfterReaudit":  "source-located / evidence-incomplete"
+                                                                 },
+                                                                 {
+                                                                     "task":  "T13",
+                                                                     "argv":  [
+                                                                                  "pnpm run test:physical-visibility-transaction",
+                                                                                  "pnpm run test:rog-hidhide-contract"
+                                                                              ],
+                                                                     "cwd":  "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC",
+                                                                     "exitCode":  0,
+                                                                     "artifact":  [
+                                                                                      {
+                                                                                          "path":  "G:\\YeManCC-Work\\Mainline\\Build\\Validation\\GyroVirtual\\T13-E01-physical-visibility-transaction-mock-20260904.json",
+                                                                                          "sha256":  "5521980F8DE158ED6D3403ADC44141DF69FB9BB4BADB3024680B6C58B4A82D72",
+                                                                                          "selfDeclaredStatus":  "MOCK-READY"
+                                                                                      },
+                                                                                      {
+                                                                                          "path":  "G:\\YeManCC-Work\\Mainline\\Build\\Validation\\GyroVirtual\\T13-E02-rog-hidhide-static-negative-20260904.json",
+                                                                                          "sha256":  "7BB6EAC0AC0EC08F88BD3CF308F5A901DF96198D6FA998E7AC5B9C3D718BB67D",
+                                                                                          "selfDeclaredStatus":  "MOCK-READY"
+                                                                                      }
+                                                                                  ],
+                                                                     "stdout":  {
+                                                                                    "status":  "not durably archived",
+                                                                                    "observed":  "Prior interactive commands reported PASS and artifact paths; no separate raw stdout files are available."
+                                                                                },
+                                                                     "stderr":  {
+                                                                                    "status":  "not captured separately"
+                                                                                },
+                                                                     "sourceDigestAtExecution":  {
+                                                                                                     "status":  "unknown"
+                                                                                                 },
+                                                                     "tierAfterReaudit":  "source-located / evidence-incomplete"
+                                                                 },
+                                                                 {
+                                                                     "task":  "T14",
+                                                                     "argv":  "pnpm run test:hc-parity-drift-ledger",
+                                                                     "cwd":  "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC",
+                                                                     "exitCode":  0,
+                                                                     "artifact":  {
+                                                                                      "path":  "G:\\YeManCC-Work\\Mainline\\Build\\Validation\\GyroVirtual\\T14-E01-T19-E01-hc-parity-drift-ledger-audit-20260904.json",
+                                                                                      "sha256":  "78A22D105BA1FB2A82925C36AA68E9D395CE6464C4D770F8644CFD5C3F711BF3",
+                                                                                      "selfDeclaredStatus":  "SPEC-READY"
+                                                                                  },
+                                                                     "stdout":  {
+                                                                                    "status":  "not durably archived",
+                                                                                    "observed":  "Prior interactive command reported PASS and artifact path; no separate raw stdout file is available."
+                                                                                },
+                                                                     "stderr":  {
+                                                                                    "status":  "not captured separately"
+                                                                                },
+                                                                     "sourceDigestAtExecution":  {
+                                                                                                     "status":  "unknown"
+                                                                                                 },
+                                                                     "tierAfterReaudit":  "source-located / evidence-incomplete"
+                                                                 },
+                                                                 {
+                                                                     "task":  "T15",
+                                                                     "argv":  "pnpm run test:parameter-consumption-ledger",
+                                                                     "cwd":  "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC",
+                                                                     "exitCode":  0,
+                                                                     "artifact":  {
+                                                                                      "path":  "G:\\YeManCC-Work\\Mainline\\Build\\Validation\\GyroVirtual\\T15-E01-parameter-consumption-static-audit-20260904.json",
+                                                                                      "sha256":  "F7153F2C587D80C509A20B0ADABCBF3D641CFF7121B4DAB8F250AF069460F7AA",
+                                                                                      "selfDeclaredStatus":  "SPEC-READY"
+                                                                                  },
+                                                                     "stdout":  {
+                                                                                    "status":  "not durably archived",
+                                                                                    "observed":  "Prior interactive command reported PASS and artifact path; no separate raw stdout file is available."
+                                                                                },
+                                                                     "stderr":  {
+                                                                                    "status":  "not captured separately"
+                                                                                },
+                                                                     "sourceDigestAtExecution":  {
+                                                                                                     "status":  "unknown"
+                                                                                                 },
+                                                                     "tierAfterReaudit":  "source-located / evidence-incomplete"
+                                                                 },
+                                                                 {
+                                                                     "task":  "T16",
+                                                                     "argv":  "pnpm run test:calibration-safety-delta",
+                                                                     "cwd":  "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC",
+                                                                     "exitCode":  0,
+                                                                     "artifact":  {
+                                                                                      "path":  "G:\\YeManCC-Work\\Mainline\\Build\\Validation\\GyroVirtual\\T16-E01-calibration-safety-delta-static-audit-20260904.json",
+                                                                                      "sha256":  "1AC345D86DDA8F86334E123942F2AEECDE6DC209CD4822117D33546DE5083987",
+                                                                                      "selfDeclaredStatus":  "SPEC-READY"
+                                                                                  },
+                                                                     "stdout":  {
+                                                                                    "status":  "not durably archived",
+                                                                                    "observed":  "Prior interactive command reported PASS and artifact path; no separate raw stdout file is available."
+                                                                                },
+                                                                     "stderr":  {
+                                                                                    "status":  "not captured separately"
+                                                                                },
+                                                                     "sourceDigestAtExecution":  {
+                                                                                                     "status":  "unknown"
+                                                                                                 },
+                                                                     "tierAfterReaudit":  "source-located / evidence-incomplete"
+                                                                 },
+                                                                 {
+                                                                     "task":  "T17",
+                                                                     "argv":  "pnpm run test:persona-descriptor-parity",
+                                                                     "cwd":  "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC",
+                                                                     "exitCode":  0,
+                                                                     "artifact":  {
+                                                                                      "path":  "G:\\YeManCC-Work\\Mainline\\Build\\Validation\\GyroVirtual\\T17-E01-persona-descriptor-parity-static-audit-20260904.json",
+                                                                                      "sha256":  "B3F8048AFB37F58D32566FCCBE6F3FFFBF73215F6CD83EBE693397E1E4C6EE7A",
+                                                                                      "selfDeclaredStatus":  "SPEC-READY"
+                                                                                  },
+                                                                     "stdout":  {
+                                                                                    "status":  "not durably archived",
+                                                                                    "observed":  "Prior interactive command reported PASS and artifact path; no separate raw stdout file is available."
+                                                                                },
+                                                                     "stderr":  {
+                                                                                    "status":  "not captured separately"
+                                                                                },
+                                                                     "sourceDigestAtExecution":  {
+                                                                                                     "status":  "unknown"
+                                                                                                 },
+                                                                     "tierAfterReaudit":  "source-located / evidence-incomplete"
+                                                                 },
+                                                                 {
+                                                                     "task":  "T18",
+                                                                     "argv":  "pnpm run test:rog-visibility-topology",
+                                                                     "cwd":  "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC",
+                                                                     "exitCode":  0,
+                                                                     "artifact":  {
+                                                                                      "path":  "G:\\YeManCC-Work\\Mainline\\Build\\Validation\\GyroVirtual\\T18-E01-rog-visibility-topology-static-audit-20260904.json",
+                                                                                      "sha256":  "F5A7ADAB11595324502C134B82E061F3A87FACB6144ED7B954868F35D8C36E1F",
+                                                                                      "selfDeclaredStatus":  "SPEC-READY"
+                                                                                  },
+                                                                     "stdout":  {
+                                                                                    "status":  "not durably archived",
+                                                                                    "observed":  "A first static-audit assertion was too broad because it matched unrelated 0x02 text. It was corrected before the recorded successful rerun; no product/runtime operation occurred."
+                                                                                },
+                                                                     "stderr":  {
+                                                                                    "status":  "not captured separately"
+                                                                                },
+                                                                     "sourceDigestAtExecution":  {
+                                                                                                     "status":  "unknown"
+                                                                                                 },
+                                                                     "tierAfterReaudit":  "source-located / evidence-incomplete"
+                                                                 },
+                                                                 {
+                                                                     "task":  "T19",
+                                                                     "argv":  "pnpm run test:evidence-quality-gate",
+                                                                     "cwd":  "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC",
+                                                                     "exitCode":  0,
+                                                                     "artifact":  {
+                                                                                      "path":  "G:\\YeManCC-Work\\Mainline\\Build\\Validation\\GyroVirtual\\T19-E01-evidence-quality-gate-static-audit-20260904.json",
+                                                                                      "sha256":  "35F755CF064F9A761D770325059FAA322B35D3C63E84AF21FDAF897717B4209B",
+                                                                                      "selfDeclaredStatus":  "SPEC-READY"
+                                                                                  },
+                                                                     "stdout":  {
+                                                                                    "status":  "not durably archived",
+                                                                                    "observed":  "Prior interactive command reported PASS and artifact path; no separate raw stdout file is available."
+                                                                                },
+                                                                     "stderr":  {
+                                                                                    "status":  "not captured separately"
+                                                                                },
+                                                                     "sourceDigestAtExecution":  {
+                                                                                                     "status":  "unknown"
+                                                                                                 },
+                                                                     "tierAfterReaudit":  "source-located / evidence-incomplete"
+                                                                 },
+                                                                 {
+                                                                     "task":  "type-check",
+                                                                     "argv":  "pnpm run type-check",
+                                                                     "cwd":  "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC",
+                                                                     "exitCode":  0,
+                                                                     "artifact":  null,
+                                                                     "stdout":  {
+                                                                                    "status":  "not durably archived",
+                                                                                    "observed":  "Prior interactive command exited 0 after vue-tsc --noEmit; no raw stdout/stderr archive exists."
+                                                                                },
+                                                                     "stderr":  {
+                                                                                    "status":  "not captured separately"
+                                                                                },
+                                                                     "sourceDigestAtExecution":  {
+                                                                                                     "status":  "unknown"
+                                                                                                 },
+                                                                     "tierAfterReaudit":  "source-located / evidence-incomplete"
+                                                                 },
+                                                                 {
+                                                                     "task":  "native-build",
+                                                                     "argv":  "cmd.exe /d /c native\\build_native.bat",
+                                                                     "cwd":  "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC",
+                                                                     "exitCode":  0,
+                                                                     "artifact":  {
+                                                                                      "buildLogPath":  "G:\\YeManCC-Work\\Mainline\\Build\\native-build.log",
+                                                                                      "buildLogSha256":  "224DAA4A818B4DDE5AC113BB4AA462B9BFEA79FE102C1E6AB17849D799FD87F0",
+                                                                                      "stdout":  "BUILD_OK G:\\YeManCC-Work\\Mainline\\Build\\App\\Native\\YeManCC.exe",
+                                                                                      "stderr":  "",
+                                                                                      "outputPath":  "G:\\YeManCC-Work\\Mainline\\Build\\App\\Native\\YeManCC.exe",
+                                                                                      "outputSha256":  "5783EBC34E8BE20CF75A116F2DDB94B0AE3D07B0D083418FB0F6385EB700EA69"
+                                                                                  },
+                                                                     "sourceDigestAtExecution":  {
+                                                                                                     "status":  "unknown; current snapshot cannot be substituted"
+                                                                                                 },
+                                                                     "tierAfterReaudit":  "product-candidate / evidence-incomplete"
+                                                                 }
+                                                             ]
+                          },
+    "summary":  {
+                    "runtimeUpgrade":  false,
+                    "reconciledClaims":  9,
+                    "dgfNumberRange":  "DGF-01…DGF-15 only",
+                    "docsReferenceCorrection":  "C1 option-2 resolved / no DGF-16 created",
+                    "provenanceGate":  "P20 durably archives current static source/porcelain/line-map provenance. Historical T10-T19/test/build records retain their own evidence-quality gaps when their contemporaneous raw stdout/stderr/source-digest bundle is absent; P20 does not substitute for runtime evidence.",
+                    "requiredNextAuthority":  "T14 aggregation is rebound to P20 in HCParityDriftLedger.v2.json. No device/consumer/runtimes conclusion is authorized by this re-audit.",
+                    "result":  "All claims remain below runtime closure. T21 is current-source static only against P20; RUNTIME-BLOCKED."
+                }
+}

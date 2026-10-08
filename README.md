@@ -9,6 +9,7 @@
 - CPU 调度：管理 CPU 性能档位、睿频、核心和电源方案。
 - 游戏监控：查看游戏、FPS、功耗、温度和 CPU/GPU 状态。
 - 游戏暂停与恢复：睡眠前暂停游戏，唤醒后自动恢复。
+- Windows 睡眠与现代待机：电源键触发的睡眠事务、S0 低功耗诊断和受控恢复。
 - Steam 大屏：启动 Steam 大屏模式，并管理相关启动项。
 - 模拟鼠标：支持 JoyXoff 和微软鼠标方案。
 - 开机启动：管理 YeManCC、RTSS、JoyXoff 等常用程序。
@@ -26,32 +27,43 @@
 
 请优先使用主页提供的完整系统包，避免因缺少运行组件导致程序无法正常工作。
 
+睡眠接口规范见：`G:\YeManCC-Work\Docs\Research\Sleep\YMCC-SLEEP-MODERN-STANDBY.md`。
+该规范区分电源键意图、确认挂起、S0 低功耗会话和实际唤醒；不得仅凭屏幕关闭或风扇转速判断睡眠结果。
+
 ## 安装方法
 
-1. 从主页下载“完整系统”压缩包。
-2. 将压缩包解压到：
-
-   `C:\SOFT\YeMan`
-
-3. 解压完成后，目录结构应保持如下形式：
+1. 下载正式 Release 附件 **`YeManCC.zip`**；这是完整程序包，也是自动升级器使用的唯一包名。
+2. 解压到 `C:\SOFT\YeMan`，保持以下目录结构，不要把所有文件展平：
 
    ```text
    C:\SOFT\YeMan\
    ├─ YeManCC\
    │  ├─ YeManCC.exe
-   │  └─ ...
-   ├─ PowerControl\
-      ├─ pawnio\
-      └─ ...
-   └─ CustomSteamLibrary\
-      ├─ CustomSteamLibrary.exe
-      ├─ SteamArtworkLab.exe
-      ├─ package-manifest.json
-      └─ ...
+   │  ├─ update-manifest.json
+   │  └─ CustomSteamLibrary\
+   │     ├─ CustomSteamLibrary.exe
+   │     ├─ SteamArtworkLab.exe
+   │     └─ package-manifest.json
+   └─ PowerControl\
+      ├─ fan-host-v2\
+      ├─ handheldcompanion-runtime\
+      └─ pawnio\
+   ```
 
-   `YeManCC.zip` 的升级包根目录必须与 `YeManCC\update-manifest.json` 声明一致；当前包含以上三个根目录。`CustomSteamLibrary` 只更新清单声明的程序文件，用户数据和未知文件保留。
+3. 运行 `C:\SOFT\YeMan\YeManCC\YeManCC.exe`。ZIP 根目录以包内 `YeManCC/update-manifest.json` 为准；不要手动改动已锁定风扇文件。
 
+028 自动升级沿用 `YeManCC.zip`。033 使用 `PowerControl/fan-host-v2`，旧安装中的 `fan-host` 保留但不是新版本运行回退。更新过程保留用户配置、数据及清单之外的文件；仍建议更新前备份。
 
-      双击运行：
-双击执行程序
-C:\SOFT\YeMan\YeManCC\YeManCC.exe
+## 源码构建
+
+需要 Windows x64、Node.js 22、pnpm 11.16.0、.NET 10 SDK，以及 Visual Studio C++ Build Tools 和 Windows SDK。InputHost 的批准依赖现位于仓库内，不再依赖开发机的 Archives 目录。
+
+```powershell
+pnpm install --frozen-lockfile
+pnpm run build
+pnpm run package
+```
+
+使用 Git 的 `main` checkout，保持仓库中的锁定载荷原始字节。发布 CI 使用 tag 的 detached checkout。独立源码 ZIP 用于审查/归档；发布前以批准的 Git checkout 及重新构建结果为准。构建/打包只产生工作区文件，不部署实际安装。
+
+更新记录见 `docs/release-notes/v0.0.33.md`。

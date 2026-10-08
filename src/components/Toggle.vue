@@ -30,6 +30,7 @@ const onColor = props.color === 'dc' ? 'var(--dc-accent)' : props.color === 'dan
       type="button"
       class="switch"
       :class="{ on: modelValue, compact }"
+      :disabled="disabled"
       :data-gp-row="gpRow"
       :data-gp-col="gpCol"
       :style="modelValue ? { background: onColor, borderColor: onColor } : {}"

@@ -7,8 +7,10 @@
 // 任务计划只识别状态、不解析内容（schtasks 创建，/Query 判断存在即=开关状态）。
 import { fs, shell, registry, rtss, tdpDaemon, powerLifecycle, systemHibernate, type RunResult, type HibernateState } from './api';
 import { invoke } from './ipc';
-import { readSettingsSection, saveSettingsSection, setSettingsDirectory } from './settingsRepository';
+import { rtssIniValue, setRtssIniValue } from './rtssOverlay';
+import { getSettingsGeneration, assertSettingsGeneration, readSettingsSection, saveSettingsSection, setSettingsDirectory } from './settingsRepository';
 import { runTdpHardwareWrite } from './tdpCircuitBreaker';
+import { OEM_EMPTY_SNAPSHOT, normalizeOemKeysSnapshot, type OemKeysSnapshot } from './controllerShortcutRules';
 
 // ── 可配置根目录（自测时可指向临时目录） ──
 let PC_DIR = 'C:\\SOFT\\YeMan\\PowerControl';
@@ -71,60 +73,18 @@ interface ControlConfig {
   tdpMax?: number;
   fpsLimit?: number;
 }
-let controlConfigCache: ControlConfig | null = null;
-let controlConfigLoad: Promise<ControlConfig> | null = null;
 let controlConfigWrite: Promise<void> = Promise.resolve();
 
 async function readControlConfig(): Promise<ControlConfig> {
-  if (controlConfigCache) return controlConfigCache;
-  if (!controlConfigLoad) {
-    controlConfigLoad = (async () => {
-      try {
-        const tdp = await readSettingsSection<any>('tdp');
-        const parsed = tdp as ControlConfig;
-        // JSON 内容为字面 null / 非对象时视为损坏 → 抛出让 catch 走迁移/兜底路径，
-        // 避免缓存被置 null 后每次调用都重新读盘（2026-08-05 修复）。
-        if (!parsed || typeof parsed !== 'object') throw new Error('control-config.json 内容无效');
-        controlConfigCache = parsed;
-        return parsed;
-      } catch {
-        // control-config.json 尚不存在：一次性迁移旧的 tdp.txt / FPS-ac.txt（只读，不写回 txt）
-        const migrated: ControlConfig = {};
-        try {
-          if (await fs.exists(join(PC_DIR, 'tdp.txt'))) {
-            const t = Number((await fs.readTextFile(join(PC_DIR, 'tdp.txt'))).trim());
-            if (Number.isFinite(t)) migrated.tdpMax = clampTdp(t);
-          }
-        } catch { /* 忽略迁移失败 */ }
-        try {
-          if (await fs.exists(join(PC_DIR, 'FPS-ac.txt'))) {
-            const f = Number((await fs.readTextFile(join(PC_DIR, 'FPS-ac.txt'))).trim());
-            if (Number.isFinite(f)) migrated.fpsLimit = Math.max(0, Math.round(f));
-          }
-        } catch { /* 忽略迁移失败 */ }
-        const fallback: ControlConfig = migrated.tdpMax == null && migrated.fpsLimit == null
-          ? { tdpMax: 75, fpsLimit: 0 }
-          : migrated;
-        controlConfigCache = fallback;
-        return fallback;
-      } finally {
-        controlConfigLoad = null;
-      }
-    })();
-  }
-  return controlConfigLoad;
+  const tdp = await readSettingsSection<any>('tdp');
+  // This module owns these two scalars only, not float/autoApply or unknown TDP fields.
+  return { tdpMax: tdp.tdpMax, fpsLimit: tdp.fpsLimit };
 }
 async function mutateControlConfig(patch: Partial<ControlConfig>): Promise<void> {
-  const run = controlConfigWrite.then(async () => {
-    const current = await readControlConfig();
-        const next = { ...current, ...patch };
-        await saveSettingsSection('tdp', next as any);
-    // 只有磁盘提交成功后才更新缓存，避免本次运行与重启后的配置分叉。
-    controlConfigCache = next;
-  });
-  // 队列吞错（防止单次失败卡死后续写入），但返回值 run 仍向调用方抛出写入失败，
-  // 让 UI 能感知「保存失败」而不是假成功；失败后清缓存，下次读取强制重新读盘。
-  controlConfigWrite = run.catch(() => { controlConfigCache = null; });
+  const snapshot = { ...patch };
+  const generation = getSettingsGeneration();
+  const run = controlConfigWrite.then(() => saveSettingsSection('tdp', snapshot, generation));
+  controlConfigWrite = run.catch(() => {});
   return run;
 }
 export async function saveTdp(_mode: 'ac' | 'dc', watts: number): Promise<void> {
@@ -198,7 +158,6 @@ function isGuid(value: unknown): value is string {
 }
 
 async function readRememberedPowerScheme(): Promise<RememberedPowerScheme | null> {
-  try {
     const power = await readSettingsSection<any>('power');
     const parsed = (power.scheme || {}) as Partial<RememberedPowerScheme>;
     if (!isGuid(parsed.guid) || parsed.remembered !== true) return null;
@@ -218,9 +177,6 @@ async function readRememberedPowerScheme(): Promise<RememberedPowerScheme | null
       return { version: 2, guid: parsed.guid.toLowerCase(), name: 'YeMan', mode: 'yeman', remembered: true };
     }
     return null;
-  } catch {
-    return null;
-  }
 }
 
 export async function rememberYemanScheme(mode: 'yeman' | 'auto' = 'yeman'): Promise<void> {
@@ -244,8 +200,8 @@ async function rememberManualScheme(key: SchemeKey, guid: string): Promise<void>
 // 仅由启动、电源/唤醒、自动优化和档位切换等低频事件调用。
 export function ensureRememberedYemanSchemeActive(): Promise<void> {
   const run = powerSchemeEnsureQueue.then(async () => {
-    await ensureYemanScheme();
     const remembered = await readRememberedPowerScheme();
+    await ensureYemanScheme();
     // This function is called only by automation-owned paths. Manual recovery
     // uses reconcileRememberedPowerScheme instead.
     if (!remembered || remembered.guid !== PW.YEMAN || (remembered.mode !== 'yeman' && remembered.mode !== 'auto')) {
@@ -485,6 +441,7 @@ export async function restoreAllYemanTasks(): Promise<{ imported: number; failed
 export interface GamepadSettings {
   enabled: boolean;          // LB+RB 呼出窗口
   bDoubleMinimize: boolean;  // 双击 B 最小化到托盘
+  startDoubleF7: boolean;    // 双击 Start 发送 F7（默认快捷键）
   tdpShortcut: boolean;      // Start + 上/下 调节 TDP ±1W
   fpsShortcut: boolean;      // Start + 左右 调节野蛮系统电源亮度 ±5，AC/DC 跟随当前供电
   killGame: boolean;         // 选择 + B 长按 0.5s → 结束当前游戏（执行 KiLL-EXE.bat）
@@ -496,6 +453,7 @@ export interface GamepadSettings {
 const DEFAULT_GAMEPAD_SETTINGS: GamepadSettings = {
   enabled: true,
   bDoubleMinimize: true,
+  startDoubleF7: true,
   tdpShortcut: true,
   fpsShortcut: true,
   killGame: true,
@@ -515,6 +473,32 @@ export async function summonGet(): Promise<GamepadSettings> {
 export async function summonSet(settings: Partial<GamepadSettings>): Promise<GamepadSettings> {
   const r = await invoke<Partial<GamepadSettings>>('summon.set', settings);
   return { ...DEFAULT_GAMEPAD_SETTINGS, ...r };
+}
+
+export interface ShortcutRecordingState {
+  active: boolean;
+  reason: string;
+}
+
+/**
+ * Arms the existing native controller reader for the foreground editor only.
+ * It does not create a browser Gamepad/Raw Input loop and native rejects the
+ * request when YMCC is not the active owner.
+ */
+export function setShortcutRecording(active: boolean): Promise<ShortcutRecordingState> {
+  return invoke<ShortcutRecordingState>('shortcut.recording.set', { active }, { timeoutMs: 1500 });
+}
+
+// ── 掌机专用键机型库（背部/专用按键清单）──
+// native oem.keys.get 由机器身份单源（familyId）+ 机型库提供；未实现/无适配时
+// fail-closed 返回空清单（supported=false），编辑器显示"不支持"，不伪造数据。
+export async function oemKeysGet(): Promise<OemKeysSnapshot> {
+  try {
+    const r = await invoke<OemKeysSnapshot>('oem.keys.get', {});
+    return normalizeOemKeysSnapshot(r);
+  } catch {
+    return OEM_EMPTY_SNAPSHOT;
+  }
 }
 
 // ── 冲突软件自动关闭：可编辑进程名列表 + 总开关 ──
@@ -607,6 +591,7 @@ export function validateUpdateManifest(value: unknown): UpdateInfo {
 export const UPDATE_MANIFEST_URL =
   'https://raw.githubusercontent.com/DaVeZhouMK/YeManCC/main/version.json';
 // 下载地址由版本号拼出：releases/download/v<version>/YeManCC.zip
+// （2026-09-23 裁定：唯一产物 = 完整包，它同时是更新包）
 export function updatePackageUrl(version: string): string {
   parseStrictVersion(version);
   return `https://github.com/DaVeZhouMK/YeManCC/releases/download/v${version}/YeManCC.zip`;
@@ -748,27 +733,52 @@ async function nativeProcRunning(names: string[]): Promise<Record<string, boolea
 // （BatteryStatus==1 放电中→DC；其余充电/满电/无电池→AC）。
 type PowerModeProbe = { mode: 'ac' | 'dc'; reliable: boolean };
 
-async function detectPowerModeProbe(): Promise<PowerModeProbe> {
+// A6（191 §2，2026-09-20）：sys.info 不可用时的 PowerShell 兜底必须**有界**——
+//   · single-flight：并发调用共用同一个在途探测，避免多处同时各起一个 PowerShell；
+//   · 失败退避：兜底失败（非 0 退出/异常）后 30s 内不再重试 PowerShell，期间直接
+//     返回 reliable:false（仍按 AC 兜底，但**不声称可靠**——调用方的
+//     detectPowerModeReliable/Stable 语义不变，绝不把未知当可靠 AC）。
+// 仅当 native 给不出 AC/DC 时才走兜底；native 正常时本机制完全不参与。
+const POWER_FALLBACK_BACKOFF_MS = 30_000;
+let powerProbeInFlight: Promise<PowerModeProbe> | null = null;
+let powerFallbackBlockedUntil = 0;
+
+async function probePowerModeOnce(): Promise<PowerModeProbe> {
   const si = await nativeSysInfo();
   if (si?.acLine === 0) return { mode: 'dc', reliable: true };
   if (si?.acLine === 1) return { mode: 'ac', reliable: true };
+  if (performance.now() < powerFallbackBlockedUntil) return { mode: 'ac', reliable: false };
   try {
     const r = await shell.run('powershell', [
       '-NoProfile',
       '-Command',
       '(Get-CimInstance Win32_Battery).BatteryStatus -join ","',
     ]);
-    if (r.exitCode !== 0) return { mode: 'ac', reliable: false };
+    if (r.exitCode !== 0) {
+      powerFallbackBlockedUntil = performance.now() + POWER_FALLBACK_BACKOFF_MS;
+      return { mode: 'ac', reliable: false };
+    }
     const out = (r.stdout || '').trim();
-    if (!out) return { mode: 'ac', reliable: true }; // 无电池（台式机）→ AC
+    if (!out) {
+      // 无电池（台式机）→ AC：这是**成功**结论，不进退避。
+      return { mode: 'ac', reliable: true };
+    }
     const discharging = out
       .split(',')
       .map((s) => s.trim())
       .some((s) => s === '1');
     return { mode: discharging ? 'dc' : 'ac', reliable: true };
   } catch {
+    powerFallbackBlockedUntil = performance.now() + POWER_FALLBACK_BACKOFF_MS;
     return { mode: 'ac', reliable: false };
   }
+}
+
+async function detectPowerModeProbe(): Promise<PowerModeProbe> {
+  if (powerProbeInFlight) return powerProbeInFlight;
+  const probe = probePowerModeOnce().finally(() => { powerProbeInFlight = null; });
+  powerProbeInFlight = probe;
+  return probe;
 }
 
 export async function detectPowerMode(): Promise<'ac' | 'dc'> {
@@ -1614,6 +1624,8 @@ export interface SmtInfo {
   configOn: boolean | null; // 下次启动态（null=未知/需管理员读取 BCD 失败）
   physicalCores: number; // 物理核心数（去 SMT）
   logicalProcs: number; // 逻辑处理器数（含超线程）
+  supported: boolean; // 拓扑数据通过 native 防御性校验
+  supportReason?: string;
 }
 export async function readSmt(): Promise<SmtInfo | null> {
   try {
@@ -1625,6 +1637,8 @@ export async function readSmt(): Promise<SmtInfo | null> {
         configOn,
         physicalCores: Number(r.physicalCores) || 0,
         logicalProcs: Number(r.logicalProcs) || 0,
+        supported: r.supported === true,
+        supportReason: r.supportReason ? String(r.supportReason) : undefined,
       };
     }
   } catch {
@@ -1724,6 +1738,8 @@ export async function runResetProfile(path: string): Promise<void> {
 /* =========================================================================
  *  RTSS 监控锁帧（对齐 HTA rtss_* 段）
  * ========================================================================= */
+// Missing RTSS is optional at YMCC startup; installation failures are not.
+class RtssNotInstalledError extends Error {}
 let rtssDirCache: string | null = null;
 async function resolveRtssDir(): Promise<string> {
   if (rtssDirCache && await fs.exists(`${rtssDirCache}\\RTSS.exe`).catch(() => false)) return rtssDirCache;
@@ -1741,7 +1757,7 @@ async function resolveRtssDir(): Promise<string> {
     const d = (r.stdout || '').split(/\r?\n/).map((v) => v.trim()).find((v) => v && /^[A-Za-z]:\\/.test(v));
     if (d) { rtssDirCache = d; return d; }
   } catch { /* handled below */ }
-  throw new Error('未找到 RTSS.exe，请先安装 RivaTuner Statistics Server');
+  throw new RtssNotInstalledError('未找到 RTSS.exe，请先安装 RivaTuner Statistics Server');
 }
 
 export function throttleForFrequency(freqMhz: number): 1 | 2 {
@@ -1942,6 +1958,7 @@ export function setRtssZoom(ratio: number): Promise<void> {
 export async function toggleRtss(on: boolean): Promise<void> {
   if (on) {
     const dir = await resolveRtssDir();
+    await prepareRtssOverlay(dir);
     await shell.hidden('powershell.exe', [
       '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
       `${PC_DIR}\\RTSS-start.ps1`,
@@ -1964,36 +1981,64 @@ const OVL_W = 'YeManOBS-W-1.ovl';
 const OVL_L = 'YeManOBS-L-1.ovl';
 const OVL_J = 'YeManOBS-JJ-1.ovl';
 const OVL_EMPTY = 'Empty.ovl';
+export interface OverlaySwitchResult { mode: 'live' | 'saved' }
+async function prepareRtssOverlay(dir: string): Promise<void> {
+  const result = await rtss.prepareOverlay(dir, PC_DIR);
+  if (!result?.ok) {
+    const detail = result?.error || 'RTSS 模板桥准备失败';
+    const code = result?.win32Error ? `（Win32 ${result.win32Error}）` : '';
+    const path = result?.path ? `；文件：${result.path}` : '';
+    throw new Error(detail + code + path);
+  }
+}
+// Called once by the main renderer after PowerControl has been resolved.
+// Repair a missing bridge even if the user never opens the RTSS page. Do not
+// start RTSS, change Layout, inject the DLL, or wait for a live bridge here.
+// The queue also serializes this file/config repair with template/FPS edits.
+export function ensureRtssOverlayInstalled(): Promise<boolean> {
+  const run = rtssConfigWriteQueue.then(async () => {
+    let dir: string;
+    try {
+      dir = await resolveRtssDir();
+    } catch (error) {
+      if (error instanceof RtssNotInstalledError) return false;
+      throw error;
+    }
+    await prepareRtssOverlay(dir);
+    return true;
+  });
+  rtssConfigWriteQueue = run.then(() => {}, () => {});
+  return run;
+}
 export async function readOverlayLayout(): Promise<string> {
   const dir = await resolveRtssDir();
   const cfg = `${dir}\\Plugins\\Client\\OverlayEditor.cfg`;
   if (!(await fs.exists(cfg))) return '';
-  const txt = await fs.readTextFile(cfg);
-  for (const line of txt.split(/\r?\n/)) {
-    if (line.indexOf('Layout=') === 0) return line.replace('Layout=', '').trim();
-  }
-  return '';
+  return rtssIniValue(await fs.readTextFile(cfg), 'Settings', 'Layout') ?? '';
 }
-export async function setOverlayLayout(layout: OverlayLayout): Promise<void> {
-  const dir = await resolveRtssDir();
-  const cfg = `${dir}\\Plugins\\Client\\OverlayEditor.cfg`;
-  if (!(await fs.exists(cfg))) throw new Error('RTSS OverlayEditor.cfg 不存在');
-  const target = layout === 'W' ? OVL_W : layout === 'L' ? OVL_L : layout === 'J' ? OVL_J : OVL_EMPTY;
-  const txt = await fs.readTextFile(cfg);
-  const lines = txt.split(/\r?\n/);
-  let found = false;
-  for (let i = 0; i < lines.length; i++) {
-    if (lines[i].indexOf('Layout=') === 0) {
-      lines[i] = `Layout=${target}`;
-      found = true;
+export function setOverlayLayout(layout: OverlayLayout): Promise<OverlaySwitchResult> {
+  const run = rtssConfigWriteQueue.then(async (): Promise<OverlaySwitchResult> => {
+    const dir = await resolveRtssDir();
+    await prepareRtssOverlay(dir);
+    const target = layout === 'W' ? OVL_W : layout === 'L' ? OVL_L : layout === 'J' ? OVL_J : OVL_EMPTY;
+    const cfg = `${dir}\\Plugins\\Client\\OverlayEditor.cfg`;
+    if (!(await rtssRunning())) {
+      const text = await fs.exists(cfg) ? await fs.readTextFile(cfg) : '';
+      await fs.writeTextFileAtomic(cfg, setRtssIniValue(text, 'Settings', 'Layout', target));
+      return { mode: 'saved' };
     }
-  }
-  if (!found) lines.push(`Layout=${target}`);
-  await fs.writeTextFile(cfg, lines.join('\r\n'));
-  // OverlayEditor.dll 仅在插件加载时读取一次 Layout=，无法热重载；直接重启 RTSS 进程让插件
-  // 重新加载（等价于手动在 RTSS 设置里把 OverlayEditor.dll 关掉再打开），使横版/竖版/关闭立即生效。
-  // 不发送 rundll32 重载指令（那只重载 RTSS 核心配置，对 OverlayEditor 横/竖版无效且会导致渲染异常）。
-  await restartRtss();
+    // The RTSS-owned plugin invokes the official Load message and only ACKs
+    // AFTER OverlayEditor has recreated layers, polled sources, rebuilt the
+    // full hypertext/embedded objects and reset its timer. No synthetic keys,
+    // no partial shared-memory rewrites and no in-process hook DLL in YMCC.
+    const result = await rtss.loadOverlay(dir, target);
+    if (!result?.ok) throw new Error(result?.error || 'RTSS 未确认模板完整加载');
+    // The plugin persists Layout only after completion, so failure does not
+    // turn a merely requested template into a falsely successful UI state.
+    return { mode: 'live' };
+  });
+  rtssConfigWriteQueue = run.then(() => {}, () => {});
+  return run;
 }
 
 // RTSS 进程家族是否还有残留（主程序 RTSS.exe + 钩子加载器 RTSSHooksLoader* + 编码服务 EncoderServer*）。
@@ -2065,6 +2110,8 @@ export interface SleepGuardStatus {
   pauseGameOnSleep: boolean;    // 睡眠事务中暂停游戏，按唤醒分类后恢复
   retryOnEntryFailure: boolean; // 明确 S0/S3 入睡失败时同模式重试一次
   retryOnNonUserWake: boolean;  // 有来源证据的异常唤醒时同模式重试一次
+  steamOverlayOffFix: boolean;   // Default off; remembered choice, applied only after user confirmation.
+  wakePasswordEnabled?: boolean; // Remembered UI choice only, default off; never auto-applied.
   joyXoffAutoClose: true;       // 固定开启，不提供用户开关
 }
 type LegacySleepGuardFields = Partial<SleepGuardStatus> & {
@@ -2080,6 +2127,8 @@ export async function sleepGuardGet(): Promise<SleepGuardStatus> {
     pauseGameOnSleep: r.pauseGameOnSleep ?? r.pauseResume !== false,
     retryOnEntryFailure: r.retryOnEntryFailure !== false,
     retryOnNonUserWake: r.retryOnNonUserWake ?? r.resleepEnabled ?? true,
+    steamOverlayOffFix: r.steamOverlayOffFix === true,
+    wakePasswordEnabled: r.wakePasswordEnabled === true,
     joyXoffAutoClose: true,
   };
 }
@@ -2633,7 +2682,7 @@ export async function steamAddonSet(key: SteamAddonKey, on: boolean): Promise<vo
   const p = addonTxtPath(key);
   if (on) {
     if (!cfg) throw new Error('未知联动项');
-    await fs.writeTextFile(p, cfg.exe);
+    await fs.writeTextFileAtomic(p, cfg.exe);
   } else {
     // 用 PowerShell Remove-Item 可靠删除：cmd del 在含空格路径/WebView2 的 shell 调用下容易解析失败，
     // 导致"反选关不掉"——用户手动删可以，但程序取消勾选删不掉对应 txt。
@@ -2690,7 +2739,7 @@ export async function steamCustomAddonAdd(exe: string): Promise<SteamCustomAddon
   const existing = (await steamCustomAddons()).find((a) => a.exe.toLowerCase() === path.toLowerCase());
   if (existing) return existing;
   await fs.mkdir(STEAM_DIR);
-  await fs.writeTextFile(customAddonTxtPath(id, true), path + '\r\n');
+  await fs.writeTextFileAtomic(customAddonTxtPath(id, true), path + '\r\n');
   return { id, name: basenamePath(path), exe: path, enabled: true };
 }
 export async function steamCustomAddonSet(addon: SteamCustomAddon, enabled: boolean): Promise<void> {
@@ -2726,7 +2775,7 @@ export async function steamMasterOn(): Promise<boolean> {
 export async function steamMasterSet(on: boolean): Promise<void> {
   const f = await steamEarlyStartFile();
   if (!f) throw new Error('无法定位用户目录，不能设置开机启动'); // 明确报错而非写错路径
-  await fs.writeTextFile(f, on ? STEAM_EARLYSTART_CONTENT + '\r\n' : '');
+  await fs.writeTextFileAtomic(f, on ? STEAM_EARLYSTART_CONTENT + '\r\n' : '');
 }
 export async function steamRunning(): Promise<boolean> {
   // 优先 native Toolhelp32 枚举；兜底 Get-Process（旧 exe 兼容）

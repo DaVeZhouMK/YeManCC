@@ -1,0 +1,304 @@
+{
+  "schema": 1,
+  "name": "ymcc_sim-domain-registry",
+  "version": "v7 (2026-09-23: operator authorizations recorded; test mode is AI-only via --mock-handshake; AC13 guard)",
+  "generatedBy": "ymcc_sim front door (tools/ymcc_sim/ymcc_sim.ps1)",
+  "placement": "repo tools\\ - not part of the release payload (package-release.ps1 does not package the repo tools dir; the installed tree has no tools\\; re-verified 2026-09-22)",
+  "operatorAuthorizations": "OPERATOR-AUTHORIZATIONS.md（2026-09-23 operator 裁决：测试场景下 AI 可自行提权启动/关闭 YMCC；mock 只经 --mock-handshake，用户路径永不触达）",
+  "evidenceDirDefault": "%LOCALAPPDATA%\\YeManCC\\sim-evidence",
+  "modeKinds": {
+    "offline-injection": "no product process involved (fixtures, sandbox host started by this run, offline decode)",
+    "live-app-injection": "a real App/Host is used; edges are injected through the authenticated API only",
+    "real-os-sleep": "the OS is asked to sleep through a supported entry (NOT implemented - requires an authorized window)",
+    "device-observation": "read-only observation of a real device (MSI/ROG); requires the device and a window"
+  },
+  "exitCodes": {
+    "0": "ALL_PASS",
+    "2": "CHECK_FAIL (a required check failed, or an exception event was recorded)",
+    "3": "ARG_OR_PREFLIGHT",
+    "4": "PRODUCT_ALREADY_RUNNING",
+    "5": "NOT_IMPLEMENTED",
+    "6": "NEEDS_ELEVATION",
+    "7": "HOST_START_FAILED",
+    "8": "TIMEOUT (a timeout event, or a child process without an exit code)",
+    "9": "EVIDENCE_INCOMPLETE_STALE (required summary missing, or the on-disk verdict does not match the computed one)",
+    "10": "BLOCKED_REQUIRED (a required item is BLOCKED or NOT_RUN: e.g. hardware gate not established, MSI_DEVICE_PENDING)",
+    "12": "REHEARSAL (the run declared itself a rehearsal: nothing started, no request sent)"
+  },
+  "statusVocabulary": [
+    "PASS",
+    "FAIL",
+    "BLOCKED",
+    "NOT_APPLICABLE",
+    "NOT_IMPLEMENTED",
+    "NOT_RUN"
+  ],
+  "hardRules": [
+    "never pass --real-backend to the fan host (no EC/HID/HC write path)",
+    "action precondition: the hardware gate is read through side-effect-free GET /api/state; unknown/open => 0 change calls",
+    "/api/handshake is NOT side-effect free (it rewrites HardwareCapable/AuthorizationGranted/FanRoute/DeviceIdentity) and is used only on a sandbox host this run started",
+    "cleanup only touches processes this run started (pid + creation time + image identity); foreign same-name processes are refused",
+    "reverse evidence is bound to the log offsets taken before the edges (historical hits can never pass)",
+    "never stop foreign processes; never claim a real Windows sleep for an HTTP injection",
+    "one verdict source (Complete-SimRun): required failures/missing/timeouts/exceptions/missing summaries can never exit 0",
+    "睡眠触发被永久禁止（operator 2026-09-22）：所有睡眠触发脚本（window-s3-20260922 / window-s4-20260922）含永久硬闸；分型只做离线判型与既有证据复用"
+  ],
+  "domains": [
+    {
+      "domain": "sleep",
+      "entry": "domains\\sleep\\sleep_domain.ps1",
+      "status": "implemented (v2: SIM-1..4)",
+      "modes": [
+        {
+          "mode": "selfcheck",
+          "modeKind": "none",
+          "status": "implemented",
+          "desc": "offline self-check (reads only)"
+        },
+        {
+          "mode": "forms",
+          "modeKind": "offline-injection",
+          "status": "implemented",
+          "desc": "20 sleep/wake forms against a self-started sandbox host; gate established before any action"
+        },
+        {
+          "mode": "quick",
+          "modeKind": "offline-injection",
+          "status": "implemented",
+          "desc": "one gated switch action against a persistent sandbox host"
+        },
+        {
+          "mode": "switch",
+          "modeKind": "offline-injection",
+          "status": "implemented",
+          "desc": "interactive toggle (s/w/t/q)"
+        },
+        {
+          "mode": "live",
+          "modeKind": "live-app-injection",
+          "status": "implemented",
+          "desc": "real App/Host: gate -> edges -> offset-bound reverse -> own-only close -> per-role settlement -> restart probe (reuse marked, never counted as fresh); -SimulateRun = rehearsal (exit 12)"
+        },
+        {
+          "mode": "retrybudget",
+          "modeKind": "offline-injection",
+          "status": "implemented",
+          "desc": "fault-budget/recovery-retry probe over the public API only: curve session -> FaultLocked -> resume refused (409) -> state converges inside the window (no unbounded retry) -> mock recovery never masquerades as a physical readback -> operator release-control resolves it (source anchors Program.cs:6867-6869 / 10045-10051 / 10118-10123)"
+        },
+        {
+          "mode": "sleeptypes",
+          "modeKind": "none",
+          "status": "implemented",
+          "desc": "S0/S3/S4 分型（离线判型器 + 7 个 golden fixtures + 本机能力解析）；判型词表 S0ix/S3/S4/S4_MISLABELED_AS_S3/S4_DOWNGRADED_TO_S3/S4_NOT_CONFIRMED/UNKNOWN；不触发睡眠"
+        },
+        {
+          "mode": "typeseries",
+          "modeKind": "offline-injection",
+          "status": "implemented",
+          "desc": "S0ix/S3/S4 分型系列（注入式，不触发真实睡眠）：S3 带 lease 冻结-恢复；S4 两段（无曲线干净恢复 / 带曲线入睡即 FaultLocked + 收敛 + release-control）；S0ix 无边沿状态稳定"
+        },
+        {
+          "mode": "rapidwake",
+          "modeKind": "offline-injection",
+          "status": "implemented",
+          "desc": "入睡失败/极短睡眠系列（S0ix rapid-wake 语义，0.1/0.5/1/2 s，可 -RapidDelays/-RapidCycles）：无曲线极短静默干净恢复；带曲线 0.1s 入睡即 FaultLocked + 409；连续压力无累积故障但会停在故障态"
+        }
+      ],
+      "forms": 20,
+      "sleepTypes": {
+        "definitions": "domains\\sleep\\sleep_types.json",
+        "typingLib": "domains\\sleep\\lib_sleep_typing.ps1",
+        "fixtures": "domains\\sleep\\fixtures\\sleeptype-*.json",
+        "verdictVocabulary": [
+          "S0ix",
+          "S0ix-network-disconnected",
+          "S3",
+          "S4",
+          "S4_MISLABELED_AS_S3",
+          "S4_DOWNGRADED_TO_S3",
+          "S4_NOT_CONFIRMED",
+          "UNKNOWN"
+        ],
+        "signalsDoc": "Docs/Tasks/Fan/FAN-920/FAN-SLEEP-可模拟信号与场景清单-20260923.md"
+      }
+    },
+    {
+      "domain": "gamepad",
+      "entry": "domains\\gamepad\\gamepad_domain.ps1",
+      "status": "implemented (wrapper; verdict via the shared aggregator)",
+      "modes": [
+        {
+          "mode": "registry",
+          "status": "implemented"
+        },
+        {
+          "mode": "selfloop",
+          "status": "implemented",
+          "desc": "forwards verbatim to tools\\virtual_gamepad_selfloop.ps1"
+        },
+        {
+          "mode": "probe",
+          "status": "implemented"
+        }
+      ],
+      "scenarios": [
+        {
+          "scenario": "sleep",
+          "status": "implemented (204-N, live-app-injection)",
+          "desc": "pad-sleep = 合成电源广播：只向 App 主窗口 PostMessage WM_POWERBROADCAST(0x0218)+PBT_APMSUSPEND(0x0004)/PBT_APMRESUMEAUTOMATIC(0x0012)/PBT_APMRESUMESUSPEND(0x0007)（真实 4→18→7 序列，覆盖 userWake 分支），不触发任何真实睡眠；依据 App 自身订阅回调（native/main.cpp:41252-41267）把真实系统事件原样投到同一窗口 ⇒ 复现同一条代码路径；该原语在本工程已有先例 tools/wake_race_sim_test.ps1。默认只做演练（exit 12，什么都不投递）；必须 -Confirm 且在授权窗口、操作者在场时执行（入睡会触发 App 睡眠守护冻结最大工作集进程，main.cpp:911-912）。本域只断言作业级事实（投递成功/pid 不变/单实例/窗口存活/本轮日志窗口推进/唤醒收敛）；手柄链语义断言归 W6，只回交原始证据（偏移+哈希+样本）",
+          "blocked": "App 未运行时 exit 10 BLOCKED_REQUIRED（app-not-running）；窗口找不到时 exit 10（window-not-found）"
+        },
+        {
+          "scenario": "full-virtual",
+          "status": "implemented (204-N: delegates to -Domain full -Mode run)",
+          "desc": "委派整机虚拟测试域并原样镜像其退出码；不重复其断言"
+        }
+      ]
+    },
+    {
+      "domain": "full",
+      "entry": "domains\\full\\full_domain.ps1",
+      "status": "implemented (204-N: -Mode run composed; window segments gated by -WithApp)",
+      "modes": [
+        {
+          "mode": "plan",
+          "status": "implemented",
+          "desc": "resolve the composition list; never claims execution"
+        },
+        {
+          "mode": "run",
+          "status": "implemented (204-N)",
+          "desc": "必需段（本机可跑）：sleep-typing（离线判型）+ sleep-forms（20 形态，沙箱宿主自启自清）+ sim-suites（run_all -Quick = 8 套件）；窗口段（需 App+授权窗口，-WithApp 才跑，届时计入必需）：sleep-live + pad-sleep。任何必需段非 0 ⇒ 总判 FAIL；窗口段未被请求时记 NOT_RUN（不判失败、不假装跑过）。-SkipForms/-SkipToolGate/-DryRun 可裁剪；-WithApp 非提权 ⇒ exit 6 NEEDS_ELEVATION"
+        }
+      ]
+    },
+    {
+      "domain": "msi",
+      "entry": "domains\\msi\\msi_domain.ps1",
+      "status": "implemented (B1 offline; B2 device-pending)",
+      "rules": "domains\\msi\\msi_rules.json",
+      "fixtures": "domains\\msi\\fixtures\\*.json",
+      "modes": [
+        {
+          "mode": "table",
+          "modeKind": "offline-injection",
+          "status": "implemented",
+          "desc": "three-way capability table (HC/CT/YMCC) with an evidence grade per fact"
+        },
+        {
+          "mode": "fixtures",
+          "modeKind": "offline-injection",
+          "status": "implemented",
+          "desc": "golden-fixture assertions for the pure decoder (short packet / read-failed / cross-session / boundary byte / telemetry raw-only)"
+        },
+        {
+          "mode": "decode",
+          "modeKind": "offline-injection",
+          "status": "implemented",
+          "desc": "decode one fixture offline"
+        },
+        {
+          "mode": "readback",
+          "modeKind": "device-observation",
+          "status": "implemented (default off)",
+          "desc": "read-only adapter: -EnableReadback required; single-flight + timeout + session binding + model whitelist; no device => MSI_DEVICE_PENDING (exit 10)"
+        }
+      ],
+      "policies": {
+        "curveBytesAreNeverRpm": true,
+        "unknownIsNullOrUnknownNeverZero": true,
+        "noWriteInThisBatch": "no EC write, no full-speed entry, no driver replacement, no global curve re-ordering"
+      }
+    }
+  ],
+  "tests": {
+    "toolGate": {
+      "path": "tests\\tool_gate.ps1",
+      "status": "PASS (16/16, 2026-09-22)",
+      "desc": "the 204 §6 A.4 required negatives + normal controls + a fixed-seed rerun"
+    },
+    "stubHost": {
+      "path": "tests\\stub_host.ps1",
+      "desc": "canned Fan-Host stub used by the hardware-gate negatives; counts every POST so '0 change calls' is provable"
+    },
+    "extremes": {
+      "path": "tests\\extremes.ps1",
+      "status": "PASS (7/7, 2026-09-22)",
+      "desc": "极端情况模拟：silent(永不响应)/drop(RST)/garbage(截断 JSON)/noop-success(声称成功但状态不变)/EC-HC 无数据(mock 边界)/fire-and-forget；stub_host.ps1 增加对应模式 + E7 无反馈（EC/HC 永不回来：服务可用/状态有界/末段稳定/不伪造成功）"
+    },
+    "signals": {
+      "path": "tests\\signals.ps1",
+      "data": "domains\\fan\\hc_signals.json",
+      "status": "PASS (24 signals: 20 spoofable / 4 real-only)",
+      "desc": "风扇与手柄生命周期用到的 HC/宿主信号清单 + 逐条伪装筛选（REAL-ONLY=真实硬件通道，禁止把模拟当能力）；含睡眠链 3 条、fan.nofeedback.bounded、err.unproven、err.exhausted、exit.codes"
+    },
+    "cycle": {
+      "path": "tests\\cycle.ps1",
+      "status": "PASS (2-wise 18/18 + 3-wise 34/34, 2026-09-23)",
+      "desc": "组合周期：60 组全组合 -> 精简集（-Strength 2 = pairwise / 3 = 3-wise），2-wise 覆盖 51/51 取值对，3-wise 覆盖 143/143（含三元组）；真宿主路径 + 故障注入路径 + 内存/句柄有界 + 第二实例"
+    },
+    "invariants": {
+      "path": "tests\\invariants.ps1",
+      "status": "PASS (12/12, 2026-09-23；I7 已改走独立 provoke 脚本并复验 exit 9)",
+      "desc": "睡眠/风扇侧 12 条机器可判定不变量（无双实体/单实例/退出零残留/未知即拒绝且 changeCallCount=0/重试有界/幂等/证据完备新鲜/代次单调/无静默成功/配置不丢更新/爆炸半径受限/未证保持未证）"
+    },
+    "regressions": {
+      "path": "tests\\regressions.ps1",
+      "status": "PASS (R1–R10 10/10, 2026-09-23)",
+      "desc": "永久回归负例：R1 非本轮自启宿主即拒 / R2-R3 silent 桩件就绪判据 / R4 noop→noop-success 映射 / R5 代次语义（边沿内重复 suspend=200+deduplicated，跨边沿复用旧代次=409 POWER_EVENT_STALE）/ R6-R7 证据 64 位 SHA256 无截断 / R8 编码纪律（.ps1 带 BOM、.json 无 BOM）/ R9 未证不升格 / R10 缺摘要即 exit 9；套件自带「用例数≠预期即假绿判 FAIL」自检"
+    },
+    "gyroCore": {
+      "path": "tests\\gyro_core.ps1",
+      "status": "PASS (G1–G6 6/6, 2026-09-23)",
+      "desc": "S1–S3/S12 共用 core 只读锚点：合成链资产目录与标记（feature-assets\\gyro-motion）、观测面（gyro-motion.log）、采样通道（input-capture.jsonl + kind 字段）、判读纪律（观测面含 mockHandshake/sensorFamily/providerBindingProven/pairProven/proofId 等区分字段）、合成不得写成「真传感器已验证」；真合成注入需 App+钩子（owner W3），本脚本不做注入"
+    },
+    "runAll": {
+      "path": "tests\\run_all.ps1",
+      "status": "PASS（首跑全量 7/7 套件 ALL_PASS，2026-09-23；单一判定源 + 套件数假绿防护）",
+      "desc": "顺序跑 tool_gate/invariants/extremes/regressions/gyro_core/signals/api_contract/cycle(-Strength 3)；-WithSleep 追加睡眠域 sleeptypes/typeseries/rapidwake；-Quick 跳过组合周期；任何子套件非 0 退出 ⇒ 总判 FAIL"
+    },
+    "apiContract": {
+      "path": "tests\\api_contract.ps1",
+      "status": "PASS (AC1–AC15 15/15, 2026-09-23)",
+      "desc": "风扇侧 API 契约负例（契约真值取自 FanLab/real-host/Program.cs）：AC1 缺/错令牌 401 API_SESSION_REQUIRED 且不泄露状态；AC2 未知路由与方法不匹配 404 NOT_FOUND；AC3 截断 JSON 400 INVALID_JSON；AC4 1.1 MiB 体 413 BODY_TOO_LARGE；AC5 代次/来源非法族 400 POWER_GENERATION_REQUIRED；AC6 越权来源 403 F4_NATIVE_AUTHORITY_REQUIRED 且被拒调用零状态变更（state/powerState/gen/attempt）；AC7 resume 同受 tagged 约束；AC8 12 并行边沿只出 200/409、不挂起、宿主存活、状态非未知；AC9 正控（合法边沿仍 200）；AC10 自启自清；AC11 乱序代次 A→B→C→迟到 A 被拒且状态/代次不回退；AC12 故障→release→/api/disable 后在新 host 世代上普通 suspend/resume 成功（204 §6 B/P2 第二半）。套件自带宿主有界自愈重试（≤2 次，写 hostStartAttempts）",
+      "evidence": "%LOCALAPPDATA%\\YeManCC\\sim-evidence\\api-contract\\api-contract-20260923-013236.json"
+    },
+    "genRunManifest": {
+      "path": "tests\\gen-run-manifest.ps1",
+      "status": "PASS（2026-09-23；产物 RUN-MANIFEST.json 21,442 B sha256 36B1DB36…）",
+      "desc": "J0 RUN-MANIFEST 生成器（204 §6 A.1 / L36，Fan owner）：只读按真实路径取身份（源码工作树/native/恢复服务/Host/HC 及依赖/payload/前端/版本/两包/安装位/Fan 工具树），完整 SHA256 + 字节数；大树受 MaxTreeBytes 守卫（超限转 key-files-only 并如实标注）；缺失目标记 exists=false，不虚构",
+      "verification": "正反跑（写前像 36B1DB36 → 重跑 2028577E → 差分仅 generatedAt → 回滚后逐字节相同）+ 反推（204 §1 六项裁决值在真盘上逐项复现：E2F3D2FB / AA168FF6 / C3F92E83 / 399E4796 / 4F3190CC / 3EFE2EA1）"
+    }
+  },
+  "registeredFindings": [
+    "D-204-1 PS 5.1: Start-Process with -RedirectStandard* leaves $p.ExitCode unreadable ([int]$null = 0) - read exit codes through a synchronous call + $LASTEXITCODE",
+    "D-204-2 a child PowerShell 5.1 that inherits a PowerShell 7 PSModulePath loses Get-FileHash/Get-Content; sim_core prepends $PSHOME\\Modules (idempotent)",
+    "D-204-3 the product can restart itself after a graceful close; the tool treats such an instance as foreign",
+    "D-204-4 without a handshake the app side records no lease rows, so reverse evidence depends on the host diagnostics flag (off by default)",
+    "D-204-5 the installed host's own --self-test crashes: its check only accepts the ASUS-path OEM_RESTORE_FAILED code (Program.cs:11604-11607) while the safe/mock close route raises a different code; the production close path (CloseFromApi) does reopen the ingress on failure (L11051-11055) - a dev-side check defect, registered",
+    "D-204-6 FanHost is single-instance: a second host exits immediately (measured exit 2), so a sandbox host left running blocks the next sandbox start (12 s not-ready); transient modes now close the host they started",
+    "D-204-10 本机 Kernel-Power 提供程序未注册（提权也读不到 42/107/566）⇒ 事件日志不能作判据；hiberfil 的 Test-Path/.NET Exists 恒 false（须用 dir /a:h），判型以写盘+间隙为硬证据、事件标签仅作旁证（operator 口径：S4 可能被误表达为 S3）",
+    "D-204-11 typeseries 曾复用常驻沙箱宿主而被 SIM-2 正确拒绝（sandbox-ownership-missing，0 变更调用、exit 10）；已把 typeseries 归入瞬时模式（自启即自清），并在测试后清理遗留沙箱宿主（8766 shutdown 200）",
+    "D-204-12 收敛窗口是 409 与 200 的分界：带曲线入睡后 0.1 s 唤醒 ⇒ 409 HC_RESUME_REBUILD_FAILED（无收敛窗口）；静默 25 s ⇒ 收敛后 resume 200。连续 5×0.1 s 快速入睡-唤醒无累积故障，但最终停在 FaultLocked（需显式 release-control 才回到 AwaitingControl）",
+    "D-204-13 极端场景首跑暴露桩件缺陷：noop-success 误伤 GET /api/state（使 E4 变成“状态读取也坏了”而非“成功但无数据”）⇒ 已把该模式限定为只影响变更类请求，重跑 6/6 PASS（工具侧修复，属 203 允许的本线工具修复）",
+    "D-204-14 风扇\"无反馈\"矩阵：无需重建路径由 extremes E7 覆盖（14/14 采样可读、状态有界、末段稳定）；需要重建路径由 sleep -Mode retrybudget 覆盖（带曲线 FaultLocked 后 75 s 无外部干预 → 状态自动收敛、服务持续可读、release-control 才恢复）。历史对照：大修前会一直等 HC 的 EC 成功反馈（operator 提供，属已修复缺陷）；旧构建反向复现未做（无旧构建、不安装）",
+    "D-204-15 组合周期作业三轮修复（全为 harness 侧）：① 桩件端口复用/TIME_WAIT 致假超时 → 端口递增 + 就绪判据；② silent/drop 按设计不响应 /health → 就绪判据改为\"进程存活+端口可连\"；③ noop 参数名不符 ValidateSet → 映射为 noop-success。产品侧本轮**未发现缺陷**",
+    "D-204-16 不变量 I7 的 provoke 作业缺陷（内联拼接致期望 exit 9 实得 0）：已改为独立 tests\\provoke-missing.ps1；2026-09-23 复验 I7 PASS（exit=9 / EVIDENCE_INCOMPLETE_STALE / missing=1），invariants 12/12",
+    "D-204-17 假绿教训（工具侧）：R 是 PowerShell 内置别名（r → Invoke-History），别名优先于函数 ⇒ regressions.ps1 的 R 函数被解析成别名，10 条用例全部静默空转并报出 cases=0 failed=0 -> PASS。修复：函数改名 Check-R（gyro_core 用 G 无冲突）+ 两套件均加装「用例数 ≠ 预期即判 FAIL」自检；run_all 总门同样带套件数防护。教训：测试套件自身必须先过非空转自检，否则会以全绿面貌空转",
+    "D-204-18 R5 断言按错误契约写（工具侧，非产品缺陷）：初版假设「边沿内重复 suspend 必须非 200」；核对产品源码（Program.cs ExecutePowerTransitionFromApiAsync：Suppressed ⇒ 200 + deduplicated=true；Stale ⇒ 409 POWER_EVENT_STALE）后按真实契约重写为三条件——首个 suspend 200 / 同代次重复 200+deduplicated=true（不得产生第二次真实转换）/ 恢复后复用旧代次 409 POWER_EVENT_STALE；实测 first=200 dup=200/dedup=True resume=200 staleReuse=409/POWER_EVENT_STALE",
+    "D-204-19 编码纪律硬检出：domains\\sleep\\sleep_types.json 带 UTF-8 BOM（违反 .json 无 BOM 约定）⇒ 已剥离（内容不变，5742→5739 字节），并复跑 sleep -Mode sleeptypes 12/12 PASS 证明剥离无影响、R8 复查 ps1MissingBom=0 jsonWithBom=0。另：编辑器保存会剥离 .ps1 的 BOM，每次改后需回补（本批 regressions/gyro_core/run_all 三件）",
+    "D-204-20 gyro_core 初版锚点两处错位（工具侧）：G1 误用安装 App 目录（应在 POWER_CONTROL_DIR\\feature-assets\\gyro-motion）；G5 只看 gyro-motion.log 尾行，而 sensor-initialised/mockHandshake 行位于应用启动段。已改为「资产目录 + enabled/input-capture 标记」判据与「两个观测面全文件扫描」，实测命中 mockHandshake/sensorFamily@gyro-motion.log、sensorFamily/providerBindingProven/pairProven/proofId@input-capture.jsonl",
+    "D-204-21 api_contract 首跑（唯一一次）沙箱宿主未就绪：所有请求 SIM_REQUEST_FAILED(-1)、Wait-SimHostReady 到点未过；同参数两次复跑均正常（探针手工启动亦正常）⇒ 判定为不可复现的一次性竞态，非产品缺陷。已给套件加 exited/exitCode/lastHealth 诊断，下次同类现象可直接判型",
+    "D-204-22 pad-sleep（合成电源广播）的副作用已被设计约束吸收：入睡路径会触发 App 自身睡眠守护（冻结最大工作集进程，main.cpp:911-912），因此该场景默认只做演练（exit 12，什么都不投递），必须显式 -Confirm 且在授权窗口/操作者在场时执行；本域不自动启动 App（requireAdministrator）。踩坑价值：任何「模拟睡眠」动作都要先看产品在真实事件下会做什么副作用",
+    "D-204-23 API 契约真值一次取全（负例不靠猜）：401 API_SESSION_REQUIRED(:11329-11337)、404 NOT_FOUND(:11286)、400 INVALID_JSON(:11310-11314)、413 BODY_TOO_LARGE(:11347)、400 POWER_GENERATION_REQUIRED(:11193-11204，含 gen>0 与 source 非空)、403 F4_NATIVE_AUTHORITY_REQUIRED(:11210-11217 仅 /api/suspend)。AC6 证明被拒的越权调用连 powerOperationGeneration/Attempt 都不动（零副作用），AC8 证明 12 并行边沿只产生 200/409、无 5xx、无未知态",
+    "D-204-24 本机当前驻留一个 App 实例（pid=37876，creationTime=2026-09-22T23:44:57，属 23:44 窗口那轮 live 后的自行重启，见 D-204-3）；pad-sleep 演练因此能验证到「恰一个实例 + 顶层窗口句柄」两级前置（hwnd 实取），真投递仍等授权窗口",
+    "D-204-25 手柄域 registry（只读清单）曾因把『product not running』设为必需而判 FAIL（本机产品在跑时清单必然 exit 2，且与本线「通过/失败」的真实含义无关）⇒ 改为信息级（-Required $false，名称为 product process state）；复跑 8/8 exit 0。教训：只读清单里不得混入「环境前置」当必需判据",
+    "D-204-26 文档真值同步（本轮自查）：registry 的 gamepad 脚注、README 的 domains 表与「现状与后续」在实现后一度仍写 NOT_IMPLEMENTED（骨架/未实现）⇒ 已同步为 implemented 并写明演练/窗口口径。教训：实现完成后必须回扫所有「未实现」字样，否则文件自身说谎",
+    "D-204-27 pad-sleep 的 fail-closed 门做了负例对照（按本工程惯例：负例只在 scratch 副本上做，生产树不动）：把 scratch 副本里 `Get-SimProcessesByRole ''App''` 强制为空 ⇒ `verdict=BLOCKED_REQUIRED exitCode=10`、必需项 1 失败（`appInstances=0`）。证明该门非空转：无 App 时绝不会给出『已演练/已投递』的假结果。副本位置 _scratch\\FAN-204N-negative-control-20260923\\simcopy",
+    "D-204-28 长期登记项复核（本轮）：native 层专用竞态/看门狗测试 exe（native\\testrun\\wake_race_test\\YeManCC-wake-race.exe）不在盘上——native\\testrun 目录不存在、全树无 *wake-race* ⇒ tools\\wake_race_sim_test.ps1 / wake_watchdog_sim_test.ps1 保持 NOT_AVAILABLE（需原生构建域出 exe，非本域可闭）；本域以 API 级等价物（sleep -Mode rapidwake / retrybudget）覆盖睡眠/唤醒竞争语义。另注记：这两个原生工具使用的合成电源广播原语（0x0218 + 4/18/7）与本轮 pad-sleep 场景一致，互为佐证",
+    "D-204-29 故障后重试的真实契约（探针实证，非缺陷）：release-control 会清 lease 与 suspendedCurve，但**本 host 世代内 hardwareWritesObserved 仍为 true、oemRestoreEvidence=not-observed** ⇒ 同一世代再入睡**必须继续 fail-closed**（retrybudget 新断言：不得在恢复未证时静默入睡）；安全清理 /api/disable（无需 lease）故障后仍可达（200/Ready）；**新 host 世代**上普通 suspend/resume 确实成功（api_contract AC12 实测 freshHost=True + 200/200）。⇒ 设备窗口观察项：ROG 真机「故障→release→再入睡」是否同样 fail-closed（本机 mock 实测为是），用于确认该门在真实 HC 恢复回调下是否会自行解除",
+    "D-204-30 编辑器/工具 BOM 坑再现（本项目第 3 次同族）：PS 5.1 的 Set-Content -Encoding UTF8 在本机被用于改写含中文 .ps1 后，实测文件首字节不是 EF BB BF（bom=False）⇒ 随后 PS 5.1 以 ANSI 读入中文并**解析失败**（输出里全是 Write-Host 行的语法高亮）。修复：WriteAllText + UTF8Encoding($true) 重写；随后 parse=OK 且 12/12 通过。教训固化：**改含中文的 .ps1 一律用 [IO.File]::WriteAllText(..., UTF8Encoding($true))**，改后立即验 bom + PSParser",
+    "D-204-21（更新：抓到真因）空闲后首跑的「宿主未就绪」实测首个宿主进程 **exitCode=2**（即 D-204-6 记录的单实例拒绝语义）——一个同族实例尚未排空时就挡住了新宿主；api_contract 现已内置**有界自愈重试（≤2 次）**并把 hostStartAttempts 写进证据：本轮实测「第 1 次未就绪（exited=True exitCode=2）→ 第 2 次就绪」，随后 12/12 全绿。不再是「不可复现的谜」，而是「可诊断 + 自愈」",
+    "D-204-31 安装位被正式导出物刷新后，lane 的 mock-handshake.flag 消失（正式包按设计不含该测试件：完整包 405 件内 mock 匹配数=0）⇒ 安装位 FanHost 进入「真装/无 mock」模式，依赖 mock 的断言被 **fail-closed 拒绝**（实测：曲线 enable=409 hwWrites=False；typeseries 4 项、rapidwake 2 项、api_contract AC12、tool_gate T13 因此 FAIL——不是假绿，是设计上的正确拒绝）。处置：sim_core 支持 `YEMAN_SIM_PAYLOAD_ROOT` 指向 **lane 载荷副本**（与安装位逐字节同二进制 + 放入 mock 旗标；实测 exe 77CBA5DF…/dll 399E4796…/payload.json C3F92E83… 全部相同），默认（未设变量）=安装位原路径、行为不变。⇒ 两类测试各有其位：对安装位跑 = 验证「真装默认安全」；对 lane 副本跑 = 跑 mock 类生命周期电池"
+  ]
+}

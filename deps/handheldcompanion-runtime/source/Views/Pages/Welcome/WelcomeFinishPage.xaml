@@ -1,0 +1,65 @@
+<Page
+    x:Class="HandheldCompanion.Views.Pages.Welcome.WelcomeFinishPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:ikw="http://schemas.inkore.net/lib/ui/wpf"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:ui="http://schemas.inkore.net/lib/ui/wpf/modern"
+    xmlns:viewmodels="clr-namespace:HandheldCompanion.ViewModels.Windows"
+    Title="Done"
+    MaxWidth="840"
+    Margin="48"
+    VerticalAlignment="Center"
+    d:Background="White"
+    d:DataContext="{d:DesignInstance Type=viewmodels:WelcomeViewModel}"
+    d:DesignHeight="1080"
+    d:DesignWidth="1920"
+    mc:Ignorable="d">
+
+    <Page.Resources>
+        <Style
+            x:Key="FinishTitleStyle"
+            BasedOn="{StaticResource TitleBoldTextBlockStyle}"
+            TargetType="TextBlock">
+            <Setter Property="Text" Value="You're ready to start." />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding RestartRequired}" Value="True">
+                    <Setter Property="Text" Value="You're ready to (re)start." />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+
+        <Style
+            x:Key="FinishMessageStyle"
+            BasedOn="{StaticResource BodyTextBlockStyle}"
+            TargetType="TextBlock">
+            <Setter Property="Text" Value="HC will save these choices and continue startup. You can revisit all options later from the Settings page." />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding RestartRequired}" Value="True">
+                    <Setter Property="Text" Value="HC will save these choices and restart your device. You can revisit all options later from the Settings page." />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+    </Page.Resources>
+
+    <ikw:SimpleStackPanel Spacing="28">
+        <ui:FontIcon
+            HorizontalAlignment="Center"
+            FontFamily="{DynamicResource SymbolThemeFontFamily}"
+            FontSize="96"
+            Foreground="{DynamicResource SystemAccentColorLight2Brush}"
+            Glyph="&#xE930;" />
+
+        <ikw:SimpleStackPanel Spacing="8">
+            <TextBlock
+                HorizontalAlignment="Center"
+                Style="{StaticResource FinishTitleStyle}"
+                TextWrapping="Wrap" />
+            <TextBlock
+                Style="{StaticResource FinishMessageStyle}"
+                TextAlignment="Center"
+                TextWrapping="Wrap" />
+        </ikw:SimpleStackPanel>
+    </ikw:SimpleStackPanel>
+</Page>

@@ -39,6 +39,8 @@ Intel: PawnIO + IntelMSR.bin (UXTU 同款常驻后端):
 (--no-check / --on-wake 为 v1 遗留参数, 接受但忽略, 仅打印废弃提示)
 """
 import sys, os, re, time, json, ctypes, shutil, subprocess, hashlib, tempfile
+import ntpath, struct, configparser
+from contextlib import contextmanager
 
 try:
     import winreg
@@ -2106,6 +2108,7 @@ def _optiscaler_cache_roots():
     power_control = os.path.dirname(this_dir)
     candidates = [
         os.path.join(client_base, "Cache"),
+        r"C:\SOFT\OptiscalerClient\Cache",
         os.path.join(power_control, "OptiScalerCache"),
         os.path.join(power_control, "OptiscalerClient", "Cache"),
         os.path.join(power_control, "OptiScaler", "Cache"),
@@ -2120,79 +2123,139 @@ def _optiscaler_cache_roots():
         result.append(path)
     return client_base, result
 
-def _optiscaler_version_key(name):
-    """Sort versions numerically: 0.10 must be newer than 0.9."""
-    nums = tuple(int(v) for v in re.findall(r"\d+", str(name)))
-    return nums or (0,)
+# Fixed, tested release ceiling. No GitHub requests, nightly, future or FP8 caches.
+# A YMCC update changes this list; older locally supplied releases remain usable.
+OPTI_SUPPORTED_VERSIONS = {
+    "OptiScaler": ("0.9.5-pre4", "0.9.4"),
+    "Extras": ("FSR_4.1.1b", "FSR_4.1.1", "FSR_4.0.2d", "FSR_4.0.2c", "FSR_4.0.2b", "FSR_4.0.0"),
+    "OptiPatcher": ("0.41",),
+}
 
-def _optiscaler_component_dirs(cache_root, section, validator):
-    base = os.path.join(cache_root, section)
-    if not os.path.isdir(base):
-        return []
-    result = []
+
+def _opti_is_reparse(path):
     try:
-        entries = list(os.scandir(base))
-    except Exception:
-        return []
-    for entry in entries:
-        if not entry.is_dir(follow_symlinks=False):
-            continue
-        try:
-            if validator(entry.path):
-                result.append(entry)
-        except Exception:
-            continue
-    result.sort(key=lambda e: (_optiscaler_version_key(e.name), e.stat().st_mtime_ns, e.name.lower()))
-    return result
+        st = os.lstat(path)
+        return os.path.islink(path) or bool(getattr(st, "st_file_attributes", 0) & 0x400)
+    except FileNotFoundError:
+        return False
+
+
+def _optiscaler_valid_dll(path):
+    """Validate complete x64 PE DLL structure/section bounds, not only MZ magic."""
+    try:
+        if _opti_is_reparse(path) or not os.path.isfile(path):
+            return False
+        size = os.path.getsize(path)
+        with open(path, "rb") as f:
+            header = f.read(64)
+            if len(header) != 64 or header[:2] != b"MZ":
+                return False
+            offset = int.from_bytes(header[60:64], "little")
+            if not 64 <= offset <= min(size - 24, 1 << 20):
+                return False
+            f.seek(offset)
+            pe = f.read(24)
+            machine, sections = struct.unpack_from("<HH", pe, 4)
+            opt_size, flags = struct.unpack_from("<HH", pe, 20)
+            if pe[:4] != b"PE\0\0" or machine != 0x8664 or not flags & 0x2000:
+                return False
+            if not 1 <= sections <= 96 or opt_size < 112 or offset + 24 + opt_size + sections * 40 > size:
+                return False
+            optional = f.read(opt_size)
+            if optional[:2] != b"\x0b\x02":
+                return False
+            for _ in range(sections):
+                section = f.read(40)
+                raw_size, raw_offset = struct.unpack_from("<II", section, 16)
+                if raw_size and (raw_offset < 64 or raw_offset + raw_size > size):
+                    return False
+        return True
+    except (OSError, ValueError, struct.error):
+        return False
+
+
+def _opti_package_file(rel):
+    """Only the fixed 0.9.x payload. Never import arbitrary cache scripts/plugins."""
+    key = rel.replace("\\", "/").lower()
+    roots = {"optiscaler.dll", "optiscaler.ini", "libxell.dll", "fakenvapi.dll", "fakenvapi.ini",
+             "dlssg_to_fsr3_amd_is_better.dll", "!! readme_extract all files to game folder !!.txt"}
+    roots.update(name for names in OPTI_RUNTIME_NAMES.values() for name in names)
+    if key in roots:
+        return True
+    return key == "d3d12_optiscaler/d3d12core.dll" or (key.startswith("licenses/") and
+           key.rsplit("/", 1)[-1].endswith((".txt", ".md")))
+
+
+def _opti_read_ini(path):
+    if _opti_is_reparse(path) or os.path.getsize(path) > 1 << 20:
+        raise ValueError("INI invalid/too large")
+    with open(path, "r", encoding="utf-8-sig") as f:
+        text = f.read()
+    ini = configparser.ConfigParser(interpolation=None, strict=True)
+    ini.read_string(text)
+    sections = [x.lower() for x in ini.sections()]
+    if len(sections) != len(set(sections)):
+        raise ValueError("INI contains case-insensitive duplicate sections")
+    if not {"upscalers", "framegen"}.issubset(sections):
+        raise ValueError("INI required sections missing")
+    return text
+
+
+def _opti_cache_walk(root):
+    _opti_plain_path(root)
+    def scan_error(error):
+        raise error
+    for current, dirs, files in os.walk(root, onerror=scan_error):
+        dirs[:] = sorted((d for d in dirs if not _opti_is_reparse(os.path.join(current, d))), key=str.lower)
+        for name in sorted(files, key=str.lower):
+            path = os.path.join(current, name)
+            if not _opti_is_reparse(path):
+                yield path
+
 
 def _optiscaler_pick_component(cache_roots, section, validator):
-    """Pick the newest valid component inside the first cache root that has one."""
-    for root in cache_roots:
-        choices = _optiscaler_component_dirs(root, section, validator)
-        if choices:
-            chosen = choices[-1]
-            return chosen.path, chosen.name, root
-    return None, None, None
-
-
-def _optiscaler_find_loose_component(cache_roots, validator, max_depth=5):
-    """Find a valid OptiScaler component in non-standard cache layouts.
-
-    Older OptiScalerClient builds and manually extracted packages do not
-    always keep files below Cache/<section>/<version>.  The previous lookup
-    therefore reported a missing runtime even when the DLL was plainly in the
-    cache.  This fallback stays bounded to the known cache roots and only
-    accepts directories that pass the supplied validator.
-    """
-    for root in cache_roots:
-        if not os.path.isdir(root):
-            continue
-        try:
-            for current, dirs, _files in os.walk(root):
-                rel = os.path.relpath(current, root)
-                depth = 0 if rel == "." else rel.count(os.sep) + 1
-                if depth >= max_depth:
-                    dirs[:] = []
-                dirs.sort(key=str.lower)
-                try:
-                    if validator(current):
-                        return current, os.path.basename(current), root
-                except Exception:
-                    continue
-        except Exception:
-            continue
+    """Prefer the pinned release across all roots, then known older releases."""
+    for version in OPTI_SUPPORTED_VERSIONS.get(section, ()):
+        for root in cache_roots:
+            path = os.path.join(root, section, version)
+            if not os.path.isdir(path) or _opti_is_reparse(path):
+                continue
+            try:
+                if validator(path):
+                    return path, version, root
+            except (OSError, ValueError, configparser.Error):
+                continue
     return None, None, None
 
 OPTI_BACKENDS = ("fsr", "xess")
-OPTI_BACKEND_LABELS = {"fsr": "FSR", "xess": "XeSS"}
+OPTI_BACKEND_LABELS = {"fsr": "FSR4", "xess": "XeSS"}
 
 # OptiScaler releases have used both the SDK and driver FSR names over time.
 # Keep the names exact: the runtime loader resolves these files by filename and
 # must not receive a renamed XeSS/FSR binary.
+#
+# The upstream client also recognizes the split FidelityFX effect DLLs. They
+# are optional in the old 0.9.4 cache and may be supplied by a newer Extras
+# package, so they are copied when present rather than treated as required.
+# amdxc64.dll is intentionally excluded: it is the optional RDNA2 custom
+# driver shim, not a general game-folder runtime, and this integration does
+# not enable the FP8/RDNA2 path.
+OPTI_EXTRA_FSR_NAMES = (
+    "amd_fidelityfx_upscaler_dx12.dll",
+    "amdxcffx64.dll",
+    "amd_fidelityfx_radiancecache_dx12.dll",
+    "amd_fidelityfx_loader_dx12.dll",
+    "amd_fidelityfx_framegeneration_dx12.dll",
+    "amd_fidelityfx_denoiser_dx12.dll",
+)
 OPTI_RUNTIME_NAMES = {
     "fsr": (
         "amd_fidelityfx_dx12.dll",
         "amd_fidelityfx_upscaler_dx12.dll",
+        "amd_fidelityfx_radiancecache_dx12.dll",
+        "amd_fidelityfx_loader_dx12.dll",
+        "amd_fidelityfx_framegeneration_dx12.dll",
+        "amd_fidelityfx_denoiser_dx12.dll",
         "amdxcffx64.dll",
         "amd_fidelityfx_vk.dll",
         "ffx_fsr2_api_dx12_x64.dll",
@@ -2210,8 +2273,11 @@ OPTI_GAME_RUNTIME_NAMES = {
     "fsr": (
         "amd_fidelityfx_dx12.dll",
         "amd_fidelityfx_vk.dll",
+        "amd_fidelityfx_radiancecache_dx12.dll",
         "amd_fidelityfx_loader_dx12.dll",
         "amd_fidelityfx_upscaler_dx12.dll",
+        "amd_fidelityfx_framegeneration_dx12.dll",
+        "amd_fidelityfx_denoiser_dx12.dll",
         "amdxcffx64.dll",
         "ffx_fsr2_api_x64.dll",
         "ffx_fsr2_api_dx12_x64.dll",
@@ -2225,95 +2291,81 @@ OPTI_GAME_RUNTIME_NAMES = {
 
 
 def _optiscaler_runtime_files(root, names):
-    """Find runtime DLLs in a component, preferring the component root."""
-    wanted = {str(name).lower(): str(name) for name in names}
-    found = {}
-    if not root or not os.path.isdir(root):
+    wanted, found = {str(name).lower() for name in names}, {}
+    if not root or not os.path.isdir(root) or _opti_is_reparse(root):
         return found
-    try:
-        for current, dirs, files in os.walk(root):
-            dirs.sort(key=str.lower)
-            files.sort(key=str.lower)
-            for filename in files:
-                key = filename.lower()
-                if key in wanted and key not in found:
-                    found[key] = os.path.join(current, filename)
-    except Exception:
-        return found
+    for path in _opti_cache_walk(root):
+        key = os.path.basename(path).lower()
+        if key not in wanted:
+            continue
+        if not _optiscaler_valid_dll(path):
+            raise ValueError("运行库不完整: " + path)
+        if key in found and _sha256(found[key]) != _sha256(path):
+            raise ValueError("缓存包含不同内容的同名运行库: " + key)
+        found.setdefault(key, path)
     return found
 
 
 def _optiscaler_cfg():
     client_base, cache_roots = _optiscaler_cache_roots()
 
-    src_opti, opti_version, opti_root = _optiscaler_pick_component(
-        cache_roots,
-        "OptiScaler",
-        lambda p: os.path.isfile(os.path.join(p, "OptiScaler.dll")),
-    )
-    if not src_opti:
-        src_opti, opti_version, opti_root = _optiscaler_find_loose_component(
-            cache_roots,
-            lambda p: os.path.isfile(os.path.join(p, "OptiScaler.dll")),
-        )
-    src_extra, extra_version, extra_root = _optiscaler_pick_component(
-        cache_roots,
-        "Extras",
-        lambda p: any(_optiscaler_runtime_files(p, names)
-                      for names in OPTI_RUNTIME_NAMES.values()),
-    )
-    if not src_extra:
-        src_extra, extra_version, extra_root = _optiscaler_find_loose_component(
-            cache_roots,
-            lambda p: any(_optiscaler_runtime_files(p, names)
-                          for names in OPTI_RUNTIME_NAMES.values()),
-        )
+    def valid_package(path):
+        _opti_read_ini(os.path.join(path, "OptiScaler.ini"))
+        required = ["OptiScaler.dll", "libxess.dll", "amd_fidelityfx_dx12.dll"]
+        if os.path.basename(path) == "0.9.5-pre4":
+            required.append("amd_fidelityfx_upscaler_dx12.dll")
+        if not all(_optiscaler_valid_dll(os.path.join(path, n)) for n in required):
+            return False
+        for source in _opti_cache_walk(path):
+            if _opti_package_file(os.path.relpath(source, path)) and source.lower().endswith((".dll", ".asi")):
+                if not _optiscaler_valid_dll(source):
+                    return False
+        return True
 
-    def patch_validator(path):
-        return os.path.isfile(os.path.join(path, "OptiPatcher.asi"))
+    src_opti, opti_version, opti_root = _optiscaler_pick_component(cache_roots, "OptiScaler", valid_package)
+    def valid_extra(path):
+        # Optional effects alone do not constitute an FSR4 SR upgrade. Validate
+        # every supplied known DLL, then require an actual INT8 upscaler slot.
+        runtimes = _optiscaler_runtime_files(path, OPTI_EXTRA_FSR_NAMES)
+        return bool({"amd_fidelityfx_upscaler_dx12.dll", "amdxcffx64.dll"}.intersection(runtimes))
 
-    src_patch = None
-    patch_version = None
-    patch_root = None
-    for root in cache_roots:
-        choices = _optiscaler_component_dirs(root, "OptiPatcher", patch_validator)
-        if choices:
-            rolling = [e for e in choices if e.name.lower() == "rolling"]
-            chosen = rolling[-1] if rolling else choices[-1]
-            src_patch, patch_version, patch_root = chosen.path, chosen.name, root
-            break
+    src_extra, extra_version, extra_root = _optiscaler_pick_component(cache_roots, "Extras", valid_extra)
+    src_patch, patch_version, patch_root = _optiscaler_pick_component(
+        cache_roots, "OptiPatcher", lambda p: _optiscaler_valid_dll(os.path.join(p, "OptiPatcher.asi")))
 
     runtime_files = {}
     for backend, names in OPTI_RUNTIME_NAMES.items():
-        runtime_files[backend] = {}
-        for source_root in (src_extra, src_opti):
-            for key, path in _optiscaler_runtime_files(source_root, names).items():
-                runtime_files[backend][key] = path
-        # A few manually managed caches put the runtime directly beside the
-        # component folder. Keep the lookup bounded to known names only.
-
-    missing = []
+        # Base first, INT8 Extras last: the old bundled SDK must never undo the swap.
+        runtime_files[backend] = _optiscaler_runtime_files(src_opti, names)
+        if backend == "fsr":
+            # Extras wins per exact filename. Do not rename legacy/current
+            # upscaler DLLs and never import the optional amdxc64.dll shim.
+            runtime_files[backend].update(_optiscaler_runtime_files(src_extra, OPTI_EXTRA_FSR_NAMES))
+    available = []
+    if src_opti and runtime_files["fsr"]:
+        available.append("fsr")
+    if src_opti and "libxess.dll" in runtime_files["xess"]:
+        available.append("xess")
+    missing, warnings = [], []
     if not src_opti:
-        missing.append("OptiScaler.dll")
-    available_backends = [backend for backend in OPTI_BACKENDS
-                          if runtime_files.get(backend)]
-    if not available_backends:
-        missing.append("FSR 或 XeSS 运行库 (FSR: amd_fidelityfx_dx12.dll/amdxcffx64.dll；XeSS: libxess.dll)")
-    source_root = opti_root or extra_root or patch_root
+        missing.append("OptiScaler.dll / OptiScaler.ini（支持 0.9.5-pre4、0.9.4）")
+    elif opti_version != OPTI_SUPPORTED_VERSIONS["OptiScaler"][0]:
+        warnings.append("0.9.5-pre4 缓存缺失或损坏，已回退到 " + opti_version)
+    if src_extra and extra_version != OPTI_SUPPORTED_VERSIONS["Extras"][0]:
+        warnings.append("FSR_4.1.1b 缓存缺失或损坏，已回退到 " + extra_version + "（INT8）")
+    if not src_extra:
+        warnings.append("未找到受支持的 FSR4 INT8 Extras；FSR 模式保守回退 FSR3.1，不使用 FP8")
+    if not src_patch:
+        warnings.append("未找到 OptiPatcher 0.41，继续使用 OptiScaler 默认伪装；部分游戏需手动配置")
+    if not available:
+        missing.append("FSR 或 XeSS 运行库（请准备本地受支持缓存，不自动联网下载）")
     return {
-        "client_base": client_base,
-        "cache_roots": cache_roots,
-        "source_root": source_root,
-        "src_opti": src_opti,
-        "src_extra": src_extra,
-        "src_patch": src_patch,
-        "opti_version": opti_version,
-        "extra_version": extra_version,
-        "patch_version": patch_version,
-        "runtime_files": runtime_files,
-        "available_backends": available_backends,
-        "missing": missing,
-        "inject": "dxgi.dll",
+        "client_base": client_base, "cache_roots": cache_roots,
+        "source_root": opti_root or extra_root or patch_root,
+        "src_opti": src_opti, "src_extra": src_extra, "src_patch": src_patch,
+        "opti_version": opti_version, "extra_version": extra_version, "patch_version": patch_version,
+        "runtime_files": runtime_files, "available_backends": available,
+        "missing": missing, "warnings": warnings, "inject": "dxgi.dll",
     }
 
 def _optiscaler_normalize_backend(value, cfg=None):
@@ -2345,28 +2397,28 @@ def _optiscaler_plan(game_dir, cfg, backend="auto", analysis=None):
     runtime_names = {name.lower() for names in OPTI_RUNTIME_NAMES.values() for name in names}
 
     def add(src, rel, role):
-        if not os.path.isfile(src):
-            return
+        if not os.path.isfile(src) or _opti_is_reparse(src):
+            raise ValueError("源文件丢失或重解析: " + src)
+        if src.lower().endswith((".dll", ".asi")) and not _optiscaler_valid_dll(src):
+            raise ValueError("源 DLL 不完整: " + src)
+        dst = _safe_join(game_dir, rel)
         key = rel.replace("/", "\\").lower()
-        by_rel[key] = {"src": src, "dst": os.path.join(game_dir, rel),
-                       "rel": rel.replace("/", "\\"), "role": role}
+        by_rel[key] = {"src": src, "dst": dst, "rel": rel.replace("/", "\\"), "role": role}
 
     add(os.path.join(cfg["src_opti"], "OptiScaler.dll"), cfg["inject"], "主DLL->注入")
-    for root, dirs, files in os.walk(cfg["src_opti"]):
-        dirs.sort(key=str.lower)
-        files.sort(key=str.lower)
-        for fn in files:
-            if fn.lower() == "optiscaler.dll" or fn.lower() in runtime_names:
-                continue
-            sp = os.path.join(root, fn)
-            rel = os.path.relpath(sp, cfg["src_opti"]).replace("/", "\\")
-            add(sp, rel, "基础包")
+    for sp in _opti_cache_walk(cfg["src_opti"]):
+        fn = os.path.basename(sp)
+        rel = os.path.relpath(sp, cfg["src_opti"]).replace("/", "\\")
+        if fn.lower() == "optiscaler.dll" or fn.lower() in runtime_names or not _opti_package_file(rel):
+            continue
+        add(sp, rel, "基础包")
 
-    # Only the selected backend is copied. This is the important difference
-    # from the old FSR-only path: selecting XeSS now changes the actual runtime
-    # DLL set and the resulting OptiScaler.ini values.
-    for filename, source in sorted((cfg.get("runtime_files", {}).get(backend) or {}).items()):
-        add(source, os.path.basename(source), OPTI_BACKEND_LABELS.get(backend, backend) + " Runtime")
+    # Auto FG is independent of the SR choice. Keep the complete cross-vendor
+    # XeFG/FSR runtime set, including libxell/fakenvapi and split FSR FG DLLs.
+    # Apply the Extras override last, without renaming SDK/driver binaries.
+    for runtime_backend in OPTI_BACKENDS:
+        for filename, source in sorted((cfg.get("runtime_files", {}).get(runtime_backend) or {}).items()):
+            add(source, os.path.basename(source), OPTI_BACKEND_LABELS[runtime_backend] + " Runtime")
 
     if cfg.get("src_patch"):
         add(os.path.join(cfg["src_patch"], "OptiPatcher.asi"),
@@ -2407,36 +2459,86 @@ def _optiscaler_game_features(game_dir):
         "api": "unknown", "engine": "unknown", "features": [],
         "evidence": [], "existing": [], "runtime_backends": [],
         "runtime_paths": {"fsr": [], "xess": []},
-        "score": {"fsr": 0, "xess": 0},
+        "score": {"fsr": 0, "xess": 0}, "anti_cheat": False,
+        "native_fg_input": None, "scan_complete": False,
     }
     if not os.path.isdir(game_dir):
         result["evidence"].append("游戏目录不存在")
         return result
     files = []
+    result["scan_complete"] = True
     try:
         scan_root = _optiscaler_game_scan_root(game_dir)
-        for current, dirs, names in os.walk(scan_root):
+        def scan_error(error):
+            result["scan_complete"] = False
+            result["evidence"].append("扫描目录受限: " + str(error))
+        for current, dirs, entries in os.walk(scan_root, onerror=scan_error):
             rel = os.path.relpath(current, scan_root)
-            dirs.sort(key=str.lower)
-            names.sort(key=str.lower)
-            for name in names:
+            safe_dirs = []
+            for name in sorted(dirs, key=str.lower):
+                if _opti_is_reparse(os.path.join(current, name)):
+                    result["scan_complete"] = False
+                else:
+                    safe_dirs.append(name)
+            dirs[:] = safe_dirs
+            for name in sorted(entries, key=str.lower):
+                if _opti_is_reparse(os.path.join(current, name)):
+                    result["scan_complete"] = False
+                    continue
                 files.append(os.path.join(rel, name).replace("/", "\\").lower())
             if len(files) >= 50000:
+                result["scan_complete"] = False
+                result["evidence"].append("游戏文件扫描达到上限，无法确认安全性")
                 break
-    except Exception as e:
+    except OSError as e:
+        result["scan_complete"] = False
         result["evidence"].append("扫描目录受限: " + str(e))
     joined = "\n".join(files)
-    names = {os.path.basename(v) for v in files}
-
-    if "d3d12.dll" in names or "dxil.dll" in names or "d3d12" in joined:
+    names = {v.rsplit("\\", 1)[-1] for v in files}
+    anti_files = {"start_protected_game.exe", "easyanticheat_eos.exe", "easyanticheat.exe",
+                 "beservice.exe", "beclient_x64.dll", "easyanticheat_x64.dll", "equ8_client.dll",
+                 "vgk.sys", "vgc.exe", "ace-base.sys"}
+    result["anti_cheat"] = bool(names & anti_files)
+    # Prefer native FG when proven by game files; never use a bundled runtime
+    # written by YMCC as evidence that a game implements a native FG input.
+    managed = set()
+    backup = _find_ymcc_backup_dir(game_dir)
+    if backup:
+        try:
+            with open(os.path.join(backup, "manifest.json"), "r", encoding="utf-8") as f:
+                prior = json.load(f)
+            managed = {os.path.normcase(os.path.abspath(_safe_join(game_dir, str(item["rel"]))))
+                       for item in prior.get("items", [])}
+            result["native_fg_input"] = prior.get("analysis", {}).get("native_fg_input")
+        except (OSError, ValueError, KeyError):
+            pass
+    native_names = {path.rsplit("\\", 1)[-1] for path in files
+                    if os.path.normcase(os.path.abspath(os.path.join(scan_root, path))) not in managed}
+    api_names = {path.rsplit("\\", 1)[-1] for path in files
+                 if os.path.normcase(os.path.abspath(os.path.join(scan_root, path))) not in managed
+                 and "d3d12_optiscaler\\" not in path}
+    apis = set()
+    if api_names & {"d3d12.dll", "d3d12core.dll"}:
+        apis.add("dx12")
+    if "d3d11.dll" in api_names:
+        apis.add("dx11")
+    if api_names & {"vulkan-1.dll", "amd_fidelityfx_vk.dll"}:
+        apis.add("vulkan")
+    if len(apis) == 1:
+        result["api"] = next(iter(apis))
+        result["evidence"].append("发现图形 API 文件特征: " + result["api"])
+    elif apis:
+        result["evidence"].append("发现多种 API，不能确认本次启动使用 DX12")
+    if "nvngx_dlssg.dll" in native_names:
+        result["native_fg_input"] = "nukems"
         result["api"] = "dx12"
-        result["evidence"].append("发现 DirectX 12 文件特征")
-    elif "d3d11.dll" in names or "d3dcompiler_47.dll" in names:
-        result["api"] = "dx11"
-        result["evidence"].append("发现 DirectX 11 文件特征")
-    elif "vulkan-1.dll" in names or "vulkan" in joined:
-        result["api"] = "vulkan"
-        result["evidence"].append("发现 Vulkan 文件特征")
+    elif "amd_fidelityfx_framegeneration_dx12.dll" in native_names:
+        result["native_fg_input"] = "fsrfg"
+        result["api"] = "dx12"
+    elif native_names & {"ffx_fsr3_api_x64.dll", "ffx_fsr3_api_dx12_x64.dll"}:
+        # The legacy FSR3.0 SDK has a different input hook from FSR3.1.
+        result["native_fg_input"] = "fsrfg30"
+        result["api"] = "dx12"
 
     if "unityplayer.dll" in names or "gameassembly.dll" in names:
         result["engine"] = "unity"
@@ -2457,12 +2559,12 @@ def _optiscaler_game_features(game_dir):
         result["score"]["xess"] += 1
         result["score"]["fsr"] += 1
     for backend, runtime_names in OPTI_GAME_RUNTIME_NAMES.items():
-        matches = [path for path in files if os.path.basename(path) in
+        matches = [path for path in files if path.rsplit("\\", 1)[-1] in
                    {name.lower() for name in runtime_names}]
         if matches:
             result["runtime_backends"].append(backend)
             result["runtime_paths"][backend] = matches[:20]
-            display_names = sorted({os.path.basename(path) for path in matches})[:4]
+            display_names = sorted({path.rsplit("\\", 1)[-1] for path in matches})[:4]
             result["evidence"].append("发现 " + OPTI_BACKEND_LABELS[backend]
                                       + " 运行库文件: " + ", ".join(display_names))
 
@@ -2503,9 +2605,6 @@ def _optiscaler_game_features(game_dir):
 def _optiscaler_analyze(game_dir, cfg):
     features = _optiscaler_game_features(game_dir)
     available = list(cfg.get("available_backends") or [])
-    for backend in features.get("runtime_backends") or []:
-        if backend not in available:
-            available.append(backend)
     available = [backend for backend in OPTI_BACKENDS if backend in available]
     ranked = sorted(available, key=lambda b: (-features["score"].get(b, 0), b))
     recommended = ranked[0] if ranked else ""
@@ -2520,13 +2619,19 @@ def _optiscaler_analyze(game_dir, cfg):
     if not available:
         reasons.append("缓存和游戏目录中都没有可用的 FSR/XeSS 运行库")
     missing = list(cfg.get("missing") or [])
+    if not features["scan_complete"]:
+        missing.append("游戏扫描不完整，已停止自动注入；请使用 OPT 客户端检查目标")
     runtime_missing = [item for item in missing if str(item).startswith("FSR 或 XeSS")]
     if game_runtime and runtime_missing:
         missing = [item for item in missing if item not in runtime_missing]
     return {
-        "ok": os.path.isdir(game_dir) and bool(cfg.get("src_opti")),
+        "ok": os.path.isdir(game_dir) and bool(cfg.get("src_opti")) and not features["anti_cheat"] and features["scan_complete"],
+        "scan_complete": features["scan_complete"],
         "game_dir": game_dir,
         "api": features["api"],
+        "anti_cheat": features["anti_cheat"],
+        "native_fg_input": features["native_fg_input"],
+        "warnings": list(cfg.get("warnings") or []),
         "engine": features["engine"],
         "features": features["features"],
         "evidence": features["evidence"],
@@ -2575,59 +2680,134 @@ def _ini_set_section_values(text, section, values):
     if remaining:
         insert_at = section_end
         newline = "\r\n" if any(line.endswith("\r\n") for line in lines) else "\n"
-        lines[insert_at:insert_at] = [k + "=" + values[k] + newline for k in remaining]
+        if insert_at and not lines[insert_at - 1].endswith(("\n", "\r")):
+            lines[insert_at - 1] += newline
+        lines[insert_at:insert_at] = [k + "=" + values[k] + newline for k in values if k in remaining]
     return "".join(lines)
 
 
-def _optiscaler_configure_backend(game_dir, backend, analysis):
-    config_path = os.path.join(game_dir, "OptiScaler.ini")
-    if not os.path.isfile(config_path):
-        return {"ok": False, "changed": False, "msgs": ["安装后未找到 OptiScaler.ini"]}
+def _optiscaler_template(backend, analysis, cfg):
+    """0.9.4 / 0.9.5-pre4 INI vocabulary, INT8-only SR + conservative Auto x2.
+
+    Keys verified against the shipped INIs and v0.9.4 Config.cpp. In particular,
+    ffx/ffx_12 and Fsr4ForceModel are NOT supported keys in these builds.
+    Quality/exposure/HDR stay game-controlled; no vendor/device-ID forcing.
+    """
+    sections = {
+        "Upscalers": ({"Dx11Upscaler": "xess_12", "Dx12Upscaler": "xess", "VulkanUpscaler": "xess"}
+                      if backend == "xess" else
+                      {"Dx11Upscaler": "fsr31_12", "Dx12Upscaler": "fsr31", "VulkanUpscaler": "fsr31_12"}),
+        "FSR": {"UpscalerIndex": "0" if backend == "fsr" and cfg.get("src_extra") else "1",
+                "Fsr4Update": "true" if cfg.get("src_extra") else "false",
+                "Fsr4ForceEnableInt8": "true",
+                # Leave the normal AMD driver-loading policy alone. Excluding
+                # custom amdxc64.dll from the copy plan is NOT equivalent to
+                # disabling the driver's own amdxc64.dll (needed by some GPUs).
+                "Fsr4DoNotLoadAmdxc64": "auto", "FGIndex": "1"},
+        "UpscaleRatio": {"UpscaleRatioOverrideEnabled": "false"},
+        "QualityOverrides": {"QualityRatioOverrideEnabled": "false"},
+        "Spoofing": {"Dxgi": "auto", "StreamlineSpoofing": "auto", "Vulkan": "auto", "VulkanExtensionSpoofing": "auto"},
+        "Plugins": {"LoadAsiPlugins": "true" if cfg.get("src_patch") else "false"},
+        "Libraries": {"OptiDllPath": "auto", "FfxDx12Path": "auto", "FfxDx12SRPath": "auto", "FfxDx12FGPath": "auto", "FfxVkPath": "auto", "XeSSPath": "auto", "XeFGPath": "auto", "XeLLPath": "auto", "XeSSDx11Path": "auto"},
+        "XeFG": {"InterpolationCount": "1", "IgnoreInitChecks": "false"},
+    }
+    warnings = []
+    src = cfg.get("src_opti") or ""
+    runtimes = {name: path for files in (cfg.get("runtime_files") or {}).values() for name, path in files.items()}
+    exists = lambda name: bool(src) and _optiscaler_valid_dll(runtimes.get(name) or os.path.join(src, name))
+    xe_fg = all(exists(name) for name in ("libxess_fg.dll", "libxell.dll", "fakenvapi.dll"))
+    # pre4 uses a split-effect loader, whereas 0.9.4's SDK is monolithic.
+    fsr_fg = (exists("amd_fidelityfx_dx12.dll") or exists("amd_fidelityfx_loader_dx12.dll")) and (
+        cfg.get("opti_version") != "0.9.5-pre4" or exists("amd_fidelityfx_framegeneration_dx12.dll"))
+    preferred_output = "xefg" if backend == "xess" else "fsrfg"
+    fallback_output = "fsrfg" if preferred_output == "xefg" else "xefg"
+    available_outputs = {"xefg": xe_fg, "fsrfg": fsr_fg}
+    output = preferred_output if available_outputs[preferred_output] else fallback_output if available_outputs[fallback_output] else "nofg"
+    native = analysis.get("native_fg_input")
+    if native == "nukems" and exists("dlssg_to_fsr3_amd_is_better.dll") and exists("fakenvapi.dll"):
+        fg_input, output = "nukems", "nukems"
+        if cfg.get("src_patch"):
+            sections["Spoofing"]["Dxgi"] = "true"
+            sections["Spoofing"]["StreamlineSpoofing"] = "true"
+        warnings.append("Auto x2 使用原生 DLSS-G/Nukem 路径；需在游戏内启用 DLSS 插帧")
+    elif native in ("fsrfg", "fsrfg30") and output != "nofg":
+        fg_input = native
+    elif analysis.get("api") == "dx12" and output != "nofg":
+        fg_input = "upscaler"
+        warnings.append("Auto x2 使用实验性 OptiFG；需要游戏提供深度/运动矢量，异常时请在 OPT 客户端关闭插帧")
+        warnings.append("OptiFG 可能影响 Steam Input/覆盖层；手柄异常时可在 OPT 客户端调整 DisableOverlays，RTSS 覆盖层可能增加不稳定性")
+        if analysis.get("engine") == "unreal" and "xess" in (analysis.get("existing") or []):
+            warnings.append("Unreal 游戏的原生 XeSS 输入可能不提供深度，OptiFG 无法正常插帧；请选择游戏内 DLSS/FSR 输入或关闭 FG（XeSS 超分输出不是输入）")
+    else:
+        fg_input, output = "nofg", "nofg"
+        warnings.append("未确认可用 DX12 / 原生插帧输入，保留超分但不强开插帧（Auto x2 安全降级）")
+    if output == fallback_output and available_outputs[preferred_output] is False and output != "nofg":
+        warnings.append("所选模式的首选插帧运行库不可用，Auto x2 已使用兼容回退：" + output)
+    sections["FrameGen"] = {"Enabled": "true" if fg_input != "nofg" else "false", "FGInput": fg_input, "FGOutput": output}
+    # Legacy 0.9.x reads this key from OptiFG, not the client's newer HUDFix section.
+    sections["OptiFG"] = {"HUDFix": "true" if fg_input == "upscaler" else "auto"}
+    if not xe_fg and output == "fsrfg":
+        warnings.append("XeFG 依赖不完整，Auto x2 已回退 FSR3.1 FG")
+    return sections, warnings
+
+
+def _optiscaler_configure_backend(game_dir, backend, analysis, cfg):
+    config_path = _safe_join(game_dir, "OptiScaler.ini")
     try:
-        with open(config_path, "r", encoding="utf-8-sig", errors="ignore") as f:
-            text = f.read()
-        if backend == "xess":
-            values = {"Dx11Upscaler": "xess_12", "Dx12Upscaler": "xess", "VulkanUpscaler": "xess"}
-        else:
-            values = {"Dx11Upscaler": "ffx_12", "Dx12Upscaler": "ffx", "VulkanUpscaler": "ffx"}
-        updated = _ini_set_section_values(text, "Upscalers", values)
+        text = _opti_read_ini(config_path)
+        sections, warnings = _optiscaler_template(backend, analysis, cfg)
+        updated = text
+        for section, values in sections.items():
+            updated = _ini_set_section_values(updated, section, values)
         if updated != text:
-            with open(config_path, "w", encoding="utf-8", newline="") as f:
-                f.write(updated)
-        return {"ok": True, "changed": updated != text, "path": config_path, "values": values}
+            # A killed process must leave either the copied source INI or a
+            # complete configured INI, never a truncated in-place write.
+            fd, temp = tempfile.mkstemp(prefix=".YeManCC-ini-", suffix=".tmp", dir=game_dir)
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8", newline="") as f:
+                    f.write(updated)
+                    f.flush()
+                    os.fsync(f.fileno())
+                _opti_read_ini(temp)
+                os.replace(temp, _safe_join(game_dir, "OptiScaler.ini"))
+            finally:
+                if os.path.exists(temp):
+                    os.remove(temp)
+        return {"ok": True, "changed": updated != text, "path": config_path,
+                "values": sections, "warnings": warnings}
     except Exception as e:
         return {"ok": False, "changed": False, "msgs": ["写入 OptiScaler.ini 失败: " + str(e)]}
 
 def _optiscaler_status(game_dir, cfg):
-    """installed = 注入 DLL 存在且哈希与缓存 OptiScaler.dll 一致。
-    仅 hash 匹配才算已装：很多游戏自带 dxgi.dll，不能用「存在即已装」判断。"""
+    """Ownership records first, hash match only as advisory untracked evidence."""
+    pending = _ymcc_backup_dir(game_dir) + ".pending"
+    if os.path.lexists(pending):
+        return {"installed": True, "reason": "pending_transaction", "recovery_required": True,
+                "msgs": ["发现中断事务，请选择卸载并还原；不要重复安装"]}
     for ybdir in _ymcc_backup_candidates(game_dir):
         ymanifest = os.path.join(ybdir, "manifest.json")
         if not os.path.isfile(ymanifest):
             continue
-        try:
-            with open(ymanifest, "r", encoding="utf-8", errors="ignore") as f:
-                m = json.load(f)
-            if _canonical_game_dir(m.get("game_dir", "")) == _canonical_game_dir(game_dir):
-                return {"installed": True, "reason": "yemancc_manifest",
-                        "version": str(m.get("source_version", "")),
-                        "backend": str(m.get("backend", "")) or None}
-        except Exception:
-            pass
+        m = _opti_load_json(ymanifest)
+        if _canonical_game_dir(m.get("game_dir", "")) != _canonical_game_dir(game_dir):
+            raise ValueError("YMCC 备份目录目标不一致")
+        if m.get("state") != "committed":
+            raise ValueError("YMCC 安装记录未提交，请先恢复")
+        return {"installed": True, "reason": "yemancc_manifest", "backend": m.get("backend"),
+                "version": m.get("source_version"), "backup": ybdir}
     client_backup = _find_client_backup(game_dir)
     if client_backup:
         return {"installed": True, "reason": "optiscalerclient_backup", "backend": None}
     if not cfg.get("src_opti"):
-        return {"installed": False, "reason": "source_missing",
-                "msgs": ["缓存缺少 OptiScaler.dll"]}
+        return {"installed": False, "reason": "source_missing", "msgs": ["缓存缺少 OptiScaler.dll"]}
     inject_dst = os.path.join(game_dir, cfg["inject"])
     src = os.path.join(cfg["src_opti"], "OptiScaler.dll")
     if not os.path.isfile(inject_dst):
         return {"installed": False, "reason": "inject_missing"}
-    if not os.path.isfile(src):
-        return {"installed": False, "reason": "source_missing",
-                "msgs": ["缓存缺少 OptiScaler.dll，无法安全判断安装状态"]}
-    if _sha256(inject_dst) == _sha256(src):
+    source_hash = _sha256(src)
+    if not source_hash:
+        return {"installed": False, "reason": "source_missing", "msgs": ["缓存缺少 OptiScaler.dll，无法安全判断安装状态"]}
+    if _sha256(inject_dst) == source_hash:
         return {"installed": True, "reason": "hash_match", "backend": None}
     return {"installed": False, "reason": "inject_present_hash_diff", "backend": None}
 
@@ -2688,27 +2868,176 @@ def _find_ymcc_backup_dir(game_dir):
 
 def _write_json_file(path, value):
     parent = os.path.dirname(path)
-    if parent:
-        os.makedirs(parent, exist_ok=True)
-    tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(value, f, ensure_ascii=False, indent=2)
-        f.flush()
-        os.fsync(f.fileno())
-    os.replace(tmp, path)
+    _opti_plain_path(parent)
+    os.makedirs(parent, exist_ok=True)
+    destination = _safe_join(parent, os.path.basename(path))
+    fd, temp = tempfile.mkstemp(prefix=".YeManCC-manifest-", suffix=".tmp", dir=parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(value, f, ensure_ascii=False, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(temp, destination)
+    finally:
+        if os.path.exists(temp):
+            os.remove(temp)
+
+
+def _opti_plain_path(path):
+    """Reject links in *all* ancestors, including a junction above the selected directory."""
+    current = os.path.abspath(path)
+    while True:
+        if _opti_is_reparse(current):
+            raise ValueError("link/junction ancestor: " + current)
+        parent = os.path.dirname(current)
+        if parent == current:
+            break
+        current = parent
+
+
+def _opti_remove_backup(path):
+    """Recursive cleanup is restricted to a verified child of YMCC's backup store."""
+    root = os.path.normcase(os.path.realpath(_ymcc_backup_root()))
+    target = os.path.normcase(os.path.realpath(path))
+    _opti_plain_path(path)
+    if target == root or os.path.commonpath((root, target)) != root:
+        raise ValueError("backup cleanup escapes store")
+    # Do not recursively delete an injected junction anywhere in a backup tree.
+    for current, dirs, files in os.walk(path):
+        if any(_opti_is_reparse(os.path.join(current, n)) for n in dirs + files):
+            raise ValueError("backup cleanup contains linked entry")
+    shutil.rmtree(path)
+
 
 def _safe_join(base, relative):
-    """Join a manifest path while rejecting traversal outside its root."""
-    base_abs = os.path.normcase(os.path.abspath(base))
-    target_abs = os.path.normcase(os.path.abspath(os.path.join(base, str(relative))))
+    """Reject traversal, absolute/ADS/device paths, links/junctions and hard links."""
+    if not isinstance(relative, str) or not relative or ntpath.isabs(relative) or ":" in relative:
+        raise ValueError("invalid relative path")
+    parts = re.split(r"[\\/]", relative)
+    for part in parts:
+        if not part or part in (".", "..") or part.rstrip(" .") != part or any(ord(c) < 32 for c in part):
+            raise ValueError("invalid path segment")
+        if re.match(r"^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)", part, re.I):
+            raise ValueError("reserved Windows path")
+    base_abs = os.path.abspath(base)
+    _opti_plain_path(base_abs)
+    target = os.path.abspath(os.path.join(base_abs, *parts))
+    base_real = os.path.normcase(os.path.realpath(base_abs))
+    if os.path.commonpath((base_real, os.path.normcase(os.path.realpath(target)))) != base_real:
+        raise ValueError("path escapes root")
+    cursor = base_abs
+    if _opti_is_reparse(cursor):
+        raise ValueError("reparse root")
+    for part in parts:
+        cursor = os.path.join(cursor, part)
+        if _opti_is_reparse(cursor):
+            raise ValueError("link/junction path")
+    if os.path.isfile(target) and os.stat(target).st_nlink > 1:
+        raise ValueError("hard-linked target")
+    return target
+
+
+def _opti_load_json(path):
+    if _opti_is_reparse(path) or os.path.getsize(path) > 4 << 20:
+        raise ValueError("manifest invalid/too large")
+    with open(path, "r", encoding="utf-8-sig") as f:
+        obj = json.load(f)
+    if not isinstance(obj, dict):
+        raise ValueError("manifest must be an object")
+    return obj
+
+
+def _opti_target_check(game_dir, cfg=None):
+    if not os.path.isabs(game_dir) or not os.path.isdir(game_dir) or _opti_is_reparse(game_dir):
+        raise ValueError("游戏目录无效或为重解析路径")
+    _opti_plain_path(game_dir)
+    game = _canonical_game_dir(game_dir)
+    if os.path.dirname(game) == game or game == os.path.splitdrive(game)[0]:
+        raise ValueError("不允许在磁盘根目录注入")
+    protected = [_ymcc_backup_root(), (cfg or {}).get("src_opti"), (cfg or {}).get("src_extra"),
+                 (cfg or {}).get("src_patch"), (cfg or {}).get("client_base"), os.environ.get("SystemRoot"),
+                 os.path.dirname(os.path.abspath(__file__))]
+    protected.extend((cfg or {}).get("cache_roots") or [])
+    if getattr(sys, "frozen", False):
+        protected.append(os.path.dirname(sys.executable))
+    for root in filter(None, protected):
+        root = _canonical_game_dir(root)
+        try:
+            if os.path.commonpath((root, game)) in (root, game):
+                raise ValueError("目标与系统、控制器或缓存/备份目录重叠")
+        except ValueError as e:
+            if "重叠" in str(e):
+                raise
+
+
+@contextmanager
+def _opti_lock(game_dir):
+    root = os.path.join(os.path.dirname(_ymcc_backup_root()), "optiscaler_locks")
+    _opti_plain_path(root)
+    os.makedirs(root, exist_ok=True)
+    path = _safe_join(root, hashlib.sha256(_canonical_game_dir(game_dir).encode("utf-8")).hexdigest() + ".lock")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "a+b") as lock:
+        if os.path.getsize(path) == 0:
+            lock.write(b"0")
+            lock.flush()
+        lock.seek(0)
+        acquired = False
+        try:
+            if os.name == "nt":
+                import msvcrt
+                msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            acquired = True
+            yield
+        except OSError as e:
+            if not acquired:
+                raise ValueError("该游戏已有 OPT 事务正在执行，请稍后重试") from e
+            raise
+        finally:
+            if acquired:
+                lock.seek(0)
+                if os.name == "nt":
+                    msvcrt.locking(lock.fileno(), msvcrt.LK_UNLCK, 1)
+                else:
+                    fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+    # Do not unlink the inode: a waiting process may already have opened it.
+
+
+def _opti_mutation(game_dir, cfg, dry, fn, *args):
     try:
-        if os.path.commonpath((base_abs, target_abs)) != base_abs:
-            raise ValueError("manifest path escapes root")
-    except ValueError:
-        raise ValueError("manifest path escapes root")
-    return target_abs
+        _opti_target_check(game_dir, cfg)
+        if dry:
+            return fn(game_dir, cfg, True, *args)
+        with _opti_lock(game_dir):
+            return fn(game_dir, cfg, False, *args)
+    except Exception as e:
+        return {"ok": False, "msgs": ["OptiScaler 已安全停止: " + str(e)]}
+
+
+def _opti_atomic_restore(source, destination, expected):
+    os.makedirs(os.path.dirname(destination), exist_ok=True)
+    fd, temp = tempfile.mkstemp(prefix=".YeManCC-restore-", suffix=".tmp", dir=os.path.dirname(destination))
+    os.close(fd)
+    try:
+        shutil.copy2(source, temp)
+        if not expected or _sha256(temp) != expected:
+            raise ValueError("还原文件校验失败")
+        os.replace(temp, destination)
+        if _sha256(destination) != expected:
+            raise ValueError("还原后校验失败")
+    finally:
+        if os.path.exists(temp):
+            os.remove(temp)
+
 
 def _optiscaler_install(game_dir, cfg, dry, backend="auto"):
+    return _opti_mutation(game_dir, cfg, dry, _optiscaler_install_locked, backend)
+
+
+def _optiscaler_install_locked(game_dir, cfg, dry, backend="auto"):
     hard_missing = [item for item in (cfg.get("missing") or [])
                     if str(item).startswith("OptiScaler.dll")]
     if hard_missing:
@@ -2716,6 +3045,10 @@ def _optiscaler_install(game_dir, cfg, dry, backend="auto"):
     if not os.path.isdir(game_dir):
         return {"ok": False, "msgs": ["游戏目录不存在: " + game_dir]}
     analysis = _optiscaler_analyze(game_dir, cfg)
+    if not analysis.get("scan_complete", True):
+        return {"ok": False, "msgs": analysis.get("missing") or ["游戏扫描不完整，拒绝注入"]}
+    if analysis.get("anti_cheat"):
+        return {"ok": False, "msgs": ["检测到反作弊，已拒绝自动注入；游戏文件未修改"]}
     selected_backend = _optiscaler_normalize_backend(
         backend, {"available_backends": analysis.get("available_backends") or []})
     if not selected_backend:
@@ -2723,7 +3056,15 @@ def _optiscaler_install(game_dir, cfg, dry, backend="auto"):
                               for v in (analysis.get("available_backends") or []))
         return {"ok": False, "msgs": ["未找到可用的 FSR/XeSS 运行库"
                                        + ("，当前可用: " + available if available else "")
-                                       + "；未结束游戏进程"]}
+                                       + "；游戏文件未修改"]}
+    if _find_client_backup(game_dir):
+        return {"ok": False, "msgs": ["该游戏已有 OPT 客户端安装记录，请先在客户端卸载还原"]}
+    for root in cfg.get("cache_roots") or []:
+        for version in OPTI_SUPPORTED_VERSIONS["OptiScaler"]:
+            old = os.path.join(root, "OptiScaler", version, "OptiScaler.dll")
+            old_hash = _sha256(old)
+            if old_hash and old_hash == _sha256(os.path.join(game_dir, "dxgi.dll")):
+                return {"ok": False, "msgs": ["发现没有 YMCC 记录的 OptiScaler，拒绝将注入库当原件备份；请先还原"]}
     plan = _optiscaler_plan(game_dir, cfg, selected_backend, analysis)
     missing = [p["src"] for p in plan if not os.path.isfile(p["src"])]
     if missing or not plan:
@@ -2735,6 +3076,10 @@ def _optiscaler_install(game_dir, cfg, dry, backend="auto"):
         return {"ok": False, "msgs": ["该游戏已有 YeManCC 安装记录，请先卸载后再安装新版本"]}
     if os.path.exists(bdir):
         return {"ok": False, "msgs": ["YeManCC 备份目录存在但清单缺失，已拒绝覆盖以保护原文件"]}
+    pending = bdir + ".pending"
+    _opti_plain_path(pending)
+    if os.path.exists(pending):
+        return {"ok": False, "msgs": ["发现未完成的安装事务，已保留备份并拒绝覆盖: " + pending]}
     if dry:
         return {"ok": True, "dry": True, "count": len(plan),
                 "plan": [p["rel"] for p in plan],
@@ -2748,9 +3093,9 @@ def _optiscaler_install(game_dir, cfg, dry, backend="auto"):
         parent = os.path.dirname(bdir)
         os.makedirs(parent, exist_ok=True)
         if os.path.exists(pending):
-            shutil.rmtree(pending)
+            return {"ok": False, "msgs": ["发现未完成的安装事务，已保留备份并拒绝覆盖: " + pending]}
         files_dir = os.path.join(pending, "files")
-        manifest = {"game_dir": game_dir,
+        manifest = {"schema_version": 2, "game_dir": game_dir,
                     "installed_at": time.strftime("%Y-%m-%d %H:%M:%S"),
                     "backend": selected_backend,
                     "analysis": analysis,
@@ -2762,16 +3107,26 @@ def _optiscaler_install(game_dir, cfg, dry, backend="auto"):
     except Exception as e:
         _olog("install transaction preparation failed", e)
         try:
-            shutil.rmtree(pending, ignore_errors=True)
+            _opti_remove_backup(pending)
         except Exception:
             pass
         return {"ok": False, "msgs": ["准备安装事务失败: " + str(e)]}
     written = 0
     touched = []
     try:
+        # Only remove deployment directories absent before this transaction.
+        created_dirs = set()
+        for p in plan:
+            parent = ntpath.dirname(p["rel"])
+            while parent:
+                if not os.path.isdir(_safe_join(game_dir, parent)):
+                    created_dirs.add(parent)
+                parent = ntpath.dirname(parent)
+        manifest["created_directories"] = sorted(created_dirs, key=lambda rel: (len(rel), rel.lower()))
         # 先完整备份并校验全部原文件，期间不覆盖游戏目录。
         for index, p in enumerate(plan):
             dst = p["dst"]
+            dst = _safe_join(game_dir, p["rel"])
             exists = os.path.exists(dst)
             if exists and not os.path.isfile(dst):
                 raise RuntimeError("目标不是普通文件: " + p["rel"])
@@ -2790,12 +3145,21 @@ def _optiscaler_install(game_dir, cfg, dry, backend="auto"):
                 raise RuntimeError("源文件不可读取: " + p["src"])
             manifest["items"].append({"rel": p["rel"], "had_original": had_original,
                                        "backup": bak_rel, "original_sha256": original_sha256,
-                                       "source_sha256": source_sha256})
+                                       "source_sha256": source_sha256, "touched": False})
         _write_json_file(os.path.join(pending, "manifest.pending.json"), manifest)
 
+        manifest["prepared"] = True
+        _write_json_file(os.path.join(pending, "manifest.pending.json"), manifest)
         # Copy through a same-directory temporary file, then atomically replace.
         for index, p in enumerate(plan):
-            dst = p["dst"]
+            dst = _safe_join(game_dir, p["rel"])
+            item = manifest["items"][index]
+            current_hash = _sha256(dst)
+            if (item["had_original"] and current_hash != item["original_sha256"]) or (not item["had_original"] and os.path.lexists(dst)):
+                raise ValueError("目标在备份后被其它程序改动: " + p["rel"])
+            # Persist intent BEFORE replacement so a killed process is recoverable.
+            item["touched"] = True
+            _write_json_file(os.path.join(pending, "manifest.pending.json"), manifest)
             d = os.path.dirname(dst)
             if d:
                 os.makedirs(d, exist_ok=True)
@@ -2820,11 +3184,15 @@ def _optiscaler_install(game_dir, cfg, dry, backend="auto"):
                 raise RuntimeError("写入后校验失败: " + p["rel"])
             written += 1
 
-        configured = _optiscaler_configure_backend(game_dir, selected_backend, analysis)
+        configured = _optiscaler_configure_backend(game_dir, selected_backend, analysis, cfg)
         if not configured.get("ok"):
             raise RuntimeError("后端配置失败: " + "；".join(configured.get("msgs") or []))
         manifest["backend_config"] = configured.get("values") or {}
 
+        for item in manifest["items"]:
+            item["installed_sha256"] = _sha256(_safe_join(game_dir, item["rel"]))
+            if not item["installed_sha256"]:
+                raise ValueError("提交前文件丢失: " + item["rel"])
         manifest["state"] = "committed"
         _write_json_file(os.path.join(pending, "manifest.json"), manifest)
         os.replace(pending, bdir)
@@ -2833,293 +3201,333 @@ def _optiscaler_install(game_dir, cfg, dry, backend="auto"):
         rollback_errors = []
         for dst, item in reversed(touched):
             try:
+                dst = _safe_join(game_dir, item["rel"])
+                current = _opti_restore_hash(dst)
+                if current and current not in (item.get("original_sha256"), item.get("source_sha256")) and item["rel"].lower() not in ("optiscaler.ini", "fakenvapi.ini"):
+                    raise ValueError("回滚目标已被其它程序改变，保留文件和备份")
                 if item.get("had_original") and item.get("backup"):
-                    shutil.copy2(os.path.join(files_dir, item["backup"]), dst)
-                elif os.path.exists(dst):
+                    _opti_atomic_restore(_safe_join(files_dir, item["backup"]), dst, item["original_sha256"])
+                elif os.path.isfile(dst):
                     os.remove(dst)
             except Exception as rollback_error:
                 rollback_errors.append(item.get("rel", dst) + ": " + str(rollback_error))
-        try:
-            shutil.rmtree(pending, ignore_errors=True)
-        except Exception:
-            pass
-        msg = "OptiScaler 安装事务失败，已回滚: " + str(e)
+        # A partial rollback must retain all original backups for recovery.
+        if not rollback_errors:
+            try:
+                _opti_remove_backup(pending)
+            except Exception:
+                pass
+        msg = "OptiScaler 安装事务失败，" + ("回滚未完成: " if rollback_errors else "已回滚: ") + str(e)
         if rollback_errors:
-            msg += "；回滚异常: " + "、".join(rollback_errors)
+            manifest["state"] = "rollback_incomplete"
+            try:
+                _write_json_file(os.path.join(pending, "manifest.pending.json"), manifest)
+            except OSError:
+                pass
+            msg += "；回滚异常（原件备份已保留于 " + pending + "）: " + "、".join(rollback_errors)
         return {"ok": False, "msgs": [msg], "written": written}
-    return {"ok": True, "written": written, "backup": bdir,
+    return {"ok": True, "written": written, "warnings": list(cfg.get("warnings") or []) + configured.get("warnings", []), "backup": bdir,
             "backend": selected_backend, "analysis": analysis,
             "source": cfg.get("source_root"),
             "version": manifest["source_version"]}
 
 def _find_client_backup(game_dir):
-    """在 OptiScalerClient 的 Backups 里找匹配本游戏目录的 manifest（用于卸载其安装的游戏）。"""
-    bdir = os.path.join(os.path.expandvars(r"%APPDATA%\OptiscalerClient"), "Backups")
+    """Find client records without silently ignoring corrupt matching manifests."""
+    bdir = os.path.join(os.environ.get("APPDATA", ""), "OptiscalerClient", "Backups")
     if not os.path.isdir(bdir):
         return None
     target = _canonical_game_dir(game_dir)
-    for name in os.listdir(bdir):
-        mfp = os.path.join(bdir, name, "manifest.json")
+    target_hash = hashlib.sha256(target.encode("utf-8")).hexdigest()[:8]
+    matches = []
+    for entry in os.scandir(bdir):
+        if not entry.is_dir(follow_symlinks=False) or _opti_is_reparse(entry.path):
+            continue
+        mfp = os.path.join(entry.path, "manifest.json")
         if not os.path.isfile(mfp):
             continue
         try:
-            with open(mfp, "r", encoding="utf-8", errors="ignore") as f:
-                m = json.load(f)
-        except Exception:
+            m = _opti_load_json(mfp)
+        except (OSError, ValueError) as e:
+            if entry.name.lower().endswith("_" + target_hash):
+                raise ValueError("目标客户端备份清单损坏，请先在客户端恢复") from e
             continue
-        gd = _canonical_game_dir(m.get("InstalledGameDirectory") or
-                                 m.get("GameDirectory") or m.get("game_dir") or "")
+        gd = _canonical_game_dir(m.get("InstalledGameDirectory") or m.get("GameDirectory") or m.get("game_dir") or "")
         if gd == target:
-            return m, os.path.join(bdir, name)
-    return None
+            matches.append((m, entry.path))
+    if len(matches) > 1:
+        raise ValueError("发现多个目标客户端备份，拒绝猜测原件")
+    return matches[0] if matches else None
 
 
 def _optiscaler_uninstall_untracked(game_dir, cfg, dry):
-    """Safely clean older installs that have no YeManCC manifest."""
-    inject = os.path.join(game_dir, cfg.get("inject", "dxgi.dll"))
-    source_inject = os.path.join(cfg.get("src_opti") or "", "OptiScaler.dll")
-    if not os.path.isfile(inject) or not os.path.isfile(source_inject):
-        return {"ok": True, "via": "none", "removed": 0, "restored": 0,
-                "dry": dry, "actions": [],
-                "msgs": ["未找到可安全确认的 OptiScaler 安装文件，未删除未知文件"]}
-    if _sha256(inject) != _sha256(source_inject):
-        return {"ok": True, "via": "none", "removed": 0, "restored": 0,
-                "dry": dry, "actions": [],
-                "msgs": ["dxgi.dll 不是当前缓存的 OptiScaler，未删除未知文件"]}
+    # Official runtime DLLs can be shipped by the game with IDENTICAL hashes.
+    # Without ownership/backup records, never delete them based on cache equality.
+    return {"ok": False, "via": "untracked", "removed": 0, "restored": 0,
+            "dry": dry, "actions": [], "msgs": ["没有可靠的安装/原件备份记录，未删除任何游戏文件；请使用 OPT 客户端或游戏校验还原"]}
 
-    candidates = [{"src": source_inject, "dst": inject, "rel": "dxgi.dll"}]
-    available = list(cfg.get("available_backends") or [])
-    for backend in OPTI_BACKENDS:
-        if backend not in available:
-            continue
-        for item in _optiscaler_plan(game_dir, cfg, backend,
-                                     {"available_backends": available}):
-            if item["rel"].lower() != "dxgi.dll":
-                candidates.append(item)
-    config_path = os.path.join(game_dir, "OptiScaler.ini")
-    if os.path.isfile(config_path):
-        try:
-            with open(config_path, "r", encoding="utf-8-sig", errors="ignore") as f:
-                config_text = f.read()
-            if "[Upscalers]" in config_text or "OptiScaler" in config_text:
-                candidates.append({"src": None, "dst": config_path, "rel": "OptiScaler.ini"})
-        except Exception:
-            pass
 
-    actions = []
-    failures = []
-    removed = 0
-    seen = set()
-    for item in candidates:
-        dst = item["dst"]
-        key = os.path.normcase(os.path.abspath(dst))
-        if key in seen or not os.path.isfile(dst):
-            continue
+def _opti_restore_hash(path):
+    if not os.path.lexists(path):
+        return None
+    if not os.path.isfile(path):
+        raise ValueError("恢复目标/原件不是普通文件: " + path)
+    digest = _sha256(path)
+    if not digest:
+        raise ValueError("无法读取恢复目标/原件，拒绝删除: " + path)
+    return digest
+
+
+def _opti_ymcc_restore_plan(game_dir, bdir, manifest, recovery=False):
+    if _opti_is_reparse(bdir) or _canonical_game_dir(manifest.get("game_dir", "")) != _canonical_game_dir(game_dir):
+        raise ValueError("备份目标不一致或为链接")
+    items = manifest.get("items")
+    if not isinstance(items, list) or not items or len(items) > 4096:
+        raise ValueError("备份清单 items 无效/为空")
+    if recovery:
+        if manifest.get("schema_version") != 2 or manifest.get("prepared") is not True:
+            raise ValueError("中断清单不具备完整恢复标记，请保留备份并人工处理")
+    elif manifest.get("state") != "committed":
+        raise ValueError("安装未提交，请先恢复中断事务")
+    seen, prepared = set(), []
+    for item in items:
+        if not isinstance(item, dict) or type(item.get("had_original")) is not bool:
+            raise ValueError("备份条目类型不正确")
+        rel = item.get("rel")
+        dst = _safe_join(game_dir, rel)
+        key = os.path.normcase(dst)
+        if key in seen:
+            raise ValueError("清单目标重复: " + str(rel))
         seen.add(key)
-        if item.get("src") and _sha256(dst) != _sha256(item["src"]):
+        if os.path.exists(dst) and not os.path.isfile(dst):
+            raise ValueError("目标不是文件: " + rel)
+        bak, original = None, None
+        if item["had_original"]:
+            bak = _safe_join(os.path.join(bdir, "files"), item.get("backup"))
+            original = _opti_restore_hash(bak)
+            if not original or (item.get("original_sha256") and original != item["original_sha256"]):
+                raise ValueError("原件备份缺失/校验失败: " + rel)
+        if recovery and not item.get("touched"):
             continue
-        if dry:
-            actions.append("delete " + item["rel"])
+        current = _opti_restore_hash(dst)
+        if current and current != original and rel.lower() not in ("optiscaler.ini", "fakenvapi.ini"):
+            expected = item.get("installed_sha256") or item.get("source_sha256")
+            if not expected or current != expected:
+                raise ValueError("安装后文件已被其它程序改变，已保留: " + rel)
+        prepared.append({"rel": rel, "dst": dst, "backup": bak, "hash": original, "current_sha256": current})
+    return prepared
+
+
+def _opti_client_restore_plan(game_dir, cdir, m):
+    status = m.get("OperationStatus", "committed")
+    target = m.get("InstalledGameDirectory") or m.get("GameDirectory") or m.get("game_dir")
+    if (not isinstance(status, str) or status.lower() != "committed" or _opti_is_reparse(cdir)
+            or _canonical_game_dir(target) != _canonical_game_dir(game_dir)):
+        raise ValueError("客户端安装记录未提交、目标不一致或路径为链接，请在客户端恢复")
+    _opti_plain_path(cdir)
+    installed = m.get("InstalledFiles", [])
+    backed = m.get("BackedUpFiles", [])
+    overwritten = m.get("FilesOverwritten", [])
+    created = m.get("FilesCreated", [])
+    snapshots = m.get("PreInstallKeyFiles", [])
+    if any(not isinstance(x, list) or len(x) > 4096 for x in (installed, backed, overwritten, created, snapshots)):
+        raise ValueError("客户端清单列表无效")
+    records, originals, absent, original_hashes, paths = {}, set(), set(), {}, {}
+
+    def key(rel):
+        k = os.path.normcase(_safe_join(game_dir, rel))
+        paths.setdefault(k, rel)  # Windows paths are case-insensitive in every list.
+        return k
+
+    def digest(value):
+        if value is None or value == "":
+            return None
+        if not isinstance(value, str) or not re.fullmatch(r"[0-9a-fA-F]{64}", value):
+            raise ValueError("客户端 SHA256 格式无效")
+        return value.lower()
+
+    for rel in installed:
+        key(rel)
+    for group, existed in ((overwritten, True), (created, False)):
+        for rec in group:
+            if not isinstance(rec, dict) or rec.get("ExistedBefore") is not existed:
+                raise ValueError("客户端文件记录无效/分类不一致")
+            k = key(rec.get("RelativePath"))
+            if k in records:
+                raise ValueError("客户端文件记录重复")
+            records[k] = rec
+            digest(rec.get("PostInstallSha256"))
+            original_hashes[k] = digest(rec.get("PreInstallSha256"))
+            (originals if existed else absent).add(k)
+    originals.update(key(rel) for rel in backed)
+    seen_snapshots = set()
+    for rec in snapshots:
+        if not isinstance(rec, dict) or type(rec.get("Existed")) is not bool:
+            raise ValueError("客户端原件快照无效")
+        k = key(rec.get("RelativePath"))
+        if k in seen_snapshots:
+            raise ValueError("客户端原件快照重复")
+        seen_snapshots.add(k)
+        # Snapshots are evidence for tracked files, not an instruction to
+        # restore/delete every key file the client happened to inspect.
+        (originals if rec["Existed"] else absent).add(k)
+        expected = digest(rec.get("Sha256"))
+        if expected and original_hashes.get(k) and original_hashes[k] != expected:
+            raise ValueError("客户端原件哈希记录矛盾")
+        if expected:
+            original_hashes[k] = expected
+    if originals & absent:
+        raise ValueError("客户端原件存在性记录矛盾")
+    # key() added snapshots for normalization; only deploy/backup lists own files.
+    tracked = {os.path.normcase(_safe_join(game_dir, rel)) for rel in installed + backed}
+    tracked.update(records)
+    if not tracked:
+        raise ValueError("客户端清单为空，拒绝报告虚假卸载成功")
+    prepared = []
+    for k, rel in paths.items():
+        if k not in tracked:
             continue
+        dst = _safe_join(game_dir, rel)
+        rec = records.get(k, {})
+        bak = _safe_join(os.path.join(cdir, "files"), rec.get("BackupRelativePath") or rel)
+        original_hash = _opti_restore_hash(bak)
+        if os.path.exists(dst) and not os.path.isfile(dst):
+            raise ValueError("客户端目标变为目录: " + rel)
+        if original_hash:
+            if k in absent:
+                raise ValueError("客户端新建文件出现未知原件备份: " + rel)
+            expected = original_hashes.get(k)
+            if expected and original_hash != expected:
+                raise ValueError("客户端原件校验失败: " + rel)
+        elif k in originals or k not in absent:
+            raise ValueError("客户端原件缺失/归属不明，停止删除: " + rel)
+        current = _opti_restore_hash(dst)
+        expected = digest(rec.get("PostInstallSha256"))
+        if current and current != original_hash and rel.lower() not in ("optiscaler.ini", "fakenvapi.ini"):
+            if not expected or current != expected:
+                raise ValueError("客户端安装文件已改变/缺少安装哈希，已保留: " + rel)
+        prepared.append({"rel": rel, "dst": dst, "backup": bak if original_hash else None,
+                         "hash": original_hash, "current_sha256": current})
+    return prepared
+
+
+def _opti_apply_restore(game_dir, prepared, dry, created_dirs=None):
+    created_dirs = created_dirs or []
+    if not isinstance(created_dirs, list) or len(created_dirs) > 4096:
+        raise ValueError("创建目录清单无效")
+    # Validate all directory records before restoring any file.
+    directories = [_safe_join(game_dir, rel) for rel in created_dirs]
+    actions, failures, removed, restored = [], [], 0, 0
+    for item in prepared:
+        rel = item["rel"]
         try:
-            os.remove(dst)
-            removed += 1
-            actions.append("delete " + item["rel"])
-        except Exception as e:
-            failures.append("delete " + item["rel"] + ": " + str(e))
-    if not dry and removed:
-        for name in ("D3D12_Optiscaler", "Licenses", "plugins"):
-            path = os.path.join(game_dir, name)
-            if os.path.isdir(path):
-                try:
-                    if not os.listdir(path):
-                        os.rmdir(path)
-                except Exception:
-                    pass
-    return {"ok": not failures, "via": "legacy_safe_cleanup", "removed": removed,
-            "restored": 0, "dry": dry, "actions": actions, "msgs": failures}
+            dst = _safe_join(game_dir, rel)
+            current = _opti_restore_hash(dst)
+            # Keep restore retries idempotent, but never delete/overwrite a new
+            # binary written by a game updater after the preflight validation.
+            if current != item["current_sha256"] and current != item["hash"]:
+                raise ValueError("还原目标在检查后发生变化，已保留")
+            if item["backup"]:
+                actions.append("restore " + rel)
+                if not dry:
+                    _opti_atomic_restore(item["backup"], dst, item["hash"])
+                    restored += 1
+            elif os.path.isfile(dst):
+                actions.append("delete " + rel)
+                if not dry:
+                    os.remove(dst)
+                    removed += 1
+        except (OSError, ValueError) as e:
+            failures.append(rel + ": " + str(e))
+    if not dry and not failures:
+        # Legacy manifests without directory ownership leave empty folders alone.
+        # Never recursively remove game directories.
+        for dd in sorted(set(directories), key=lambda path: len(path), reverse=True):
+            try:
+                dd = _safe_join(game_dir, os.path.relpath(dd, game_dir))
+                if os.path.isdir(dd) and not os.listdir(dd):
+                    os.rmdir(dd)
+            except (OSError, ValueError) as e:
+                failures.append(dd + ": " + str(e))
+    return {"ok": not failures, "removed": removed, "restored": restored,
+            "dry": dry, "actions": actions, "msgs": failures}
 
 
 def _optiscaler_uninstall(game_dir, cfg, dry):
-    ybdir = _find_ymcc_backup_dir(game_dir) or _ymcc_backup_dir(game_dir)
-    ymanifest = os.path.join(ybdir, "manifest.json")
-    removed = 0
-    restored = 0
-    actions = []
-    failures = []
+    return _opti_mutation(game_dir, cfg, dry, _optiscaler_uninstall_locked)
 
-    if os.path.isfile(ymanifest):
-        # 主路径：YeManCC 自管备份（我们安装的游戏）
-        try:
-            with open(ymanifest, "r", encoding="utf-8", errors="ignore") as f:
-                m = json.load(f)
-        except Exception:
-            return {"ok": False, "msgs": ["读取 YeManCC 备份 manifest 失败"]}
-        files_dir = os.path.join(ybdir, "files")
-        for it in m.get("items", []):
-            try:
-                rel = str(it["rel"])
-                dst = _safe_join(game_dir, rel)
-                bak = _safe_join(files_dir, it["backup"]) if it.get("backup") else None
-            except (KeyError, ValueError) as e:
-                return {"ok": False, "msgs": ["安装清单路径无效，已停止卸载: " + str(e)]}
-            if it.get("had_original") and bak and os.path.isfile(bak):
-                if dry:
-                    actions.append("restore " + rel)
-                else:
-                    try:
-                        shutil.copy2(bak, dst); restored += 1
-                        actions.append("restore " + rel)
-                    except Exception as e:
-                        failures.append("restore " + rel + ": " + str(e))
-                        actions.append("restore FAIL " + rel + " " + str(e))
-                continue
-            # 无原件 -> 删除
-            if os.path.exists(dst):
-                if dry:
-                    actions.append("delete " + rel)
-                else:
-                    try:
-                        if os.path.isdir(dst):
-                            shutil.rmtree(dst)
-                        else:
-                            os.remove(dst)
-                        removed += 1
-                    except Exception as e:
-                        failures.append("delete " + rel + ": " + str(e))
-                        actions.append("delete FAIL " + rel + " " + str(e))
-                        continue
-                    actions.append("delete " + rel)
-        if not dry:
-            for d in ("D3D12_Optiscaler", "Licenses", "plugins"):
-                dd = os.path.join(game_dir, d)
-                if os.path.isdir(dd):
-                    try:
-                        if not os.listdir(dd):
-                            os.rmdir(dd)
-                    except Exception:
-                        pass
-            try:
-                shutil.rmtree(ybdir, ignore_errors=True)
-            except Exception:
-                pass
-        return {"ok": not failures, "via": "yemancc", "removed": removed,
-                "restored": restored, "dry": dry, "actions": actions,
-                "backend": m.get("backend"), "msgs": failures}
 
-    # 回退路径：OptiScalerClient 自带 Backups（游戏是它装的）
+def _optiscaler_uninstall_locked(game_dir, cfg, dry):
+    ybdir = _find_ymcc_backup_dir(game_dir)
+    pending = _ymcc_backup_dir(game_dir) + ".pending"
+    if os.path.isdir(pending):
+        # Recover the original state, not another installation, from durable intent.
+        manifest_path = os.path.join(pending, "manifest.pending.json")
+        if not os.path.isfile(manifest_path):
+            raise ValueError("发现中断备份但没有恢复清单，已保留")
+        m = _opti_load_json(manifest_path)
+        prepared = _opti_ymcc_restore_plan(game_dir, pending, m, recovery=True)
+        result = _opti_apply_restore(game_dir, prepared, dry, m.get("created_directories", []))
+        result.update(via="pending_recovery", backend=m.get("backend"))
+        if result["ok"] and not dry:
+            _opti_remove_backup(pending)
+        return result
+    if ybdir:
+        m = _opti_load_json(os.path.join(ybdir, "manifest.json"))
+        prepared = _opti_ymcc_restore_plan(game_dir, ybdir, m)
+        result = _opti_apply_restore(game_dir, prepared, dry, m.get("created_directories", []))
+        result.update(via="yemancc", backend=m.get("backend"))
+        if result["ok"] and not dry:
+            _opti_remove_backup(ybdir)
+        return result
     found = _find_client_backup(game_dir)
-    if not found:
-        return _optiscaler_uninstall_untracked(game_dir, cfg, dry)
-    m, cdir = found
-    files_dir = os.path.join(cdir, "files")
-    # 直接以 Backups/<dir>/files/ 里的原始备份为准：
-    #  - 某 InstalledFile 在 files/ 中有同名备份 -> 还原原件（覆盖 OptiScaler 版）
-    #  - 否则该文件是 OptiScaler 新建/覆盖且无原备份 -> 删除
-    # 这样即使 manifest 的 BackedUpFiles 字段为空，也能正确还原（files/ 始终含原件）。
-    installed_files = list(m.get("InstalledFiles", []))
-    overwritten = m.get("FilesOverwritten", [])
-    if isinstance(overwritten, list):
-        for entry in overwritten:
-            if isinstance(entry, dict):
-                rel = entry.get("RelativePath")
-                if rel and rel not in installed_files:
-                    installed_files.append(rel)
-    for rel in installed_files:
-        try:
-            dst = _safe_join(game_dir, rel)
-            backup_rel = rel
-            for entry in overwritten if isinstance(overwritten, list) else []:
-                if isinstance(entry, dict) and entry.get("RelativePath") == rel:
-                    backup_rel = entry.get("BackupRelativePath") or rel
-                    break
-            bak = _safe_join(files_dir, backup_rel)
-        except ValueError:
-            actions.append("skip unsafe path " + str(rel))
-            continue
-        if os.path.isfile(bak):
-            if dry:
-                actions.append("restore " + rel)
-            else:
-                try:
-                    shutil.copy2(bak, dst); restored += 1
-                    actions.append("restore " + rel)
-                except Exception as e:
-                    failures.append("restore " + rel + ": " + str(e))
-                    actions.append("restore FAIL " + rel + " " + str(e))
-        elif os.path.exists(dst):
-            if dry:
-                actions.append("delete " + rel)
-            else:
-                try:
-                    if os.path.isdir(dst):
-                        shutil.rmtree(dst)
-                    else:
-                        os.remove(dst)
-                    removed += 1
-                    actions.append("delete " + rel)
-                except Exception as e:
-                    failures.append("delete " + rel + ": " + str(e))
-                    actions.append("delete FAIL " + rel + " " + str(e))
-    # 清理空目录
-    if not dry:
-        for d in m.get("InstalledDirectories", []):
-            try:
-                dd = _safe_join(game_dir, d)
-            except ValueError:
-                continue
-            if os.path.isdir(dd):
-                try:
-                    if not os.listdir(dd):
-                        os.rmdir(dd)
-                except Exception:
-                    pass
-    return {"ok": not failures, "via": "optiscalerclient", "removed": removed,
-            "restored": restored, "dry": dry, "actions": actions,
-            "msgs": failures}
+    if found:
+        m, cdir = found
+        result = _opti_apply_restore(game_dir, _opti_client_restore_plan(game_dir, cdir, m), dry, m.get("InstalledDirectories", []))
+        result["via"] = "optiscalerclient"
+        # Keep client's recovery record; deleting its store breaks its own state tracking.
+        return result
+    return _optiscaler_uninstall_untracked(game_dir, cfg, dry)
+
 
 def optiscaler_cmd(argv, dry=False):
-    if len(argv) < 2:
-        print(json.dumps({"ok": False, "msgs": ["usage: optiscaler <analyze|status|install|uninstall> <game_dir> [--backend fsr|xess] [--dry-run]"]}))
-        return 2
-    sub = argv[0].lower()
-    game_dir = argv[1]
-    cfg = _optiscaler_cfg()
-    backend = "auto"
-    for index, value in enumerate(argv[2:], start=2):
-        if str(value).lower() == "--backend" and index + 1 < len(argv):
-            backend = argv[index + 1]
-        elif str(value).lower().startswith("--backend="):
-            backend = str(value).split("=", 1)[1]
-    if sub == "analyze":
-        payload = _optiscaler_analyze(game_dir, cfg)
-        print(json.dumps(payload, ensure_ascii=False))
-        return 0 if payload.get("ok") else 7
-    if sub == "status":
-        if not os.path.isdir(game_dir):
-            print(json.dumps({"ok": False, "installed": False,
-                              "msgs": ["游戏目录不存在: " + game_dir]}))
-            return 2
-        st = _optiscaler_status(game_dir, cfg)
-        payload = {"ok": not bool(st.get("msgs")),
-                   "installed": st["installed"], "reason": st.get("reason"),
-                   "msgs": st.get("msgs", []),
-                   "backend": st.get("backend"),
-                   "available_backends": cfg.get("available_backends") or [],
-                   "source": cfg.get("source_root"),
-                   "version": "%s/%s" % (cfg.get("opti_version") or "", cfg.get("extra_version") or "")}
-        print(json.dumps(payload, ensure_ascii=False))
-        return 0 if payload["ok"] else 7
-    if sub == "install":
-        r = _optiscaler_install(game_dir, cfg, dry, backend)
-        print(json.dumps(r))
-        return 0 if r.get("ok") else 7
-    if sub == "uninstall":
-        r = _optiscaler_uninstall(game_dir, cfg, dry)
-        print(json.dumps(r))
-        return 0 if r.get("ok") else 7
-    print(json.dumps({"ok": False, "msgs": ["unknown optiscaler subcommand: " + sub]}))
-    return 2
+    try:
+        if len(argv) < 2:
+            raise ValueError("usage: optiscaler <analyze|status|install|uninstall> <game_dir> [--backend fsr|xess] [--dry-run]")
+        sub, game_dir, backend = str(argv[0]).lower(), argv[1], "auto"
+        if sub not in ("analyze", "status", "install", "uninstall"):
+            raise ValueError("unknown optiscaler subcommand: " + sub)
+        i = 2
+        while i < len(argv):
+            arg = argv[i]
+            if arg == "--dry-run":
+                dry = True
+            elif arg == "--backend" and i + 1 < len(argv):
+                i += 1
+                backend = argv[i]
+            elif str(arg).startswith("--backend="):
+                backend = str(arg).split("=", 1)[1]
+            else:
+                raise ValueError("unknown/incomplete optiscaler option: " + str(arg))
+            i += 1
+        if backend not in ("auto", "fsr", "xess"):
+            raise ValueError("unsupported backend: " + backend)
+        cfg = _optiscaler_cfg()
+        if sub == "analyze":
+            payload = _optiscaler_analyze(game_dir, cfg)
+        elif sub == "status":
+            if not os.path.isdir(game_dir):
+                raise ValueError("游戏目录不存在: " + game_dir)
+            st = _optiscaler_status(game_dir, cfg)
+            payload = dict(st, ok=not bool(st.get("msgs")), available_backends=cfg.get("available_backends") or [], source=cfg.get("source_root"))
+            payload.setdefault("version", "%s/%s" % (cfg.get("opti_version") or "", cfg.get("extra_version") or ""))
+        elif sub == "install":
+            payload = _optiscaler_install(game_dir, cfg, dry, backend)
+        else:
+            payload = _optiscaler_uninstall(game_dir, cfg, dry)
+    except Exception as e:
+        payload = {"ok": False, "msgs": ["OptiScaler 已安全停止: " + str(e)]}
+    print(json.dumps(payload, ensure_ascii=True))
+    return 0 if payload.get("ok") else 7
 
 # ==========================================================================
 # Daemon 常驻模式 — 安全双向命名管道。

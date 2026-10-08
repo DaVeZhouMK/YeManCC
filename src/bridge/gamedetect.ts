@@ -94,7 +94,7 @@ export async function detectGame(force = false, preferredPid = 0): Promise<Detec
     detectInFlight.set(pid, inFlight);
   }
   const game = await inFlight;
-  return game;
+  return game ? { ...game } : null;
 }
 
 export async function isGameRunning(): Promise<boolean> {
@@ -132,11 +132,11 @@ function sameGame(a: DetectedGame | null, b: DetectedGame | null): boolean {
 
 function emitGame(game: DetectedGame | null): void {
   if (sameGame(game, currentGame)) {
-    currentGame = game;
+    currentGame = game ? { ...game } : null;
     return;
   }
-  currentGame = game;
-  for (const cb of [...listeners]) cb(game);
+  currentGame = game ? { ...game } : null;
+  for (const cb of [...listeners]) { try { cb(game ? { ...game } : null); } catch { /* A subscriber cannot fail a successful detection. */ } }
 }
 
 /**
@@ -146,16 +146,20 @@ function emitGame(game: DetectedGame | null): void {
  */
 export async function refreshGameStatusStrict(preferredPid = 0): Promise<DetectedGame | null> {
   const pid = Number.isInteger(preferredPid) && preferredPid > 0 ? preferredPid : 0;
+  const epochAtStart = preferredRefreshEpoch;
+  const epoch = pid ? ++preferredRefreshEpoch : epochAtStart;
+  if (pid) detectInFlight.delete(0);
   const game = await detectGame(true, pid);
-  emitGame(game);
-  return game;
+  if (epoch === preferredRefreshEpoch) emitGame(game);
+  const result = epoch === preferredRefreshEpoch ? game : currentGame;
+  return result ? { ...result } : null;
 }
 
 export async function refreshGameStatus(preferredPid = 0): Promise<DetectedGame | null> {
   const pid = Number.isInteger(preferredPid) && preferredPid > 0 ? preferredPid : 0;
-  if (!pid && preferredRefreshInFlight) return preferredRefreshInFlight;
+  if (!pid && preferredRefreshInFlight) { const game = await preferredRefreshInFlight; return game ? { ...game } : null; }
   const existing = refreshInFlight.get(pid);
-  if (existing) return existing;
+  if (existing) { const game = await existing; return game ? { ...game } : null; }
   const epochAtStart = preferredRefreshEpoch;
   const preferredEpoch = pid ? ++preferredRefreshEpoch : epochAtStart;
   if (pid) detectInFlight.delete(0);
@@ -170,7 +174,7 @@ export async function refreshGameStatus(preferredPid = 0): Promise<DetectedGame 
       }
       return game;
     } catch {
-      return currentGame;
+      return currentGame ? { ...currentGame } : null;
     } finally {
       if (pid && preferredRefreshInFlight === refresh) preferredRefreshInFlight = null;
     }
@@ -186,13 +190,13 @@ export async function refreshGameStatus(preferredPid = 0): Promise<DetectedGame 
 
 export function subscribeGameStatus(cb: GameStatusListener): () => void {
   listeners.add(cb);
-  cb(currentGame);
+  cb(currentGame ? { ...currentGame } : null);
   if (listeners.size === 1) {
     stopPollSchedule = registerScheduledTask(
       'game-status',
       POLL_MS,
       refreshGameStatus,
-      { pauseWhenHidden: true, runImmediately: true },
+      { pauseWhenHidden: false, runImmediately: true },
     );
   }
   return () => {

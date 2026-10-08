@@ -1,0 +1,116 @@
+{
+    "schemaVersion":  1,
+    "toolVersion":  "rog-portable-runner-2",
+    "timestampUtc":  "2026-10-04T05:44:14.2118131Z",
+    "scope":  "local-software-tool-parser-only",
+    "powershellVersion":  "5.1.26100.8875",
+    "status":  "PARSER_ONLY_PASSED",
+    "actualExitCode":  0,
+    "casesTotal":  6,
+    "casesPassed":  6,
+    "casesFailed":  0,
+    "cases":  [
+                  {
+                      "path":  "Invoke-ROG-CPU.ps1",
+                      "parserErrorCount":  0,
+                      "passed":  true
+                  },
+                  {
+                      "path":  "Invoke-YMCC-AuthorizedWorker.ps1",
+                      "parserErrorCount":  0,
+                      "passed":  true
+                  },
+                  {
+                      "path":  "Control-YMCC-Lifecycle.ps1",
+                      "parserErrorCount":  0,
+                      "passed":  true
+                  },
+                  {
+                      "path":  "Send-YMCC-AI-Fan-Mock.ps1",
+                      "parserErrorCount":  0,
+                      "passed":  true
+                  },
+                  {
+                      "path":  "Collect-YMCC-CPU.ps1",
+                      "parserErrorCount":  0,
+                      "passed":  true
+                  },
+                  {
+                      "path":  "tests\\Test-ROG-CPU-Runner.ps1",
+                      "parserErrorCount":  0,
+                      "passed":  true
+                  }
+              ],
+    "validatedSourceFiles":  [
+                                 {
+                                     "path":  "Invoke-ROG-CPU.ps1",
+                                     "sha256":  "3ea6872f9c14481cdd963889f62a9033dc7d8f81941fbd0e2c8db0361b024f7d",
+                                     "bytes":  58725
+                                 },
+                                 {
+                                     "path":  "Invoke-YMCC-AuthorizedWorker.ps1",
+                                     "sha256":  "4be38c7bf91811b40eaa739ebac3b6fd2f47dc9a672a1448289868947ea9f21b",
+                                     "bytes":  5621
+                                 },
+                                 {
+                                     "path":  "Control-YMCC-Lifecycle.ps1",
+                                     "sha256":  "350e573ea38ed96c79256fd9a4ac991cf38f295f6956828abe289b05aaaaf54e",
+                                     "bytes":  8849
+                                 },
+                                 {
+                                     "path":  "Send-YMCC-AI-Fan-Mock.ps1",
+                                     "sha256":  "f640c9a2ccd878b5115b284c7734bf826fe299d6d7e5e72fded219187276d084",
+                                     "bytes":  11447
+                                 },
+                                 {
+                                     "path":  "Collect-YMCC-CPU.ps1",
+                                     "sha256":  "2dba99927ea58f12274a950bd59590d72a9aec8f1b6a1186f2125163de000fe5",
+                                     "bytes":  63760
+                                 },
+                                 {
+                                     "path":  "tests\\Test-ROG-CPU-Runner.ps1",
+                                     "sha256":  "9004f3a67de294f781c60383d0f49a48044113bc2c6acede483c2f5e208348e0",
+                                     "bytes":  78059
+                                 }
+                             ],
+    "defaultExecutionPolicy":  "Restricted",
+    "executionPolicyScopes":  [
+                                  {
+                                      "executionPolicy":  "Undefined",
+                                      "scope":  "MachinePolicy"
+                                  },
+                                  {
+                                      "executionPolicy":  "Undefined",
+                                      "scope":  "UserPolicy"
+                                  },
+                                  {
+                                      "executionPolicy":  "Undefined",
+                                      "scope":  "Process"
+                                  },
+                                  {
+                                      "executionPolicy":  "Undefined",
+                                      "scope":  "CurrentUser"
+                                  },
+                                  {
+                                      "executionPolicy":  "Undefined",
+                                      "scope":  "LocalMachine"
+                                  }
+                              ],
+    "policyProbe":  "INERT_SENTINEL_ONLY_NO_RUNNER_EXECUTION",
+    "policyProbeExitCode":  1,
+    "fullOfflineRuntimeStatus":  "BLOCKED_BY_DEFAULT_EXECUTION_POLICY",
+    "fullOfflineRuntimeExecuted":  false,
+    "equivalentToPS7Coverage":  false,
+    "noExecutionPolicyBypass":  true,
+    "noExecutionPolicyChange":  true,
+    "realProductProcessesTouched":  false,
+    "realElevationPerformed":  false,
+    "realCpuSamplingPerformed":  false,
+    "realNativeCallsPerformed":  false,
+    "rogRegressionPassed":  false,
+    "rogActions":  "HOLD",
+    "rogToolRegression":  "NOT_RUN",
+    "rogProductRegression":  "NOT_RUN",
+    "rogCpuAB":  "NOT_RUN",
+    "productVersionConfirmed":  false
+}

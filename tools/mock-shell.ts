@@ -68,6 +68,14 @@ function dispatch(cmd: string, a: any): any {
       return true;
     case 'shell.execute':
       return true;
+    case 'shell.taskView':
+      return true;
+    case 'settings.read': {
+      if (!fs.existsSync(a.path)) return { stamp: 'missing', unchanged: false, content: '' };
+      const stat = fs.statSync(a.path, { bigint: true });
+      const stamp = `${stat.mtimeNs}:${stat.birthtimeNs}:${stat.size}`;
+      return stamp === a.stamp ? { stamp, unchanged: true } : { stamp, unchanged: false, content: fs.readFileSync(a.path, 'utf8') };
+    }
     case 'settings.write':
       fs.mkdirSync(require('path').dirname(a.path), { recursive: true });
       fs.writeFileSync(a.path, a.content ?? '');

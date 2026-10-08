@@ -12,9 +12,10 @@ let selectedCategoryDirectories = { unclassified: new Set(), 'non-game': new Set
 let selectedActionGame = null;
 let editDraft = null;
 let confirmResolver = null;
-let artworkDraft = { cover: null, wallpaper: null, dirty: { cover: false, wallpaper: false } };
-let artworkPageBase = { cover: null, wallpaper: null };
+let artworkDraft = { cover: null, long: null, wallpaper: null, dirty: { cover: false, long: false, wallpaper: false } };
+let artworkPageBase = { cover: null, long: null, wallpaper: null };
 let artworkSearchType = "cover";
+let artworkSearchSlot = "cover";
 let artworkActionType = "cover";
 let artworkCandidates = [];
 const artworkUnavailableUrls = new Set();
@@ -356,14 +357,135 @@ function resolveLibraryFocusDescriptor(descriptor) {
   return null;
 }
 document.addEventListener('focusin', event => { updateWorkspaceFocusMarker(event.target); rememberLibraryFocus(event.target); }, true);
-document.addEventListener('pointerdown', event => closeWorkspaceDropdownAtBoundary(event.target), true);
+document.addEventListener('pointerdown', event => { closeWorkspaceDropdownAtBoundary(event.target); }, true);
 window.addEventListener('resize', () => { if (openWorkspaceDropdownState) workspaceDropdownSetPosition(openWorkspaceDropdownState); });
 window.addEventListener('scroll', () => { if (openWorkspaceDropdownState) workspaceDropdownSetPosition(openWorkspaceDropdownState); }, true);
+
+// The editor is a fixed 840px design box; this ratio is its reference viewport
+// (1080p host: 1040px work area - 100px window margin - 46px titlebar). The
+// editor scales as one unit, so 1080p renders 1:1 and a 720p host scales to
+// 0.64 instead of clipping or scrolling. Taller viewports stay at 1:1.
+const EDITOR_DESIGN_VIEWPORT_HEIGHT = 894;
+function syncEditorScale() {
+  const zoom = Math.min(1, window.innerHeight / EDITOR_DESIGN_VIEWPORT_HEIGHT);
+  document.documentElement.style.setProperty('--edit-zoom', String(zoom));
+}
+syncEditorScale();
+window.addEventListener('resize', syncEditorScale);
+
+// Host JSON is persisted/user data, not an instruction or a trusted shape.
+function isWorkspaceRecord(value) { return value !== null && typeof value === 'object' && !Array.isArray(value); }
+function isBuiltinExcludedSteamTool(row, depth = 0) {
+  if (!isWorkspaceRecord(row)) return false;
+  const toolName = text => {
+    if (typeof text !== 'string') return false;
+    const key = text.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+    if (['steamworkscommonredistributables', 'steamworksshared', 'unrealengine', 'unrealengine4', 'unrealengine5', 'unityhub', 'unityeditor', 'godotengine', 'godot', 'gamemaker', 'gamemakerstudio', 'rpgmaker', 'steamcmd', 'steamvr', 'steamlink', 'steamworkssdk', 'steamsdk', 'sourcesdk', 'sourcesdkbase', 'sourcefilmmaker', 'epicgameslauncher', 'proton', 'steamlinuxruntime'].includes(key)) return true;
+    return (/^unrealengine[45]\d{1,3}$/.test(key) || /^ue[45]\d{1,3}$/.test(key) || /^steamlinuxruntime\d{1,3}$/.test(key) || /^proton\d{1,3}$/.test(key));
+  };
+  const toolId = value => typeof value === 'number' ? value === 228980 :
+    typeof value === 'string' && /^0*228980$/.test(value.trim());
+  for (const key of ['nativeSteamAppId', 'steamStoreAppId', 'storefrontAppId', 'appId', 'steamAppId', 'steamId', 'steam_appid']) if (toolId(row[key])) return true;
+  for (const key of ['directoryName', 'formalName', 'displayName', 'name', 'primaryProductName', 'manifestName', 'manualName', 'query']) if (toolName(row[key])) return true;
+  for (const key of ['gameDirectory', 'primaryExecutable', 'nativeSteamGameDirectory', 'nativeSteamExecutable', 'executable']) {
+    if (typeof row[key] === 'string' && row[key].split(/[\\/]/).some(toolName)) return true;
+  }
+  return depth < 3 && ['nativeSteam', 'steamNativeRecord', 'steam', 'match', 'resolvedIdentity'].some(key => isBuiltinExcludedSteamTool(row[key], depth + 1));
+}
+function deduplicateWorkspaceExecutables(rows) {
+  const pathKey = value => typeof value === 'string' ? value.trim().replace(/^"|"$/g, '').replaceAll('/', '\\').replace(/[\\]+$/, '').toLocaleLowerCase() : '';
+  const rank = row => row.steamNative === true || row.contentType === 'steam-native' ? 100
+    : ['already-in-steam', 'added-to-steam'].includes(row.status) ? 90
+    : row.manualGameDirectoryLocked === true || row.discoverySource === 'manual' ? 80
+    : row.steamVerificationStatus === 'steam-verified' ? 70
+    : ['ready', 'ready-to-add'].includes(row.status) ? 60 : 0;
+  const result = [], positions = new Map();
+  for (const row of rows) {
+    if (isBuiltinExcludedSteamTool(row)) continue;
+    const key = pathKey(row.primaryExecutable);
+    if (!key || !positions.has(key)) {
+      if (key) positions.set(key, result.length);
+      result.push(row); continue;
+    }
+    const index = positions.get(key), prior = result[index];
+    const nextDir = pathKey(row.gameDirectory), oldDir = pathKey(prior.gameDirectory);
+    if (rank(row) > rank(prior) || (rank(row) === rank(prior) &&
+      (nextDir.length < oldDir.length || (nextDir.length === oldDir.length && nextDir < oldDir)))) result[index] = row;
+  }
+  return result;
+}
+function normalizeWorkspaceSnapshot(value, previous = {}) {
+  if (!isWorkspaceRecord(value)) throw new Error('游戏库返回的数据格式无效；已保留当前列表。');
+  const next = { ...value };
+  const warnings = [];
+  const record = (input, fallback, label) => {
+    if (isWorkspaceRecord(input)) return { ...input };
+    if (input !== undefined) warnings.push(label);
+    return isWorkspaceRecord(fallback) ? { ...fallback } : {};
+  };
+  const rows = (input, fallback, label, validate) => {
+    if (!Array.isArray(input)) {
+      if (input !== undefined) warnings.push(label);
+      return Array.isArray(fallback) ? fallback.map(row => ({ ...row })) : [];
+    }
+    const valid = input.filter(row => isWorkspaceRecord(row) && validate(row)).map(row => ({ ...row }));
+    if (valid.length !== input.length) warnings.push(label);
+    // An intentionally empty list is authoritative. If any row is malformed,
+    // retain the last complete list instead of silently dropping that record.
+    return valid.length !== input.length && Array.isArray(fallback) ? fallback.map(row => ({ ...row })) : valid;
+  };
+  next.config = record(value.config, previous.config, 'config');
+  for (const key of ['roots', 'trainerRoots']) {
+    if (next.config[key] !== undefined && !Array.isArray(next.config[key])) {
+      warnings.push('config.' + key);
+      next.config[key] = Array.isArray(previous.config?.[key]) ? previous.config[key] : [];
+    } else if (Array.isArray(next.config[key])) next.config[key] = next.config[key].filter(item => typeof item === 'string');
+  }
+  next.library = record(value.library, previous.library, 'library');
+  next.library.games = rows(next.library.games, previous.library?.games, 'library.games', row => typeof row.gameDirectory === 'string' && row.gameDirectory.length > 0).map(game => {
+    for (const key of ['primaryExecutable', 'directoryName', 'status', 'contentType', 'classification']) {
+      if (game[key] !== undefined && game[key] !== null && typeof game[key] !== 'string') {
+        warnings.push('library.games.' + key); delete game[key]; game.status = 'data-invalid-review-required';
+      }
+    }
+    return game;
+  });
+  next.steamPlan = record(value.steamPlan, previous.steamPlan, 'steamPlan');
+  next.steamPlan.items = rows(next.steamPlan.items, previous.steamPlan?.items, 'steamPlan.items', row =>
+    (typeof row.gameDirectory === 'string' && row.gameDirectory.trim().length > 0) ||
+    (typeof row.primaryExecutable === 'string' && row.primaryExecutable.trim().length > 0)).map(item => {
+    for (const key of ['gameDirectory', 'primaryExecutable', 'status', 'formalName', 'steamVerificationStatus']) {
+      if (item[key] !== undefined && item[key] !== null && typeof item[key] !== 'string') {
+        warnings.push('steamPlan.items.' + key); delete item[key]; item.status = 'data-invalid-review-required';
+      }
+    }
+    return item;
+  });
+  next.library.games = deduplicateWorkspaceExecutables(next.library.games);
+  for (const key of ['unscannedGames', 'missingGames']) {
+    if (Array.isArray(next.library[key])) next.library[key] = next.library[key].filter(row => !isBuiltinExcludedSteamTool(row));
+  }
+  next.steamPlan.items = deduplicateWorkspaceExecutables(next.steamPlan.items);
+  next.steamPlan.summary = record(next.steamPlan.summary, previous.steamPlan?.summary, 'steamPlan.summary');
+  next.manualOverrides = record(value.manualOverrides, previous.manualOverrides, 'manualOverrides');
+  next.manualOverrides.items = record(next.manualOverrides.items, previous.manualOverrides?.items, 'manualOverrides.items');
+  next.resolvedIdentities = record(value.resolvedIdentities, previous.resolvedIdentities, 'resolvedIdentities');
+  next.steamAccounts = record(value.steamAccounts, previous.steamAccounts, 'steamAccounts');
+  next.steamAccounts.accounts = rows(next.steamAccounts.accounts, previous.steamAccounts?.accounts, 'steamAccounts.accounts', row => typeof row.accountId === 'string' && row.accountId.trim().length > 0);
+  if (warnings.length) next.dataValidationWarnings = [...new Set(warnings)];
+  return next;
+}
+function workspaceBridgeResult(command, result) {
+  const snapshotCommands = new Set(['state', 'scan', 'prepare', 'openLibrary', 'plan', 'commit', 'deleteFromSteam', 'refreshSteamArtwork']);
+  const isSnapshot = isWorkspaceRecord(result) && ('library' in result || 'steamPlan' in result || 'config' in result);
+  if (!isSnapshot && snapshotCommands.has(command)) throw new Error('游戏库没有返回有效快照；已保留当前数据。');
+  return isSnapshot ? normalizeWorkspaceSnapshot(result, snapshot) : result;
+}
 
 function invoke(command, arguments_ = {}) {
   const id = requestId++;
   return new Promise((resolve, reject) => {
-    pending.set(id, { resolve, reject });
+    pending.set(id, { resolve, reject, command });
     try {
       window.chrome.webview.postMessage({ id, command, arguments: arguments_ });
     } catch (error) {
@@ -488,11 +610,21 @@ function ensureSteamTarget() {
   else if (accounts.length === 1) selectedSteamTarget = { accountId: accounts[0].accountId, steamRoot: accounts[0].steamRoot || '' };
   else if (accounts.length > 1) selectedSteamTarget = { accountId: '', steamRoot: '' };
 }
-function defaultSelectedDirectories() { return mergedGames().filter(game => isSteamReady(game) && category(game) === 'not-in-steam').map(keyFor); }
+function defaultSelectedDirectories() { return mergedGames().filter(game => isSteamImportReady(game) && category(game) === 'not-in-steam').map(keyFor); }
 function defaultSelectedSteamDirectories() { return mergedGames().filter(game => category(game) === 'in-steam').map(keyFor); }
 function selectedCommitDirectories() {
-  if (activeTab === 'not-in-steam') return selectedGameDirectories === null ? defaultSelectedDirectories() : [...selectedGameDirectories];
-  if (activeTab === 'unclassified' || activeTab === 'non-game') return [...(selectedCategoryDirectories[activeTab] || [])];
+  if (activeTab === 'not-in-steam') {
+    const selected = selectedGameDirectories === null ? new Set(defaultSelectedDirectories()) : selectedGameDirectories;
+    return mergedGames().filter(game => category(game) === 'not-in-steam' && selected.has(keyFor(game))).map(keyFor);
+  }
+  if (activeTab === 'unclassified' || activeTab === 'non-game') {
+    // Selection sets survive a background scan so a user does not lose an
+    // in-progress choice. They must still be intersected with the current
+    // inventory; otherwise a removed/renamed directory is sent to the native
+    // worker as an unmatched selection and the whole commit is rejected.
+    const available = new Set(mergedGames().filter(game => category(game) === activeTab).map(keyFor));
+    return [...(selectedCategoryDirectories[activeTab] || [])].filter(key => available.has(keyFor({ gameDirectory: key })));
+  }
   return [];
 }
 function selectedTargetArguments() { return { accountId: '', steamRoot: '', selectionMode: 'all-steam-accounts', selectedGameDirectories: selectedCommitDirectories() }; }
@@ -520,30 +652,51 @@ function ensureNativeSteamTab() {
   anchor.after(tab);
 }
 function isSteamReady(game) { return steamReadyStatuses.has(game.steam?.status); }
+function isSteamImportReady(game) {
+  // Waiting-to-add is an explicit user queue. SteamID and artwork are
+  // optional metadata and must never prevent selecting an otherwise scanned
+  // game for import.
+  return category(game) === 'not-in-steam';
+}
 function isNonGame(game) { return game.contentType === 'non-game' || game.status === 'unrecognized-tool' || game.unrecognizedTool; }
 function keyFor(game) { return normalizedUiPath(game?.gameDirectory || ''); }
-function planMap() { const result = new Map(); for (const item of snapshot.steamPlan?.items || []) { if (item.primaryExecutable) result.set(item.primaryExecutable.toLocaleLowerCase(), item); else if (item.gameDirectory) result.set(`dir:${item.gameDirectory.toLocaleLowerCase()}`, item); } return result; }
+function planMap() {
+  const result = new Map();
+  for (const item of snapshot.steamPlan?.items || []) {
+    // Host and Worker persist the same Windows path through different JSON
+    // generations (slash direction, case, and trailing separators can vary).
+    // Use the same canonical UI key on both sides and index both identifiers;
+    // an executable update must not hide a still-valid directory match.
+    const executable = normalizedUiPath(item.primaryExecutable);
+    const directory = normalizedUiPath(item.gameDirectory);
+    if (executable) result.set(executable, item);
+    if (directory) result.set(`dir:${directory}`, item);
+  }
+  return result;
+}
 function normalizedUiPath(value) { return String(value || '').replaceAll('/', '\\').replace(/[\\]+$/, '').toLocaleLowerCase(); }
 function manualOverride(executable) { const key = normalizedUiPath(executable); if (!key) return {}; const items = snapshot.manualOverrides?.items || {}; if (items[key]) return items[key]; const found = Object.entries(items).find(([stored]) => normalizedUiPath(stored) === key); return found?.[1] || {}; }
 function resolvedIdentity(executable) { const key = normalizedUiPath(executable); if (!key) return {}; const items = snapshot.resolvedIdentities || {}; if (items[key]) return items[key]; const found = Object.entries(items).find(([stored, value]) => normalizedUiPath(stored) === key || normalizedUiPath(value?.executable) === key); return found?.[1] || {}; }
 function executableLikeName(value) { return /\\.(exe|dll|bin|bat|cmd)$/i.test(String(value || '').trim()) || /^(setup|unins|launcher|start|game)\\d*$/i.test(String(value || '').trim()); }
 function gameDisplayName(game) { const overrideName = game.override?.name; if (overrideName) return overrideName; const formal = game.resolvedIdentity?.formalName || game.steam?.formalName; if (formal && !executableLikeName(formal)) return formal; return game.primaryProductName || game.primaryFileDescription || game.steam?.suggestedName || game.directoryName || formal || '未命名项目'; }
+const MANUAL_BUCKETS = new Set(['auto', 'not-in-steam', 'in-steam', 'native-steam', 'unclassified', 'non-game']);
+function validManualBucket(value) { return MANUAL_BUCKETS.has(String(value || '')) ? String(value) : 'auto'; }
 function manualBucket(game) {
   const buckets = snapshot.config?.manualBuckets || {};
   const directoryKey = keyFor(game);
   const executableKey = normalizedUiPath(game.primaryExecutable);
   const direct = buckets[directoryKey];
-  if (direct?.bucket) return direct.bucket;
+  if (direct?.bucket) return validManualBucket(direct.bucket);
   const executable = buckets[executableKey];
-  if (executable?.bucket) return executable.bucket;
+  if (executable?.bucket) return validManualBucket(executable.bucket);
   const found = Object.entries(buckets).find(([stored, value]) =>
     (normalizedUiPath(stored) === directoryKey || normalizedUiPath(stored) === executableKey) && value?.bucket);
-  return found?.[1]?.bucket || 'auto';
+  return validManualBucket(found?.[1]?.bucket);
 }
 function mergedGames() {
   const plans = planMap();
   return (snapshot.library?.games || []).map(game => {
-    const key = game.primaryExecutable?.toLocaleLowerCase();
+    const key = normalizedUiPath(game.primaryExecutable);
     const steam = plans.get(key) || plans.get(`dir:${keyFor(game)}`) || {};
     const override = manualOverride(game.primaryExecutable);
     const resolved = resolvedIdentity(game.primaryExecutable);
@@ -572,6 +725,7 @@ function category(game) {
   if (bucket !== 'auto') return bucket;
   if (isNonGame(game)) return 'non-game';
   if (isSteamReady(game) || game.steam?.status === 'waiting-steam-verification') return 'not-in-steam';
+  if (shouldPreserveWaitingCard(game)) return 'not-in-steam';
   return 'unclassified';
 }
 function categoryDefinition(gameOrCategory) {
@@ -586,11 +740,86 @@ function categoryCounts(games = mergedGames()) {
   }
   return counts;
 }
-function selectedReadyCount() { const selected = new Set(selectedCommitDirectories()); return mergedGames().filter(game => isSteamReady(game) && category(game) === activeTab && selected.has(keyFor(game))).length; }
+const WAITING_KEEP_STATUSES = new Set([
+  'needs-minimum-artwork',
+  'needs-identity-and-artwork',
+  'needs-identity-confirmation',
+  'needs-steam-verification',
+  'waiting-steam-verification',
+  'ready-to-add',
+  'ready-not-selected',
+  'needs-primary-confirmation'
+]);
+function snapshotLooksDegraded(next) {
+  if (!next || typeof next !== 'object') return false;
+  const source = String(next.steamPlanSource || '');
+  if (source === 'local-scrape-fallback') return true;
+  if (next.steamPlanError) return true;
+  const items = Array.isArray(next.steamPlan?.items) ? next.steamPlan.items : [];
+  return items.some(item => String(item?.steamVerificationStatus || '') === 'network-pending' ||
+    String(item?.reason || '') === 'steam-verification-pending-network');
+}
+function shouldPreserveWaitingCard(game) {
+  const keys = snapshot._preservedWaitingKeys;
+  if (!Array.isArray(keys) || !keys.length) return false;
+  if (!keys.includes(keyFor(game))) return false;
+  const status = String(game.steam?.status || '');
+  return !status || WAITING_KEEP_STATUSES.has(status);
+}
+function firstPopulatedTab(games) {
+  const counts = categoryCounts(games);
+  for (const tab of [activeTab, 'not-in-steam', 'in-steam', 'native-steam', 'unclassified', 'non-game']) {
+    if (counts[tab] > 0) return tab;
+  }
+  return activeTab;
+}
+function tabContainingKeys(games, keys) {
+  if (!keys || !keys.size) return '';
+  const hits = {};
+  for (const game of games) {
+    if (!keys.has(keyFor(game))) continue;
+    const code = category(game);
+    hits[code] = (hits[code] || 0) + 1;
+  }
+  let best = '';
+  let count = 0;
+  for (const [code, value] of Object.entries(hits)) {
+    if (value > count) {
+      best = code;
+      count = value;
+    }
+  }
+  return best;
+}
+function applyLibrarySnapshot(next, options = {}) {
+  if (!next || typeof next !== 'object') return;
+  const preserveWaiting = options.preserveWaiting === true || snapshotLooksDegraded(next);
+  const previousTab = activeTab;
+  const previousGames = mergedGames();
+  const previousVisibleKeys = new Set(previousGames.filter(game => category(game) === previousTab).map(keyFor));
+  const previousWaitingKeys = previousGames.filter(game => category(game) === 'not-in-steam').map(keyFor);
+  snapshot = normalizeWorkspaceSnapshot(next, snapshot);
+  if (preserveWaiting && previousWaitingKeys.length) snapshot._preservedWaitingKeys = previousWaitingKeys;
+  const games = mergedGames();
+  const visible = games.filter(game => category(game) === activeTab);
+  if (visible.length === 0 && games.length > 0) {
+    const switched = tabContainingKeys(games, previousVisibleKeys) || firstPopulatedTab(games);
+    if (switched && switched !== activeTab) {
+      activeTab = switched;
+      const label = CATEGORY_DEFINITIONS[switched]?.label || switched;
+      if (!$('#library-view').classList.contains('hidden')) {
+        showNotice(`当前页暂无项目，已切换到「${label}」。`, false, libraryNotice);
+      }
+    }
+  }
+  renderEntry();
+  if (!$('#library-view').classList.contains('hidden')) renderLibrary();
+}
+function selectedReadyCount() { const selected = new Set(selectedCommitDirectories()); return mergedGames().filter(game => category(game) === activeTab && selected.has(keyFor(game))).length; }
 function selectedSteamCount() { return mergedGames().filter(game => category(game) === 'in-steam' && (selectedSteamDirectories === null || selectedSteamDirectories.has(keyFor(game)))).length; }
 function formatCount(value) { const count = Number.isFinite(Number(value)) ? Math.max(0, Number(value)) : 0; return `[${count}个]`; }
 function formatSelectedCount(value) { const count = Number.isFinite(Number(value)) ? Math.max(0, Number(value)) : 0; return `[已选${count}个]`; }
-function pageSelectable(game, page = activeTab) { const itemCategory = category(game); if (itemCategory !== page || page === 'native-steam') return false; return page !== 'not-in-steam' || isSteamReady(game); }
+function pageSelectable(game, page = activeTab) { const itemCategory = category(game); if (itemCategory !== page || page === 'native-steam') return false; return true; }
 function pageSelectionKeys(page = activeTab) {
   if (page === 'not-in-steam') return new Set(selectedGameDirectories === null ? defaultSelectedDirectories() : selectedGameDirectories);
   if (page === 'in-steam') return new Set(selectedSteamDirectories === null ? defaultSelectedSteamDirectories() : selectedSteamDirectories);
@@ -611,8 +840,8 @@ function statusLabel(game) {
 }
 function escapeHtml(value) { return String(value ?? '').replace(/[&<>'"]/g, char => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', "'":'&#39;', '"':'&quot;' })[char]); }
 function initials(name) { const parts = String(name || '?').trim().split(/[\s\-_]+/).filter(Boolean); return (parts.length > 1 ? parts.slice(0, 2).map(x => x[0]).join('') : parts[0]?.slice(0, 2) || '?').toUpperCase(); }
-function manualArtworkPriority(game) { const override = game?.override || {}; const policy = override.artworkProtection || {}; return Boolean(override.cover || override.wallpaper || policy.cover === 'manual' || policy.cover === 'deleted' || policy.wallpaper === 'manual' || policy.wallpaper === 'deleted'); }
-function artworkMarkup(game, name) { const manual = game.override?.cover || game.override?.artwork?.cover; const preview = manual?.url ? manual : game.steam?.artworkPreview?.tall; const previewUrl = artworkPreviewUrl(preview); return previewUrl ? `<img src="${escapeHtml(previewUrl)}" alt="${escapeHtml(name)} 封面" loading="lazy">` : escapeHtml(initials(name)); }
+function manualArtworkPriority(game) { const override = game?.override || {}; const policy = override.artworkProtection || {}; return Boolean(override.cover || override.long || override.wallpaper || policy.cover === 'manual' || policy.cover === 'deleted' || policy.long === 'manual' || policy.long === 'deleted' || policy.wallpaper === 'manual' || policy.wallpaper === 'deleted'); }
+function artworkMarkup(game, name) { const previewUrl = artworkPreviewUrl(artworkEntry(game, 'cover')); return previewUrl ? `<img src="${escapeHtml(previewUrl)}" alt="${escapeHtml(name)} 封面" loading="lazy">` : escapeHtml(initials(name)); }
 function scrapeStatusFor(game) {
   if (isNativeSteamGame(game)) return null;
   const executable = normalizedUiPath(game?.primaryExecutable || '');
@@ -696,7 +925,7 @@ function renderRoots() {
   const directoryToggle = $('#directory-settings-toggle');
   if (directoryPanel && directoryToggle) directoryToggle.setAttribute('aria-expanded', String(!directoryPanel.classList.contains('hidden')));
   const list = $('#root-list'); list.replaceChildren();
-  for (const root of roots) { const row = document.createElement('div'); row.className = 'root-row'; row.innerHTML = `<code>${escapeHtml(root)}</code><button class="mini-button danger" ${roots.length <= 1 ? 'disabled' : ''}>移除</button>`; row.querySelector('button').addEventListener('click', async () => { if (!await askConfirm('移除扫描目录', `停止扫描此目录？\n${root}\n\n不会删除游戏文件。`, '移除')) return; await runBusy('removeRoot', '正在移除扫描目录', root, { path: root }); }); list.appendChild(row); }
+  for (const root of roots) { const row = document.createElement('div'); row.className = 'root-row'; row.innerHTML = `<code>${escapeHtml(root)}</code><button class="mini-button danger">移除</button>`; row.querySelector('button').addEventListener('click', async () => { if (!await askConfirm('移除扫描目录', `停止扫描此目录？\n${root}\n\n不会删除游戏文件。`, '移除')) return; await runBusy('removeRoot', '正在移除扫描目录', root, { path: root }); }); list.appendChild(row); }
   renderManualGameDirectories();
 }
 function renderManualGameDirectories() {
@@ -754,14 +983,14 @@ function renderSteamRuntimeState() {
   const button = $('#commit-button');
   if (!button || activeTab === 'in-steam' || activeTab === 'native-steam') return;
   const running = steamRuntimeState.running;
-  const label = running === true ? '点击关闭Steam' : running === false ? '点击加入Steam' : '检测Steam状态';
+  const label = '点击加入';
   button.innerHTML = `${label} <span class="count-label">${formatSelectedCount(selectedPageCount())}</span>`;
   // Closing Steam is an independent safety action; it must remain available
   // even when the current page has no selected game.
   button.disabled = running === null || (running !== true && selectedReadyCount() === 0);
   button.title = running === true
     ? 'Steam 正在运行，点击后关闭 Steam；关闭后再点击加入 Steam'
-    : running === false ? '只加入当前页中已验证且已选中的项目' : '正在检测 Steam 状态';
+    : running === false ? '加入当前页中已选中的项目（SteamID、封面和壁纸可为空）' : '正在检测 Steam 状态';
 }
 function refreshSteamRuntimeState(force = false) {
   const now = Date.now();
@@ -856,11 +1085,21 @@ function createCard(game) {
   const card = document.createElement("article"); card.className = "game-card"; card.tabIndex = 0; card.setAttribute("role", "button"); card.dataset.directory = game.gameDirectory || "";
   card.dataset.executable = game.primaryExecutable || "";
   const name = gameDisplayName(game); const checked = isPageSelected(game); const canSelect = pageSelectable(game, activeTab);
+  // Every waiting card is selectable. SteamID and artwork are optional and
+  // can be completed later from the editor or background scraper.
+  const steamIdPending = activeTab === 'not-in-steam' && !canSelect;
   card.classList.toggle("selection-enabled", canSelect); card.classList.toggle("selected-for-steam", checked); card.classList.toggle("unselected-for-steam", canSelect && !checked);
+  card.classList.toggle("steam-id-pending", steamIdPending);
   card.classList.toggle("current-card", currentCardDirectory === keyFor(game));
-  card.setAttribute("aria-pressed", canSelect ? (checked ? "true" : "false") : "false"); card.setAttribute("aria-label", `${name}，${canSelect ? (checked ? "已选中，点击或按 A 取消选择；按 X 编辑" : "未选中，点击或按 A 选择；按 X 编辑") : "按 X 编辑"}`); card.title = "双击编辑";
+  card.setAttribute("aria-pressed", canSelect ? (checked ? "true" : "false") : "false");
+  card.setAttribute("aria-disabled", steamIdPending ? "true" : "false");
+  card.setAttribute("aria-label", `${name}，${canSelect ? (checked ? "已选中，点击或按 A 取消选择；按 X 编辑" : "未选中，点击或按 A 选择；按 X 编辑") : steamIdPending ? "Steam AppID 尚未正式验证，不能加入；双击或按 X 编辑" : "按 X 编辑"}`);
+  card.title = steamIdPending ? "Steam AppID 尚未正式验证，不能加入；双击或按 X 编辑" : "双击编辑";
   card.innerHTML = `<span class="card-art-glow" aria-hidden="true"></span><div class="game-main"><div class="cover-placeholder">${artworkMarkup(game, name)}</div><div><h2 class="game-card-name">${escapeHtml(name)}</h2></div></div><span class="game-card-scrape-overlay" aria-hidden="true"><span class="spinner"></span><span class="game-card-scrape-label">正在刮削</span></span>`;
-  const cardArtwork = game.override?.cover || game.override?.artwork?.cover || game.steam?.artworkPreview?.tall;
+  // Keep the glow on the exact same priority/deletion path as the visible
+  // card image. The old shortcut bypassed artworkEntry(), so an explicitly
+  // deleted manual cover still left the stale automatic image as a glow.
+  const cardArtwork = artworkEntry(game, 'cover');
   const cardArtworkUrl = artworkPreviewUrl(cardArtwork);
   const glow = card.querySelector(".card-art-glow");
   if (glow && cardArtworkUrl) glow.style.backgroundImage = `url("${cardArtworkUrl.replaceAll('"', '%22')}")`;
@@ -897,7 +1136,7 @@ function createCard(game) {
       card.classList.remove("current-card");
     }
   });
-  card.addEventListener("click", event => { if (event.target.closest("button,input,select")) return; if (canSelect) toggleGameSelection(game, event.isTrusted && card.matches(":hover")); else openEdit(game); });
+  card.addEventListener("click", event => { if (event.target.closest("button,input,select")) return; if (canSelect) toggleGameSelection(game, event.isTrusted && card.matches(":hover")); else if (!steamIdPending) openEdit(game); });
   card.addEventListener("dblclick", event => { if (event.target === card || event.target.closest(".game-main")) openEdit(game); });
   card.addEventListener("keydown", event => {
     if (event.target !== card) return;
@@ -910,7 +1149,7 @@ function createCard(game) {
       // navigation handler cannot click the same card a second time.
       event.preventDefault();
       event.stopPropagation();
-      if (canSelect) toggleGameSelection(game); else openEdit(game);
+      if (canSelect) toggleGameSelection(game); else if (!steamIdPending) openEdit(game);
     }
   });
   applyScrapeCardState(card, game);
@@ -1157,19 +1396,21 @@ function editIdentityFocusTarget(key, active) {
 }
 function editArtworkFocusTarget(key, active) {
   const cover = $('#artwork-cover-preview');
+  const long = $('#artwork-long-preview');
   const wallpaper = $('#artwork-wallpaper-preview');
-  if (!cover || !wallpaper || ![cover, wallpaper].includes(active)) return null;
-  if (key === 'ArrowLeft') return active === wallpaper ? cover : null;
-  if (key === 'ArrowRight') return active === cover ? wallpaper : null;
+  if (!cover || !long || !wallpaper || ![cover, long, wallpaper].includes(active)) return null;
+  if (key === 'ArrowUp') {
+    if (active === long) return cover;
+    return active;
+  }
   if (key === 'ArrowDown') {
-    // The previews are a visual row. Keep their downward destinations tied to
-    // the two information bubbles below instead of letting nearest-neighbour
-    // geometry choose the Steam AppID field by accident.
-    if (active === wallpaper) return $('#identity-name') || null;
+    if (active === cover) return long;
     return workspaceDropdownTriggerForSelect($('#edit-primary-select')) ||
       workspaceDropdownTriggerForSelect($('#edit-bucket-select')) || null;
   }
-  return null;
+  if (key === 'ArrowRight' && (active === cover || active === long)) return wallpaper;
+  if (key === 'ArrowLeft' && active === wallpaper) return cover;
+  return active;
 }
 function editModalFocusItems() {
   const modal = $('#edit-modal');
@@ -1291,7 +1532,7 @@ function handleModalGamepadKey(event) {
   }
   if (key === 'Enter' || key === ' ') {
     const active = document.activeElement;
-    if (modal.id === 'edit-modal' && active?.matches?.('.artwork-dropzone')) {
+    if (modal.id === 'edit-modal' && active?.matches?.('.artwork-dropzone[data-artwork-editable="true"]')) {
       event.preventDefault(); event.stopPropagation(); return openArtworkActionMenu(active.dataset.artworkType);
     }
     if (active?.matches?.('button,summary')) { event.preventDefault(); event.stopPropagation(); active.click(); return true; }
@@ -1310,7 +1551,37 @@ function isFormInputTarget(target = document.activeElement) {
   const element = target instanceof Element ? target : document.activeElement;
   return Boolean(element?.matches?.('input, textarea, select, [contenteditable="true"], [contenteditable=""]'));
 }
+// Controller navigation selects text fields without making them editable.
+// Unlock only on A/Enter or a pointer gesture; blur/B restores navigation mode.
+function configureControllerTextInput(target, editable = true) {
+  if (!target?.matches?.('[data-controller-input]')) return;
+  target.dataset.controllerEditable = String(editable);
+  finishControllerTextInput(target);
+}
+function finishControllerTextInput(target) {
+  if (!target?.matches?.('[data-controller-input]')) return false;
+  const wasEditing = target.dataset.controllerEditing === 'true';
+  delete target.dataset.controllerEditing;
+  target.readOnly = true;
+  return wasEditing;
+}
+function beginControllerTextInput(target) {
+  if (!target?.matches?.('[data-controller-input]') || target.disabled ||
+      target.dataset.controllerEditable === 'false') return false;
+  target.dataset.controllerEditing = 'true';
+  target.readOnly = false;
+  target.focus({ preventScroll: false });
+  return true;
+}
+document.querySelectorAll('[data-controller-input]').forEach(target => {
+  configureControllerTextInput(target);
+  target.addEventListener('pointerdown', event => {
+    if (event.button === 0) beginControllerTextInput(target);
+  });
+  target.addEventListener('blur', () => finishControllerTextInput(target));
+});
 function requestGamepadKeyboard(target = document.activeElement) {
+  if (target?.matches?.('[data-controller-input]') && !beginControllerTextInput(target)) return false;
   if (!isFormInputTarget(target) || target.disabled || target.readOnly ||
       !target.matches?.('input:not([readonly]), textarea:not([readonly]), [contenteditable="true"], [contenteditable=""]')) return false;
   target.focus({ preventScroll: false });
@@ -1383,7 +1654,7 @@ function renderLibrary() {
   const games = mergedGames(); const counts = categoryCounts(games);
   ensureNativeSteamTab();
   $('#count-not-in-steam').textContent = formatCount(counts['not-in-steam']); $('#count-in-steam').textContent = formatCount(counts['in-steam']); $('#count-native-steam').textContent = formatCount(counts['native-steam']); $('#count-unclassified').textContent = formatCount(counts.unclassified); $('#count-non-game').textContent = formatCount(counts['non-game']); $('#library-subtitle').textContent = `${formatCount(games.length)} 项目 · 已确认 ${formatCount(games.filter(game => game.status === 'ready').length)} 主程序`;
-  document.querySelectorAll('.page-tab').forEach(tab => tab.classList.toggle('active', tab.dataset.tab === activeTab)); const inSteam = activeTab === 'in-steam'; const nativeSteam = activeTab === 'native-steam'; const notInSteam = activeTab === 'not-in-steam'; document.querySelector('.steam-target-copy')?.classList.add('hidden'); document.querySelector('.steam-bar')?.classList.remove('hidden'); $('#commit-button').classList.toggle('hidden', inSteam || nativeSteam); $('#delete-button').classList.toggle('hidden', !inSteam); $('#commit-button').innerHTML = `点击加入Steam <span class="count-label">${formatSelectedCount(selectedPageCount())}</span>`; $('#delete-button').innerHTML = `点击删除 <span class="count-label">${formatSelectedCount(selectedSteamCount())}</span>`; $('#commit-button').disabled = inSteam || nativeSteam || selectedReadyCount() === 0; $('#commit-button').title = nativeSteam ? '原生 Steam 游戏不能通过自定义库重复导入' : '只加入当前页中已验证且已选中的项目'; $('#delete-button').disabled = selectedSteamCount() === 0; $("#in-steam-limitation").classList.add("hidden"); syncPageSelectionControls(); renderRoots(); renderSteamRuntimeState();
+  document.querySelectorAll('.page-tab').forEach(tab => tab.classList.toggle('active', tab.dataset.tab === activeTab)); const inSteam = activeTab === 'in-steam'; const nativeSteam = activeTab === 'native-steam'; const notInSteam = activeTab === 'not-in-steam'; document.querySelector('.steam-target-copy')?.classList.add('hidden'); document.querySelector('.steam-bar')?.classList.remove('hidden'); $('#commit-button').classList.toggle('hidden', inSteam || nativeSteam); $('#delete-button').classList.toggle('hidden', !inSteam); $('#commit-button').innerHTML = `点击加入 <span class="count-label">${formatSelectedCount(selectedPageCount())}</span>`; $('#delete-button').innerHTML = `点击删除 <span class="count-label">${formatSelectedCount(selectedSteamCount())}</span>`; $('#commit-button').disabled = inSteam || nativeSteam || selectedReadyCount() === 0; $('#commit-button').title = nativeSteam ? '原生 Steam 游戏不能通过自定义库重复导入' : '加入当前页中已选中的项目（SteamID、封面和壁纸可为空）'; $('#delete-button').disabled = selectedSteamCount() === 0; $("#in-steam-limitation").classList.add("hidden"); syncPageSelectionControls(); renderRoots(); renderSteamRuntimeState();
   renderArtworkRefreshControl();
   renderSteamTarget();
   const focusedDescriptor = libraryFocusDescriptor(document.activeElement) || libraryFocusMemory;
@@ -1398,10 +1669,11 @@ function renderLibrary() {
   }
 }
 function candidateDataFor(game) {
-  const key = (game.primaryExecutable || '').toLocaleLowerCase();
+  const key = normalizedUiPath(game.primaryExecutable);
   const direct = snapshot.identityCandidates?.[key];
   if (direct?.candidates) return direct.candidates;
-  const normalized = Object.entries(snapshot.identityCandidates || {}).find(([candidateKey, value]) => candidateKey === key || value.executable?.toLocaleLowerCase() === key);
+  const normalized = Object.entries(snapshot.identityCandidates || {}).find(([candidateKey, value]) =>
+    normalizedUiPath(candidateKey) === key || normalizedUiPath(value.executable) === key);
   return normalized?.[1]?.candidates || [];
 }
 function candidatePreview(candidate) {
@@ -1458,7 +1730,7 @@ function draftFor(game) {
   const cloned = cloneEditGame(game);
   cloned.override = { ...(cloned.override || {}) };
   cloned.override.artwork = { ...(cloned.override.artwork || {}) };
-  return { game: cloned, original: game, originalBucket: manualBucket(game), bucket: manualBucket(game), artworkDirty: false, artworkChanged: { cover: false, wallpaper: false }, identityDirty: false, primaryDirty: false };
+  return { game: cloned, original: game, originalBucket: manualBucket(game), bucket: manualBucket(game), artworkDirty: false, artworkChanged: { cover: false, long: false, wallpaper: false }, identityDirty: false, primaryDirty: false };
 }
 function draftName() { return $('#identity-name')?.value.trim() || ''; }
 function draftSteamId() { return $('#identity-steam-id')?.value.trim() || ''; }
@@ -1530,6 +1802,7 @@ function refreshNativeArtworkForEdit(game) {
     artworkDraft = artworkDraftFromGame(refreshed);
     artworkPageBase = {
       cover: artworkDraft.cover ? { ...artworkDraft.cover } : null,
+      long: artworkDraft.long ? { ...artworkDraft.long } : null,
       wallpaper: artworkDraft.wallpaper ? { ...artworkDraft.wallpaper } : null
     };
     renderEditDraft(refreshed);
@@ -1548,15 +1821,16 @@ function openEdit(game) {
     if (!editDraft || normalizedUiPath(editDraft.game?.primaryExecutable) !== normalizedUiPath(game.primaryExecutable)) editDraft = draftFor(game);
     selectedActionGame = editDraft.game;
     artworkDraft = artworkDraftFromGame(selectedActionGame);
-    artworkPageBase = { cover: artworkDraft.cover ? { ...artworkDraft.cover } : null, wallpaper: artworkDraft.wallpaper ? { ...artworkDraft.wallpaper } : null };
+    artworkPageBase = { cover: artworkDraft.cover ? { ...artworkDraft.cover } : null, long: artworkDraft.long ? { ...artworkDraft.long } : null, wallpaper: artworkDraft.wallpaper ? { ...artworkDraft.wallpaper } : null };
     steamIdClearPending = selectedActionGame.override?.idCleared === true;
     renderEditDraft(selectedActionGame);
     const override = selectedActionGame.override || {};
     $('#identity-name').value = override.name || selectedActionGame.steam?.suggestedName || selectedActionGame.primaryProductName || selectedActionGame.directoryName || '';
     $('#identity-steam-id').value = formalSteamAppId(selectedActionGame);
     const nativeSteam = isNativeSteamGame(selectedActionGame);
-    $('#identity-steam-id').readOnly = nativeSteam;
-    $('#identity-steam-id').title = nativeSteam ? '原生 Steam AppID 来自 appmanifest，不允许手动改写' : '';
+    configureControllerTextInput($('#identity-name'));
+    configureControllerTextInput($('#identity-steam-id'), !nativeSteam);
+    $('#identity-steam-id').title = nativeSteam ? '原生 Steam AppID 来自 appmanifest，不允许手动改写' : '手柄按 A 输入，按 B 返回导航';
     $('#identity-steam-id-clear').disabled = nativeSteam;
     if (nativeSteam) $('#artwork-search-hint').textContent = `原生 Steam AppID ${formalSteamAppId(selectedActionGame)}；素材启动时读取缓存，进入手动编辑时刷新 Steam 本地素材`;
     const rawCandidates = (selectedActionGame.candidates || []).filter(candidate => candidate.role !== 'mod-manager' && candidate.path);
@@ -1722,14 +1996,18 @@ function artworkOverride(game) {
   const legacy = direct.artwork && typeof direct.artwork === "object" ? direct.artwork : {};
   return { ...legacy, ...direct };
 }
+function artworkLabel(type) { return type === 'cover' ? '封面' : type === 'long' ? '横版封面' : '壁纸'; }
+function artworkSearchTypeForSlot(type) { return type; }
 function artworkEntry(game, type) {
   const override = artworkOverride(game);
   const protection = override.artworkProtection && typeof override.artworkProtection === "object" ? override.artworkProtection : {};
   if (protection[type] === "deleted") return null;
   const entry = override[type];
-  if (entry?.url || entry?.portableFile || entry?.file || entry?.path) return entry;
-  const preview = type === "cover" ? game.steam?.artworkPreview?.tall : game.steam?.artworkPreview?.hero;
-  return preview || null;
+  if (entry?.available !== false && artworkPreviewUrl(entry)) return { ...entry, source: "manual", priority: "manual" };
+  const preview = type === "cover" ? game?.steam?.artworkPreview?.tall
+    : type === "long" ? game?.steam?.artworkPreview?.long
+    : game?.steam?.artworkPreview?.hero;
+  return preview ? { ...preview, source: preview.source === "manual" ? "manual" : "automatic", priority: preview.source === "manual" ? "manual" : "automatic" } : null;
 }
 function artworkPreviewUrl(entry) {
   if (!entry) return '';
@@ -1738,16 +2016,16 @@ function artworkPreviewUrl(entry) {
     if (!updated || !/^https?:\/\//i.test(value)) return value;
     return `${value}${value.includes('?') ? '&' : '?'}v=${encodeURIComponent(String(updated))}`;
   };
-  if (entry.url) return cacheBust(String(entry.url));
-  const raw = String(entry.path || entry.file || entry.portableFile || '').trim();
-  if (!raw) return '';
+  if (entry.available === false) return '';
+  const raw = String(entry.portableFile || entry.path || entry.file || '').trim();
   const root = normalizedUiPath(snapshot.dataRoot || '');
   const normalized = normalizedUiPath(raw);
   if (root && (normalized === root || normalized.startsWith(root + '\\'))) {
     const relative = normalized.slice(root.length).replace(/^\\+/, '');
-    const mapped = `https://steam-library-data.local/${relative.split('\\').map(part => encodeURIComponent(part)).join('/')}`;
+    const mapped = `https://steam-library-data.localhost/${relative.split('\\').map(part => encodeURIComponent(part)).join('/')}`;
     return cacheBust(mapped);
   }
+  if (entry.url) return cacheBust(String(entry.url));
   return /^https?:\/\//i.test(raw) ? raw : '';
 }
 function artworkDropMarkup(entry, label) { const previewUrl = artworkPreviewUrl(entry); if (previewUrl) return `<img src="${escapeHtml(previewUrl)}" alt="${escapeHtml(label)}" loading="lazy">`; const raw = entry?.path || entry?.file || entry?.portableFile; if (raw) return `<span class="artwork-path">${escapeHtml(raw)}</span>`; return `<span class="artwork-empty">暂无${escapeHtml(label)}</span>`; }
@@ -1763,14 +2041,15 @@ async function downloadIgdbArtworkFallback(target, label, type) {
   const token = ++artworkTaskToken;
   artworkTaskInFlight = true;
   try {
-    const result = await ensureArtworkSearch(game, type);
+    const requestType = artworkSearchTypeForSlot(type);
+    const result = await ensureArtworkSearch(game, requestType);
     if (token !== artworkTaskToken || selectedActionGame !== game) return;
     const candidates = Array.isArray(result?.candidates) ? result.candidates : [];
     const fallback = candidates.find(candidate => String(candidate?.provider || '').toLocaleLowerCase() === 'playnite-igdb' && candidate?.url) ||
       candidates.find(candidate => String(candidate?.provider || '').toLocaleLowerCase() === 'baidu-image' && candidate?.url);
     if (!fallback) throw new Error('没有可用的 IGDB 备用图片');
     downloadingCandidateUrl = fallback.url;
-    const downloaded = await invoke('downloadArtworkCandidate', { executable: game.primaryExecutable, type, url: fallback.url });
+    const downloaded = await invoke('downloadArtworkCandidate', { executable: game.primaryExecutable, type: requestType, url: fallback.url });
     if (token !== artworkTaskToken || selectedActionGame !== game) return;
     artworkDraft[type] = { state: 'set', asset: {
       path: downloaded.path, file: downloaded.path, width: downloaded.width, height: downloaded.height,
@@ -1802,13 +2081,13 @@ function bindArtworkImageFallback(target, label, type) {
   }, { once: true });
 }
 function artworkSlotMarkup(slot, type) {
-  const label = type === "cover" ? "封面" : "壁纸";
+  const label = artworkLabel(type);
   if (slot?.state === "deleted") return `<span class="artwork-empty artwork-deleted">${label}已删除，保存后不自动补回</span>`;
   return artworkDropMarkup(slot?.asset || null, label);
 }
 function renderArtworkDraft() {
   if (!selectedActionGame) return;
-  for (const type of ["cover", "wallpaper"]) {
+  for (const type of ["cover", "long", "wallpaper"]) {
     const target = $(`#artwork-${type}-preview`);
     if (!target) {
       reportUiError('artwork-preview-missing', new Error(`缺少素材预览节点：${type}`));
@@ -1817,15 +2096,15 @@ function renderArtworkDraft() {
     const slot = artworkDraft[type];
     target.dataset.artworkType = type;
     target.dataset.editRow = `artwork-${type}`;
-    target.setAttribute('aria-label', `${type === 'cover' ? '封面' : '壁纸'}操作，按 A 打开`);
+    target.setAttribute('aria-label', `${artworkLabel(type)}操作，按 A 打开`);
     target.innerHTML = artworkSlotMarkup(slot, type);
-    if (slot?.state !== "deleted") bindArtworkImageFallback(target, type === "cover" ? "封面" : "壁纸", type);
+    if (slot?.state !== "deleted") bindArtworkImageFallback(target, artworkLabel(type), type);
   }
 }
 function openArtworkActionMenu(type) {
   if (!selectedActionGame) return false;
-  artworkActionType = type === 'wallpaper' ? 'wallpaper' : 'cover';
-  const label = artworkActionType === 'wallpaper' ? '壁纸' : '封面';
+  artworkActionType = ['cover', 'long', 'wallpaper'].includes(type) ? type : 'cover';
+  const label = artworkLabel(artworkActionType);
   $('#artwork-action-title').textContent = label;
   $('#artwork-action-detail').textContent = `${label}：方向键移动，按 A 确认，按 B 关闭。`;
   $('#artwork-action-modal').classList.remove('hidden');
@@ -1922,7 +2201,8 @@ function ensureArtworkSearch(game, type) {
 }
 function startArtworkPrefetch(game) {
   if (!game) return;
-  for (const type of ['cover', 'wallpaper']) {
+  for (const slot of ['cover', 'long', 'wallpaper']) {
+    const type = artworkSearchTypeForSlot(slot);
     const key = artworkSearchCacheKey(game, type);
     const cached = artworkPrefetchCache.get(key);
     if (artworkPrefetchEntryFresh(cached)) continue;
@@ -1941,11 +2221,11 @@ function artworkDraftFromGame(game) {
     if (protection[type] === "deleted") return { state: "deleted", asset: null };
     return { state: "inherit", asset: artworkEntry(game, type) };
   };
-  return { cover: slotFor("cover"), wallpaper: slotFor("wallpaper"), dirty: { cover: false, wallpaper: false } };
+  return { cover: slotFor("cover"), long: slotFor("long"), wallpaper: slotFor("wallpaper"), dirty: { cover: false, long: false, wallpaper: false } };
 }
 function openArtworkEditor() { if (!selectedActionGame) return; const artworkId = artworkSearchSteamId(selectedActionGame); $('#artwork-search-hint').textContent = artworkId ? `已确认 Steam AppID ${artworkId}` : `搜索词：${artworkSearchQuery(selectedActionGame)}（优先产品名称，其次 EXE）`; renderArtworkDraft(); $('#artwork-status').classList.add('hidden'); $('#edit-modal').classList.remove('hidden'); startArtworkPrefetch(selectedActionGame); }
 async function promptArtworkPath(type) { if (!selectedActionGame) return; try { const result = await invoke('pickArtwork', { type }); if (result?.cancelled || !result?.path) return; artworkDraft[type] = { state: "set", asset: { path: result.path, file: result.path } }; artworkDraft.dirty[type] = true; renderArtworkDraft(); } catch (error) { showError(error, libraryNotice); } }
-function clearArtwork(type) { artworkDraft[type] = { state: "deleted", asset: null }; artworkDraft.dirty[type] = true; renderArtworkDraft(); showNotice(`${type === "cover" ? "封面" : "壁纸"}已标记删除；点击“保存内容”后应用。`, false, libraryNotice); }
+function clearArtwork(type) { artworkDraft[type] = { state: "deleted", asset: null }; artworkDraft.dirty[type] = true; renderArtworkDraft(); showNotice(`${artworkLabel(type)}已标记删除；点击“保存内容”后应用。`, false, libraryNotice); }
 function moveArtworkCandidateFocus(card, key) {
   const cards = [...document.querySelectorAll("#artwork-search-list .artwork-candidate")];
   if (!cards.includes(card) || cards.length < 2) return false;
@@ -1982,32 +2262,46 @@ function artworkCandidateCard(candidate) {
   return [...document.querySelectorAll('#artwork-search-list .artwork-candidate')]
     .find(item => item.dataset.candidateKey === key) || null;
 }
-async function fallbackArtworkCandidate(candidate, card, reason = 'preview') {
+function artworkSearchContext() {
+  return { token: artworkTaskToken, executable: selectedActionGame?.primaryExecutable || '', slot: artworkSearchSlot, type: artworkSearchType };
+}
+function artworkSearchContextCurrent(context) {
+  return Boolean(context && context.token === artworkTaskToken && context.executable === (selectedActionGame?.primaryExecutable || '') &&
+    context.slot === artworkSearchSlot && context.type === artworkSearchType && !$("#artwork-search-modal")?.classList.contains("hidden"));
+}
+async function fallbackArtworkCandidate(candidate, card, reason = 'preview', context = artworkSearchContext()) {
+  // Loading a thumbnail is not user consent to download or apply another image.
+  // Old cards may dispatch errors after a new game/slot has already been opened.
+  if (!artworkSearchContextCurrent(context) || !artworkCandidates.includes(candidate) || (card && !card.isConnected)) return false;
   const key = artworkCandidateKey(candidate);
   if (!key || artworkUnavailableUrls.has(key)) return false;
-  artworkUnavailableUrls.add(key);
+  const distinctPreview = reason === 'preview' && candidate.previewUrl && candidate.previewUrl !== candidate.url;
+  if (!distinctPreview) artworkUnavailableUrls.add(key);
   if (card) {
-    card.disabled = true;
+    card.disabled = !distinctPreview;
     card.classList.add('unavailable');
-    card.setAttribute('aria-disabled', 'true');
+    card.setAttribute('aria-disabled', String(!distinctPreview));
     const preview = card.querySelector('.artwork-candidate-preview');
-    if (preview) preview.textContent = artworkCandidateIsSteam(candidate) ? 'Steam 预览失败，正在切换 IGDB' : '预览失败，正在切换备用图片';
+    if (preview) preview.textContent = distinctPreview ? '预览失败，仍可点击下载原图' : artworkCandidateIsSteam(candidate) ? 'Steam 图片不可用' : '图片候选不可用';
   }
   const fallback = artworkCandidateFallback(candidate);
   if (!fallback) {
-    showNotice(artworkCandidateIsSteam(candidate) ? 'Steam 图片不可用，当前没有可用的 IGDB 备用图片。' : '图片候选不可用，当前没有备用图片。', true, libraryNotice);
+    showNotice('当前图片不可用；可选择其他候选，或返回后指定图片。', true, libraryNotice);
     return false;
   }
+  const label = artworkProviderLabel(fallback.provider);
   const fallbackCard = artworkCandidateCard(fallback);
-  showNotice(artworkCandidateIsSteam(candidate) ? 'Steam 图片预览失败，正在自动改用 IGDB 图片。' : '当前图片不可用，正在切换备用图片。', false, libraryNotice);
-  return applyArtworkCandidate(fallback, fallbackCard, true, reason);
+  if (fallbackCard && !fallbackCard.disabled) fallbackCard.focus({ preventScroll: true });
+  showNotice(`${artworkCandidateIsSteam(candidate) ? 'Steam' : '当前'}图片${reason === 'preview' ? '预览' : '下载'}失败，已切换到${label}候选，请点击选择。`, false, libraryNotice);
+  return true;
 }
 function renderArtworkCandidates(result) {
+  const context = artworkSearchContext();
   artworkCandidates = Array.isArray(result?.candidates) ? result.candidates.filter(candidate => candidate?.url || candidate?.previewUrl) : [];
   artworkUnavailableUrls.clear();
-  $("#artwork-search-title").textContent = artworkSearchType === "wallpaper" ? "选择壁纸" : "选择封面";
+  $("#artwork-search-title").textContent = `选择${artworkLabel(artworkSearchSlot)}`;
   $("#artwork-search-summary").textContent = `${result?.query || artworkSearchQuery(selectedActionGame)} · ${artworkCandidates.length} 个候选 · ${result?.filterInstruction || "已过滤过小图片"}`;
-  const list = $("#artwork-search-list"); list.dataset.artworkType = artworkSearchType; list.replaceChildren();
+  const list = $("#artwork-search-list"); list.dataset.artworkType = artworkSearchSlot; list.replaceChildren();
   $("#artwork-search-empty").classList.toggle("hidden", artworkCandidates.length !== 0);
   for (const candidate of artworkCandidates) {
     const card = document.createElement("button"); card.type = "button"; card.className = "artwork-candidate"; card.tabIndex = 0;
@@ -2032,56 +2326,59 @@ function renderArtworkCandidates(result) {
          moveArtworkCandidateFocus(card, event.key);
        }
      });
-     const image = card.querySelector("img"); image?.addEventListener("error", () => { fallbackArtworkCandidate(candidate, card, 'preview').catch(() => {}); }, { once: true });
+     const image = card.querySelector("img");
+     image?.addEventListener("load", () => {
+       // A Steam "_2x" filename is not proof of doubled pixel dimensions.
+       if (!artworkSearchContextCurrent(context) || (candidate.previewUrl && candidate.previewUrl !== candidate.url)) return;
+       const dimensionsLabel = card.querySelector(".artwork-candidate-meta")?.children[1];
+       if (dimensionsLabel && image.naturalWidth > 0 && image.naturalHeight > 0) dimensionsLabel.textContent = `${image.naturalWidth}×${image.naturalHeight}`;
+     }, { once: true });
+     image?.addEventListener("error", () => { fallbackArtworkCandidate(candidate, card, 'preview', context).catch(error => { if (artworkSearchContextCurrent(context)) showError(error, libraryNotice); }); }, { once: true });
     list.appendChild(card);
   }
   requestAnimationFrame(() => list.querySelector(".artwork-candidate")?.focus());
 }
-async function applyArtworkCandidate(candidate, card, automaticFallback = false, failureReason = 'download') {
-  if (!selectedActionGame || !candidate?.url || downloadingCandidateUrl) return false;
+async function applyArtworkCandidate(candidate, card) {
+  if (!selectedActionGame || !candidate?.url || downloadingCandidateUrl || artworkUnavailableUrls.has(artworkCandidateKey(candidate))) return false;
+  const context = artworkSearchContext();
   const token = ++artworkTaskToken;
+  context.token = token;
   artworkTaskInFlight = true;
   downloadingCandidateUrl = candidate.url; card?.classList.add("loading"); card?.setAttribute("aria-busy", "true");
   try {
-    const result = await invoke("downloadArtworkCandidate", { executable: selectedActionGame.primaryExecutable, type: artworkSearchType, url: candidate.url });
-    if (token !== artworkTaskToken) return;
-    artworkDraft[artworkSearchType] = { state: "set", asset: { path: result.path, file: result.path, width: result.width, height: result.height, provider: candidate.provider || "baidu-image", source: "search" } };
-    artworkDraft.dirty[artworkSearchType] = true;
+    const result = await invoke("downloadArtworkCandidate", { executable: context.executable, type: context.type, url: candidate.url });
+    if (!artworkSearchContextCurrent(context)) return false;
+    if (!result?.path) throw new Error('图片下载没有返回有效文件，请选择其他候选。');
+    artworkDraft[context.slot] = { state: "set", asset: { path: result.path, file: result.path, width: result.width, height: result.height, provider: candidate.provider || "baidu-image", source: "search" } };
+    artworkDraft.dirty[context.slot] = true;
     $("#artwork-search-modal").classList.add("hidden"); renderArtworkDraft();
-    if (token === artworkTaskToken) {
-      renderArtworkDraft();
-      showNotice((artworkSearchType === "wallpaper" ? "壁纸" : "封面") + "已下载，请点击“保存内容”。", false, libraryNotice);
-    }
+    showNotice(artworkLabel(context.slot) + "已下载，请点击“保存内容”。", false, libraryNotice);
     return true;
   } catch (error) {
-    if (token === artworkTaskToken) {
-      artworkUnavailableUrls.add(artworkCandidateKey(candidate));
-      const fallback = artworkCandidateFallback(candidate);
-      if (fallback && !automaticFallback) {
-        downloadingCandidateUrl = '';
-        card?.classList.remove('loading');
-        card?.removeAttribute('aria-busy');
-        const fallbackCard = artworkCandidateCard(fallback);
-        showNotice(artworkCandidateIsSteam(candidate) ? 'Steam 图片无法下载，正在自动改用 IGDB 图片。' : '图片无法下载，正在切换备用图片。', false, libraryNotice);
-        return await applyArtworkCandidate(fallback, fallbackCard, true, 'download-fallback');
-      }
-      if (!String(error?.message || error).includes("CANCELLED")) showError(error, libraryNotice);
+    if (artworkSearchContextCurrent(context) && !String(error?.message || error).includes("CANCELLED")) {
+      const switched = await fallbackArtworkCandidate(candidate, card, 'download', context);
+      if (!switched) showError(error, libraryNotice);
     }
     return false;
-  } finally { if (token === artworkTaskToken) artworkTaskInFlight = false; downloadingCandidateUrl = ""; card?.classList.remove("loading"); card?.removeAttribute("aria-busy"); }
+  } finally {
+    // An older/cancelled request must not clear a newer request's busy guard.
+    if (token === artworkTaskToken) { artworkTaskInFlight = false; downloadingCandidateUrl = ""; }
+    card?.classList.remove("loading"); card?.removeAttribute("aria-busy");
+  }
 }
 async function searchArtwork(type) {
   if (!selectedActionGame) { showNotice("请先打开一个游戏卡片的编辑页面。", true, libraryNotice); return; }
   const token = ++artworkTaskToken;
   artworkTaskInFlight = true;
-  artworkSearchType = type;
-  $("#artwork-search-title").textContent = type === "wallpaper" ? "选择壁纸" : "选择封面";
+  artworkSearchSlot = ['cover', 'long', 'wallpaper'].includes(type) ? type : 'cover';
+  artworkSearchType = artworkSearchTypeForSlot(artworkSearchSlot);
+  $("#artwork-search-title").textContent = `选择${artworkLabel(artworkSearchSlot)}`;
   $("#artwork-search-summary").textContent = "正在搜索：" + artworkSearchQuery(selectedActionGame) + " · 弱网下仍可返回";
-  $("#artwork-search-list").dataset.artworkType = type;
+  $("#artwork-search-list").dataset.artworkType = artworkSearchSlot;
   $("#artwork-search-list").innerHTML = '<div class="search-loading"><strong>正在获取候选图片</strong><span>搜索完成后可直接选择素材</span></div>';
   $("#artwork-search-empty").classList.add("hidden");
   $("#artwork-search-modal").classList.remove("hidden");
-  try { const result = await ensureArtworkSearch(selectedActionGame, type); if (token === artworkTaskToken) renderArtworkCandidates(result); }
+  try { const result = await ensureArtworkSearch(selectedActionGame, artworkSearchType); if (token === artworkTaskToken) renderArtworkCandidates(result); }
   catch (error) { if (token === artworkTaskToken && !String(error?.message || error).includes("CANCELLED")) { $("#artwork-search-list").innerHTML = '<div class="search-loading error">搜索失败，可返回后改用“指定图片”</div>'; showError(error, libraryNotice); } }
   finally { if (token === artworkTaskToken) artworkTaskInFlight = false; }
 }
@@ -2090,7 +2387,7 @@ function syncArtworkDraftToEdit() {
   if (!selectedActionGame || !editDraft?.game) return;
   selectedActionGame.override = { ...(selectedActionGame.override || {}) };
   selectedActionGame.override.artworkProtection = { ...(selectedActionGame.override.artworkProtection || {}) };
-  for (const type of ["cover", "wallpaper"]) {
+  for (const type of ["cover", "long", "wallpaper"]) {
     const slot = artworkDraft[type];
     if (!artworkDraft.dirty[type]) continue;
     if (slot?.state === "set" && slot.asset) {
@@ -2103,7 +2400,7 @@ function syncArtworkDraftToEdit() {
     editDraft.artworkChanged[type] = true;
   }
   if (!Object.keys(selectedActionGame.override.artworkProtection).length) delete selectedActionGame.override.artworkProtection;
-  editDraft.artworkDirty = editDraft.artworkDirty || artworkDraft.dirty.cover || artworkDraft.dirty.wallpaper;
+  editDraft.artworkDirty = editDraft.artworkDirty || artworkDraft.dirty.cover || artworkDraft.dirty.long || artworkDraft.dirty.wallpaper;
 }
 function confirmArtworkDraft() {
   syncArtworkDraftToEdit();
@@ -2139,7 +2436,7 @@ async function persistEditDraft() {
     else if (igdbId && igdbId !== originalIgdbId) snapshot = await invoke('identifyOne', { executable: game.primaryExecutable, manualName: name, igdbId: String(igdbId) });
     if (editDraft.artworkDirty) {
       const args = { executable: game.primaryExecutable };
-      for (const type of ['cover', 'wallpaper']) {
+      for (const type of ['cover', 'long', 'wallpaper']) {
         if (!editDraft.artworkChanged[type]) continue;
         const value = game.override?.[type]?.path || game.override?.[type]?.file || game.override?.[type]?.portableFile || game.override?.[type]?.url || '';
         args[`${type}Path`] = value;
@@ -2170,6 +2467,7 @@ async function persistEditDraft() {
 }
 function setBucketOptions(value) { const select = $('#edit-bucket-select'); if (select) { select.value = value || 'auto'; refreshWorkspaceDropdown(select); } }
 function closeEdit() {
+  document.querySelectorAll('#edit-modal [data-controller-input]').forEach(finishControllerTextInput);
   cancelEditorBackgroundTasks();
   closeWorkspaceDropdown(false);
   closeArtworkActionMenu(false);
@@ -2180,12 +2478,12 @@ function closeEdit() {
   $('#artwork-search-modal').classList.add('hidden');
   selectedActionGame = null;
   editDraft = null;
-  artworkDraft = { cover: null, wallpaper: null, dirty: { cover: false, wallpaper: false } };
+  artworkDraft = { cover: null, long: null, wallpaper: null, dirty: { cover: false, long: false, wallpaper: false } };
   editReturnCardDirectory = '';
   restoreEditReturnFocus(returnDirectory);
 }
 async function refreshSteamPlan() { try { snapshot = await invoke('plan', selectedTargetArguments()); renderEntry(); renderLibrary(); } catch (error) { showError(error, libraryNotice); } }
-async function runBusy(command, title, detail, args = {}, success = '') { clearNotice(); setBusy(true, title, detail); try { const result = await invoke(command, args); if (command === 'closeSteam') { applySteamRuntimeState(result); } else { snapshot = result; renderEntry(); if (!$('#library-view').classList.contains('hidden')) renderLibrary(); } if (success) showNotice(success, false, $('#library-view').classList.contains('hidden') ? notice : libraryNotice); return true; } catch (error) { const text = error?.message || String(error); const cancelled = text.includes('TASK_CANCELLED') || text.includes('ERROR_CANCELLED'); if (cancelled) { showNotice(/搜索游戏|搜索候选|识别真实游戏/.test(title) ? '已取消搜索，返回当前游戏。' : '已取消当前任务。', false, $('#library-view').classList.contains('hidden') ? notice : libraryNotice); if (searchReturnToEdit && selectedActionGame) { searchReturnToEdit = false; $('#identity-search-modal')?.classList.add('hidden'); openEdit(selectedActionGame); } } else showError(error, $('#library-view').classList.contains('hidden') ? notice : libraryNotice); return false; } finally { cancelInFlight = false; setBusy(false); } }
+async function runBusy(command, title, detail, args = {}, success = '') { clearNotice(); setBusy(true, title, detail); try { const result = await invoke(command, args); if (command === 'closeSteam') { applySteamRuntimeState(result); } else { snapshot = result; renderEntry(); if (!$('#library-view').classList.contains('hidden')) renderLibrary(); } if (success) showNotice(success, false, $('#library-view').classList.contains('hidden') ? notice : libraryNotice); return true; } catch (error) { const text = error?.message || String(error); const cancelled = text.includes('TASK_CANCELLED') || text.includes('ERROR_CANCELLED'); if (cancelled) { showNotice(/搜索游戏|搜索候选|识别真实游戏/.test(title) ? '已取消搜索，返回当前游戏。' : '已取消当前任务。', false, $('#library-view').classList.contains('hidden') ? notice : libraryNotice); if (searchReturnToEdit && selectedActionGame) { searchReturnToEdit = false; $('#identity-search-modal')?.classList.add('hidden'); openEdit(selectedActionGame); } } else { if (['commit', 'deleteFromSteam', 'refreshSteamArtwork'].includes(command)) { try { applyLibrarySnapshot(await invoke('state')); } catch (refreshError) { reportUiError('refresh-after-steam-write-error', refreshError, { command }); } } showError(error, $('#library-view').classList.contains('hidden') ? notice : libraryNotice); } return false; } finally { cancelInFlight = false; setBusy(false); } }
 async function startNonBlockingRefresh() {
   if (['starting', 'queued', 'running'].includes(manualRefreshProgress.phase)) return;
   clearNotice();
@@ -2292,14 +2590,14 @@ async function requestSteamCommit() {
     applySteamRuntimeState(preflight);
     if (preflight?.steamRunning) {
       const accepted = await askConfirm('Steam 正在运行',
-        'Steam 正在运行，确认后只请求 Steam 温和退出，不会启动游戏；关闭完成后请再次点击“点击加入Steam”。',
+        'Steam 正在运行，确认后只请求 Steam 温和退出，不会启动游戏；关闭完成后请再次点击“点击加入”。',
         '关闭 Steam');
       if (accepted) await closeSteamOnly();
       return;
     }
     const count = selectedReadyCount();
-    if (!count) return showNotice('当前页面没有已验证且已选中的项目。', true, libraryNotice);
-    $('#commit-summary').textContent = `将把 ${count} 个已验证项目同步到全部 Steam 大屏用户。`;
+    if (!count) return showNotice('当前页面没有已选中的项目。', true, libraryNotice);
+    $('#commit-summary').textContent = `将把 ${count} 个已选中项目同步到全部 Steam 大屏用户。`;
     $('#commit-target').textContent = '目标：所有已发现的 Steam 用户（逐账户事务写入）';
     $('#steam-commit-modal').classList.remove('hidden');
   } catch (error) { showError(error, libraryNotice); }
@@ -2316,7 +2614,7 @@ $('#steam-commit-close').addEventListener('click', () => $('#steam-commit-modal'
     applySteamRuntimeState(preflight);
     if (preflight?.steamRunning) {
       const accepted = await askConfirm('Steam 正在运行',
-        'Steam 在确认期间重新启动了，当前不能导入。确认后只关闭 Steam，关闭完成后请再次点击“点击加入Steam”。',
+        'Steam 在确认期间重新启动了，当前不能导入。确认后只关闭 Steam，关闭完成后请再次点击“点击加入”。',
         '关闭 Steam');
       if (!accepted) return;
       await closeSteamOnly();
@@ -2326,7 +2624,7 @@ $('#steam-commit-close').addEventListener('click', () => $('#steam-commit-modal'
 $('#delete-button').addEventListener('click', () => { const count = selectedSteamCount(); if (!count) return showNotice('当前页面没有已选中的 Steam 快捷方式。', true, libraryNotice); $('#delete-summary').textContent = `将从全部 Steam 大屏用户中删除 ${count} 个明确匹配的快捷方式。`; $('#steam-delete-modal').classList.remove('hidden'); });
 $('#steam-delete-close').addEventListener('click', () => $('#steam-delete-modal').classList.add('hidden')); $('#steam-delete-cancel').addEventListener('click', () => $('#steam-delete-modal').classList.add('hidden')); $('#steam-delete-confirm').addEventListener('click', async () => { $('#steam-delete-modal').classList.add('hidden'); await runBusy('deleteFromSteam', '正在事务删除 Steam 快捷方式', '逐账户备份、暂存、删除并校验 shortcuts.vdf。', { ...selectedTargetArguments(), selectionMode: 'all-steam-accounts', selectedGameDirectories: [...(selectedSteamDirectories === null ? new Set(defaultSelectedSteamDirectories()) : selectedSteamDirectories)] }); });
 document.querySelectorAll('.page-tab').forEach(tab => tab.addEventListener('click', () => { closeLibraryMenuPanels(); activeTab = tab.dataset.tab; renderLibrary(); }));
-$('#edit-back-button').addEventListener('click', closeEdit); $('#edit-folder').addEventListener('click', () => selectedActionGame && invoke('openFolder', { path: selectedActionGame.gameDirectory }).catch(error => showError(error, libraryNotice))); $('#artwork-cancel')?.addEventListener('click', cancelArtworkEditor); $('#artwork-save')?.addEventListener('click', confirmArtworkDraft); document.querySelectorAll('.artwork-pane').forEach(pane => { const type = pane.dataset.artworkType; const preview = pane.querySelector('.artwork-dropzone'); preview?.addEventListener('click', () => openArtworkActionMenu(type)); preview?.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); event.stopPropagation(); openArtworkActionMenu(type); } }); });
+$('#edit-back-button').addEventListener('click', closeEdit); $('#edit-folder').addEventListener('click', () => selectedActionGame && invoke('openFolder', { path: selectedActionGame.gameDirectory }).catch(error => showError(error, libraryNotice))); $('#artwork-cancel')?.addEventListener('click', cancelArtworkEditor); $('#artwork-save')?.addEventListener('click', confirmArtworkDraft); document.querySelectorAll('.artwork-pane[data-artwork-editable="true"]').forEach(pane => { const type = pane.dataset.artworkType; const preview = pane.querySelector('.artwork-dropzone'); preview?.addEventListener('click', () => openArtworkActionMenu(type)); preview?.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); event.stopPropagation(); openArtworkActionMenu(type); } }); });
 $('#artwork-action-close').addEventListener('click', () => closeArtworkActionMenu(true)); $('#artwork-action-search').addEventListener('click', () => artworkActionForCurrentType('search')); $('#artwork-action-replace').addEventListener('click', () => artworkActionForCurrentType('replace')); $('#artwork-action-delete').addEventListener('click', () => artworkActionForCurrentType('delete'));
 $('#artwork-search-close').addEventListener('click', cancelArtworkTask); $('#artwork-search-cancel').addEventListener('click', cancelArtworkTask); $('#identity-search-cancel').addEventListener('click', cancelIdentitySearch);
 $('#edit-primary-select').addEventListener('change', event => { if (!selectedActionGame || !event.target.value) return; selectedActionGame.primaryExecutable = event.target.value; editDraft.primaryDirty = true; renderEditDraft(selectedActionGame); showNotice('主程序已暂存；点击“保存内容”才会写入配置。', false, libraryNotice); });
@@ -2341,7 +2639,30 @@ function routeWorkspaceKey(event) {
   // event already consumed by a card or modal control from reaching the global
   // router.
   const semanticWorkspaceAction = event.workspaceAction === true;
-  if (event.defaultPrevented || (!isBack && !semanticWorkspaceAction && isFormInputTarget(event.target || document.activeElement))) return;
+  const activeInput = event.target || document.activeElement;
+  const lockedControllerInput = activeInput?.matches?.('[data-controller-input]') && activeInput.readOnly;
+  if (event.defaultPrevented || (!isBack && !semanticWorkspaceAction && isFormInputTarget(activeInput) && !lockedControllerInput)) return;
+  if (lockedControllerInput && !semanticWorkspaceAction && (event.key === 'Enter' || event.key === ' ')) {
+    event.preventDefault();
+    beginControllerTextInput(activeInput);
+    return;
+  }
+  if (isBack && document.activeElement?.dataset?.controllerEditing === 'true') {
+    event.preventDefault();
+    controllerBackLastAt = 0;
+    if (controllerBackResetTimer) window.clearTimeout(controllerBackResetTimer);
+    controllerBackResetTimer = 0;
+    const input = document.activeElement;
+    finishControllerTextInput(input);
+    // Remove the editable DOM focus before selecting the locked field again.
+    // This ends text entry without closing the editor or arming double-B exit.
+    input.blur();
+    focusWorkspaceElement(input, false);
+    return;
+  }
+  if (semanticWorkspaceAction && ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.key)) {
+    finishControllerTextInput(document.activeElement);
+  }
   if (isBack) {
     event.preventDefault();
     const isControllerBack = semanticWorkspaceAction;
@@ -2439,20 +2760,22 @@ function scheduleSilentRefresh() {
   }, 250);
 }
 window.chrome.webview.addEventListener('message', event => {
-  const message = event.data || {};
+  const message = isWorkspaceRecord(event.data) ? event.data : {};
   if (message.kind === 'response') {
     if (message.id === 0) {
       if (message.ok && message.result) {
-        snapshot = message.result;
-        renderEntry();
-        if (!$('#library-view').classList.contains('hidden')) renderLibrary();
+        applyLibrarySnapshot(message.result);
       } else if (!message.ok) showError(message.error);
       return;
     }
     const item = pending.get(message.id);
     if (!item) return;
     pending.delete(message.id);
-    message.ok ? item.resolve(message.result) : item.reject(new Error(message.error || '操作失败'));
+    if (!message.ok) item.reject(new Error(message.error || '操作失败'));
+    else {
+      try { item.resolve(workspaceBridgeResult(item.command, message.result)); }
+      catch (error) { reportUiError('invalid-host-snapshot', error, { command: item.command }); item.reject(error); }
+    }
     return;
   }
   if (message.scrape) {
@@ -2465,24 +2788,18 @@ window.chrome.webview.addEventListener('message', event => {
   if (message.event === 'library-first-run-started') {
     showNotice('正在自动扫描游戏库；仅首次打开时执行，页面保持可操作。', false, libraryNotice);
   } else if (message.event === 'library-first-run-scan-complete' || message.event === 'library-first-run-complete') {
-    if (message.snapshot) snapshot = message.snapshot;
-    renderEntry();
-    if (!$('#library-view').classList.contains('hidden')) renderLibrary();
+    if (message.snapshot) applyLibrarySnapshot(message.snapshot);
     showNotice(`首次目录扫描完成${Number.isFinite(Number(message.rootCount)) ? `，发现 ${Number(message.rootCount)} 个游戏库目录` : ''}；SteamID、封面和壁纸仍在后台识别。`, false, libraryNotice);
   } else if (message.event === 'library-first-run-error') {
     showNotice(message.error || '首次自动扫描未完成，可手动点击“扫描游戏库”重试。', true, libraryNotice);
   } else if (message.event === 'library-scan-complete') {
-    if (message.snapshot) snapshot = message.snapshot;
-    renderEntry();
-    if (!$('#library-view').classList.contains('hidden')) renderLibrary();
+    if (message.snapshot) applyLibrarySnapshot(message.snapshot);
     showNotice('目录扫描已完成；页面保持可操作。', false, libraryNotice);
   } else if (message.event === 'library-plan-refreshed') {
     // The local scan and Steam plan are intentionally separate phases.  A
     // slow/disconnected Steam install may delay this event, but must never
     // delay the library page or consume foreground input.
-    if (message.snapshot) snapshot = message.snapshot;
-    renderEntry();
-    if (!$('#library-view').classList.contains('hidden')) renderLibrary();
+    if (message.snapshot) applyLibrarySnapshot(message.snapshot, { preserveWaiting: true });
   } else if (message.event === 'scrape-queue-started') {
     clearNotice(libraryNotice);
     if (String(message.scrape?.mode || '') === 'manual-refresh') {
@@ -2648,9 +2965,7 @@ window.chrome.webview.addEventListener('message', event => {
     scheduleSilentRefresh();
     showNotice(message.planPending ? '网络恢复已完成，计划正在后台刷新。' : '网络恢复任务已完成。', false, libraryNotice);
   } else if (message.event === 'network-plan-refreshed') {
-    if (message.snapshot) snapshot = message.snapshot;
-    renderEntry();
-    if (!$('#library-view').classList.contains('hidden')) renderLibrary();
+    if (message.snapshot) applyLibrarySnapshot(message.snapshot, { preserveWaiting: true });
   } else if (message.event === 'network-wake-cancelled') {
     scheduleSilentRefresh();
     showNotice('网络恢复已取消；当前缓存和页面状态保留，可稍后重试。', false, libraryNotice);
@@ -2720,19 +3035,6 @@ invoke('startup').then(async result => {
   renderEntry();
   await openLibraryView();
 }).catch(showError);
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 

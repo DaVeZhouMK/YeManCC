@@ -1,0 +1,376 @@
+{
+    "schemaVersion":  1,
+    "artifactId":  "T20-HISTORICAL-CLAIM-INVENTORY-20260904",
+    "status":  "T20-AUTHORITY-REAUDIT-P20-CURRENT-SOURCE-STATIC / DOCS-ONLY / RUNTIME-BLOCKED",
+    "authority":  "Docs/Tasks/GyroVirtual/TASK.md#2026-09-04-HC-同源偏差治理-BUS（主线整合）",
+    "scope":  "BUS-P05 historical inventory re-audited against TASK.md BUS authority. The 21 historical claims retain explicit 4/13/4 dispositions; P20 (T22-RF00-20260906-T10-I-HC-ROUTE-STATIC-SNAPSHOT / 41FF57702ECF777BD409B1D7FE5820A81F9891B1C34CB0E9CB1E2F6861B5B80C) is the linked static source/provenance snapshot and does not establish runtime evidence.",
+    "claims":  [
+                   {
+                       "historyId":  "HIS-01",
+                       "document":  "Docs/Tasks/GyroVirtual/00-CONSTITUTION.md#1",
+                       "originalDate":  "2026-09-03",
+                       "originalScope":  "top-level input principles, single coordinator/Host/writer, HC source lock and safe-stop",
+                       "currentAuthority":  "current-authority for general principles; 24/30/TASK control current T10-T19 details",
+                       "stillReferenced":  true,
+                       "evidenceTier":  "source-located",
+                       "relationToDgf":  [
+                                             "DGF-02",
+                                             "DGF-04",
+                                             "DGF-06",
+                                             "DGF-14"
+                                         ],
+                       "disposition":  "current-authority",
+                       "requiredWording":  "principle/contract only; no runtime conclusion without the later 24/30/TASK gates",
+                       "closureOrRetirementRule":  "retain as governing principles; specific runtime claims defer to 30/TASK and R1 evidence"
+                   },
+                   {
+                       "historyId":  "HIS-02",
+                       "document":  "Docs/Tasks/GyroVirtual/01-ASSET-BASELINE-AND-EXECUTION-NODES-20260903.md#1",
+                       "originalDate":  "2026-09-03",
+                       "originalScope":  "asset identity and staged execution nodes",
+                       "currentAuthority":  "historical-reference",
+                       "stillReferenced":  true,
+                       "evidenceTier":  "source-located",
+                       "relationToDgf":  [
+                                             "DGF-08",
+                                             "DGF-09"
+                                         ],
+                       "disposition":  "historical-reference",
+                       "requiredWording":  "F0 identity is historical context; A1/runtime remains blocked unless the current asset and 30/TASK gates say otherwise",
+                       "closureOrRetirementRule":  "retain only as asset/staging history; do not derive a live InputHost or virtual target"
+                   },
+                   {
+                       "historyId":  "HIS-03",
+                       "document":  "Docs/Tasks/GyroVirtual/02-POWERCONTROL-PRODUCTION-ASSET-PARTITION-20260903.md#1",
+                       "originalDate":  "2026-09-03",
+                       "originalScope":  "PowerControl asset partition and release boundary",
+                       "currentAuthority":  "historical-reference",
+                       "stillReferenced":  true,
+                       "evidenceTier":  "source-located",
+                       "relationToDgf":  [
+                                             "DGF-09",
+                                             "DGF-12"
+                                         ],
+                       "disposition":  "historical-reference",
+                       "requiredWording":  "packaging/asset partition is not a runtime capability or consumer-isolation proof",
+                       "closureOrRetirementRule":  "require current package manifest and release authorization before any product claim"
+                   },
+                   {
+                       "historyId":  "HIS-04",
+                       "document":  "Docs/Tasks/GyroVirtual/03-CANDIDATE-GAMEPAD-GYRO-ASSET-SPLIT-20260903.md#1",
+                       "originalDate":  "2026-09-03",
+                       "originalScope":  "candidate shared runtime plus gamepad/gyro split",
+                       "currentAuthority":  "superseded by 30/TASK",
+                       "stillReferenced":  true,
+                       "evidenceTier":  "source-located",
+                       "relationToDgf":  [
+                                             "DGF-08",
+                                             "DGF-09",
+                                             "DGF-12"
+                                         ],
+                       "disposition":  "superseded",
+                       "requiredWording":  "design-only candidate, not deployed and not a current InputHost/HidHide decision",
+                       "closureOrRetirementRule":  "never use as runtime evidence; retain for drift history only"
+                   },
+                   {
+                       "historyId":  "HIS-05",
+                       "document":  "Docs/Tasks/GyroVirtual/04-CANDIDATE-PRODUCT-PATH-CONFIRMATION-20260903.md#1",
+                       "originalDate":  "2026-09-03",
+                       "originalScope":  "candidate YMCC/product paths",
+                       "currentAuthority":  "superseded by current source and 30/TASK",
+                       "stillReferenced":  true,
+                       "evidenceTier":  "source-located",
+                       "relationToDgf":  [
+                                             "DGF-08",
+                                             "DGF-11",
+                                             "DGF-12"
+                                         ],
+                       "disposition":  "superseded",
+                       "requiredWording":  "historical product-path candidate only; existence must be checked in current source and does not show contract conformance",
+                       "closureOrRetirementRule":  "retire from current path claims once TASK links a current reconciled path map"
+                   },
+                   {
+                       "historyId":  "HIS-06",
+                       "document":  "Docs/Tasks/GyroVirtual/05-CANDIDATE-THREE-LAYER-INPUT-ARCHITECTURE-20260903.md#1",
+                       "originalDate":  "2026-09-03",
+                       "originalScope":  "three-layer input candidate",
+                       "currentAuthority":  "superseded for product topology",
+                       "stillReferenced":  true,
+                       "evidenceTier":  "source-located",
+                       "relationToDgf":  [
+                                             "DGF-11",
+                                             "DGF-14"
+                                         ],
+                       "disposition":  "superseded",
+                       "requiredWording":  "architectural vocabulary only; it cannot prove one writer, owner handoff or external consumer isolation",
+                       "closureOrRetirementRule":  "replace runtime assertions with 24/29/30/TASK references"
+                   },
+                   {
+                       "historyId":  "HIS-07",
+                       "document":  "Docs/Tasks/GyroVirtual/06-CONFIRMED-TWO-PAGES-AND-INPUT-HOST-SCOPE-20260903.md#1",
+                       "originalDate":  "2026-09-03",
+                       "originalScope":  "two sidebar pages and InputHost scope",
+                       "currentAuthority":  "scope-reference only",
+                       "stillReferenced":  true,
+                       "evidenceTier":  "source-located",
+                       "relationToDgf":  [
+                                             "DGF-08",
+                                             "DGF-11"
+                                         ],
+                       "disposition":  "historical-reference",
+                       "requiredWording":  "page/Host scope is design-only and not deployment or runtime admission",
+                       "closureOrRetirementRule":  "requires current source call graph and 30 ACK/release contract before use beyond scope"
+                   },
+                   {
+                       "historyId":  "HIS-08",
+                       "document":  "Docs/Tasks/GyroVirtual/07-INPUTHOST-COORDINATOR-CALL-CHAIN-20260903.md#1",
+                       "originalDate":  "2026-09-03",
+                       "originalScope":  "Coordinator/InputHost lifecycle design",
+                       "currentAuthority":  "contract-reference subject to 24/30/TASK",
+                       "stillReferenced":  true,
+                       "evidenceTier":  "source-located",
+                       "relationToDgf":  [
+                                             "DGF-02",
+                                             "DGF-06",
+                                             "DGF-11"
+                                         ],
+                       "disposition":  "historical-reference",
+                       "requiredWording":  "design-ready does not mean runtime created; direct state-file Host is a legacy candidate until Coordinator/ACK/release evidence closes",
+                       "closureOrRetirementRule":  "each call-chain edge must be shown in a current source map plus R1 for runtime"
+                   },
+                   {
+                       "historyId":  "HIS-09",
+                       "document":  "Docs/Tasks/GyroVirtual/08-UNIFIED-INPUT-THREE-LINE-BUILD-ROUTE-20260903.md#1",
+                       "originalDate":  "2026-09-03",
+                       "originalScope":  "authoritative planning route for three input lines",
+                       "currentAuthority":  "plan-reference only",
+                       "stillReferenced":  true,
+                       "evidenceTier":  "source-located",
+                       "relationToDgf":  [
+                                             "DGF-02",
+                                             "DGF-08",
+                                             "DGF-14"
+                                         ],
+                       "disposition":  "historical-reference",
+                       "requiredWording":  "route/ordering only; later contracts govern implementation and runtime",
+                       "closureOrRetirementRule":  "retain unless it conflicts with 30/TASK; conflicts require DGF/C1"
+                   },
+                   {
+                       "historyId":  "HIS-10",
+                       "document":  "Docs/Tasks/GyroVirtual/16-FRAMEWORK-CLOSURE-AUDIT-20260903.md#1",
+                       "originalDate":  "2026-09-03",
+                       "originalScope":  "framework mock and isolated probe closure audit",
+                       "currentAuthority":  "historical-reference",
+                       "stillReferenced":  true,
+                       "evidenceTier":  "mock-pass or source-located per underlying provenance",
+                       "relationToDgf":  [
+                                             "DGF-05",
+                                             "DGF-08",
+                                             "DGF-09",
+                                             "DGF-15"
+                                         ],
+                       "disposition":  "historical-reference",
+                       "requiredWording":  "framework/isolated evidence is not a product Host, descriptor, visibility or consumer conclusion",
+                       "closureOrRetirementRule":  "every inherited pass must be re-tiered by T19 evidence requirements"
+                   },
+                   {
+                       "historyId":  "HIS-11",
+                       "document":  "Docs/Tasks/GyroVirtual/19-IMPLEMENTER-FORWARD-DERIVATION-AND-GAPS-20260903.md#1",
+                       "originalDate":  "2026-09-03",
+                       "originalScope":  "implementation readiness and gap list",
+                       "currentAuthority":  "historical-reference",
+                       "stillReferenced":  false,
+                       "evidenceTier":  "source-located",
+                       "relationToDgf":  [
+                                             "DGF-08",
+                                             "DGF-13"
+                                         ],
+                       "disposition":  "historical-reference",
+                       "requiredWording":  "forward derivation identifies gaps but cannot authorize implementation or close them",
+                       "closureOrRetirementRule":  "maintain only as historical design rationale"
+                   },
+                   {
+                       "historyId":  "HIS-12",
+                       "document":  "Docs/Tasks/GyroVirtual/20-YMCC-UI-INPUT-LOGGING-INTEGRATION-CONTRACT-20260903.md#1",
+                       "originalDate":  "2026-09-03",
+                       "originalScope":  "YMCC UI/input/log integration contract",
+                       "currentAuthority":  "current-authority for UI/log scope; not an external-consumer contract",
+                       "stillReferenced":  true,
+                       "evidenceTier":  "source-located",
+                       "relationToDgf":  [
+                                             "DGF-08",
+                                             "DGF-14"
+                                         ],
+                       "disposition":  "current-authority",
+                       "requiredWording":  "UI/log integration governs YMCC only; no HidHide/XInput/Steam claim follows",
+                       "closureOrRetirementRule":  "retain; route-level runtime claims require 29 evidence and a named scope"
+                   },
+                   {
+                       "historyId":  "HIS-13",
+                       "document":  "Docs/Tasks/GyroVirtual/22-HC-VIRTUAL-GAMEPAD-TO-YMCC-UI-CONTROL-ASSESSMENT-20260903.md#1",
+                       "originalDate":  "2026-09-03",
+                       "originalScope":  "project delta for frontend semantic ownership",
+                       "currentAuthority":  "current contract for P-OWNER only",
+                       "stillReferenced":  true,
+                       "evidenceTier":  "R1-runtime-observed limited to YMCC route where recorded; otherwise source-located",
+                       "relationToDgf":  [
+                                             "DGF-04",
+                                             "DGF-14"
+                                         ],
+                       "disposition":  "current-authority",
+                       "requiredWording":  "YMCC owner isolation is separate from P-HID and P-XINPUT; do not generalize it to games",
+                       "closureOrRetirementRule":  "runtime evidence must name the internal consumer, epoch, neutral and restoration"
+                   },
+                   {
+                       "historyId":  "HIS-14",
+                       "document":  "Docs/Tasks/GyroVirtual/23-HC-FEEDBACK-LIFECYCLE-AND-CAPABILITY-MATRIX-20260903.md#1",
+                       "originalDate":  "2026-09-03",
+                       "originalScope":  "feedback lifecycle and capability matrix",
+                       "currentAuthority":  "historical HC reference; separate from gyro/virtual runtime",
+                       "stillReferenced":  false,
+                       "evidenceTier":  "source-located",
+                       "relationToDgf":  [
+                                             "DGF-02",
+                                             "DGF-13"
+                                         ],
+                       "disposition":  "historical-reference",
+                       "requiredWording":  "feedback capability must not be used to prove input, descriptor or consumer closure",
+                       "closureOrRetirementRule":  "keep isolated from the gyro motion implementation line"
+                   },
+                   {
+                       "historyId":  "HIS-15",
+                       "document":  "Docs/Tasks/GyroVirtual/27-END-TO-END-BUILD-AND-REVERSE-FAILURE-REPLAY-20260903.md#1",
+                       "originalDate":  "2026-09-03",
+                       "originalScope":  "readiness replay and fault handling",
+                       "currentAuthority":  "current process/reference, not implementation evidence",
+                       "stillReferenced":  true,
+                       "evidenceTier":  "source-located",
+                       "relationToDgf":  [
+                                             "DGF-01",
+                                             "DGF-02",
+                                             "DGF-04",
+                                             "DGF-05",
+                                             "DGF-06"
+                                         ],
+                       "disposition":  "current-authority",
+                       "requiredWording":  "replay describes gates and errors; it cannot establish that a target/report/consumer exists",
+                       "closureOrRetirementRule":  "retain as process contract; link each execution result to 30/TASK evidence"
+                   },
+                   {
+                       "historyId":  "HIS-16",
+                       "document":  "Docs/Tasks/GyroVirtual/TASK-HC-GYRO-VIRTUAL-ASSET-EVALUATION-20260903.md#1",
+                       "originalDate":  "2026-09-03",
+                       "originalScope":  "mainline asset-evaluation overview",
+                       "currentAuthority":  "mainline-reference; current drift conclusions defer to Docs/Tasks/GyroVirtual/TASK.md BUS sections",
+                       "stillReferenced":  true,
+                       "evidenceTier":  "source-located",
+                       "relationToDgf":  [
+                                             "DGF-08",
+                                             "DGF-09",
+                                             "DGF-13"
+                                         ],
+                       "disposition":  "historical-reference",
+                       "requiredWording":  "overview/asset lock only; current source and runtime claims must be read through TASK/30",
+                       "closureOrRetirementRule":  "retain as entry page but do not let historical package sections override current gates"
+                   },
+                   {
+                       "historyId":  "HIS-17",
+                       "document":  "Docs/Research/HC/Gyro/HC-GYRO-LIFECYCLE.md#1",
+                       "originalDate":  "2026-09-02",
+                       "originalScope":  "HC gyro lifecycle research",
+                       "currentAuthority":  "HC source-reference only; frozen source remains authoritative",
+                       "stillReferenced":  true,
+                       "evidenceTier":  "source-located",
+                       "relationToDgf":  [
+                                             "DGF-01",
+                                             "DGF-02",
+                                             "DGF-07"
+                                         ],
+                       "disposition":  "historical-reference",
+                       "requiredWording":  "research may locate HC symbols/order but cannot replace the frozen source or prove YMCC runtime",
+                       "closureOrRetirementRule":  "revalidate all cited symbols against 06c0b954 before product use"
+                   },
+                   {
+                       "historyId":  "HIS-18",
+                       "document":  "Docs/Research/HC/Gyro/HC-GYRO-HIDMAESTRO-PROJECT-CLOSURE-20260903.md#1",
+                       "originalDate":  "2026-09-03",
+                       "originalScope":  "pre-project HIDMaestro closure design",
+                       "currentAuthority":  "superseded research candidate",
+                       "stillReferenced":  false,
+                       "evidenceTier":  "source-located",
+                       "relationToDgf":  [
+                                             "DGF-05",
+                                             "DGF-09",
+                                             "DGF-15"
+                                         ],
+                       "disposition":  "superseded",
+                       "requiredWording":  "design lock and not-created status are historical; HIDMaestro descriptor/runtime claims remain separately unclosed",
+                       "closureOrRetirementRule":  "retain for negative history; T17 determines current descriptor status"
+                   },
+                   {
+                       "historyId":  "HIS-19",
+                       "document":  "Docs/Research/HC/Gyro/20260901-A3-HC-GYRO-EVIDENCE-FREEZE.md#1",
+                       "originalDate":  "2026-09-01",
+                       "originalScope":  "A3 frozen static gyro evidence",
+                       "currentAuthority":  "historical frozen evidence only",
+                       "stillReferenced":  true,
+                       "evidenceTier":  "source-located",
+                       "relationToDgf":  [
+                                             "DGF-01",
+                                             "DGF-02",
+                                             "DGF-13"
+                                         ],
+                       "disposition":  "historical-reference",
+                       "requiredWording":  "5c94 source is superseded by 06c0b954 for new work and cannot prove runtime",
+                       "closureOrRetirementRule":  "never use as the current HC baseline"
+                   },
+                   {
+                       "historyId":  "HIS-20",
+                       "document":  "Docs/Research/HC/Gamepad/HC-GAMEPAD-LIFECYCLE.md#1",
+                       "originalDate":  "2026-09-02",
+                       "originalScope":  "HC gamepad lifecycle research",
+                       "currentAuthority":  "HC source-reference only",
+                       "stillReferenced":  true,
+                       "evidenceTier":  "source-located",
+                       "relationToDgf":  [
+                                             "DGF-02",
+                                             "DGF-03",
+                                             "DGF-04",
+                                             "DGF-05"
+                                         ],
+                       "disposition":  "historical-reference",
+                       "requiredWording":  "research lifecycle is not equivalent to the product lifecycle or external consumer observation",
+                       "closureOrRetirementRule":  "reconcile each source statement with 06c0b954 and 30/TASK"
+                   },
+                   {
+                       "historyId":  "HIS-21",
+                       "document":  "Docs/Research/HC/Gamepad/20260901-A3-HC-GAMEPAD-EVIDENCE-FREEZE.md#1",
+                       "originalDate":  "2026-09-01",
+                       "originalScope":  "A3 frozen static gamepad evidence",
+                       "currentAuthority":  "historical frozen evidence only",
+                       "stillReferenced":  true,
+                       "evidenceTier":  "source-located",
+                       "relationToDgf":  [
+                                             "DGF-03",
+                                             "DGF-04",
+                                             "DGF-05",
+                                             "DGF-13"
+                                         ],
+                       "disposition":  "historical-reference",
+                       "requiredWording":  "5c94 evidence is retained for comparison/negative evidence and cannot set the active source baseline",
+                       "closureOrRetirementRule":  "never promote to current implementation or runtime proof"
+                   }
+               ],
+    "summary":  {
+                    "currentAuthority":  4,
+                    "historicalReference":  13,
+                    "superseded":  4,
+                    "negativeEvidence":  0,
+                    "newDriftRequired":  [
+
+                                         ],
+                    "authorityReaudit":  "PASS: former 31/32 are not authority inputs; TASK.md BUS is the only current mainline authority.",
+                    "provenanceStatus":  "Historical inventory remains docs-only. Current source provenance is P20 (T22-RF00-20260906-T10-I-HC-ROUTE-STATIC-SNAPSHOT / 41FF57702ECF777BD409B1D7FE5820A81F9891B1C34CB0E9CB1E2F6861B5B80C) as recorded by MainlineClaimReconciliation.v1.json; this inventory itself cannot establish runtime evidence.",
+                    "result":  "All 21 scanned historical entries retain an explicit 4/13/4 disposition. None may be silently used as current runtime evidence."
+                }
+}

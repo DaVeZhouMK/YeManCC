@@ -155,86 +155,89 @@ export async function openOrSearchGameTrainer(
     await shell.execute(installed.path, []);
     return { action: 'opened', trainer: installed };
   }
-  await fs.writeTextFile(GCM_RESULT_FILE, JSON.stringify({ ok: false, gameName: title, error: 'pending' })).catch(() => {});
-  const worker = await shell.hidden('powershell.exe', [
-    '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', GCM_SEARCH_SCRIPT,
-    '-GameName', title, '-ResultPath', GCM_RESULT_FILE, '-DownloadTimeoutSeconds', '120',
-  ]);
-  options.onWorkerStarted?.(Number(worker.pid) || 0);
-  throwIfCancelled();
-  const deadline = Date.now() + 135000;
-  let search: GcmSearchResult | null = null;
-  let lastProgressKey = '';
-  while (Date.now() < deadline) {
+  const resultPath = GCM_RESULT_FILE.replace(/\.json$/, `-${Date.now()}-${Math.random().toString(36).slice(2)}.json`);
+  try {
+    await fs.writeTextFileAtomic(resultPath, JSON.stringify({ ok: false, gameName: title, error: 'pending' }));
+    const worker = await shell.hidden('powershell.exe', [
+      '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', GCM_SEARCH_SCRIPT,
+      '-GameName', title, '-ResultPath', resultPath, '-DownloadTimeoutSeconds', '120',
+    ]);
+    options.onWorkerStarted?.(Number(worker.pid) || 0);
     throwIfCancelled();
-    if (await fs.exists(GCM_RESULT_FILE).catch(() => false)) {
-      try {
-        const parsed = JSON.parse(await fs.readTextFile(GCM_RESULT_FILE)) as GcmSearchResult;
-        if (parsed.gameName === title) {
-          const progressKey = `${parsed.state || parsed.error}:${parsed.elapsedSeconds || 0}:${parsed.message || ''}`;
-          if (progressKey !== lastProgressKey) {
-            onProgress?.(parsed);
-            lastProgressKey = progressKey;
+    const deadline = Date.now() + 135000;
+    let search: GcmSearchResult | null = null;
+    let lastProgressKey = '';
+    while (Date.now() < deadline) {
+      throwIfCancelled();
+      if (await fs.exists(resultPath).catch(() => false)) {
+        try {
+          const parsed = JSON.parse(await fs.readTextFile(resultPath)) as GcmSearchResult;
+          if (parsed.gameName === title) {
+            const progressKey = `${parsed.state || parsed.error}:${parsed.elapsedSeconds || 0}:${parsed.message || ''}`;
+            if (progressKey !== lastProgressKey) {
+              onProgress?.(parsed);
+              lastProgressKey = progressKey;
+            }
+            if (parsed.state === 'completed' || parsed.downloaded || (parsed.error && parsed.error !== 'pending')) {
+              search = parsed;
+              break;
+            }
           }
-          if (parsed.state === 'completed' || parsed.downloaded || (parsed.error && parsed.error !== 'pending')) {
-            search = parsed;
-            break;
-          }
-        }
-      } catch { /* 文件仍在写入，稍后再读 */ }
+        } catch { /* 文件仍在写入，稍后再读 */ }
+      }
+      await new Promise((resolve) => window.setTimeout(resolve, 250));
     }
-    await new Promise((resolve) => window.setTimeout(resolve, 250));
-  }
-  throwIfCancelled();
-  if (!search) {
-    const recovered = await findInstalledGameTrainer(title);
-    if (recovered) {
-      await shell.execute(recovered.path, []);
-      return { action: 'opened', trainer: recovered };
+    throwIfCancelled();
+    if (!search) {
+      const recovered = await findInstalledGameTrainer(title);
+      if (recovered) {
+        await shell.execute(recovered.path, []);
+        return { action: 'opened', trainer: recovered };
+      }
+      throw new Error('GCM search timeout');
     }
-    throw new Error('GCM search timeout');
-  }
-  if (!search.ok) {
-    const recovered = await findInstalledGameTrainer(title);
-    if (recovered) {
-      await shell.execute(recovered.path, []);
-      return { action: 'opened', trainer: recovered, search };
+    if (!search.ok) {
+      const recovered = await findInstalledGameTrainer(title);
+      if (recovered) {
+        await shell.execute(recovered.path, []);
+        return { action: 'opened', trainer: recovered, search };
+      }
+      throw new Error(search.error || 'GCM search failed');
     }
-    throw new Error(search.error || 'GCM search failed');
-  }
-  if (!search) throw new Error('GCM 搜索超时');
-  if (!search.ok) throw new Error('GCM 搜索失败');
-  if (!search) {
-    const recovered = await findInstalledGameTrainer(title);
-    if (recovered) {
-      await shell.execute(recovered.path, []);
-      return { action: 'opened', trainer: recovered };
+    if (!search) throw new Error('GCM 搜索超时');
+    if (!search.ok) throw new Error('GCM 搜索失败');
+    if (!search) {
+      const recovered = await findInstalledGameTrainer(title);
+      if (recovered) {
+        await shell.execute(recovered.path, []);
+        return { action: 'opened', trainer: recovered };
+      }
+      throw new Error('GCM search timeout');
     }
-    throw new Error('GCM search timeout');
-  }
-  if (!search.ok) {
-    const recovered = await findInstalledGameTrainer(title);
-    if (recovered) {
-      await shell.execute(recovered.path, []);
-      return { action: 'opened', trainer: recovered, search };
+    if (!search.ok) {
+      const recovered = await findInstalledGameTrainer(title);
+      if (recovered) {
+        await shell.execute(recovered.path, []);
+        return { action: 'opened', trainer: recovered, search };
+      }
+      throw new Error(search.error || 'GCM search failed');
     }
-    throw new Error(search.error || 'GCM search failed');
-  }
-  // The script has already verified the folder and executable. Use its exact
-  // path so the first click does not need a second directory scan.
-  if (search.downloaded && search.trainerPath) {
-    await shell.execute(search.trainerPath, []);
-    return {
-      action: 'opened',
-      trainer: {
-        gameName: search.trainerGameName || title,
-        origin: search.origin || 'other',
-        folder: search.trainerFolder || search.trainerPath.substring(0, search.trainerPath.lastIndexOf('\\')),
-        path: search.trainerPath,
-        modified: Date.now(),
-      },
-      search,
-    };
-  }
-  return { action: 'searched', search };
+    // The script has already verified the folder and executable. Use its exact
+    // path so the first click does not need a second directory scan.
+    if (search.downloaded && search.trainerPath) {
+      await shell.execute(search.trainerPath, []);
+      return {
+        action: 'opened',
+        trainer: {
+          gameName: search.trainerGameName || title,
+          origin: search.origin || 'other',
+          folder: search.trainerFolder || search.trainerPath.substring(0, search.trainerPath.lastIndexOf('\\')),
+          path: search.trainerPath,
+          modified: Date.now(),
+        },
+        search,
+      };
+    }
+    return { action: 'searched', search };
+  } finally { await fs.remove(resultPath).catch(() => {}); }
 }

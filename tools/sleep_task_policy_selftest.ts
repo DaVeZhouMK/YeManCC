@@ -105,8 +105,14 @@ assert.ok(
   'EntryFailure must win before Reason=5 processing',
 );
 
-// Physical path 2: 120-second user sleep intent plus code=7 or Reason=5.
+// Physical path 2: sleep age >= 120 seconds + actual resume; button wakes cancel.
 requireNative('SG_USER_STANDBY_DEVICE_DELAY_MS = 120000ULL');
+requireNative('SG_NON_USER_WAKE_CLASSIFY_MS = 2000ULL');
+requireNative('sgArmNonUserWakeGuard("sleep-trigger")');
+requireNative('sgObserveNonUserWake("pbt-resume-suspend")');
+requireNative('sgObserveNonUserWake("pbt-resume-automatic")');
+requireNative('sgObserveNonUserWake("kernel-power-507-non-power-button")');
+requireNative('buttonWakeFileTime >= intentFileTime');
 requireNative('g_sgTask.unexpectedWakeConsumed = true;');
 requireNative('sgStartSleepRetry(SgRetryKind::UnexpectedWake, "external-device-wake")');
 const externalEvaluate = section(
@@ -168,14 +174,15 @@ const entryExit = (s: Model, at: number, reason: number): boolean => {
   return true;
 };
 const unexpectedWake = (s: Model, at: number, code7: boolean, reason507: number): boolean => {
-  if (s.unexpectedConsumed || s.retryKind !== 'none' ||
-      at - s.userIntentAt < 120000 || (!code7 && reason507 !== 5)) return false;
+  if (s.userIntentAt < 0 || s.unexpectedConsumed || s.retryKind !== 'none' ||
+      at - s.userIntentAt < 120000 || (!code7 && reason507 === 1)) return false;
   s.unexpectedConsumed = true;
   s.retryKind = 'unexpected-wake';
   return true;
 };
 const userWake = (s: Model): void => {
   s.retryKind = 'none';
+  s.userIntentAt = -1;
   if (s.paused) {
     s.paused = false;
     s.resumeCount += 1;
@@ -209,6 +216,15 @@ assert.equal(entryExit(fiveSecondBoundary, 5000, 7), true);
 assert.equal(entryExit(fiveSecondBoundary, 5001, 7), false);
 const tooEarly = createModel();
 userSleep(tooEarly, 0);
-assert.equal(unexpectedWake(tooEarly, 119999, true, -1), false);
+assert.equal(unexpectedWake(tooEarly, 6000, true, 5), false,
+  'Intel USB4 wake at six seconds intentionally does not re-sleep');
+assert.equal(unexpectedWake(tooEarly, 119999, true, 5), false,
+  'USB4 wake before the 120-second boundary must not re-sleep');
+assert.equal(unexpectedWake(tooEarly, 120000, true, 5), true,
+  'retain the original >=120-second boundary');
+assert.equal(unexpectedWake(createModel(), 6000, true, 5), false,
+  'awake USB insertion must not cause sleep');
+assert.equal(unexpectedWake(usb4, 193000, true, 5), false,
+  'USB insertion after a genuine power-button wake must not cause sleep');
 
 console.log('sleep task policy self-test: PASS');

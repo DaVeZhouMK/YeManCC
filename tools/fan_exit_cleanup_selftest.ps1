@@ -1,7 +1,7 @@
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $native = Get-Content -LiteralPath (Join-Path $repoRoot 'native\main.cpp') -Raw
-$workspaceRoot = Split-Path -Parent (Split-Path -Parent $repoRoot)
+$workspaceRoot = $repoRoot
 $hostSource = Get-Content -LiteralPath (Join-Path $workspaceRoot 'FanLab\real-host\Program.cs') -Raw
 $appSource = Get-Content -LiteralPath (Join-Path $repoRoot 'src\App.vue') -Raw
 
@@ -20,6 +20,16 @@ foreach ($block in $appUnmountBlocks) {
 $postStart = $native.IndexOf('static bool fanHostEmergencyPost')
 $postEnd = $native.IndexOf('static bool fanHostEmergencySuspend', $postStart)
 $postBody = if ($postStart -ge 0 -and $postEnd -gt $postStart) { $native.Substring($postStart, $postEnd - $postStart) } else { '' }
+# FAN-926 (P0/P3): W3's GP-926 post-image extracted the native boundary safety
+# gate into one evidence builder plus one predicate. Re-anchor these source-shape
+# guards to that post-image by MEANING; never rename a production symbol to fit
+# an outdated text guard (GP-926 ship rule).
+$boundaryStart = $native.IndexOf('static FanBoundaryEvidence fanBoundaryEvidenceFromState')
+$boundaryEnd = $native.IndexOf('static json fanBoundaryEvidenceDetail', $boundaryStart)
+if ($boundaryStart -lt 0 -or $boundaryEnd -le $boundaryStart) {
+    throw 'fan exit cleanup source check failed: native boundary evidence body not found'
+}
+$boundaryBody = $native.Substring($boundaryStart, $boundaryEnd - $boundaryStart)
 $exitStart = $native.IndexOf('static DWORD WINAPI exitCleanupThreadProc')
 $exitEnd = $native.IndexOf('static void beginAsyncExit', $exitStart)
 $exitBody = if ($exitStart -ge 0 -and $exitEnd -gt $exitStart) { $native.Substring($exitStart, $exitEnd - $exitStart) } else { '' }
@@ -27,37 +37,91 @@ $readyStart = $native.IndexOf('case WM_APP_EXIT_READY:')
 $readyEnd = $native.IndexOf('case WM_POWER_RESUME_READY:', $readyStart)
 $readyBody = if ($readyStart -ge 0 -and $readyEnd -gt $readyStart) { $native.Substring($readyStart, $readyEnd - $readyStart) } else { '' }
 Require-Contains $native 'static bool fanHostExactProcessRunning()' 'exact Host identity check'
+Require-Contains $native 'static std::wstring processImagePath(DWORD pid)' 'Host image identity probe'
 Require-Contains $native 'static bool fanHostOwnsLoopbackPort' 'Host loopback ownership check'
+Require-Contains $native 'static constexpr DWORD kHttpSysListenerOwnerPid = 4' 'HttpListener owner (HTTP.sys pid 4) is a first-class identity'
+Require-Contains $native 'row.dwOwningPid == pid || row.dwOwningPid == kHttpSysListenerOwnerPid' 'port ownership accepts the Host pid or the HTTP.sys owner'
 Require-Contains $native 'GetExtendedTcpTable' 'OS TCP listener ownership proof'
-Require-Contains $native 'fanHostOwnsLoopbackPort(entry.th32ProcessID)' 'exact Host check binds process identity to port owner'
+Require-Contains $native 'fanHostOwnsLoopbackPort(entry.th32ProcessID)' 'exact Host check consults loopback ownership'
+Require-Contains $native 'fan-host-identity-unverified' 'identity failure is logged, never a silent false'
+Require-Contains $native 'FAN_LEASE_RENDERER_GRACE_MS' 'renderer rebuild grace (90s) constant exists'
+Require-Contains $native 'renderer-epoch-grace-expired' 'keepalive disarms only after the renderer epoch grace expires'
+Require-Contains $native 'fanLeaseKeepaliveNoteRendererRebuild' 'renderer rebuild bumps the keepalive epoch'
+Require-Contains $native 'fanHostEmergencyResume' 'native triggers the Host resume rebuild itself'
+Require-Contains $native 'L"/api/resume"' 'native resume endpoint (fast accept + bounded observation)'
+Require-Contains $native 'g_fanResumeRecoveryInFlight' 'resume recovery is serialized (single in-flight sequence per generation/session)'
+# 2026-09-23（FAN-204 s31 补充裁决 Q1）：接受与后台重建分离——接受只做有界传输重试，
+# 完成由同一 generation 的有界只读观察判定（≤15 s；只有 Ready 才算 recovered）。
+Require-Contains $native 'const DWORD acceptBackoffMs[3] = {0, 250, 500};' 'bounded accept backoff 0/250/500 ms (accept never waits for the rebuild)'
+Require-Contains $native 'for (int attempt = 1; attempt <= 3; ++attempt)' 'at most three bounded accept attempts'
+Require-Contains $native 'static bool fanHostEmergencyGetState' 'observation reads state through its own GET helper'
+Require-Contains $native 'static constexpr unsigned long long kFanResumeObserveWindowMs = 15000;' 'observation window is the ruled 15 s'
+Require-Contains $native '"resume-recovery-exhausted"' 'exhaustion is written as its own terminal event'
+Require-Contains $native 'fanResumeParseReply' 'resume response is parsed: a bare HTTP 200 is never a recovery'
+Require-Contains $native 'fanResumeClassify' 'terminal classification is a single explicit function'
+Require-Contains $native 'finish("noop", "host-explicit-noop", false)' 'legal resume no-op is recorded separately'
+Require-Contains $native 'finish("recovered", "observed-ready", false)' 'only a verified Ready recovery is written as recovered'
+Require-Contains $native '"terminal", terminal' 'the terminal event always carries the single classified verdict'
+Require-Contains $native 'host-rebuild-timeout' 'the 15 s timeout writes the ruled honest terminal reason'
+Require-Contains $native 'generation-taken-over' 'a late response from a superseded generation is never consumed'
+# 2026-09-23（裁决 B）：恢复序列**不得**并发发送第二个 Close/Restore（函数体内只允许 /api/resume）。
+$resumeStart = $native.IndexOf('static void fanHostEmergencyResume(unsigned long long generation) {')
+$resumeEnd = $native.IndexOf('static void fanHostScheduleEmergencyResume', $resumeStart)
+if ($resumeStart -lt 0 -or $resumeEnd -le $resumeStart) { throw 'fan exit cleanup source check failed: resume recovery body not found' }
+$resumeBody = $native.Substring($resumeStart, $resumeEnd - $resumeStart)
+Require-Contains $resumeBody 'L"/api/resume"' 'resume recovery sends the resume endpoint'
+Require-Contains $resumeBody 'fanHostEmergencyGetState' 'observation phase reads state (no second lifecycle owner)'
+foreach ($forbidden in @('/api/close', '/api/restore', '/api/shutdown')) {
+    if ($resumeBody.Contains($forbidden)) {
+        throw "fan exit cleanup source check failed: resume recovery must not send $forbidden (no concurrent close/restore)"
+    }
+}
+if ($resumeBody.Contains('L"/api/open"') -or $resumeBody.Contains('L"/api/enable"')) {
+    throw 'fan exit cleanup source check failed: resume recovery must not drive Open/Enable itself (the Host owns the background rebuild)'
+}
 Require-Contains $native 'static std::string fanHostReadSessionToken()' 'session sidecar reader'
 Require-Contains $postBody 'X-YeMan-Fan-Session:' 'authenticated native Host request'
-Require-Contains $postBody 'if (!fanHostExactProcessRunning()) return false;' 'identity gate before token use'
-Require-Contains $postBody 'state.contains("hardwareWritesEnabled")' 'canonical live-write telemetry field'
-Require-Contains $postBody 'state.value("hardwareWrites", false)' 'legacy live-write telemetry alias'
-Require-Contains $postBody 'const bool closeCleanupPending = state.value("hcCloseCleanupPending", false);' 'pending HC cleanup is visible to native safety gate'
-Require-Contains $postBody 'const bool openCalled = state.value("openCalled", false);' 'HC Open session state is visible to native safety gate'
-Require-Contains $postBody 'const bool openEventsCalled = state.value("openEventsCalled", false);' 'HC OpenEvents session state is visible to native safety gate'
-Require-Contains $postBody 'const bool unknownState = state.value("unknownState", false);' 'unknown Host state is visible to native safety gate'
+Require-Contains $postBody 'if (!fanHostExactProcessRunning()) {' 'identity gate before token use'
+Require-Contains $postBody 'fanHostIdentityNoteUnverified(reason ? reason : "emergency-post");' 'identity gate failure leaves evidence'
+Require-Contains $boundaryBody 'const bool hasCanonicalLiveWrites = state.contains("hardwareWritesEnabled");' 'canonical live-write telemetry field'
+Require-Contains $boundaryBody 'const bool hasLegacyLiveWrites = state.contains("hardwareWrites");' 'legacy live-write alias is discriminated, not merged'
+Require-Contains $boundaryBody 'evidence.telemetryComplete =' 'native safety gate requires complete telemetry'
+Require-Contains $boundaryBody 'state.contains("state") &&' 'telemetry completeness requires the state label itself'
+Require-Contains $boundaryBody '(hasCanonicalLiveWrites || hasLegacyLiveWrites) &&' 'telemetry completeness accepts canonical-or-legacy live-write evidence'
+Require-Contains $boundaryBody 'evidence.writesHistory = state.value("hardwareWritesObserved", false);' 'write history is visible to the native safety gate'
+Require-Contains $boundaryBody 'evidence.releaseReceipt = state.value("oemRestoreConfirmed", false);' 'the software release receipt is visible to the native safety gate'
+Require-Contains $boundaryBody 'evidence.unknownState = state.value("unknownState", false);' 'unknown Host state is visible to the native safety gate'
+Require-Contains $boundaryBody 'evidence.cleanupPending = state.value("hcCloseCleanupPending", false);' 'pending HC cleanup is visible to the native safety gate'
+Require-Contains $boundaryBody 'evidence.sessionOpen = state.value("openCalled", false) ||' 'HC Open session state is visible to the native safety gate'
+Require-Contains $boundaryBody 'state.value("openEventsCalled", false);' 'HC OpenEvents session state is visible to the native safety gate'
+Require-Contains $boundaryBody 'evidence.liveWrites = hasCanonicalLiveWrites' 'the canonical live-write field wins when both are present'
+Require-Contains $boundaryBody ': state.value("hardwareWrites", false);' 'the legacy live-write alias is only a fallback'
 Require-Contains $postBody 'const bool suspendBoundary = _wcsicmp(endpoint, L"/api/suspend") == 0;' 'native safety gate distinguishes HC SystemPending from Window_Closed'
-Require-Contains $postBody 'const bool hcTerminalBoundary = suspendBoundary' 'native safety gate accepts only the matching HC terminal lifecycle boundary'
-Require-Contains $postBody 'const bool releaseEvidence = !historicalWrites || restoreConfirmed || hcTerminalBoundary;' 'historical writes require either HC Hardware release or a complete HC terminal boundary'
-Require-Contains $postBody 'const bool expectedTerminalState = suspendBoundary' 'native safety gate requires the endpoint-specific terminal state'
-Require-Contains $postBody 'const bool telemetryComplete =' 'native safety gate requires complete telemetry'
-Require-Contains $postBody 'const bool hasAnyHcCloseEvidence =' 'native safety gate detects partial protocol-2 HC close evidence'
-Require-Contains $postBody 'const bool hasCompleteHcCloseEvidence =' 'native safety gate requires both HC close evidence fields'
-Require-Contains $postBody 'const bool hcCloseEvidenceSafe =' 'native safety gate rejects explicit incomplete HC close evidence'
-Require-Contains $postBody 'safe = telemetryComplete && expectedTerminalState &&' 'native safety gate rejects incomplete/unknown/pending/live-write or wrong terminal state'
-Require-Contains $postBody '!openCalled &&' 'native safety gate rejects an unreleased HC session'
-Require-Contains $postBody '!openEventsCalled && releaseEvidence' 'native safety gate requires release evidence after HC session close'
-Require-Contains $native 'static bool fanHostCleanupForAppExit()' 'native exit cleanup routine'
-if ($native -notmatch 'fanHostEmergencyPost\s*\(\s*L"/api/parent-exit",\s*"app-exit",\s*1,\s*false,\s*&handoffStatus\s*\)') {
+Require-Contains $boundaryBody 'evidence.expectedTerminalState = suspendBoundary' 'native safety gate requires the endpoint-specific terminal state'
+Require-Contains $boundaryBody 'evidence.hcCleanupTerminal = suspendBoundary' 'native safety gate accepts only the matching HC terminal lifecycle boundary'
+Require-Contains $boundaryBody 'const bool hasAnyHcCloseEvidence =' 'native safety gate detects partial protocol-2 HC close evidence'
+Require-Contains $boundaryBody 'evidence.hcCloseEvidenceComplete = hasHcVirtualCloseEvidence && hasHcDeviceManagerStopEvidence;' 'native safety gate requires both HC close evidence fields'
+Require-Contains $boundaryBody 'evidence.hcCloseEvidenceAcceptable = !hasAnyHcCloseEvidence ||' 'native safety gate rejects explicit incomplete HC close evidence'
+Require-Contains $boundaryBody 'evidence.releaseEvidence = !evidence.writesHistory ||' 'historical writes require a proven release action'
+Require-Contains $boundaryBody 'evidence.hostReleaseActionProven = fanReleaseActionKindProven(evidence.hostReleaseActionKind);' 'the Host release-action classification is the single release authority'
+Require-Contains $native 'static bool fanBoundaryIsSafe(const FanBoundaryEvidence& evidence) {' 'native safety predicate has one decision entry'
+Require-Contains $boundaryBody 'if (!evidence.telemetryComplete || !evidence.expectedTerminalState) return false;' 'native safety gate rejects incomplete telemetry or a wrong terminal state'
+Require-Contains $boundaryBody 'if (!evidence.hcCloseEvidenceAcceptable) return false;' 'native safety gate rejects unacceptable HC close evidence'
+Require-Contains $boundaryBody 'if (evidence.unknownState || evidence.cleanupPending) return false;' 'native safety gate rejects unknown or pending state'
+Require-Contains $boundaryBody 'if (evidence.liveWrites || evidence.sessionOpen) return false;' 'native safety gate rejects live writes and an unreleased HC session'
+Require-Contains $boundaryBody 'if (!evidence.releaseEvidence) return false;' 'cleanup or a Close return can never substitute for release evidence'
+Require-Contains $native 'safe = fanBoundaryIsSafe(boundary);' 'the native safety assessment consumes the single decision entry'
+Require-Contains $native 'static FanExitHandoffResult fanHostCleanupForAppExit()' 'native exit cleanup routine'
+if ($native -notmatch 'fanHostEmergencyPost\s*\(\s*L"/api/parent-exit",\s*"app-exit",\s*1,\s*false,\s*&handoffStatus') {
     throw 'fan exit cleanup source check failed: parent-exit recovery handoff before UI exit'
 }
 Require-Contains $native 'if (handoffStatus != 404 && handoffStatus != 405)' 'transport-ambiguous parent-exit never races a second close'
-Require-Contains $native 'fanHostEmergencyPost(L"/api/close", "app-exit", 1)' 'legacy bounded close only when parent-exit is absent'
-Require-Contains $native 'fanHostEmergencyPost(L"/api/shutdown", "app-exit", 1, false)' 'shutdown only after close'
-Require-Contains $exitBody 'fan-exit-recovery-handed-off' 'unconfirmed recovery is handed to resident Host'
+if ($native -notmatch 'fanHostEmergencyPost\s*\(\s*L"/api/close",\s*"app-exit",\s*1,\s*true') {
+    throw 'fan exit cleanup source check failed: legacy bounded close only when parent-exit is absent'
+}
+Require-Contains $native 'fanHostEmergencyPost(L"/api/shutdown", "app-exit", 1, false,' 'shutdown only after close'
+Require-Contains $exitBody 'fanHostCleanupForAppExit()' 'exit cleanup delegates to the app-exit handoff owner'
+Require-Contains $native 'fan-exit-recovery-handed-off' 'unconfirmed recovery is handed to resident Host'
 Require-Contains $native 'static std::atomic<bool> g_exitReadyPosted{false};' 'single final-exit message guard'
 Require-Contains $native 'static void postExitReadyOnce(HWND hwnd, WPARAM code = 0)' 'idempotent final-exit notifier'
 Require-Contains $native '#define EXIT_CLEANUP_WATCHDOG_MS 8000' 'global exit cleanup deadline'
@@ -131,14 +195,43 @@ $safeStateScenarios = @(
 $failedSafeState = @($safeStateScenarios | Where-Object { -not $_.value })
 if ($failedSafeState.Count -gt 0) { throw "native safety telemetry simulation failed: $($failedSafeState.name -join ', ')" }
 Write-Output ('native safety telemetry simulation: PASS (' + ($safeStateScenarios.name -join ', ') + ')')
-Require-Contains $hostSource 'if (!IsAuthorizedRequest(context.Request))' 'Host rejects unauthenticated requests'
+# FAN-925B §5.1: the auth check must classify the rejection (and must not gain a bypass path).
+Require-Contains $hostSource 'private bool IsAuthorizedRequest(HttpListenerRequest request, out string rejectionCategory)' 'Host rejects unauthenticated requests'
+Require-Contains $hostSource 'rejectionCategory = "request-credential-missing";' 'auth rejection is classified, not silently false'
+Require-Contains $hostSource 'scope = "this-request-not-accepted; no bypass, no rotation, no second owner",' 'a 401 never authorises a bypass/rotation/second owner'
 Require-Contains $hostSource 'private void BlockWritesForClose()' 'Host has a lock-free close write gate'
 Require-Contains $hostSource 'Volatile.Write(ref closeWriteBlocked, 1);' 'close gate blocks new writes before engine lock'
 Require-Contains $hostSource 'throw new FanApiException(409, "HOST_CLOSING"' 'close gate rejects later control admission'
 Require-Contains $hostSource 'public object BeginParentExitHandoff()' 'Host has an authenticated parent-exit recovery handoff'
+# FAN-926 P1 (CP-07): the acknowledgement may only report a REALISED acceptance
+# (this-host-instance + real recovery cycle), never a bare field fill.
+Require-Contains $hostSource 'private ParentExitAcceptance? EnsureParentExitAcceptance()' 'parent-exit binds a real acceptance before the ACK'
+Require-Contains $hostSource 'cycleOk = EnsureRecoveryCycleLocked("parent-exit-handoff");' 'the acceptance establishes or reuses the real recovery cycle'
+Require-Contains $hostSource 'if (acceptanceFastPathActive)' 'cycle persistence defers while the acceptance fast path is active'
+Require-Contains $hostSource 'acceptanceFastPathActive = true;' 'the acceptance fast path is marked so the ACK never touches disk'
+Require-Contains $hostSource 'internal static bool UiFreeRecoveryComplete(' 'UI-free recovery completion has a single decision entry'
+# D6（FAN-926R 重钉/恢复/导出裁决 §3）**因本裁决改要求**：后继等待不再使用固定 15 s，
+# 而是与前置停止、接管恢复**共用同一周期剩余预算**（`successorWaitMs` 由继承的剩余预算算出）。
+# 断言意图不变：受控更换的后继必须**在有界等待里拿到前驱退出证明**，不得无界等、不得并行开窗。
+Require-Contains $hostSource 'HostInstanceLease.TryAcquireBounded(successorWaitMs)' 'a controlled replacement successor must wait for the predecessor exit proof (bounded, shared cycle budget)'
+Require-Contains $hostSource 'lock (gate) { lock (acceptanceGate) { PersistRecoveryCycleSynchronously(); } }' 'deferred cycle persistence re-enters the engine gate before writing'
+Require-Contains $hostSource 'acceptedRecoveryCycleId = acceptance.CycleId,' 'the ACK reports the accepted cycle instead of a freshly minted field'
+Require-Contains $hostSource 'recoveryAccepted = false,' 'an unbound responsibility is never reported as accepted'
+Require-Contains $hostSource 'lock (acceptanceGate) return EnsureRecoveryCycleCoreLocked(reason);' 'the acceptance lock is a short critical section, never the HC/ACPI gate'
+Require-Contains $hostSource 'internal static bool SameEpisodeParentIdentity(' 'the same-episode parent rule is a pure, directly testable function'
+Require-Contains $hostSource 'var staged = path + "." + Guid.NewGuid().ToString("N") + ".new";' 'cycle persistence uses a unique staged name (the acceptance path never takes the engine gate)'
+# FAN-925B §3.3/§3.4: the two release-action decisions must be consumed through their single
+# decision entry, and the old shortcuts must not reappear anywhere in the Host source.
+Require-Contains $hostSource 'var releaseSafe = RouteLostCloseIsRelease(' 'route-lost close boundary is consumed via the single decision entry'
+Require-Contains $hostSource 'var fallbackProven = FanHostEngine.AcpiFallbackProven(' 'ACPI fallback proof is consumed via the single decision entry'
+foreach ($forbidden in @('skipOemRestore && hcCloseComplete', 'closeBoundaryOnly', '? "TransportedComplete"')) {
+    if ($hostSource.Contains($forbidden)) {
+        throw "FAN-925B regression guard: forbidden release/cleanup shortcut reappeared in Host source: '$forbidden'"
+    }
+}
 Require-Contains $hostSource 'Interlocked.Exchange(ref parentExitHandoffQueued, 1)' 'parent-exit handoff is one-shot'
 Require-Contains $hostSource 'parent-exit-handoff.existing-close-observed' 'parent-exit handoff observes an already-owned HC Close instead of spawning a second recovery worker'
-Require-Contains $hostSource 'state.CloseCalled || state.HcCloseCleanupPending || realBackend?.OperationTimedOut == true)' 'parent-exit handoff rejects duplicate ownership during an in-flight HC Close'
+Require-Contains $hostSource 'state.CloseCalled || state.HcCloseCleanupPending || realBackend?.OperationTimedOut == true;' 'parent-exit handoff rejects duplicate ownership during an in-flight HC Close'
 Require-Contains $hostSource 'private int closeBoundaryClaimed;' 'close ownership is claimed before api-close can acquire the engine lock'
 Require-Contains $hostSource 'Interlocked.Exchange(ref closeBoundaryClaimed, 1);' 'api-close claims the HC lifecycle boundary before parent-exit can race it'
 Require-Contains $hostSource 'Volatile.Read(ref closeBoundaryClaimed) != 0 ||' 'parent-exit observes the pre-lock close owner and cannot enqueue a second HC Close'

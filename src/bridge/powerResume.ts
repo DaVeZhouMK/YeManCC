@@ -4,6 +4,13 @@ export interface ResumeCompleteMeta {
 }
 
 export interface PowerResumeTransactionDeps {
+  /**
+   * HC SystemReady resumes managers and opens the device fire-and-forget: the
+   * app becomes Ready immediately and the device catches up in the background.
+   * The FanHost F5 therefore never gates the native Ready commit. It is
+   * triggered separately on `power.resume-ready` and observed by the fan
+   * coordinator; the commit below runs without waiting for it.
+   */
   resumeDaemon: (required: boolean) => Promise<boolean>;
   completeResume: (generation: number, meta: ResumeCompleteMeta) => Promise<{ ok: boolean; reason?: string }>;
   isGenerationCurrent?: () => boolean;
@@ -26,10 +33,12 @@ export interface PowerResumeTransactionResult {
 const defaultSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 /**
- * Run one bounded wake transaction. Native input/gate recovery commits first;
- * daemon handle rebuilding is best-effort and runs afterwards. This prevents
- * a slow or broken PawnIO reopen from crossing the native renderer watchdog
- * deadline and reloading a healthy page while all hardware writes are gated.
+ * Run one bounded wake transaction.  The isolated FanHost's HC-equivalent
+ * F5 recovery completes first, native then publishes Ready/opens its global
+ * write gate, and daemon handle rebuilding remains best-effort afterwards.
+ *
+ * This ordering prevents a renderer recreation from stranding a resident
+ * FanHost in Suspended after native has already reported Ready.
  */
 export async function runPowerResumeTransaction(
   generation: number,
@@ -45,6 +54,11 @@ export async function runPowerResumeTransaction(
 
   let commitAttempts = 0;
   let lastReason: string | undefined;
+
+  // HC SystemReady completes synchronously: managers resume and the device
+  // open is fire-and-forget in a background task. The fan F5 is already
+  // triggered by `power.resume-ready`; the native Ready commit below never
+  // waits for it, matching upstream rather than gating the wake on the device.
   for (; commitAttempts < commitAttemptsLimit && !lastReason?.startsWith('superseded'); commitAttempts++) {
     if (!isCurrent()) {
       lastReason = 'superseded';

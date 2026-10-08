@@ -7,7 +7,8 @@
 //   node scripts/bump-version.mjs 0.0.2 --notes "本次更新说明"
 //
 // 之后按脚本打印的 git 命令执行即可；CI（release.yml）会在打 v* tag 后自动构建并发布
-// YeManCC.zip（含程序本体 + PowerControl 依赖包），并把新 sha256 写回 main/version.json。
+// YeManCC.zip（唯一产物：程序本体 + PowerControl 依赖包 + 虚拟手柄 bundle），
+// 并把新 sha256 写回 main/version.json。
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
@@ -71,7 +72,7 @@ console.log('\n== 下一步（复制执行）==');
 console.log(`git add version.json package.json # 两个发布版本源必须保持一致`);
 console.log(`git commit -m "chore: 发布 v${newVersion}"`);
 console.log(`git tag v${newVersion}`);
-console.log(`git push origin main --tags`);
+console.log(`git push origin main v${newVersion}`);
 console.log(`\n提示：首次发布还需把本次改造一并提交 ——`);
 console.log(`  git add PowerControl .github/workflows/release.yml native/main.cpp scripts/bump-version.mjs package.json`);
 console.log(`  （可与上面的 version.json 合并在一次 commit/tag 中）`);

@@ -88,13 +88,25 @@ const ICONS = {
   // 自动 CPU 浮动优化：芯片 + 循环箭头
   cpufloat: `<rect x="7" y="7" width="10" height="10" rx="1.5"/><path d="M10 7V4M14 7V4M10 20v-3M14 20v-3M7 10H4M7 14H4M20 10h-3M20 14h-3"/><path d="M12 9.4a2.6 2.6 0 1 1-2.3 1.4" stroke-width="1.4"/><path d="M9.4 9.1 9.7 7.1 11.6 8.1" stroke-width="1.4"/>`,
 
+  // ===== 音乐播放器 =====
+  music: `<path d="M9 18V5l12-2v13"/><path d="M9 9l12-2"/><ellipse cx="6" cy="18" rx="3" ry="3"/><ellipse cx="18" cy="16" rx="3" ry="3"/>`,
+  folder: `<path d="M3 7V5a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"/>`,
+  prev: `<path d="M5 4v16M19 4 7 12l12 8V4Z"/>`,
+  next: `<path d="M19 4v16M5 4l12 8-12 8V4Z"/>`,
+  volume: `<path d="M3 9h4l5-4v14l-5-4H3Z"/><path d="M16 9a4 4 0 0 1 0 6M19 6a8 8 0 0 1 0 12"/>`,
+  mute: `<path d="M3 9h4l5-4v14l-5-4H3Z"/><path d="m17 9 5 6m0-6-5 6"/>`,
+
   // ===== 内容页小标 =====
   play: `<path d="M5 3l16 9-16 9z"/>`,
   pause: `<path d="M9 3v18M15 3v18"/>`,
   close: `<path d="M6 6l12 12M18 6l-12 12"/>`,
   plus: `<path d="M12 5v14M5 12h14"/>`,
   mouse: `<rect x="8" y="2" width="8" height="14" rx="4"/><path d="M12 6v4"/>`,
-  gamepad: `<path d="M6 8h12a4 4 0 0 1 4 4v2a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4v-2a4 4 0 0 1 4-4z"/><path d="M8 11v4M6 13h4"/><circle cx="16" cy="13" r="1"/><circle cx="19" cy="13" r="1"/>`,
+  // 性能调度：仪表盘
+  gauge: `<path d="M4 15a8 8 0 1 1 16 0"/><path d="M12 15l4-5"/><circle cx="12" cy="15" r="1.5"/><path d="M6 19h12"/>`,
+
+  // 控制器：只保留手柄轮廓，不显示十字和面部按钮，避免与性能图标混淆
+  gamepad: `<path d="M7 7h10c2.5 0 4 1.5 5 4l1 5c.6 3-2.6 4-4.4 2.1l-2-2.1H7.4l-2 2.1C3.6 20 1 19 1.6 16l1-5C3.6 8.5 5 7 7 7Z"/>`,
   rocket: `<path d="M12 2.2c3.3 1.8 5.1 5.5 4.6 9.2-.4 3.2-2 6.2-4.6 8.4-2.6-2.2-4.2-5.2-4.6-8.4-.5-3.7 1.3-7.4 4.6-9.2Z"/><path d="M8.1 10.1 5.3 13.9l2.8-.8M15.9 10.1l2.8 3.8-2.8-.8"/><circle cx="12" cy="9.2" r="1.7"/>`,
   bolt: `<path d="M13 2 4 14h6l-1 8 9-12h-6z"/>`,
   speed: `<path d="M5 5l6 7-6 7z"/><path d="M13 5l6 7-6 7z"/>`,
@@ -133,7 +145,8 @@ const ICONS = {
   broom: `<path d="M18 2l-3 9"/><path d="M7 22l4-11h5l-1 3-8 8z"/>`,
   gpu: `<rect x="3" y="8" width="18" height="9" rx="2"/><path d="M6 17v3M18 17v3"/><circle cx="15" cy="12" r="2"/><path d="M6 11h5"/>`,
   refresh: `<path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 5v5h-5"/>`,
-  rotate: `<path d="M16 4h4v4"/><path d="M20 5.5A9 9 0 0 0 4 12"/><path d="M8 20H4v-4"/><path d="M4 18.5A9 9 0 0 0 20 12"/>`,
+  // 陀螺仪：中心传感器 + 环绕轨迹
+  rotate: `<circle cx="12" cy="12" r="3"/><path d="M4 12a8 8 0 0 1 13.2-6.1"/><path d="M17.2 3.9h3v3"/><path d="M20 12a8 8 0 0 1-13.2 6.1"/><path d="M6.8 20h-3v-3"/>`,
   list: `<path d="M5 7h14M5 12h14M5 17h14"/>`,
 };
 
@@ -142,20 +155,25 @@ writeFileSync(resolve(root, 'src/icons.json'), JSON.stringify(ICONS, null, 2) + 
 
 // 2) 生成独立 SVG 到 public/icons（原生壳/托盘/EXE 用）
 const outDir = resolve(root, 'public/icons');
+const lightIconNames = new Set(['gauge', 'gamepad', 'rotate']);
 mkdirSync(outDir, { recursive: true });
 for (const [name, inner] of Object.entries(ICONS)) {
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#e9eef5" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${inner}</svg>\n`;
+  const strokeWidth = lightIconNames.has(name) ? 1.2 : 1.6;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#e9eef5" stroke-width="${strokeWidth}" stroke-linecap="round" stroke-linejoin="round">${inner}</svg>\n`;
   writeFileSync(resolve(outDir, `${name}.svg`), svg, 'utf8');
 }
 
 // 3) 预览页
 const cards = Object.entries(ICONS)
   .map(
-    ([name, inner]) => `
+    ([name, inner]) => {
+      const strokeWidth = lightIconNames.has(name) ? 1.2 : 1.6;
+      return `
     <div class="card">
-      <svg viewBox="0 0 24 24" fill="none" stroke="#e9eef5" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${inner}</svg>
+      <svg viewBox="0 0 24 24" fill="none" stroke="#e9eef5" stroke-width="${strokeWidth}" stroke-linecap="round" stroke-linejoin="round">${inner}</svg>
       <code>${name}</code>
-    </div>`
+    </div>`;
+    }
   )
   .join('');
 

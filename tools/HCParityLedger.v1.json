@@ -1,0 +1,276 @@
+{
+  "schemaVersion": 1,
+  "revision": 5,
+  "closure": "UNENCLOSED",
+  "ledgerId": "HC-GYRO-VIRTUAL-PARITY-20260903",
+  "hcCommit": "06c0b9544db2b1f39abf9cd3796225ccfb096103",
+  "entries": [
+    {
+      "parityId": "HC-CONTROLLER-UPDATE-001",
+      "domain": "controller",
+      "sourcePath": "deps/handheldcompanion-runtime/source/Managers/ControllerManager.cs",
+      "symbol": "ControllerManager.UpdateReport / VirtualManager.UpdateInputs",
+      "observedOrder": [
+        "ControllerState snapshot",
+        "MotionManager.UpdateReport",
+        "Motion output",
+        "VirtualManager.UpdateInputs"
+      ],
+      "yemanOwner": "ControllerParticipant",
+      "parityClass": "unknown",
+      "rationale": "HC source shows controller and motion processing before virtual input publication; exact adapter boundary remains unproven.",
+      "fixtureOrTrace": "tools/assisted_stick_assembler_selftest.ts",
+      "status": "located"
+    },
+    {
+      "parityId": "HC-MOTION-CALIBRATED-002",
+      "domain": "motion",
+      "sourcePath": "deps/handheldcompanion-runtime/source/Managers/MotionManager.cs",
+      "symbol": "MotionManager.SetupMotion / ProcessMotion LocalSpace",
+      "observedOrder": [
+        "GetCalibratedGyro",
+        "GyrometerMultiplier",
+        "LocalSpace (Z,X)",
+        "MotionInvert",
+        "ApplyCustomSensitivity",
+        "GetSensitivityX/Y",
+        "Clamp short GyroX/Y"
+      ],
+      "yemanOwner": "GyroMotionParticipant",
+      "parityClass": "exact",
+      "rationale": "T4 mapper now follows MotionManager LocalSpace numeric path. PlayerSpace/WorldSpace/JoystickSteering remain unenclosed without GamepadMotion/inclination evidence.",
+      "fixtureOrTrace": "tools/gyro_motion_mapper_mock_selftest.ts",
+      "status": "verified"
+    },
+    {
+      "parityId": "HC-JOYSTICK-CONTRIBUTION-003",
+      "domain": "motion",
+      "sourcePath": "deps/handheldcompanion-runtime/source/Managers/LayoutManager.cs",
+      "symbol": "LayoutManager.ProcessGyroActions / AxisActions.ApplyAxisModifiers",
+      "observedOrder": [
+        "gyro AxisActions modifiers",
+        "stickNorm = |current|/32767",
+        "weightFactor = gyroWeight - stickNorm",
+        "blended = current + gyro * weightFactor",
+        "ClampShort"
+      ],
+      "yemanOwner": "VirtualReportAssembler",
+      "parityClass": "exact",
+      "rationale": "T5 assembler uses HC short-space AxisActions modifiers and LayoutManager weighted blend. Invented 1/2000 stick scale, per-axis deadzone, and square*1.1 were removed.",
+      "fixtureOrTrace": "tools/assisted_stick_assembler_selftest.ts",
+      "status": "verified"
+    },
+    {
+      "parityId": "HC-CONTROLLER-CLEAR-004",
+      "domain": "lifecycle",
+      "sourcePath": "deps/handheldcompanion-runtime/source/Managers/ControllerManager.cs",
+      "symbol": "ControllerUnplugged / ClearTargetController",
+      "observedOrder": [
+        "unplug event",
+        "clear target",
+        "dispose controller",
+        "pick next target"
+      ],
+      "yemanOwner": "InputLifecycleCoordinator",
+      "parityClass": "unknown",
+      "rationale": "Source contains PnP removal and target-clear paths; process-external recovery proof is not yet connected.",
+      "fixtureOrTrace": "tools/input_power_pnp_selftest.ts",
+      "status": "located"
+    },
+    {
+      "parityId": "HC-VIRTUAL-TARGET-005",
+      "domain": "persona",
+      "sourcePath": "deps/handheldcompanion-runtime/source/Managers/ControllerManager.cs",
+      "symbol": "VirtualManager.UpdateInputs",
+      "observedOrder": [
+        "mapped controller state",
+        "VirtualManager.UpdateInputs",
+        "virtual target output"
+      ],
+      "yemanOwner": "VirtualReportAssembler",
+      "parityClass": "unknown",
+      "rationale": "HC target publication is located, but HIDMaestro descriptor/API equivalence is separately audited.",
+      "fixtureOrTrace": "tools/hidmaestro_real_probe_evidence.json",
+      "status": "located"
+    },
+    {
+      "parityId": "YMCC-ROUTE-LB-RB-006",
+      "domain": "route",
+      "sourcePath": "src/gamepad/engine.ts",
+      "symbol": "LB+RB summon route",
+      "observedOrder": [
+        "physical chord observed",
+        "native summon action"
+      ],
+      "yemanOwner": null,
+      "parityClass": "unknown",
+      "rationale": "Existing native route is recorded as migration evidence only; HC parity, owner and release semantics are not established.",
+      "fixtureOrTrace": "tools/input-route-evidence-20260903.json",
+      "status": "blocked"
+    },
+    {
+      "parityId": "YMCC-ROUTE-B-DOUBLE-TAP-007",
+      "domain": "route",
+      "sourcePath": "src/bridge/yeman.ts",
+      "symbol": "B double-tap minimize route",
+      "observedOrder": [
+        "B double-tap observed",
+        "native minimize action"
+      ],
+      "yemanOwner": null,
+      "parityClass": "unknown",
+      "rationale": "Existing native route is recorded as migration evidence only; HC parity, owner and release semantics are not established.",
+      "fixtureOrTrace": "tools/input-route-evidence-20260903.json",
+      "status": "blocked"
+    },
+    {
+      "parityId": "YMCC-ROUTE-START-DPAD-008",
+      "domain": "route",
+      "sourcePath": "src/bridge/yeman.ts",
+      "symbol": "Start+D-pad adjustment route",
+      "observedOrder": [
+        "Start+D-pad observed",
+        "native adjustment action"
+      ],
+      "yemanOwner": null,
+      "parityClass": "unknown",
+      "rationale": "Existing native route is recorded as migration evidence only; HC parity, owner and release semantics are not established.",
+      "fixtureOrTrace": "tools/input-route-evidence-20260903.json",
+      "status": "blocked"
+    },
+    {
+      "parityId": "HC-MOTION-SENSITIVITY-009",
+      "domain": "motion",
+      "sourcePath": "deps/handheldcompanion-runtime/source/Utils/InputUtils.cs",
+      "symbol": "InputUtils.ApplyCustomSensitivity / Profile.GetSensitivityX/Y",
+      "observedOrder": [
+        "posAbs = |angular|/thresholdG",
+        "two nearest MotionSensivityArray nodes",
+        "adjusted *= 2",
+        "output *= MotionSensivity*1000",
+        "cast to short"
+      ],
+      "yemanOwner": "GyroMotionParticipant",
+      "parityClass": "exact",
+      "rationale": "Default MotionSensivityArray is 49 nodes at 0.5; thresholdG defaults to 2000 from IMUCalibration. No project-invented full-scale mapping.",
+      "fixtureOrTrace": "tools/gyro_motion_mapper_mock_selftest.ts",
+      "status": "verified"
+    },
+    {
+      "parityId": "HC-ROG-IMU-GYROMETER-010",
+      "domain": "motion",
+      "sourcePath": "deps/handheldcompanion-runtime/source/Sensors/IMUGyrometer.cs",
+      "symbol": "IMUGyrometer.ReadingChanged / XboxROGAllyX.GyroMatrix",
+      "observedOrder": [
+        "thresholdG=2000",
+        "AxisRemapIndices",
+        "Axis sign",
+        "ProcessMotion",
+        "GetCalibratedGyro"
+      ],
+      "yemanOwner": "GyroMotionParticipant",
+      "parityClass": "exact",
+      "rationale": "ROG Ally X matrix (x,z,-y) and E-37 calibrated deg/s samples are the T4 provider evidence. Mapper consumes post-matrix calibrated gyro and does not invent a rest threshold.",
+      "fixtureOrTrace": "tools/gyro_e37_hc_parity_selftest.ts",
+      "status": "verified"
+    },
+    {
+      "parityId": "HC-FEEDBACK-RUMBLE-011",
+      "domain": "lifecycle",
+      "sourcePath": "deps/handheldcompanion-runtime/source/Controllers/IController.cs",
+      "symbol": "IController.Rumble / StopRumble / SetHaptic",
+      "observedOrder": [
+        "capability Rumble",
+        "cancel previous CTS",
+        "SetVibration(large,small)",
+        "delay",
+        "SetVibration(0,0)",
+        "StopRumble on suspend/dispose"
+      ],
+      "yemanOwner": "FeedbackParticipant",
+      "parityClass": "exact",
+      "rationale": "T6 mock follows HC rumble cancel/zero/release. HIDMaestro virtual rumble/light remains UNENCLOSED until descriptor evidence.",
+      "fixtureOrTrace": "tools/feedback_participant_mock_selftest.ts",
+      "status": "verified"
+    },
+    {
+      "parityId": "HC-JOYSTICK-STEERING-012",
+      "domain": "motion",
+      "sourcePath": "deps/handheldcompanion-runtime/source/Utils/InputUtils.cs",
+      "symbol": "InputUtils.Steering / Inclination.UpdateReport",
+      "observedOrder": [
+        "accelerometer",
+        "inclination Angles.Y",
+        "Steering(max=30,power=1,deadzone=0)",
+        "invert",
+        "ApplyCustomSensitivity",
+        "no GetSensitivityX/Y",
+        "GyroX short"
+      ],
+      "yemanOwner": "GyroMotionParticipant",
+      "parityClass": "exact",
+      "rationale": "JoystickSteering is now HC Inclination+Steering. Missing accel is SAFE_STOP. PlayerSpace/WorldSpace remain unenclosed without GamepadMotion.",
+      "fixtureOrTrace": "tools/gyro_motion_mapper_mock_selftest.ts",
+      "status": "verified"
+    },
+    {
+      "parityId": "HC-T8-HOST-LOOP-013",
+      "domain": "lifecycle",
+      "sourcePath": "deps/handheldcompanion-runtime/source/Managers/ControllerManager.cs",
+      "symbol": "ControllerManager.UpdateReport / VirtualManager.UpdateInputs / IController.StopRumble",
+      "observedOrder": [
+        "physical frame",
+        "motion contribution",
+        "canonical assemble",
+        "persona encode",
+        "adapter submit",
+        "transport fail -> neutral/release",
+        "summon owner isolate",
+        "feedback safe-zero"
+      ],
+      "yemanOwner": "InputLifecycleCoordinator",
+      "parityClass": "adapted",
+      "rationale": "T8 mock joins T4/T5/T6/F4 without HIDMaestro process. Isolated HIDMaestroTest traces remain non-product.",
+      "fixtureOrTrace": "tools/input_t8_host_loop_selftest.ts",
+      "status": "verified"
+    },
+    {
+      "parityId": "HC-PLAYER-WORLD-014",
+      "domain": "motion",
+      "sourcePath": "deps/handheldcompanion-runtime/source/Helpers/GamepadMotion.cs",
+      "symbol": "GetPlayerSpaceGyro(1.41) / GetWorldSpaceGyro(0.125)",
+      "observedOrder": [
+        "ProcessMotion",
+        "GetPlayerSpaceGyro yawRelax=1.41",
+        "GetWorldSpaceGyro sideReduction=0.125",
+        "output=(-y,x)",
+        "invert",
+        "ApplyCustomSensitivity",
+        "GetSensitivityX/Y"
+      ],
+      "yemanOwner": "GyroMotionParticipant",
+      "parityClass": "exact",
+      "rationale": "Player/World now consume locked GamepadMotion.dll exports with HC constants and MotionManager axis remap. Missing sample remains SAFE_STOP.",
+      "fixtureOrTrace": "tools/gyro_motion_mapper_mock_selftest.ts",
+      "status": "verified"
+    },
+    {
+      "parityId": "HC-INPUTHOST-HIDMAESTRO-015",
+      "domain": "persona",
+      "sourcePath": "deps/handheldcompanion-runtime/source/Targets/Xbox360Target.cs",
+      "symbol": "Xbox360Target.BuildReport / HIDMaestro HMContext.CreateController+SubmitState",
+      "observedOrder": [
+        "feature-assets/virtual-gamepad gate",
+        "create xbox-360-wired",
+        "submit merged sticks",
+        "neutral",
+        "dispose"
+      ],
+      "yemanOwner": "VirtualReportAssembler",
+      "parityClass": "adapted",
+      "rationale": "YeManInputHost is the product adapter for locked HIDMaestro 1.7.0. It is not HIDMaestroTest.exe. HidHide is unused. Host starts only when gyro-motion/virtual-gamepad folders exist.",
+      "fixtureOrTrace": "InputHost/Program.cs",
+      "status": "located"
+    }
+  ]
+}

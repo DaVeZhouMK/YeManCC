@@ -1,0 +1,50 @@
+<Page
+    x:Class="HandheldCompanion.Views.Pages.Welcome.WelcomeStartPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:behaviors="clr-namespace:HandheldCompanion.Behaviors"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:ikw="http://schemas.inkore.net/lib/ui/wpf"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:ui="http://schemas.inkore.net/lib/ui/wpf/modern"
+    xmlns:viewmodels="clr-namespace:HandheldCompanion.ViewModels.Windows"
+    Title="Welcome"
+    MaxWidth="840"
+    Margin="48"
+    VerticalAlignment="Center"
+    d:Background="White"
+    d:DataContext="{d:DesignInstance Type=viewmodels:WelcomeViewModel}"
+    d:DesignHeight="1080"
+    d:DesignWidth="1920"
+    mc:Ignorable="d">
+
+    <ikw:SimpleStackPanel Spacing="28">
+        <TextBlock
+            Margin="0,-50,0,-50"
+            HorizontalAlignment="Center"
+            FontSize="220"
+            FontWeight="Black"
+            Foreground="#FFFEB635"
+            Text="HC"
+            TextAlignment="Center" />
+
+        <ikw:SimpleStackPanel Spacing="8">
+            <TextBlock
+                Style="{StaticResource TitleBoldTextBlockStyle}"
+                Text="Welcome to Handheld Companion."
+                TextAlignment="Center"
+                TextWrapping="Wrap" />
+            <TextBlock
+                Style="{StaticResource BodyTextBlockStyle}"
+                Text="Over the next few steps, we'll prepare your device and a few important settings for a smooth handheld experience."
+                TextAlignment="Center"
+                TextWrapping="Wrap" />
+        </ikw:SimpleStackPanel>
+
+        <ui:SettingsCard Description="Detected device" Header="{Binding DeviceName}">
+            <ui:SettingsCard.HeaderIcon>
+                <ui:FontIcon Icon="{x:Static ui:SegoeFluentIcons.XboxOneConsole}" />
+            </ui:SettingsCard.HeaderIcon>
+        </ui:SettingsCard>
+    </ikw:SimpleStackPanel>
+</Page>

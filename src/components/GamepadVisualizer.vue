@@ -1,6 +1,8 @@
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount, computed, watch } from 'vue';
+import { ref, shallowRef, onMounted, onBeforeUnmount, onActivated, onDeactivated, computed } from 'vue';
 import { on as onIpc } from '@/bridge/ipc';
+import { isUiVisible, onUiVisibilityChange } from '@/bridge/uiLifecycle';
+import { createGamepadPresenter, EMPTY_GAMEPAD_PRESENTATION } from '@/bridge/gamepadPresentation';
 
 import Toggle from '@/components/Toggle.vue';
 import type { GamepadSettings } from '@/bridge/yeman';
@@ -9,132 +11,128 @@ const props = withDefaults(
   defineProps<{
     settings: GamepadSettings;
     highlightButtons?: number[];
+    /** Hide the optional live test-mode switch in compact/editor mirrors. */
+    showTestMode?: boolean;
   }>(),
-  { highlightButtons: () => [] }
+  { highlightButtons: () => [], showTestMode: true }
 );
 
-const live = ref<boolean[]>([]);
-const axes = ref<number[]>([]);
+// Independent shallow refs keep axis-only changes out of button/name consumers.
+// The presenter preserves normalized array identity and avoids deep proxy churn.
+const live = shallowRef(EMPTY_GAMEPAD_PRESENTATION.buttons);
+const axes = shallowRef(EMPTY_GAMEPAD_PRESENTATION.axes);
 const connected = ref(false);
 const padName = ref('');
 const testMode = ref(false);
+const presenter = createGamepadPresenter((state) => {
+  connected.value = state.connected;
+  padName.value = state.name;
+  live.value = state.buttons;
+  axes.value = state.axes;
+});
+let viewActive = true;
 let stopState: (() => void) | null = null;
+let stopVisibility: (() => void) | null = null;
 let testBTimer: number | null = null;
-let raf = 0;
-let lastLive: boolean[] = [];
-let lastAxes: number[] = [];
-let probeTimer = 0; // 无手柄时的低频探测 timer（省 CPU）
-// 复用缓冲：仅当内容变化时才整体替换 ref，避免每帧 map + Vue 响应式开销
+let testBHeld = false;
+// The native stream remains authoritative. Only display work pauses when hidden.
 const baseImageRevision = ref(0);
 let baseImageRetryTimer: number | null = null;
 let stopResumeReady: (() => void) | null = null;
 let stopResumed: (() => void) | null = null;
+let imageRefreshPending = false;
+let imageFailures = 0;
+const IMAGE_RETRY_LIMIT = 3;
 
 const baseImageUrl = computed(() => `/gamepad-base.png?wake=${baseImageRevision.value}`);
 
-function refreshBaseImage(): void {
-  baseImageRevision.value += 1;
+function cancelImageRetry(): void {
   if (baseImageRetryTimer !== null) window.clearTimeout(baseImageRetryTimer);
-  // WebView2 may restore the DOM before its compositor is ready. Recreate the
-  // image once more after the resume transaction has settled.
+  baseImageRetryTimer = null;
+}
+
+function refreshBaseImage(): void {
+  cancelImageRetry();
+  imageFailures = 0;
+  if (!viewActive || !isUiVisible()) { imageRefreshPending = true; return; }
+  imageRefreshPending = false;
+  baseImageRevision.value += 1;
+  // Preserve the existing bounded second load after the compositor resumes.
   baseImageRetryTimer = window.setTimeout(() => {
     baseImageRetryTimer = null;
+    if (!viewActive || !isUiVisible()) { imageRefreshPending = true; return; }
     baseImageRevision.value += 1;
   }, 250);
 }
 
 function onBaseImageError(): void {
-  if (baseImageRetryTimer !== null) window.clearTimeout(baseImageRetryTimer);
+  cancelImageRetry();
+  if (!viewActive || !isUiVisible()) { imageRefreshPending = true; return; }
+  // A missing/failed image must not create a permanent 120ms render/network loop.
+  if (imageFailures >= IMAGE_RETRY_LIMIT) return;
+  const delay = 120 * 2 ** imageFailures++;
   baseImageRetryTimer = window.setTimeout(() => {
     baseImageRetryTimer = null;
-    refreshBaseImage();
-  }, 120);
+    if (!viewActive || !isUiVisible()) { imageRefreshPending = true; return; }
+    baseImageRevision.value += 1;
+  }, delay);
 }
 
-function setTestMode(v: boolean) {
+function syncPresentationVisibility(): void {
+  const visible = viewActive && isUiVisible();
+  presenter.setVisible(visible);
+  if (!visible) {
+    if (baseImageRetryTimer !== null) imageRefreshPending = true;
+    cancelImageRetry();
+  } else if (imageRefreshPending) refreshBaseImage();
+}
+
+function syncTestBHold(): void {
+  if (!testMode.value || !testBHeld) {
+    if (testBTimer !== null) window.clearTimeout(testBTimer);
+    testBTimer = null;
+    return;
+  }
+  if (testBTimer !== null) return;
+  testBTimer = window.setTimeout(() => {
+    testBTimer = null;
+    if (testMode.value && testBHeld) setTestMode(false);
+  }, 3000);
+}
+
+function setTestMode(v: boolean): void {
   testMode.value = v;
+  syncTestBHold();
   window.dispatchEvent(new CustomEvent('ipc:gamepad.testmode', { detail: v }));
-}
-
-function scheduleNext(connectedNow: boolean) {
-  if (connectedNow) {
-    raf = requestAnimationFrame(poll);
-  } else {
-    // 无手柄：250ms 低频探测（连接后由下一轮恢复 60Hz）
-    probeTimer = window.setTimeout(poll, 250);
-  }
-}
-
-function poll() {
-  try {
-    const pads: Gamepad[] = [];
-    let p: Gamepad | null = null;
-    for (const x of pads) if (x && x.connected) { p = x; break; }
-    if (p) {
-      connected.value = true;
-      padName.value = p.id || '手柄';
-      const bl = p.buttons.length;
-      if (lastLive.length !== bl) lastLive = new Array(bl).fill(false);
-      const al = p.axes.length;
-      if (lastAxes.length !== al) lastAxes = new Array(al).fill(0);
-      let liveChanged = false;
-      let axesChanged = false;
-      for (let i = 0; i < bl; i++) {
-        const v = p.buttons[i].pressed;
-        if (lastLive[i] !== v) { lastLive[i] = v; liveChanged = true; }
-      }
-      for (let i = 0; i < al; i++) {
-        const v = Number.isFinite(p.axes[i]) ? p.axes[i] : 0;
-        if (lastAxes[i] !== v) { lastAxes[i] = v; axesChanged = true; }
-      }
-      if (liveChanged) live.value = lastLive.slice();
-      if (axesChanged) axes.value = lastAxes.slice();
-      scheduleNext(true);
-    } else {
-      if (connected.value) {
-        connected.value = false;
-        live.value = [];
-        axes.value = [];
-      }
-      scheduleNext(false);
-    }
-  } catch {
-    if (connected.value) {
-      connected.value = false;
-      live.value = [];
-      axes.value = [];
-    }
-    scheduleNext(false);
-  }
 }
 
 function onTestModeEvent(e: Event) {
   testMode.value = Boolean((e as CustomEvent<boolean>).detail);
+  syncTestBHold();
 }
 
 onMounted(() => {
   window.addEventListener('ipc:gamepad.testmode', onTestModeEvent);
+  stopVisibility = onUiVisibilityChange(syncPresentationVisibility);
   stopState = onIpc('gamepad.state', (payload) => {
-    const state = payload as {
-      connected?: boolean;
-      name?: string;
-      buttons?: unknown;
-      axes?: unknown;
-    };
-    connected.value = Boolean(state?.connected);
-    padName.value = String(state?.name || '手柄');
-    live.value = Array.isArray(state?.buttons) ? state.buttons.map(Boolean) : [];
-    axes.value = Array.isArray(state?.axes)
-      ? state.axes.map((value) => Number.isFinite(Number(value)) ? Number(value) : 0)
-      : [];
+    const raw = payload as { connected?: unknown; buttons?: unknown } | null;
+    // The safety/long-press path still observes EVERY snapshot while hidden.
+    // Axis-only changes must not restart a held-B deadline.
+    testBHeld = Boolean(Array.isArray(raw?.buttons) && raw.buttons[1]);
+    if (!raw?.connected && testMode.value) setTestMode(false);
+    syncTestBHold();
+    presenter.accept(payload);
   });
   stopResumeReady = onIpc('power.resume-ready', refreshBaseImage);
   stopResumed = onIpc('power.resumed', refreshBaseImage);
 });
+onActivated(() => { viewActive = true; syncPresentationVisibility(); });
+onDeactivated(() => { viewActive = false; syncPresentationVisibility(); });
 onBeforeUnmount(() => {
-  if (raf) cancelAnimationFrame(raf);
-  if (probeTimer) clearTimeout(probeTimer);
-  if (baseImageRetryTimer !== null) window.clearTimeout(baseImageRetryTimer);
+  presenter.dispose();
+  stopVisibility?.();
+  stopVisibility = null;
+  cancelImageRetry();
   window.removeEventListener('ipc:gamepad.testmode', onTestModeEvent);
   stopState?.();
   stopState = null;
@@ -146,32 +144,18 @@ onBeforeUnmount(() => {
   testBTimer = null;
   setTestMode(false);
 });
-watch(connected, (c) => {
-  if (!c && testMode.value) setTestMode(false); // 断连时自动退出测试模式
-});
-
-// 交互层以原始 420x270 标定坐标为基准；模板统一应用与 495px PNG 相同的 1.1 倍几何变换。
-watch(live, (buttons) => {
-  if (testBTimer !== null) window.clearTimeout(testBTimer);
-  testBTimer = null;
-  if (testMode.value && buttons[1]) {
-    testBTimer = window.setTimeout(() => {
-      testBTimer = null;
-      if (testMode.value && live.value[1]) setTestMode(false);
-    }, 3000);
-  }
-});
-
+// Native/XInput Y is positive upward; SVG Y is positive downward.
+// Invert only the preview coordinate, retaining input precision and real output.
 const STICK_L = { x: 116, y: 138 };
 const STICK_R = { x: 255, y: 191 };
 const STICK_TRAVEL = 10;
 const stickL = computed(() => ({
   x: STICK_L.x + (axes.value[0] || 0) * STICK_TRAVEL,
-  y: STICK_L.y + (axes.value[1] || 0) * STICK_TRAVEL,
+  y: STICK_L.y - (axes.value[1] || 0) * STICK_TRAVEL,
 }));
 const stickR = computed(() => ({
   x: STICK_R.x + (axes.value[2] || 0) * STICK_TRAVEL,
-  y: STICK_R.y + (axes.value[3] || 0) * STICK_TRAVEL,
+  y: STICK_R.y - (axes.value[3] || 0) * STICK_TRAVEL,
 }));
 const stickLPushed = computed(() => Math.hypot(axes.value[0] || 0, axes.value[1] || 0) > 0.45);
 const stickRPushed = computed(() => Math.hypot(axes.value[2] || 0, axes.value[3] || 0) > 0.45);
@@ -312,12 +296,7 @@ function cls(i: number): Record<string, boolean> {
       </svg>
     </div>
 
-    <div class="legend">
-      <span><i class="lg mapped"></i> 快捷键关联</span>
-      <span><i class="lg live"></i> 实时按下 / 摇杆推动</span>
-    </div>
-
-    <div class="test-toggle">
+    <div v-if="props.showTestMode" class="test-toggle">
       <Toggle
         v-model="testMode"
         :label="connected ? '手柄测试模式' : '未检测'"
@@ -543,33 +522,6 @@ function cls(i: number): Record<string, boolean> {
   font-size: 11px;
   color: var(--accent-2);
   padding: 6px 0 2px;
-}
-.legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  justify-content: center;
-  margin-top: 10px;
-  font-size: 10.5px;
-  color: var(--text-dim);
-}
-.legend span {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-}
-.lg {
-  width: 11px;
-  height: 11px;
-  border-radius: 3px;
-  display: inline-block;
-}
-.lg.mapped {
-  background: rgba(80, 150, 255, 0.3);
-  border: 1px solid var(--accent);
-}
-.lg.live {
-  background: var(--ok);
 }
 .test-toggle {
   margin-top: 10px;

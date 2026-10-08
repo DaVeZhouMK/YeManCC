@@ -1,0 +1,219 @@
+{
+  "schemaVersion": "T22-P00-CurrentSourceManifest.v2",
+  "manifestId": "T22-P00-20260904-C01-P05-P07-T21T14-DESIGN-CURRENT",
+  "capturedUtc": "2026-09-04T15:42:15.3185674Z",
+  "captureMode": "static-read-hash-documentation-only",
+  "runtimeOperation": false,
+  "buildOrTest": false,
+  "supersedes": [
+    {
+      "manifestId": "T22-P00-20260904-C01",
+      "status": "INVALID-EVIDENCE-ARTIFACT",
+      "reason": "manifest count 276, raw count 217"
+    },
+    {
+      "manifestId": "T22-P00-20260904-C01-R2",
+      "status": "HISTORICAL-SNAPSHOT",
+      "reason": "superseded after T15/T16 design correction"
+    },
+    {
+      "manifestId": "T22-P00-20260904-C01-R3",
+      "status": "HISTORICAL-SNAPSHOT",
+      "reason": "superseded after E3 homepage evidence return"
+    },
+    {
+      "manifestId": "T22-P00-20260904-C01-CURRENT",
+      "status": "HISTORICAL-SNAPSHOT",
+      "reason": "superseded after P05 mock-producer boundary correction, P07 v2 index, and v2 reproducible digest definition"
+    },
+    {
+      "manifestId": "T22-P00-20260904-C01-P05-CURRENT",
+      "status": "HISTORICAL-SNAPSHOT",
+      "reason": "superseded after TASK homepage status return and P07 v2 final evidence pointer update"
+    },
+    {
+      "manifestId": "T22-P00-20260904-C01-P05-P07-CURRENT",
+      "status": "HISTORICAL-SNAPSHOT",
+      "reason": "superseded after T21/T14 current-source re-audit, T15/T16 design maintenance, and TASK homepage evidence return"
+    }
+  ],
+  "ymcc": {
+    "repository": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC",
+    "head": "aa8f38b83cc960267d2f68bf78d0e8adaca2234f",
+    "worktreePorcelainCount": 304,
+    "worktreePorcelainRawPath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\T22-BUS-P07-current-source-porcelain.raw.txt",
+    "worktreePorcelainCanonicalSha256": "A97DCBC9122F938CEA52F7D5B81B766DF1C2404766C608EBF542959EF23C8B51",
+    "worktreePorcelainArtifactSha256": "A97DCBC9122F938CEA52F7D5B81B766DF1C2404766C608EBF542959EF23C8B51",
+    "porcelainEncoding": "UTF-8 without BOM; LF; git status --porcelain=v1 complete output"
+  },
+  "hc": {
+    "root": "G:\\YeManCC-Work\\Isolated\\HC-Candidate-0.32.4.0-06c0b954-20260902",
+    "head": "06c0b9544db2b1f39abf9cd3796225ccfb096103",
+    "expectedVersion": "0.32.4.0",
+    "expectedCommit": "06c0b9544db2b1f39abf9cd3796225ccfb096103",
+    "worktreePorcelainCount": 0
+  },
+  "sourceDigest": "3FC345530AD8D974F159D42E94176C4EFE49DC3D77E435B4E3EF9087A1FDAA10",
+  "sourceDigestAlgorithm": "SHA256(UTF8(join(sorted keyFiles, scope + TAB + relativePath + TAB + fileSha256 + TAB + bytes + LF)))",
+  "lineMapDigest": "DDA4C66FD3C5FE00D353901B3A11B1C8CB1FFB5872E6DC8C90881675D68027FD",
+  "lineMap": [
+    "native/main.cpp:5221-5235 inputHostStop: neutral state -> host exit -> HidHide restore",
+    "InputHost/Program.cs:44-55 file-mode: neutral before stop return",
+    "native/main.cpp:5279-5307 fixed parameters and state-file gyro transport",
+    "native/main.cpp:5369-5510 pair gate/g_gmProcess/calibration",
+    "InputHost/Program.cs:116-136 GyroDps direct submit",
+    "src/bridge/rogInputAdapter.ts:43-45 dormant ROG disable payload",
+    "native/main.cpp:5535-5569 XInput slot selection without devicePath/PnP identity",
+    "src/bridge/inputCoordinatorMock.ts:41-44,123-128 mock-only counter producer",
+    "src/bridge/inputOwnerRuntime.ts:1-43 and src/gamepad/engine.ts:151-157,232-239 renderer observation/UI semantic trace"
+  ],
+  "keyFiles": [
+    {
+      "scope": "YMCC",
+      "relativePath": "native\\main.cpp",
+      "absolutePath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\native\\main.cpp",
+      "sha256": "034B028E8B1E0B7BC49F3AF21076D9EE852EDBC5FE67C29258D1E8C38B54683D",
+      "bytes": 1048967
+    },
+    {
+      "scope": "YMCC",
+      "relativePath": "InputHost\\Program.cs",
+      "absolutePath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\InputHost\\Program.cs",
+      "sha256": "72F7E4F890DF4AE2F93196AE9FE7C11F74976851ABCC78546D8521E428A484F3",
+      "bytes": 7494
+    },
+    {
+      "scope": "YMCC",
+      "relativePath": "src\\bridge\\rogInputAdapter.ts",
+      "absolutePath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\src\\bridge\\rogInputAdapter.ts",
+      "sha256": "D1EC2EB58D22F80EF38D47F017809E57844264B2FC96C238E21252E5BBDAF634",
+      "bytes": 3633
+    },
+    {
+      "scope": "YMCC",
+      "relativePath": "src\\bridge\\inputOwnerRuntime.ts",
+      "absolutePath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\src\\bridge\\inputOwnerRuntime.ts",
+      "sha256": "74C135BC525AB2BE4129A69497D460AB2A75B2619EA26C6982B4E3B600170B8C",
+      "bytes": 1924
+    },
+    {
+      "scope": "YMCC",
+      "relativePath": "src\\bridge\\physicalInputOwnership.ts",
+      "absolutePath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\src\\bridge\\physicalInputOwnership.ts",
+      "sha256": "D807BE442E1577DD7778EC2EBB32F58858EA4013D703783F435066B8168D5D89",
+      "bytes": 3806
+    },
+    {
+      "scope": "YMCC",
+      "relativePath": "src\\bridge\\inputCoordinatorMock.ts",
+      "absolutePath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\src\\bridge\\inputCoordinatorMock.ts",
+      "sha256": "D64B7D108F06FAD2624BEA53825896C6FC91904638299B64B57D58BC8CBB5B6E",
+      "bytes": 8361
+    },
+    {
+      "scope": "YMCC",
+      "relativePath": "src\\gamepad\\engine.ts",
+      "absolutePath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\src\\gamepad\\engine.ts",
+      "sha256": "E7900D4BABBD7F937CD4111CBA2F5EC17DD05D6B1B3BB3EB47A4B02D82B462CA",
+      "bytes": 69564
+    },
+    {
+      "scope": "YMCC",
+      "relativePath": "tools\\ParameterConsumptionLedger.v1.json",
+      "absolutePath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ParameterConsumptionLedger.v1.json",
+      "sha256": "5D2737A6E9A3519AC951ADA29A84B73CC080A33BBA1330D71F0052B92DF97B80",
+      "bytes": 4972
+    },
+    {
+      "scope": "YMCC",
+      "relativePath": "tools\\T15T16EmpiricalClosureTestDesign.v1.md",
+      "absolutePath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\T15T16EmpiricalClosureTestDesign.v1.md",
+      "sha256": "90EC95A5D7E420305600BFD083CC27D95617C3DAB369C9F51FF502F0C7069CCB",
+      "bytes": 17237
+    },
+    {
+      "scope": "DOC",
+      "relativePath": "Docs\\Tasks\\GyroVirtual\\TASK.md",
+      "absolutePath": "G:\\YeManCC-Work\\Docs\\Tasks\\GyroVirtual\\TASK.md",
+      "sha256": "1D47E8139CBA64CE830F397154E95D0AAC3789536C9CCEB58A35BD8D0CF7D5A0",
+      "bytes": 54656
+    },
+    {
+      "scope": "DOC",
+      "relativePath": "Docs\\Tasks\\GyroVirtual\\24-UNIFIED-LIFECYCLE-AND-COORDINATION-CONTRACT-20260903.md",
+      "absolutePath": "G:\\YeManCC-Work\\Docs\\Tasks\\GyroVirtual\\24-UNIFIED-LIFECYCLE-AND-COORDINATION-CONTRACT-20260903.md",
+      "sha256": "21ED9BDA1A42BE5288C6EBD6DAEEDE02613D907FBCEA115404E2D1E42033EFD6",
+      "bytes": 5363
+    },
+    {
+      "scope": "DOC",
+      "relativePath": "Docs\\Tasks\\GyroVirtual\\30-GYRO-PARAMETER-SHIELD-RESET-ACCEL-CONTRACT-20260904.md",
+      "absolutePath": "G:\\YeManCC-Work\\Docs\\Tasks\\GyroVirtual\\30-GYRO-PARAMETER-SHIELD-RESET-ACCEL-CONTRACT-20260904.md",
+      "sha256": "0EFAB2E095B280B78CAA1AAFD33465781E36BF9803FDB69A9291E80DDB63BA86",
+      "bytes": 51318
+    },
+    {
+      "scope": "HC",
+      "relativePath": "HandheldCompanion\\Managers\\MotionManager.cs",
+      "absolutePath": "G:\\YeManCC-Work\\Isolated\\HC-Candidate-0.32.4.0-06c0b954-20260902\\HandheldCompanion\\Managers\\MotionManager.cs",
+      "sha256": "19A9C645351DC74B5A0E2A74D99C3AD95F105CF85EDF173C8AF8531713F6FC7E",
+      "bytes": 15971
+    },
+    {
+      "scope": "HC",
+      "relativePath": "HandheldCompanion\\Managers\\SensorsManager.cs",
+      "absolutePath": "G:\\YeManCC-Work\\Isolated\\HC-Candidate-0.32.4.0-06c0b954-20260902\\HandheldCompanion\\Managers\\SensorsManager.cs",
+      "sha256": "660CC003DF8C425CC4AA7D478C3D7327991C194D8FAE13F1EFD060B38BC2B4A3",
+      "bytes": 16413
+    },
+    {
+      "scope": "HC",
+      "relativePath": "HandheldCompanion\\Managers\\LayoutManager.cs",
+      "absolutePath": "G:\\YeManCC-Work\\Isolated\\HC-Candidate-0.32.4.0-06c0b954-20260902\\HandheldCompanion\\Managers\\LayoutManager.cs",
+      "sha256": "1A4D3EBDCB09F8431EFD138F580086F435BC8296B0D248BFB02BF4650D0994A1",
+      "bytes": 36010
+    },
+    {
+      "scope": "HC",
+      "relativePath": "HandheldCompanion\\Helpers\\GamepadMotion.cs",
+      "absolutePath": "G:\\YeManCC-Work\\Isolated\\HC-Candidate-0.32.4.0-06c0b954-20260902\\HandheldCompanion\\Helpers\\GamepadMotion.cs",
+      "sha256": "7BA36F0DCB0E280D526E5B09E95888AF58B98927B3C83001858817EC12FB23ED",
+      "bytes": 12816
+    },
+    {
+      "scope": "HC",
+      "relativePath": "HandheldCompanion\\Devices\\ASUS\\XboxROGAlly.cs",
+      "absolutePath": "G:\\YeManCC-Work\\Isolated\\HC-Candidate-0.32.4.0-06c0b954-20260902\\HandheldCompanion\\Devices\\ASUS\\XboxROGAlly.cs",
+      "sha256": "78BF90520419B63C6C8FD2BC12543B2D16280895802D8F9952849C4E030FE3D4",
+      "bytes": 1815
+    }
+  ],
+  "selfReferenceRule": "Evidence artifacts are written after capture and excluded from sourceDigest. Their paths remain in the complete porcelain raw, but they must not retroactively alter key-file source identity.",
+  "changesSinceBUS_P07": [
+    {
+      "id": "T22-C01",
+      "status": "SOURCE-FIX-APPLIED-STATIC-REVERIFY-REQUIRED",
+      "files": [
+        "native/main.cpp",
+        "InputHost/Program.cs"
+      ],
+      "doesNotProve": [
+        "Host ACK",
+        "neutral receipt",
+        "release proof",
+        "epoch transition",
+        "runtime closure"
+      ]
+    },
+    {
+      "id": "T22-P05-MOCK-PRODUCER-BOUNDARY-01",
+      "status": "EVIDENCE-BOUNDARY-CORRECTED / NO-SOURCE-CHANGE",
+      "doesNotProve": [
+        "Steam input blocked",
+        "game consumer observed zero input",
+        "physical identity provenance",
+        "runtime closure"
+      ]
+    }
+  ]
+}

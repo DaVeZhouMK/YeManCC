@@ -1,0 +1,184 @@
+===== G:\YeManCC-Work\Mainline\YeManCC-source\YeManCC\native\main.cpp
+6645:            if (startupUnacknowledged && TerminateProcess(g_inputHostProcess, 1)) {
+6398:    HANDLE pipe = CreateNamedPipeW(path.c_str(), PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,
+6399:        PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
+6774:    const bool prepared = hello && inputHostRequestLocked("PREPARE_TARGET", json::object(), "target-prepared", 10000);
+6907:// reaches PREPARE_TARGET and therefore never creates a HIDMaestro controller.
+6612:            "SUBMIT_NEUTRAL", json::object(), "neutral-accepted", 1000);
+6777:    const bool neutralized = prepared && inputHostRequestLocked("SUBMIT_NEUTRAL", json::object(), "neutral-accepted", 2000);
+6952:    const bool frameAccepted = hello && inputHostRequestLocked("SUBMIT_FRAME", frame, "frame-accepted", 1000, &rejected);
+7132:            accepted = inputHostRequestLocked("SUBMIT_FRAME", canonicalFrame, "frame-accepted", 1000, &receipt);
+5576:static ULONGLONG g_inputHostLastKeepAliveTick = 0;
+6361:    g_inputHostLastKeepAliveTick = 0;
+6742:    g_inputHostLastKeepAliveTick = 0;
+6876:static void inputHostKeepAliveIfNeeded(const char* reason) {
+6882:    constexpr ULONGLONG kInputHostKeepAliveIntervalMs = 500;
+6889:        if (g_inputHostLastKeepAliveTick != 0 && now - g_inputHostLastKeepAliveTick < kInputHostKeepAliveIntervalMs)
+6891:        if (inputHostRequestLocked("KEEPALIVE", json::object(), "keepalive-accepted", 1000)) {
+6892:            g_inputHostLastKeepAliveTick = now;
+6899:        g_inputHostReleaseDisposition = "keepalive-fault/release-unproven";
+6902:    if (fault) inputHostStop(reason ? reason : "publication-suppressed-keepalive-fault");
+6940:    json keepAliveRejected;
+6941:    const bool keepAliveAccepted = hello && inputHostRequestLocked("KEEPALIVE", json::object(), "keepalive-accepted", 1000, &keepAliveRejected);
+6942:    const bool keepAliveRejectedInOrder = !keepAliveAccepted && !g_inputHostTransportFault &&
+6943:        keepAliveRejected.value("status", "") == "state-rejected";
+6960:    return hello && keepAliveRejectedInOrder && frameRejectedInOrder && shutdown && exitWait == WAIT_OBJECT_0 ? 0 : 13;
+7008:        inputHostKeepAliveIfNeeded("physical-source-absent-keepalive-fault");
+7034:        inputHostKeepAliveIfNeeded("shortcut-recording-keepalive-fault");
+1532:static bool waitForHardwareWritesQuiesced(unsigned long long generation, DWORD timeoutMs) {
+1537:            traceLog("power gate quiesce timeout inflight=%u generation=%llu",
+5527:                // Ordered QUIESCE -> neutral -> release -> shutdown. This is
+6290:// single serialized target lifecycle: old writer quiesces, neutralizes and
+6607:        // QUIESCE or neutral receipt and then mislabel a later dispose as a
+6610:        const bool quiesced = inputHostRequestLocked("QUIESCE", json::object(), "quiesced", 1000);
+6611:        const bool neutralized = quiesced && inputHostRequestLocked(
+6615:            localReleaseAck = inputHostRequestLocked("RELEASE_TARGET", json::object(),
+935:static std::atomic<bool> g_inputReady{true};
+6719:    if (!g_inputReady.load(std::memory_order_acquire) ||
+6861:        g_inputReady.load(std::memory_order_acquire) &&
+6978:    const bool powerAdmitted = g_inputReady.load(std::memory_order_acquire) &&
+8244:    if (!g_inputReady.load(std::memory_order_acquire)) {
+9559:        if (!g_inputReady.load(std::memory_order_acquire) || !hardwareWriteAllowed()) return;
+11084:    g_inputReady.store(true, std::memory_order_release);
+17413:    g_inputReady.store(false, std::memory_order_release);
+19678:            {"inputReady", g_inputReady.load(std::memory_order_acquire)},
+19704:                        {"inputReady", g_inputReady.load(std::memory_order_acquire)},
+19719:        g_inputReady.store(true, std::memory_order_release);
+21632:        g_inputReady.store(false, std::memory_order_release);
+21709:    g_inputReady.store(false, std::memory_order_release);
+21811:        g_inputReady.store(false, std::memory_order_release);
+22250:                g_inputReady.store(inputReady, std::memory_order_release);
+22507:                {"inputReady", g_inputReady.load(std::memory_order_acquire)}
+22658:        if (!g_inputReady.load(std::memory_order_acquire) || !hardwareWriteAllowed()) return 0;
+22661:            if (!g_inputReady.load(std::memory_order_acquire) || !hardwareWriteAllowed()) return;
+22667:        if (!g_inputReady.load(std::memory_order_acquire) || !hardwareWriteAllowed()) return 0;
+23051:                g_inputReady.store(false, std::memory_order_release);
+23137:                g_inputReady.store(false, std::memory_order_release);
+931:static std::atomic<PowerLifecycle> g_powerLifecycle{PowerLifecycle::Ready};
+990:    case PowerLifecycle::Ready: return "ready";
+1098:           g_powerLifecycle.load(std::memory_order_acquire) == PowerLifecycle::Ready;
+6720:        g_powerLifecycle.load(std::memory_order_acquire) != PowerLifecycle::Ready) {
+6862:        g_powerLifecycle.load(std::memory_order_acquire) == PowerLifecycle::Ready;
+6979:        g_powerLifecycle.load(std::memory_order_acquire) == PowerLifecycle::Ready;
+11082:    g_powerLifecycle.store(PowerLifecycle::Ready, std::memory_order_release);
+19701:        if (phase == PowerLifecycle::Ready) {
+19720:        g_powerLifecycle.store(PowerLifecycle::Ready, std::memory_order_release);
+21611:        phase == PowerLifecycle::Ready &&
+21624:        if (phase == PowerLifecycle::Ready) {
+21662:    if (previousPhase != PowerLifecycle::Ready) {
+21673:        if (g_powerLifecycle.load(std::memory_order_acquire) != PowerLifecycle::Ready) {
+22251:                g_powerLifecycle.store(PowerLifecycle::Ready, std::memory_order_release);
+22503:        if (g_powerLifecycle.load(std::memory_order_acquire) == PowerLifecycle::Ready) {
+23039:                g_powerLifecycle.load(std::memory_order_acquire) == PowerLifecycle::Ready &&
+23219:                    g_powerLifecycle.load(std::memory_order_acquire) == PowerLifecycle::Ready)
+6808:static void inputHostRequestPowerRelease(unsigned long long generation, const char* reason) {
+17414:    inputHostRequestPowerRelease(generation, "sleep-retry-exhausted");
+21633:        inputHostRequestPowerRelease(generation, reason ? reason : "power-resuming");
+21710:    inputHostRequestPowerRelease(generation, "s0-intent");
+21812:        inputHostRequestPowerRelease(generation, userWake ? "s0-resume-user" : "s0-resume-auto");
+23138:                inputHostRequestPowerRelease(generation, "suspend-confirmed");
+6818:static void inputHostRequestPowerRearm(unsigned long long generation, const char* reason) {
+11086:    inputHostRequestPowerRearm(generation, "sleep-intent-canceled");
+19722:        inputHostRequestPowerRearm(current, "power-resume-commit");
+22254:                    inputHostRequestPowerRearm(currentPowerGeneration(), "power-resume-watchdog-commit");
+6977:static json inputHostSubmitPad(bool physicalSourceAdmitted, const XINPUT_GAMEPAD& pad, double cgx, double cgy, double cgz, float psx, float psy, float wsx, float wsy, bool steady, bool calLocked, bool motionAdmitted, bool motionTriggered, const std::string& targetStick) {
+7007:    if (!physicalSourceAdmitted) {
+7008:        inputHostKeepAliveIfNeeded("physical-source-absent-keepalive-fault");
+7018:            {"publicationReason", "physical-source-absent"},
+5304:static void inputCaptureSuspendSensorsForPower() {
+6846:            inputCaptureSuspendSensorsForPower();
+5312:static void inputCaptureResumeSensorsForPower() {
+6870:    if (started) inputCaptureResumeSensorsForPower();
+5271:        g_gyroSensor = winrt::Windows::Devices::Sensors::Gyrometer::GetDefault();
+5283:        g_accelSensor = winrt::Windows::Devices::Sensors::Accelerometer::GetDefault();
+5583:// Receipt telemetry only.  A release-unproven result is not yet a complete
+6279:        {"status", ok && exact ? "restored" : "release-unproven"}, {"pXinput", "UNENCLOSED"}
+6588:    // release-unproven and are never force-killed here.
+6609:        // Coordinator connection; native must retain release-unproven.
+6619:            ? "local-dispose-complete/external-release-unproven"
+6620:            : "release-unproven";
+6621:        g_inputHostLifecycle = localReleaseAck ? "released-local" : "release-unproven";
+6623:        g_inputHostReleaseDisposition = "release-unproven";
+6624:        g_inputHostLifecycle = "release-unproven";
+6642:        // removal budget. A timeout remains release-unproven, not device-gone.
+6659:                g_inputHostReleaseDisposition = "release-unproven/host-exit-timeout";
+6795:        g_inputHostReleaseDisposition = "opening-failed/release-unproven";
+6899:        g_inputHostReleaseDisposition = "keepalive-fault/release-unproven";
+6995:            {"lifecycle", "release-unproven"},
+7146:                g_inputHostReleaseDisposition = "frame-fault/release-unproven";
+7156:    // otherwise it records none/release-unproven and never force-kills Host.
+===== G:\YeManCC-Work\Mainline\YeManCC-source\YeManCC\InputHost\Program.cs
+293:                case "PREPARE_TARGET":
+605:            if (command is not ("HELLO" or "PREPARE_TARGET" or "SUBMIT_NEUTRAL" or "SUBMIT_FRAME" or "KEEPALIVE" or "QUIESCE" or "RELEASE_TARGET" or "SHUTDOWN"))
+308:                case "SUBMIT_NEUTRAL":
+605:            if (command is not ("HELLO" or "PREPARE_TARGET" or "SUBMIT_NEUTRAL" or "SUBMIT_FRAME" or "KEEPALIVE" or "QUIESCE" or "RELEASE_TARGET" or "SHUTDOWN"))
+204:        var frameBeforePrepare = $$"""{"protocolVersion":1,"command":"SUBMIT_FRAME","requestId":"r3","sequence":3,"runId":"run-1","epoch":1,"powerGeneration":1,"targetId":"target-1","ownerIdentity":"coordinator","persona":"dualshock4","profileIdentity":"dualshock-4-v2","startupNonce":"{{nonce}}","configRevision":1,"configHash":"{{hash}}","buttons":0,"lx":0,"ly":0,"rx":0,"ry":0,"lt":0,"rt":0,"sampleSequence":1,"monotonicTick":1,"normalizedInputHash":"{{frameHash}}","motionPairProofId":"pair-unproven-safe-zero"}""";
+315:                case "SUBMIT_FRAME":
+605:            if (command is not ("HELLO" or "PREPARE_TARGET" or "SUBMIT_NEUTRAL" or "SUBMIT_FRAME" or "KEEPALIVE" or "QUIESCE" or "RELEASE_TARGET" or "SHUTDOWN"))
+610:            var allowed = command == "SUBMIT_FRAME" ? FrameFields : BaseFields;
+631:            if (command == "SUBMIT_FRAME")
+203:        var keepAliveBeforePrepare = $$"""{"protocolVersion":1,"command":"KEEPALIVE","requestId":"r2","sequence":2,"runId":"run-1","epoch":1,"powerGeneration":1,"targetId":"target-1","ownerIdentity":"coordinator","persona":"dualshock4","profileIdentity":"dualshock-4-v2","startupNonce":"{{nonce}}","configRevision":1,"configHash":"{{hash}}"}""";
+214:        var keepAliveResponse = session.Handle(keepAliveBeforePrepare, out var keepAliveShutdown);
+220:        using var keepAliveDoc = JsonDocument.Parse(keepAliveResponse);
+222:        return !helloShutdown && !invalidShutdown && !nonceShutdown && !negativeZeroShutdown && !keepAliveShutdown && !frameShutdown &&
+227:               !keepAliveDoc.RootElement.GetProperty("ok").GetBoolean() &&
+338:                case "KEEPALIVE":
+344:                        return Error(envelope, "state-rejected", "keepalive-requires-prepared-target");
+345:                    return Ack(envelope, "keepalive-accepted");
+605:            if (command is not ("HELLO" or "PREPARE_TARGET" or "SUBMIT_NEUTRAL" or "SUBMIT_FRAME" or "KEEPALIVE" or "QUIESCE" or "RELEASE_TARGET" or "SHUTDOWN"))
+309:                    if (_phase is not (Phase.Prepared or Phase.Neutralized or Phase.Active or Phase.Quiesced))
+312:                    if (_phase != Phase.Quiesced) _phase = Phase.Neutralized;
+343:                    if (_phase is not (Phase.Prepared or Phase.Neutralized or Phase.Active or Phase.Quiesced))
+347:                case "QUIESCE":
+348:                    if (_phase is not (Phase.Prepared or Phase.Neutralized or Phase.Active or Phase.Quiesced))
+349:                        return Error(envelope, "state-rejected", "quiesce-requires-prepared-target");
+350:                    _phase = Phase.Quiesced;
+351:                    return Ack(envelope, "quiesced");
+605:            if (command is not ("HELLO" or "PREPARE_TARGET" or "SUBMIT_NEUTRAL" or "SUBMIT_FRAME" or "KEEPALIVE" or "QUIESCE" or "RELEASE_TARGET" or "SHUTDOWN"))
+761:    private enum Phase { AwaitHello, Hello, Prepared, Neutralized, Active, Quiesced, Released }
+353:                case "RELEASE_TARGET":
+395:                    // incomplete safe-zero boundary; otherwise RELEASE_TARGET
+605:            if (command is not ("HELLO" or "PREPARE_TARGET" or "SUBMIT_NEUTRAL" or "SUBMIT_FRAME" or "KEEPALIVE" or "QUIESCE" or "RELEASE_TARGET" or "SHUTDOWN"))
+===== G:\YeManCC-Work\Docs\Tasks\GyroVirtual\TASK.md
+137:- virtual target/backend PnP、Host crash/pipe loss 才进入 project safe-zero/release-unproven/rearm。
+172:- P96 用户包 `YeManCC-ROG-Input-Gap-Evidence-20260906-131243.zip` 捕获了当前 PID `16108` 的完整退出链：`input-host-stop-request` → `input-host-release-receipt(ok=true)` → `input-host-stop-result(localReleaseAck=true)` → `window-destroy(exitRequested=true)`；释放 disposition 为 `local-dispose-complete/external-release-unproven`。本次 PnP before/after 均为 14 项且无 DS4 `Wireless Controller`，因此 Host-local release 已有同代回执，但 OS device-gone/Steam consumer 仍未证明。
+231:| target/PnP/Host release/consumer 缺少外部 receipt | `release-unproven / RUNTIME-BLOCKED` |
+===== G:\YeManCC-Work\Docs\Tasks\GyroVirtual\T10-HC-CORE-BOUNDARY-AND-INPUTHOST-ARCHITECTURE-AUDIT-20260905.md
+89:1. 删除 `input-host-state.json` 覆盖轮询与 `--state` production path。
+24:| **实施前** Host 曾是 .NET 10 x64 EXE，native 以 `CreateProcessW --state` 启动。 | implementation-before source snapshot | 该 one-way state-file 与隐式 deployment path 已由 current named-pipe Host 取代；历史事实不得用于评价 current source。 |
+89:1. 删除 `input-host-state.json` 覆盖轮询与 `--state` production path。
+193:4. YMCC 当前 `inputCaptureStart()` 只要测试资产目录齐全就创建采集线程并调用 `inputHostStart()`；后者先写一个 local neutral JSON，再 `CreateProcessW --state`，成功后只写日志，不等待 Host prepare/neutral/target-created 响应（`main.cpp:5269-5301,5371-5389`）。这与 HC 的 manager-owned backend success gate 不同。
+65:| `PREPARE_TARGET` | 单一 mutex 内验证锁定 DLL/profile/config，创建一个 `HMContext`/controller；禁止 `InstallDriver()`。 | `prepared`：当前 tuple 唯一 adapter object 已建立。 | OS/Steam/游戏已见设备。 |
+90:2. 删除 `EnsureController()` 内每个新 Host context 首次 controller 初始化时的 `ctx.InstallDriver()` 和吞异常。驱动安装/修复是独立、显式、可报告的部署事务，不属于 target lifecycle；HC 的 backend gate 不是静默安装驱动。
+109:- `HMContext` 提供 `IsDriverInstalled`、`LoadDefaultProfiles`、`GetProfile`、`CreateController/CreateControllerAt`、`ActiveControllers`、`Dispose`。因此 Host 可先做**只读 driver preflight**，未安装时明确拒绝；不得为创建 target 而调用/吞掉 `InstallDriver()`。
+27:**P25 补正：**锁定 HID source 的 `CreateController` 并非没有 readiness work：它会经 `SetupController` 等待 HID child 与 `DN_STARTED`。current Host 已显式验证 driver state、profile 和锁定 DLL identity，并把 `PREPARE_TARGET` 的 Host-local success/rejection 返给 Coordinator；但底层 wait 并没有转化为 OS/PnP 可验证 receipt，且 `target-prepared` 仍不等于 `host-active`、first-frame/HID readback、release proof 或 game consumer observation。`SetupController` 在 driver 缺失时还可能 `FullDeploy()`，因此 current Host 必须在 `CreateController` 前用 `IsDriverInstalled` fail-close，绝不调用 install/repair。完整 source/gap scope 见 [P25](../../../Mainline/YeManCC-source/YeManCC/tools/T22-BUS-P25-HIDMAESTRO-CREATE-READINESS-AND-HOST-ACK-AUDIT-20260905.md)。
+65:| `PREPARE_TARGET` | 单一 mutex 内验证锁定 DLL/profile/config，创建一个 `HMContext`/controller；禁止 `InstallDriver()`。 | `prepared`：当前 tuple 唯一 adapter object 已建立。 | OS/Steam/游戏已见设备。 |
+72:timeout、管道断开、Host exit、tuple/hash 不符、同一 `requestId` 内容不一致、跳号/旧 epoch，都进入 `faulted → safe-zero → released-or-unproven`。若 fault 发生在 neutral receipt 前，Host 最多可 best-effort zero/dispose，但响应必须是 `release-unproven`，绝不能返回 `host-released`。`PREPARE_TARGET`/`RELEASE_TARGET` 仅可同 tuple 幂等；`SUBMIT_FRAME` 不重试，避免重复输入边沿。
+91:3. `inputCaptureStart()` 不得因目录存在就启动可写 target。资产存在仅表示测试能力可用；target 只由 Coordinator `PREPARE_TARGET` 创建。
+267:T10 named-pipe/locked-asset Host lifecycle fields (`PREPARE_TARGET`, `SUBMIT_NEUTRAL`, `host-released`, `release-unproven`) are Host-local protocol facts. They do not prove HC physical-source no-write/source identity, gyro listener rearm/pair/matrix/calibration, HID descriptor/PnP readback, P-HID/P-XINPUT/P-OWNER, Steam/game consumer release, or crash recovery. T10 remains source-implemented but runtime-blocked and cannot declare global `active`, `released`, or `runtime-closed` alone.
+66:| `SUBMIT_NEUTRAL` | 对当前 tuple 提交全零 state。 | `host-neutral-submitted`：调用正常返回。 | 外部 neutral observation/release proof。 |
+69:| `RELEASE_TARGET` | 只接受同 tuple 的 `QUIESCE` 与 `SUBMIT_NEUTRAL` receipt；随后 `controller.Dispose → ctx.Dispose` 并清 current target。 | `host-released`：Host 已确认该次 neutral 后按顺序 dispose。 | OS 已删 device，或 Steam/游戏已恢复。 |
+80:→ Host QUIESCE → Host SUBMIT_NEUTRAL → Host RELEASE_TARGET
+267:T10 named-pipe/locked-asset Host lifecycle fields (`PREPARE_TARGET`, `SUBMIT_NEUTRAL`, `host-released`, `release-unproven`) are Host-local protocol facts. They do not prove HC physical-source no-write/source identity, gyro listener rearm/pair/matrix/calibration, HID descriptor/PnP readback, P-HID/P-XINPUT/P-OWNER, Steam/game consumer release, or crash recovery. T10 remains source-implemented but runtime-blocked and cannot declare global `active`, `released`, or `runtime-closed` alone.
+67:| `SUBMIT_FRAME` | 只收 current tuple、递增序号的 canonical frame。 | `host-frame-submitted`；首个同代响应才可到 `host-active`。 | Steam/游戏实际只收到这一帧。 |
+72:timeout、管道断开、Host exit、tuple/hash 不符、同一 `requestId` 内容不一致、跳号/旧 epoch，都进入 `faulted → safe-zero → released-or-unproven`。若 fault 发生在 neutral receipt 前，Host 最多可 best-effort zero/dispose，但响应必须是 `release-unproven`，绝不能返回 `host-released`。`PREPARE_TARGET`/`RELEASE_TARGET` 仅可同 tuple 幂等；`SUBMIT_FRAME` 不重试，避免重复输入边沿。
+158:- **physical source remove 是否等于 virtual target release：否。** 锁定 HC `ControllerManager` 会清当前实体 target，之后 tick 在 `VirtualManager.UpdateInputs` 前退出；它的直接语义是 source-lost `no-write`。current YMCC 已在 canonical `SUBMIT_FRAME` 前加入 `physicalSourceAdmitted` gate，断开快照返回 local `publication-suppressed / physical-source-absent`，不再把 `{}` 变成连续零 report。此项只修正当前 source publication；Host/target release、新 epoch、ROG/Raw HID identity 绑定和 external consumer result 仍不是 HC 可直接推导的结论。
+216:- current `InputHost/Program.cs` 在 `SUBMIT_FRAME` 失败后调用 `ReleaseLocalLocked()` 并进入 `Released`（`315-332`）；该函数先尝试 neutral，再 Dispose `HMController` 和 `HMContext`（`379-404`）。
+159:- **no-write 与 Host lease：** 独立 InputHost 的 bounded lease 不能因 HC 等价的 no-write 而过期；current YMCC 仅在 source/listening suppression 期间每 500 ms 发 `KEEPALIVE`，这是不触及 `SubmitState` 的 transport-only process-boundary delta。它不代表 HC 有同名 API，也不替代 PnP/target release；receipt/transport fault 仍进入 existing release-unproven path。
+29:**P26 补正：**实施前 native 曾在 1,500 ms 后 `TerminateProcess`；该强杀路径已退役。current native 只在 `QUIESCE → neutral → RELEASE_TARGET` 同序成功后发送 `SHUTDOWN`，否则保持 `release-unproven` 并等待 Host bounded lease/local cleanup；锁定 HIDMaestro `Dispose → TeardownController` 对 parent removal仍有最高 120,000 ms budget。SDK/Host 不提供可回传的 device-gone receipt，故 T16 仍必须区分 local completion、indeterminate 与 external release-unproven；timeout/crash 后 Coordinator 保持 `none`，不自动恢复 game。
+68:| `QUIESCE` | 关闭新 frame admission，排空已线性化命令。 | `quiesced`：之后拒收该 tuple frame。 | physical/XInput 已从其它消费者消失。 |
+69:| `RELEASE_TARGET` | 只接受同 tuple 的 `QUIESCE` 与 `SUBMIT_NEUTRAL` receipt；随后 `controller.Dispose → ctx.Dispose` 并清 current target。 | `host-released`：Host 已确认该次 neutral 后按顺序 dispose。 | OS 已删 device，或 Steam/游戏已恢复。 |
+74:Coordinator 的线性化点是**收到 `QUIESCE` 后、提交 `ymcc-frontend` owner 前**：
+80:→ Host QUIESCE → Host SUBMIT_NEUTRAL → Host RELEASE_TARGET
+29:**P26 补正：**实施前 native 曾在 1,500 ms 后 `TerminateProcess`；该强杀路径已退役。current native 只在 `QUIESCE → neutral → RELEASE_TARGET` 同序成功后发送 `SHUTDOWN`，否则保持 `release-unproven` 并等待 Host bounded lease/local cleanup；锁定 HIDMaestro `Dispose → TeardownController` 对 parent removal仍有最高 120,000 ms budget。SDK/Host 不提供可回传的 device-gone receipt，故 T16 仍必须区分 local completion、indeterminate 与 external release-unproven；timeout/crash 后 Coordinator 保持 `none`，不自动恢复 game。
+69:| `RELEASE_TARGET` | 只接受同 tuple 的 `QUIESCE` 与 `SUBMIT_NEUTRAL` receipt；随后 `controller.Dispose → ctx.Dispose` 并清 current target。 | `host-released`：Host 已确认该次 neutral 后按顺序 dispose。 | OS 已删 device，或 Steam/游戏已恢复。 |
+72:timeout、管道断开、Host exit、tuple/hash 不符、同一 `requestId` 内容不一致、跳号/旧 epoch，都进入 `faulted → safe-zero → released-or-unproven`。若 fault 发生在 neutral receipt 前，Host 最多可 best-effort zero/dispose，但响应必须是 `release-unproven`，绝不能返回 `host-released`。`PREPARE_TARGET`/`RELEASE_TARGET` 仅可同 tuple 幂等；`SUBMIT_FRAME` 不重试，避免重复输入边沿。
+80:→ Host QUIESCE → Host SUBMIT_NEUTRAL → Host RELEASE_TARGET
+158:- **physical source remove 是否等于 virtual target release：否。** 锁定 HC `ControllerManager` 会清当前实体 target，之后 tick 在 `VirtualManager.UpdateInputs` 前退出；它的直接语义是 source-lost `no-write`。current YMCC 已在 canonical `SUBMIT_FRAME` 前加入 `physicalSourceAdmitted` gate，断开快照返回 local `publication-suppressed / physical-source-absent`，不再把 `{}` 变成连续零 report。此项只修正当前 source publication；Host/target release、新 epoch、ROG/Raw HID identity 绑定和 external consumer result 仍不是 HC 可直接推导的结论。
+158:- **physical source remove 是否等于 virtual target release：否。** 锁定 HC `ControllerManager` 会清当前实体 target，之后 tick 在 `VirtualManager.UpdateInputs` 前退出；它的直接语义是 source-lost `no-write`。current YMCC 已在 canonical `SUBMIT_FRAME` 前加入 `physicalSourceAdmitted` gate，断开快照返回 local `publication-suppressed / physical-source-absent`，不再把 `{}` 变成连续零 report。此项只修正当前 source publication；Host/target release、新 epoch、ROG/Raw HID identity 绑定和 external consumer result 仍不是 HC 可直接推导的结论。
+29:**P26 补正：**实施前 native 曾在 1,500 ms 后 `TerminateProcess`；该强杀路径已退役。current native 只在 `QUIESCE → neutral → RELEASE_TARGET` 同序成功后发送 `SHUTDOWN`，否则保持 `release-unproven` 并等待 Host bounded lease/local cleanup；锁定 HIDMaestro `Dispose → TeardownController` 对 parent removal仍有最高 120,000 ms budget。SDK/Host 不提供可回传的 device-gone receipt，故 T16 仍必须区分 local completion、indeterminate 与 external release-unproven；timeout/crash 后 Coordinator 保持 `none`，不自动恢复 game。
+72:timeout、管道断开、Host exit、tuple/hash 不符、同一 `requestId` 内容不一致、跳号/旧 epoch，都进入 `faulted → safe-zero → released-or-unproven`。若 fault 发生在 neutral receipt 前，Host 最多可 best-effort zero/dispose，但响应必须是 `release-unproven`，绝不能返回 `host-released`。`PREPARE_TARGET`/`RELEASE_TARGET` 仅可同 tuple 幂等；`SUBMIT_FRAME` 不重试，避免重复输入边沿。
+85:关闭、失焦、suspend、PnP remove、Host crash 使用同一前半段。没有 `host-released` 时只能进入 `none / release-unproven`，不得自动回 game。`gameInputCount=0` 只能定义为 Coordinator 成功提交给 game virtual target 的 canonical-frame 数；它不是 Steam/游戏进程计数，不能证明 P-XINPUT 或 game consumer isolation。
+159:- **no-write 与 Host lease：** 独立 InputHost 的 bounded lease 不能因 HC 等价的 no-write 而过期；current YMCC 仅在 source/listening suppression 期间每 500 ms 发 `KEEPALIVE`，这是不触及 `SubmitState` 的 transport-only process-boundary delta。它不代表 HC 有同名 API，也不替代 PnP/target release；receipt/transport fault 仍进入 existing release-unproven path。
+242:1. `InputHost/Program.cs:385-404` 现在检查 `TrySubmitNeutral()` 的布尔结果；neutral 未被 backend 接受时，release 返回失败/`release-unproven`，不再仅因 Dispose 成功而误报完整 release。
+267:T10 named-pipe/locked-asset Host lifecycle fields (`PREPARE_TARGET`, `SUBMIT_NEUTRAL`, `host-released`, `release-unproven`) are Host-local protocol facts. They do not prove HC physical-source no-write/source identity, gyro listener rearm/pair/matrix/calibration, HID descriptor/PnP readback, P-HID/P-XINPUT/P-OWNER, Steam/game consumer release, or crash recovery. T10 remains source-implemented but runtime-blocked and cannot declare global `active`, `released`, or `runtime-closed` alone.

@@ -1,4 +1,5 @@
-import { readSettingsSection, saveSettingsSection } from './settingsRepository';
+import { snapshotSettingsData } from './settingsSnapshot';
+import { getSettingsGeneration, assertSettingsGeneration, readSettingsSection, saveSettingsSection } from './settingsRepository';
 
 export interface UiSettings {
   theme: 'blue-black' | 'red-black' | 'cyberpunk';
@@ -78,15 +79,9 @@ export function getUiSetting<K extends keyof UiSettings>(key: K): UiSettings[K] 
 }
 
 export async function loadUiSettings(): Promise<void> {
-  if (loaded) return;
   if (loadPromise) return loadPromise;
   loadPromise = (async () => {
-    let fromDisk: Partial<UiSettings> | null = null;
-    try {
-      fromDisk = await readSettingsSection<Partial<UiSettings>>('ui');
-    } catch {
-      fromDisk = null;
-    }
+    const fromDisk = await readSettingsSection<Partial<UiSettings>>('ui');
     const migrated = !fromDisk ? legacySettings() : {};
     settings = normalize({ ...(fromDisk || {}), ...migrated });
     loaded = true;
@@ -102,20 +97,27 @@ export async function loadUiSettings(): Promise<void> {
 }
 
 export function setUiSettings(patch: Partial<UiSettings>): Promise<void> {
-  writeQueue = writeQueue.catch(() => {}).then(async () => {
-    await loadUiSettings();
-    const next = normalize({ ...settings, ...patch });
-    await saveSettingsSection('ui', next);
-    settings = next;
+  const submitted = snapshotSettingsData(patch);
+  const generation = getSettingsGeneration();
+  const run = writeQueue.then(async () => {
+    assertSettingsGeneration(generation);
+    const current = await readSettingsSection<Partial<UiSettings>>('ui');
+    const next = normalize({ ...current, ...submitted });
+    const changed: Partial<UiSettings> = {};
+    for (const key of Object.keys(submitted) as (keyof UiSettings)[]) {
+      if (key in DEFAULTS) (changed as any)[key] = next[key];
+    }
+    await saveSettingsSection('ui', changed, generation);
+    settings = normalize(await readSettingsSection<Partial<UiSettings>>('ui'));
+    loaded = true;
     window.dispatchEvent(new CustomEvent('ui-settings:changed', { detail: getUiSettings() }));
   });
-  return writeQueue;
+  writeQueue = run.catch(() => {});
+  return run;
 }
 
 async function writeUiSettings(value: UiSettings): Promise<void> {
   await saveSettingsSection('ui', value);
 }
 
-void loadUiSettings().catch(() => {
-  loaded = true;
-});
+void loadUiSettings().catch(() => { /* Leave initialization retryable after I/O failure. */ });

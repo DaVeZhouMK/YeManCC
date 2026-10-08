@@ -1,0 +1,22 @@
+{
+  "name": "sleeptype-s0ix",
+  "expect": {
+    "type": "S0ix",
+    "confidence": "high",
+    "downgrade": false
+  },
+  "facts": {
+    "pcfgA": "The following sleep states are available on this system:\n    Standby (S0 Low Power Idle) Network Connected\n    Hibernate",
+    "sessions": [
+      {
+        "id": 507,
+        "text": "exiting connected standby"
+      },
+      {
+        "id": 566,
+        "text": "session switch"
+      }
+    ]
+  },
+  "note": "modern standby: S0ix is exclusive with S3 and uses the 506/507/566 session family"
+}

@@ -98,8 +98,13 @@ function syncGame(next: DetectedGame | null, preserveRuleMenu = false): void {
 
 function focusGameRulePanel(): void {
   nextTick(() => {
-    const candidates = gameRulePanelEl.value
-      ? Array.from(gameRulePanelEl.value.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled)'))
+    const panel = gameRulePanelEl.value;
+    // 呼出后手柄光标默认落在“切换程序”（第一行第一列）；只有它不可用
+    // （例如动作忙碌被禁用）时才回落到原先的 FSR 导入按钮。
+    const switchProgram = panel?.querySelector<HTMLElement>('[data-gp-game-control="switch-program"]') || null;
+    if (switchProgram && focusGamepadElement(switchProgram)) return;
+    const candidates = panel
+      ? Array.from(panel.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled)'))
       : [];
     const first = candidates.find((el) =>
       !el.hasAttribute('data-gp-ignore') &&

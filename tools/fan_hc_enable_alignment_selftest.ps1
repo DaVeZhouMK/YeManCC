@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
   Read-only conformance check between YeManFanHost and the frozen HC enable path.
 
@@ -17,10 +17,10 @@ param(
 $ErrorActionPreference = 'Stop'
 
 if ([string]::IsNullOrWhiteSpace($HcRoot)) {
-  $HcRoot = Join-Path $PSScriptRoot '..\..\..\FanLab\hc-upstream'
+  $HcRoot = Join-Path $PSScriptRoot '..\deps\handheldcompanion-runtime\source'
 }
 if ([string]::IsNullOrWhiteSpace($HostSource)) {
-  $HostSource = Join-Path $PSScriptRoot '..\..\..\FanLab\real-host\Program.cs'
+  $HostSource = Join-Path $PSScriptRoot '..\FanLab\real-host\Program.cs'
 }
 
 function Assert-Check([bool]$Condition, [string]$Name) {
@@ -32,23 +32,23 @@ function Read-Required([string]$Path) {
   return Get-Content -LiteralPath $Path -Raw -Encoding UTF8
 }
 
-$app = Read-Required (Join-Path $HcRoot 'HandheldCompanion\App.xaml.cs')
-$window = Read-Required (Join-Path $HcRoot 'HandheldCompanion\Views\Windows\MainWindow.xaml.cs')
-$device = Read-Required (Join-Path $HcRoot 'HandheldCompanion\Devices\IDevice.cs')
-$powerProfileManager = Read-Required (Join-Path $HcRoot 'HandheldCompanion\Managers\PowerProfileManager.cs')
-$fanProfile = Read-Required (Join-Path $HcRoot 'HandheldCompanion\Misc\FanProfile.cs')
-$managerFactory = Read-Required (Join-Path $HcRoot 'HandheldCompanion\Managers\ManagerFactory.cs')
-$deviceManager = Read-Required (Join-Path $HcRoot 'HandheldCompanion\Managers\DeviceManager.cs')
-$msi = Read-Required (Join-Path $HcRoot 'HandheldCompanion\Devices\MSI\ClawA1M.cs')
-$lenovo = Read-Required (Join-Path $HcRoot 'HandheldCompanion\Devices\Lenovo\LegionGo.cs')
-$lenovoGo2 = Read-Required (Join-Path $HcRoot 'HandheldCompanion\Devices\Lenovo\LegionGoTablet2.cs')
-$rog = Read-Required (Join-Path $HcRoot 'HandheldCompanion\Devices\ASUS\ROGAlly.cs')
-$ayanFlip1 = Read-Required (Join-Path $HcRoot 'HandheldCompanion\Devices\AYANEO\AYANEOFlip1SDS.cs')
-$ayanFlipDs = Read-Required (Join-Path $HcRoot 'HandheldCompanion\Devices\AYANEO\AYANEOFlipDS.cs')
+$app = Read-Required (Join-Path $HcRoot 'App.xaml.cs')
+$window = Read-Required (Join-Path $HcRoot 'Views\Windows\MainWindow.xaml.cs')
+$device = Read-Required (Join-Path $HcRoot 'Devices\IDevice.cs')
+$powerProfileManager = Read-Required (Join-Path $HcRoot 'Managers\PowerProfileManager.cs')
+$fanProfile = Read-Required (Join-Path $HcRoot 'Misc\FanProfile.cs')
+$managerFactory = Read-Required (Join-Path $HcRoot 'Managers\ManagerFactory.cs')
+$deviceManager = Read-Required (Join-Path $HcRoot 'Managers\DeviceManager.cs')
+$msi = Read-Required (Join-Path $HcRoot 'Devices\MSI\ClawA1M.cs')
+$lenovo = Read-Required (Join-Path $HcRoot 'Devices\Lenovo\LegionGo.cs')
+$lenovoGo2 = Read-Required (Join-Path $HcRoot 'Devices\Lenovo\LegionGoTablet2.cs')
+$rog = Read-Required (Join-Path $HcRoot 'Devices\ASUS\ROGAlly.cs')
+$ayanFlip1 = Read-Required (Join-Path $HcRoot 'Devices\AYANEO\AYANEOFlip1SDS.cs')
+$ayanFlipDs = Read-Required (Join-Path $HcRoot 'Devices\AYANEO\AYANEOFlipDS.cs')
 $hostSourceText = Read-Required $HostSource
 $fanApiSource = Read-Required (Join-Path $PSScriptRoot '..\src\bridge\fanApi.ts')
 $fanHostSource = Read-Required (Join-Path $PSScriptRoot '..\src\bridge\fanHost.ts')
-$allDeviceSource = [string]::Join("`n", @(Get-ChildItem -LiteralPath (Join-Path $HcRoot 'HandheldCompanion\Devices') -Recurse -File -Filter '*.cs' | ForEach-Object {
+$allDeviceSource = [string]::Join("`n", @(Get-ChildItem -LiteralPath (Join-Path $HcRoot 'Devices') -Recurse -File -Filter '*.cs' | ForEach-Object {
   Get-Content -LiteralPath $_.FullName -Raw -Encoding UTF8
 }))
 
@@ -136,23 +136,39 @@ Assert-Check ($rogCloseStart -ge 0 -and $rogCloseEnd -gt $rogCloseStart -and
 
 # YeManHost mirrors HC activation order, but begins it only after its separate
 # authorization gate. A failed Open must not invent a Close-side write.
-$hostOpenStart = $hostSourceText.IndexOf('private void OpenCore()')
-$hostOpenEnd = $hostSourceText.IndexOf("`n    public void OpenEvents()", $hostOpenStart)
+# §2（FAN-926R 裁决）：按**现行生产入口**定位 Host 分段。边界必须**唯一命中**且区间非空；
+# 缺失 / 重复 / end<=start 一律报**清晰的测试错误**，绝不把空字符串或"全文尾部"当成合法
+# 函数体（旧写法用 IndexOf 的隐式 -1 与 EOF 兜底，正是本次"提取错误"的根因）。
+function Get-Boundary([string]$Text, [string]$Token) {
+  $hits = ([regex]::Matches($Text, [regex]::Escape($Token))).Count
+  if ($hits -lt 1) { throw "fan_hc_enable_alignment: source boundary missing: '$Token'" }
+  if ($hits -ne 1) { throw "fan_hc_enable_alignment: source boundary ambiguous ($hits hits): '$Token'" }
+  return $Text.IndexOf($Token, [StringComparison]::Ordinal)
+}
+$hostOpenStart = Get-Boundary $hostSourceText 'private void OpenCore()'
+$hostOpenEnd = Get-Boundary $hostSourceText 'public void OpenEvents()'
 $hostOpen = $hostSourceText.Substring($hostOpenStart, $hostOpenEnd - $hostOpenStart)
-$hostEventsStart = $hostSourceText.IndexOf('private void OpenEventsCore()')
-$hostEventsEnd = $hostSourceText.IndexOf("`n    private void OpenHcDevice()", $hostEventsStart)
+# 旧要求（独立的 `private void OpenEventsCore()`）已被**现行合同取代**：HC OpenEvents 的生产
+# 入口现为 `private HcDeviceOpenNeed OpenEventsBeginCore()`，由 `RealHcBackend.OpenEvents()`
+# 经 `OnStaBounded` 调用（见 `open-events-begin`）。断言内容不变，只重定位入口。
+$hostEventsStart = Get-Boundary $hostSourceText 'private HcDeviceOpenNeed OpenEventsBeginCore()'
+$hostEventsEnd = Get-Boundary $hostSourceText 'private void OpenEventsFinalizeCore()'
 $hostEvents = $hostSourceText.Substring($hostEventsStart, $hostEventsEnd - $hostEventsStart)
 Assert-Check ($hostOpenStart -ge 0 -and $hostOpenEnd -gt $hostOpenStart) 'Host Open boundary present'
 Assert-Check (-not $hostOpen.Contains('StartHcDeviceManager();') -and
   $hostOpen.IndexOf('WaitForHcDeviceReadyBeforeOpen();') -ge 0 -and
   $hostOpen.IndexOf('OpenHcDevice();') -gt $hostOpen.IndexOf('WaitForHcDeviceReadyBeforeOpen();') -and
   $hostOpen.IndexOf('CaptureOemBaseline();') -gt $hostOpen.IndexOf('OpenHcDevice();')) 'Host fan-only IsReady -> Open -> baseline order (DeviceManager intentionally isolated)'
-Assert-Check ($hostEvents.Contains('Invoke(device!, "OpenEvents")') -and
-  $hostEvents.Contains('EnsureHcDeviceOpenForRestore();') -and
-  -not $hostEvents.Contains('StartHcDeviceManager();')) 'Host OpenEvents executes after prior DeviceManager startup and waits for the HC route handle'
+# 旧要求（`Invoke` 之后再轮询 `EnsureHcDeviceOpenForRestore()`）已被 920-v1.14 §25 **正式取代**：
+# 现合同 = 调用**前**确证 HC 会话/路由就绪 + 调用**后**以正式收据开始设备打开。
+# `fan_host_lifecycle_selftest.ts` / `fan_payload_selftest.ps1` 已记录该取代，本条门漏同步。
+Assert-Check ($hostEvents.Contains('EnsureHcSessionReadyForOpenEvents();') -and
+  $hostEvents.IndexOf('Invoke(device!, "OpenEvents")') -gt $hostEvents.IndexOf('EnsureHcSessionReadyForOpenEvents();') -and
+  $hostEvents.Contains('BeginHcDeviceOpenForRestore();') -and
+  -not $hostEvents.Contains('StartHcDeviceManager();')) 'Host OpenEvents asserts the HC route handle BEFORE invoking OpenEvents and begins the formal receipt AFTER'
 Assert-Check (([regex]::Matches($hostSourceText, 'Invoke\(device!, "IsReady"\)')).Count -eq 1 -and -not $hostSourceText.Contains('FAN_NOT_READY')) 'Host has exactly one HC IsReady probe after DeviceManager startup, with no invented readiness rejection'
 Assert-Check (($hostSourceText.Contains('if (IsOpen)') -or
-  $hostSourceText.Contains('if (IsOpen || (openAttempted && hcOpenInvocationStarted))')) -and
+  $hostSourceText.Contains('IsOpen || (openAttempted && hcOpenInvocationStarted)')) -and
   -not $hostSourceText.Contains('StopHcDeviceManager();') -and
   $hostSourceText.Contains('not-started/no-stop-required')) 'failed Host Open does not manufacture a DeviceManager stop in the fan-only process'
 Assert-Check ($hostOpen.Contains('openAttempted = false;') -and
@@ -166,9 +182,9 @@ Assert-Check (-not $hostSourceText.Contains('foreach (IManager manager in Manage
   -not $hostSourceText.Contains('powerProfileManager.Start') -and
   -not $hostSourceText.Contains('profileManager.Start')) 'Host isolates HC full power/TDP manager graph'
 Assert-Check ($hostEvents.Contains('Invoke(device!, "OpenEvents")') -and
-  $hostEvents.Contains('EnsureHcDeviceOpenForRestore();') -and
+  $hostEvents.Contains('EnsureHcSessionReadyForOpenEvents();') -and
   -not $hostEvents.Contains('AssertHcNonFanManagersIsolated();')) 'Host keeps OpenEvents on the leased HC device boundary without starting non-fan managers'
-Assert-Check ($hostSourceText.Contains('private void EnsureHcDeviceOpenForRestore()') -and
+Assert-Check ($hostSourceText.Contains('private void EnsureHcSessionReadyForOpenEvents()') -and
   -not $hostSourceText.Contains('HC_DEVICE_NOT_OPEN_FOR_RESTORE') -and
   $hostSourceText.Contains('hc-device-open-unconfirmed')) 'ROG restore cannot be acknowledged before its HC IsOpen/HID boundary is real'
 
@@ -205,10 +221,20 @@ Assert-Check (($managerFactory.Contains('processManager = new() { SuspendWithOS 
   ($hostSourceText.Contains('private const string ManagerFactoryNotStarted = "not-started/no-stop-required";') -and
    $hostSourceText.Contains('ResetManagerLifecycle();'))) -and
   -not $managerFactory.Contains('deviceManager = new() { SuspendWithOS = true }') -and
-  $hostSourceText.Contains('RestoreHardware(close: true, stopDeviceManager: false)') -and
+  $hostSourceText.Contains('private bool CloseForSystemPending()') -and
+  # ★ 因 FAN-926R 裁决 §3-D1 **改要求**（明示取代，不是"仅更新符号/证明行为未变"）：
+  # 旧要求 = SystemPending 一律 `skipOemRestore: true` + `clearOemEvidence: true`（禁止默认表预写）。
+  # 新要求 = 有写历史且会话可操作时，**先**在同一生命周期 owner 内有界执行一次现成默认模式恢复，
+  # 再进入 HC Close；只有会话不可操作时才 not-attempted；证据不再清除（D3 三轴分列）。
+  # 关闭边界仍必须进入、仍不得夺取 DeviceManager 所有权。
+  $hostSourceText.Contains('power.suspend-preclose-release-decision') -and
+  $hostSourceText.Contains('skipOemRestore: !preCloseReleaseAttempted') -and
+  $hostSourceText.Contains('clearOemEvidence: false') -and
+  $hostSourceText.Contains('not-attempted-session-not-usable') -and
+  -not $hostSourceText.Contains('RestoreHardware(close: true, stopDeviceManager: false)') -and
   ($hostSourceText.Contains('hc-close.device-manager-not-started') -or $hostSourceText.Contains('ManagerFactoryNotStarted')) -and
   $hostSourceText.Contains('realBackend.Close(stopDeviceManager)') -and
-  $hostSourceText.Contains('if (closed && !stopDeviceManager)')) 'sleep duplicate is idempotent and process close re-enters the HC virtual Close boundary without owning DeviceManager'
+  $hostSourceText.Contains('if (closed && !stopDeviceManager)')) 'F4 SystemPending enters the HC virtual Close boundary without DeviceManager ownership; D1: a usable session performs ONE bounded default-mode restore BEFORE Close'
 
 # A device Open establishes only the HC transport/session. It must not be
 # reported as an active fan write. Conversely, every accepted software curve
@@ -236,8 +262,19 @@ Assert-Check ($engineOpen.Contains('state.OemRestoreConfirmed = false;') -and
 $hostRestoreStart = $hostSourceText.IndexOf('private void RestoreOemCore()')
 $hostRestoreEnd = $hostSourceText.IndexOf("`n    private bool IsRouteStillReady()", $hostRestoreStart)
 $hostRestore = $hostSourceText.Substring($hostRestoreStart, $hostRestoreEnd - $hostRestoreStart)
-$engineRestoreStart = $hostSourceText.IndexOf('private bool RestoreHardware(bool close, bool stopDeviceManager = true, bool skipOemRestore = false)')
+# R1（FAN-926R 唤醒租约裁决 §3.2.9）**因本裁决改要求**：`RestoreHardware` 增加了
+# `string cause = "unspecified"` 形参（用于分清"租约到期 / 幂等交还 / 关闭边界"等释放来源，
+# 让"是否由占位租约触发"可判读）。断言内容不变，只把边界锚点同步到现行签名；
+# 仍要求边界**唯一命中且区间非空**，缺失/重复一律报清晰测试错误。
+$engineRestoreStart = $hostSourceText.IndexOf('private bool RestoreHardware(bool close, bool stopDeviceManager = true, bool skipOemRestore = false, string cause = "unspecified")')
+if ($engineRestoreStart -lt 0 -or
+    $hostSourceText.IndexOf('private bool RestoreHardware(', $engineRestoreStart + 1) -ge 0) {
+  throw 'fan_hc_enable_alignment: RestoreHardware(bool,bool,bool,string) 生产入口必须恰好存在一处'
+}
 $engineRestoreEnd = $hostSourceText.IndexOf("`n    private void ClearLease()", $engineRestoreStart)
+if ($engineRestoreEnd -le $engineRestoreStart) {
+  throw 'fan_hc_enable_alignment: RestoreHardware 边界定位失败（end<=start 或锚点缺失）'
+}
 $engineRestore = $hostSourceText.Substring($engineRestoreStart, $engineRestoreEnd - $engineRestoreStart)
 Assert-Check ($hostRestoreStart -ge 0 -and $hostRestoreEnd -gt $hostRestoreStart -and
   $hostRestore.IndexOf('ApplyPowerProfile(BuildPowerProfile(Array.Empty<double>(), software: false));') -ge 0 -and
@@ -289,12 +326,12 @@ Assert-Check ($fanApiSource.Contains("if (path === '/api/close') return 45000;")
 Assert-Check ($fanHostSource.Contains('hcVirtualCloseReturned') -and
   $fanHostSource.Contains('hcDeviceManagerStopCompleted') -and
   $fanHostSource.Contains('DeviceManager')) 'frontend close requires explicit HC virtual Close and DeviceManager evidence when provided'
-Assert-Check ($fanHostSource.Contains('function assertHcSessionSuspended') -and
-  $fanHostSource.Contains('Fan Host suspend') -and
+Assert-Check ($fanHostSource.Contains('function assertHcSessionClosed') -and
+  $fanHostSource.Contains('lifecycle.suspend-begin') -and
   # Keep this source assertion ASCII-stable across Windows PowerShell code
   # pages; the implementation itself still emits the localized diagnostic.
   $fanHostSource.Contains('hcVirtualCloseReturned') -and
-  $fanHostSource.Contains('suspend()')) 'frontend suspend requires HC virtual Close evidence while retaining DeviceManager'
+  $fanHostSource.Contains('async suspend')) 'frontend suspend requires HC virtual Close evidence while retaining DeviceManager'
 Assert-Check ($hostSourceText.Contains('power.suspend-ignored-duplicate') -and
   $hostSourceText.Contains('state.State == "Suspending"') -and
   $hostSourceText.Contains('state.State == "Suspended"') -and
@@ -303,12 +340,19 @@ Assert-Check ($hostSourceText.Contains('power.suspend-ignored-duplicate') -and
 # Parent watchdog identity is part of the lifecycle boundary: PID reuse or an
 # ambiguous same-name process must trigger recovery, never keep an old HC
 # session alive under a new process.
+# FAN-931 P1.3: the watcher now binds one trusted parent instance and waits for
+# its exit instead of reopening the handle every 2 s, so the identity comparison
+# lives in TryBindParentProcess. The intent is unchanged and asserted by its
+# three distinct rejection reasons (never by "the old function still exists").
 Assert-Check ($hostSourceText.Contains('parentStartTimeUtc') -and
   $hostSourceText.Contains('parentExecutablePath') -and
   $hostSourceText.Contains('CaptureParentIdentity') -and
   $hostSourceText.Contains('CaptureNamedParentIdentity') -and
   $hostSourceText.Contains('GetUniqueNamedProcess') -and
-  $hostSourceText.Contains('IsProcessAlive(') -and
+  $hostSourceText.Contains('private (Process? Process, string Reason) TryBindParentProcess()') -and
+  $hostSourceText.Contains('parent-start-time-mismatch') -and
+  $hostSourceText.Contains('parent-image-mismatch') -and
+  $hostSourceText.Contains('parent-not-uniquely-resolvable') -and
   $hostSourceText.Contains('Ambiguity is a') -and
   $hostSourceText.Contains('return null;')) 'parent watchdog rejects PID reuse and ambiguous name-only identity'
 Assert-Check ($engineRestore.Contains('var backendSessionActive = realBackend?.IsOpen == true || realBackend?.OpenAttempted == true;') -and

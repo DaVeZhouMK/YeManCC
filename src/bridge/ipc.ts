@@ -43,9 +43,25 @@ export type LogInput = Omit<LogEntry, 'id' | 'ts'>;
 const pending = new Map<number, Pending>();
 let nextId = 0;
 let logSink: ((e: LogInput) => void) | null = null;
+// `gamepad.state` is a state snapshot rather than a one-shot command. Keep
+// the latest native snapshot so late-mounted pages (notably the controller
+// settings view) do not render "disconnected" simply because they mounted
+// after the WebView render-ready replay.
+let lastGamepadState: unknown = null;
+let hasLastGamepadState = false;
 
 export function setLogSink(fn: ((e: LogInput) => void) | null): void {
   logSink = fn;
+}
+
+// Diagnostic sink must stay best-effort: a throwing logSink (e.g. a wedged
+// debug consumer) must never change IPC resolve/reject semantics.
+function emitLog(entry: LogInput): void {
+  try {
+    logSink?.(entry);
+  } catch {
+    // ignore diagnostic sink failures
+  }
 }
 
 const webview =
@@ -100,6 +116,10 @@ if (hasWebView) {
       }
     }
     if (typeof msg.event === 'string') {
+      if (msg.event === 'gamepad.state') {
+        lastGamepadState = msg.data;
+        hasLastGamepadState = true;
+      }
       window.dispatchEvent(new CustomEvent(`ipc:${msg.event}`, { detail: msg.data }));
     }
   });
@@ -112,9 +132,7 @@ export function invoke<T = unknown>(
 ): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     if (!hasWebView) {
-      const e = new Error('Not running in WebView2');
-      logSink?.({ cmd, args, ok: false, error: e.message });
-      reject(e);
+      reject(new Error('Not running in WebView2'));
       return;
     }
     const id = nextId++;
@@ -122,9 +140,7 @@ export function invoke<T = unknown>(
       options.timeoutMs && options.timeoutMs > 0
         ? setTimeout(() => {
             pending.delete(id);
-            const e = new Error(`IPC command timed out: ${cmd}`);
-            logSink?.({ cmd, args, ok: false, error: e.message });
-            reject(e);
+            reject(new Error(`IPC command timed out: ${cmd}`));
           }, options.timeoutMs)
         : undefined;
     pending.set(id, { resolve: resolve as (v: unknown) => void, reject, timeout });
@@ -134,23 +150,40 @@ export function invoke<T = unknown>(
       pending.delete(id);
       if (timeout) clearTimeout(timeout);
       const m = err instanceof Error ? err.message : String(err);
-      logSink?.({ cmd, args, ok: false, error: m });
       reject(err instanceof Error ? err : new Error(m));
     }
   }).then(
     (res) => {
-      logSink?.({ cmd, args, ok: true, result: res });
+      emitLog({ cmd, args, ok: true, result: res });
       return res as T;
     },
     (err) => {
-      logSink?.({ cmd, args, ok: false, error: err.message });
+      emitLog({ cmd, args, ok: false, error: err.message });
       throw err;
     }
   );
 }
 
 export function on<T = unknown>(event: string, handler: (data: T) => void): () => void {
-  const listener = ((e: CustomEvent<T>) => handler(e.detail)) as EventListener;
+  let active = true;
+  let replayPending = event === 'gamepad.state' && hasLastGamepadState;
+  const listener = ((e: CustomEvent<T>) => {
+    if (!active) return;
+    // A live snapshot supersedes a not-yet-delivered cached replay.
+    replayPending = false;
+    handler(e.detail);
+  }) as EventListener;
   window.addEventListener(`ipc:${event}`, listener);
-  return () => window.removeEventListener(`ipc:${event}`, listener);
+  if (replayPending) {
+    queueMicrotask(() => {
+      if (!active || !replayPending) return;
+      replayPending = false;
+      handler(lastGamepadState as T);
+    });
+  }
+  return () => {
+    active = false;
+    replayPending = false;
+    window.removeEventListener(`ipc:${event}`, listener);
+  };
 }

@@ -45,35 +45,13 @@ export async function readCpuAutostart(): Promise<CpuAutostart> {
   }
 }
 
-let updateQueue = Promise.resolve();
-
-async function updateConfig(
-  mutate: (cfg: CpuAutostart) => void,
-): Promise<void> {
-  const next = updateQueue.then(async () => {
-    const cfg = await readCpuAutostart();
-    mutate(cfg);
-    await saveSettingsSection('cpu', { autostart: cfg });
-  });
-  updateQueue = next.catch(() => {});
-  return next;
-}
-
-// 更新 CCD 部分（enabled + 当前选中的 mode），其余部分保持不变
+// Each save owns only its branch. Native merges the branch under its lock,
+// so a simultaneous CCD/UV save cannot replay a stale whole autostart object.
 export async function writeCcdAutostart(enabled: boolean, mode: number): Promise<void> {
-  await updateConfig((cfg) => {
-    cfg.ccd.enabled = enabled;
-    cfg.ccd.mode = mode;
-  });
+  await saveSettingsSection('cpu', { autostart: { ccd: { enabled, mode } } });
 }
-
-// 更新 降压 部分（enabled + 当前选中的 preset + vendor），其余部分保持不变
 export async function writeUvAutostart(enabled: boolean, preset: string, vendor: UvVendor): Promise<void> {
-  await updateConfig((cfg) => {
-    cfg.uv.enabled = enabled;
-    cfg.uv.preset = preset;
-    cfg.uv.vendor = vendor;
-  });
+  await saveSettingsSection('cpu', { autostart: { uv: { enabled, preset, vendor } } });
 }
 
 // 由 App.vue 在启动 30 秒后调用：按记录状态自行启用 CCD / 降压（不抛错，单条失败不影响另一条）

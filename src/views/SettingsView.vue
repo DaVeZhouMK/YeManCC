@@ -2,9 +2,9 @@
 import { ref, onMounted, onActivated, onBeforeUnmount, computed } from 'vue';
 import Toggle from '@/components/Toggle.vue';
 import SegButton from '@/components/SegButton.vue';
-import GamepadVisualizer from '@/components/GamepadVisualizer.vue';
-import { summonGet, summonSet, autocloseGet, autocloseSet, updateAccelGet, updateAccelToggle, sleepFactsGet, sleepFactsSetEnabled, sleepFactsClearLog, sleepFactsExportLog, type GamepadSettings, type AutoCloseConfig, type UpdateAccelState, type SleepFactStatus } from '@/bridge/yeman';
-import { shell, fs, dialog } from '@/bridge/api';
+import { autocloseGet, autocloseSet, updateAccelGet, updateAccelToggle, sleepFactsGet, sleepFactsSetEnabled, sleepFactsClearLog, sleepFactsExportLog, type AutoCloseConfig, type UpdateAccelState, type SleepFactStatus } from '@/bridge/yeman';
+import { shell, fs, dialog, domainLogs } from '@/bridge/api';
+import { invoke } from '@/bridge/ipc';
 import { APP_VERSION } from '@/version';
 import InlineIcon from '@/components/InlineIcon.vue';
 import { getTheme, setTheme, type ThemeName } from '@/bridge/theme';
@@ -31,13 +31,23 @@ import {
 } from '@/bridge/dynamicBackground';
 import { cleanGameTitle, detectGame } from '@/bridge/gamedetect';
 import { getUiSetting, loadUiSettings, setUiSettings } from '@/bridge/uiSettings';
-import { setMouseBackend, type MouseBackend } from '@/bridge/gameproc';
 import {
   getFanFeatureSettings,
   initializeFanFeature,
   setFanDiagnosticLoggingEnabled,
 } from '@/bridge/fanFeature';
 import { clearFanDiagnosticLogs, exportFanDiagnosticLogs, fanDiagnosticLog } from '@/bridge/fanDiagnostics';
+import {
+  clearInputDiagnosticLogs,
+  checkInputCaptureFileExists,
+  exportInputDiagnosticLogs,
+  initializeInputDiagnosticsUi,
+  inputDiagnosticsLogFiles,
+  inputDiagnosticsLoggingEnabled,
+  makeUiInputDiagnostic,
+  setInputDiagnosticsLoggingEnabled,
+  writeInputDiagnostic,
+} from '@/bridge/inputDiagnosticsUi';
 import {
   ensureUpdateManager,
   checkForUpdate,
@@ -46,20 +56,7 @@ import {
   updateSnapshot,
 } from '@/bridge/updateManager';
 
-const gp = ref<GamepadSettings>({
-  enabled: true,
-  bDoubleMinimize: true,
-  tdpShortcut: true,
-  fpsShortcut: true,
-  killGame: true,
-  openKeyboard: true,
-  returnDesktop: true,
-  mouseToggle: true,
-  mouseBackend: 'joyxoff',
-});
 const errMsg = ref('');
-const mouseBackendBusy = ref(false);
-const mouseBackendNotice = ref('');
 
 const theme = ref<ThemeName>(getTheme());
 const bgEnabled = ref(false);
@@ -91,8 +88,13 @@ function onOpacityInput(e: Event): void {
   previewOpacity((e.target as HTMLInputElement).value);
 }
 
-function saveOpacity(): void {
-  bgOpacity.value = Math.round(setBackgroundOpacity(bgOpacity.value / 100) * 100);
+async function saveOpacity(): Promise<void> {
+  try { bgOpacity.value = Math.round(await setBackgroundOpacity(bgOpacity.value / 100) * 100); }
+  catch (error) {
+    bgOpacity.value = Math.round(getBackgroundOpacity() * 100);
+    previewBackgroundOpacity(bgOpacity.value / 100);
+    errMsg.value = `背景透明度保存失败：${(error as Error).message}`;
+  }
 }
 
 function previewBlur(value: string | number): void {
@@ -106,8 +108,13 @@ function onBlurInput(e: Event): void {
   previewBlur((e.target as HTMLInputElement).value);
 }
 
-function saveBlur(): void {
-  bgBlur.value = setBackgroundBlur(bgBlur.value);
+async function saveBlur(): Promise<void> {
+  try { bgBlur.value = await setBackgroundBlur(bgBlur.value); }
+  catch (error) {
+    bgBlur.value = getBackgroundBlur();
+    previewBackgroundBlur(bgBlur.value);
+    errMsg.value = `背景模糊度保存失败：${(error as Error).message}`;
+  }
 }
 
 async function loadBackgroundState() {
@@ -220,6 +227,59 @@ const fanLogStatus = ref('');
 const sleepFacts = ref<SleepFactStatus | null>(null);
 const sleepLogBusy = ref(false);
 const sleepLogStatus = ref('');
+const inputLogBusy = ref(false);
+const inputLogStatus = ref('');
+
+// ── 诊断日志（2026-09-17 合并批：旧 5 开关 → 1 个详细开关 + 整包导出）──
+// 默认档（常开、无 UI）：仅错误与关键事件；详细档：全量诊断明细。
+const detailLoggingEnabled = ref(false);
+const detailLogBusy = ref(false);
+// Export feedback belongs below the diagnostic card's buttons, not in a popup.
+const detailLogStatus = ref('');
+async function loadDetailLogging(): Promise<void> {
+  try {
+    const r = await invoke<{ gyro?: boolean; virtual?: boolean }>('logs.domainGetEnabled');
+    detailLoggingEnabled.value = r.virtual === true;
+  } catch {
+    /* 保持默认 */
+  }
+}
+async function toggleDetailLogging(): Promise<void> {
+  if (detailLogBusy.value) return;
+  detailLogBusy.value = true;
+  errMsg.value = '';
+  try {
+    const r = await invoke<{ ok?: boolean; virtual?: boolean; reason?: string }>('logs.domainSetEnabled', {
+      domain: 'virtual',
+      enabled: !detailLoggingEnabled.value,
+    });
+    if (r.ok !== true || typeof r.virtual !== 'boolean') throw new Error(r.reason || '日志设置未能确认保存');
+    detailLoggingEnabled.value = r.virtual;
+  } catch (e) {
+    // Failed changes still need to be visible; successful changes have no extra feedback.
+    errMsg.value = '日志设置失败：' + (e instanceof Error ? e.message : String(e));
+  } finally {
+    detailLogBusy.value = false;
+  }
+}
+async function exportAllLogs(): Promise<void> {
+  if (detailLogBusy.value) return;
+  detailLogBusy.value = true;
+  detailLogStatus.value = '正在打包全部日志…';
+  try {
+    const r = await invoke<{ ok?: boolean; path?: string; count?: number; reason?: string }>(
+      'logs.exportAll',
+      {},
+      { timeoutMs: 150000 },
+    );
+    if (r.ok !== true || !r.path) throw new Error(r.reason || '导出失败');
+    detailLogStatus.value = `已导出 ${r.count ?? 0} 个日志文件到桌面：${r.path}`;
+  } catch (e) {
+    detailLogStatus.value = '导出失败：' + (e instanceof Error ? e.message : String(e));
+  } finally {
+    detailLogBusy.value = false;
+  }
+}
 
 // 版本号：构建期由 version.json 注入（scripts/write-version.mjs → src/version.ts）
 const appVersion = APP_VERSION;
@@ -262,66 +322,9 @@ function formatEta(value: number | undefined): string {
   return `${Math.floor(n / 60)} 分 ${n % 60} 秒`;
 }
 
-// 快捷键预览：鼠标悬浮 或 真实手柄按键按下 → 对应手柄图标蓝色闪烁 + 提示
-type GpKey = Exclude<keyof GamepadSettings, 'mouseBackend'>;
-const shortcuts: { key: GpKey; label: string; hint: string; buttons: number[] }[] = [
-  { key: 'enabled', label: '呼出软件', hint: 'LB + RB 长按 2 秒 → 呼出窗口', buttons: [4, 5] },
-  { key: 'bDoubleMinimize', label: '关闭软件', hint: '双击 B → 最小化到托盘', buttons: [1] },
-  { key: 'tdpShortcut', label: '切换档位 / 手动TDP', hint: '按住 开始 + 方向键 上/下 → 自动切换已编辑档位；手动模式 TDP 最大值 ±1W', buttons: [9, 12, 13] },
-  { key: 'fpsShortcut', label: '调节亮度', hint: '按住 开始 + 方向键 左/右 → 野蛮系统电源亮度 ±5；长按线性加速（AC / DC 跟随当前电源）', buttons: [9, 14, 15] },
-  { key: 'killGame', label: '关闭游戏', hint: '按住 选择 + B 长按 0.5 秒 → 关闭游戏', buttons: [8, 1] },
-  { key: 'openKeyboard', label: '打开键盘', hint: '按住 选择 + X 长按 0.5 秒 → 打开键盘', buttons: [8, 2] },
-  { key: 'returnDesktop', label: '返回桌面', hint: '选择 + A 组合按下瞬间 → 返回桌面', buttons: [8, 0] },
-  { key: 'mouseToggle', label: '模拟鼠标开/关', hint: '按住 选择 + Y 长按 0.5 秒 → 模拟鼠标开/关', buttons: [8, 3] },
-];
-// 快捷键预览：鼠标悬浮 或 手柄焦点选中（移动选择）→ 对应手柄图标蓝色闪烁 + 提示
-const hoverKey = ref<GpKey | ''>('');
-const focusKey = ref<GpKey | ''>('');
-const activeKey = computed<GpKey | ''>(() => hoverKey.value || focusKey.value);
-const activeShortcut = computed(() => shortcuts.find((s) => s.key === activeKey.value) || null);
-
-// 把手柄提示里的物理按键名（开始 = Menu 按钮 / 选择 = Select 按钮 / 字母键 / 方向键…）单独标黄加粗放大
-const KEY_TOKENS = ['开始', '选择', '方向键 上/下', '方向键 左/右', 'Start', 'LB', 'RB', 'X', 'Y', 'A', 'B'];
-function segmentHint(hint: string): { text: string; key: boolean }[] {
-  const segs: { text: string; key: boolean }[] = [];
-  let i = 0;
-  while (i < hint.length) {
-    let matched = false;
-    for (const t of KEY_TOKENS) {
-      if (hint.startsWith(t, i)) {
-        segs.push({ text: t, key: true });
-        i += t.length;
-        matched = true;
-        break;
-      }
-    }
-    if (!matched) {
-      let j = i + 1;
-      let found = -1;
-      while (j < hint.length) {
-        let hit = false;
-        for (const t of KEY_TOKENS) {
-          if (hint.startsWith(t, j)) { found = j; hit = true; break; }
-        }
-        if (hit) break;
-        j++;
-      }
-      const end = found === -1 ? hint.length : found;
-      segs.push({ text: hint.slice(i, end), key: false });
-      i = end;
-    }
-  }
-  return segs;
-}
-const hintSegments = computed(() => (activeShortcut.value ? segmentHint(activeShortcut.value.hint) : []));
-
 async function load() {
   errMsg.value = '';
-  try {
-    gp.value = await summonGet();
-  } catch {
-    /* 保持默认值 */
-  }
+  void loadDetailLogging();
   try {
     autoClose.value = await autocloseGet();
   } catch {
@@ -441,6 +444,99 @@ async function exportFanLogs(): Promise<void> {
   }
 }
 
+async function toggleInputDiagnosticLogging(): Promise<void> {
+  if (inputLogBusy.value) return;
+  inputLogBusy.value = true;
+  inputLogStatus.value = '';
+  try {
+    await setInputDiagnosticsLoggingEnabled(!inputDiagnosticsLoggingEnabled.value);
+    if (inputDiagnosticsLoggingEnabled.value) {
+      writeInputDiagnostic(makeUiInputDiagnostic('input-diagnostic-logging-changed', 'set-enabled', 'ok'));
+    }
+    inputLogStatus.value = inputDiagnosticsLoggingEnabled.value ? '输入日志已开启' : '输入日志已关闭';
+  } catch (error) {
+    inputLogStatus.value = `输入日志设置失败：${error instanceof Error ? error.message : String(error)}`;
+  } finally { inputLogBusy.value = false; }
+}
+async function clearInputLogs(): Promise<void> {
+  if (inputLogBusy.value) return;
+  inputLogBusy.value = true;
+  inputLogStatus.value = '';
+  try {
+    await clearInputDiagnosticLogs();
+    await refreshNativeInputLogFiles();
+    inputLogStatus.value = '输入日志已清空';
+  } catch (error) {
+    inputLogStatus.value = `输入日志清空失败：${error instanceof Error ? error.message : String(error)}`;
+  } finally { inputLogBusy.value = false; }
+}
+async function exportInputLogs(): Promise<void> {
+  if (inputLogBusy.value) return;
+  inputLogBusy.value = true;
+  inputLogStatus.value = '';
+  try { inputLogStatus.value = `输入日志已导出：${await exportInputDiagnosticLogs()}`; }
+  catch (error) { inputLogStatus.value = `输入日志导出失败：${error instanceof Error ? error.message : String(error)}`; }
+  finally { inputLogBusy.value = false; }
+}
+async function refreshNativeInputLogFiles(): Promise<void> {
+  try { inputDiagnosticsLogFiles.value = await checkInputCaptureFileExists(); }
+  catch { inputDiagnosticsLogFiles.value = false; }
+}
+
+// ── 日志域：陀螺仪 / 虚拟手柄（独立文件；单文件 ≤5MB 自动切分）──
+const gyroDomainLogEnabled = ref(false);
+const virtualDomainLogEnabled = ref(false);
+const domainLogBusy = ref(false);
+const domainLogStatus = ref<Record<'gyro' | 'virtual', string>>({ gyro: '', virtual: '' });
+async function refreshDomainLogStates(): Promise<void> {
+  try {
+    const state = await domainLogs.getEnabled();
+    gyroDomainLogEnabled.value = state.gyro;
+    virtualDomainLogEnabled.value = state.virtual;
+  } catch {
+    /* 读取失败保持默认 */
+  }
+}
+async function toggleDomainLog(domain: 'gyro' | 'virtual'): Promise<void> {
+  if (domainLogBusy.value) return;
+  const next = domain === 'gyro' ? !gyroDomainLogEnabled.value : !virtualDomainLogEnabled.value;
+  domainLogBusy.value = true;
+  domainLogStatus.value[domain] = '';
+  try {
+    const state = await domainLogs.setEnabled(domain, next);
+    gyroDomainLogEnabled.value = state.gyro;
+    virtualDomainLogEnabled.value = state.virtual;
+    const name = domain === 'gyro' ? '陀螺仪日志' : '虚拟手柄日志';
+    domainLogStatus.value[domain] = next ? `${name}已开启` : `${name}已关闭`;
+  } catch (error) {
+    domainLogStatus.value[domain] = `日志设置失败：${error instanceof Error ? error.message : String(error)}`;
+  } finally { domainLogBusy.value = false; }
+}
+async function clearDomainLog(domain: 'gyro' | 'virtual'): Promise<void> {
+  if (domainLogBusy.value) return;
+  domainLogBusy.value = true;
+  domainLogStatus.value[domain] = '';
+  try {
+    const result = await domainLogs.clear(domain);
+    domainLogStatus.value[domain] = result.ok ? '日志已清空' : `日志清空失败：${result.reason || '未知原因'}`;
+  } catch (error) {
+    domainLogStatus.value[domain] = `日志清空失败：${error instanceof Error ? error.message : String(error)}`;
+  } finally { domainLogBusy.value = false; }
+}
+async function exportDomainLog(domain: 'gyro' | 'virtual'): Promise<void> {
+  if (domainLogBusy.value) return;
+  domainLogBusy.value = true;
+  domainLogStatus.value[domain] = '';
+  try {
+    const result = await domainLogs.export(domain);
+    domainLogStatus.value[domain] = result.ok && result.path
+      ? `已导出到桌面：${result.path}`
+      : `暂无日志可导出（${result.reason || '未知原因'}）`;
+  } catch (error) {
+    domainLogStatus.value[domain] = `日志导出失败：${error instanceof Error ? error.message : String(error)}`;
+  } finally { domainLogBusy.value = false; }
+}
+
 async function refreshSleepFacts(): Promise<void> {
   try {
     sleepFacts.value = await sleepFactsGet();
@@ -494,47 +590,6 @@ async function exportSleepLogs(): Promise<void> {
   }
 }
 
-async function onGpSetting<K extends keyof GamepadSettings>(key: K, v: GamepadSettings[K]) {
-  errMsg.value = '';
-  const prev = gp.value[key];
-  gp.value[key] = v; // 乐观更新
-  try {
-    const next = await summonSet({ [key]: v });
-    gp.value = next;
-    // 实时同步给手柄引擎（避免重启才生效）
-    window.dispatchEvent(new CustomEvent('ipc:gamepad.settings', { detail: next }));
-  } catch (e) {
-    gp.value[key] = prev; // 失败回滚
-    errMsg.value = '设置失败：' + (e as Error).message;
-  }
-}
-
-async function onMouseBackend(backend: MouseBackend) {
-  if (mouseBackendBusy.value || gp.value.mouseBackend === backend) return;
-  mouseBackendBusy.value = true;
-  mouseBackendNotice.value = '';
-  const previous = gp.value.mouseBackend;
-  try {
-    const result = await setMouseBackend(backend);
-    if (!result.ok) {
-      mouseBackendNotice.value = result.error || '模拟鼠标方案不可用';
-      return;
-    }
-    gp.value.mouseBackend = result.backend;
-    window.dispatchEvent(new CustomEvent('mouse-mode:backend-changed', {
-      detail: { backend: result.backend },
-    }));
-    window.dispatchEvent(new CustomEvent('gp:mouse-mode', {
-      detail: { on: result.on, backend: result.backend },
-    }));
-  } catch (e) {
-    gp.value.mouseBackend = previous;
-    mouseBackendNotice.value = '方案切换失败：' + (e as Error).message;
-  } finally {
-    mouseBackendBusy.value = false;
-  }
-}
-
 // ── 以下原属「支持」页 ──
 async function openSupport() {
   try {
@@ -562,6 +617,9 @@ async function openGithub() {
 
 onMounted(async () => {
   const fanSettings = await initializeFanFeature();
+  await initializeInputDiagnosticsUi();
+  await refreshNativeInputLogFiles();
+  await refreshDomainLogStates();
   fanDiagnosticLoggingEnabled.value = fanSettings.diagnosticLoggingEnabled === true;
   await ensureUpdateManager();
   await loadUiSettings();
@@ -580,6 +638,7 @@ onActivated(() => {
   void ensureUpdateManager();
   load();
   void refreshSleepFacts();
+  void refreshNativeInputLogFiles();
   void loadBackgroundState();
 });
 onBeforeUnmount(() => {
@@ -590,59 +649,6 @@ onBeforeUnmount(() => {
 <template>
   <div class="page">
     <div v-if="errMsg" class="err-bar page-error">{{ errMsg }}</div>
-    <section class="card">
-      <h3 class="card-title"><InlineIcon name="keyboard" /> 快捷键</h3>
-      <div class="gp-toggles">
-        <button
-          v-for="s in shortcuts"
-          :key="s.key"
-          class="gp-toggle"
-          :class="{ on: gp[s.key], sel: activeKey === s.key }"
-          @mouseenter="hoverKey = s.key"
-          @mouseleave="hoverKey = ''"
-          @focus="focusKey = s.key"
-          @blur="focusKey = ''"
-          @click="onGpSetting(s.key, !gp[s.key])"
-        >
-          <span class="gp-toggle-label">{{ s.label }}</span>
-          <span class="gp-toggle-state">{{ gp[s.key] ? '开' : '关' }}</span>
-        </button>
-      </div>
-      <div class="mouse-backend-row">
-        <span class="mouse-backend-label">模拟鼠标方案</span>
-        <div class="mouse-backend-control">
-          <div class="mouse-backend-buttons">
-            <button
-              type="button"
-              :class="{ active: gp.mouseBackend === 'gamebar' }"
-              :disabled="mouseBackendBusy"
-              @click="onMouseBackend('gamebar')"
-            >微软鼠标</button>
-            <button
-              type="button"
-              :class="{ active: gp.mouseBackend === 'joyxoff' }"
-              :disabled="mouseBackendBusy"
-              @click="onMouseBackend('joyxoff')"
-            >JoyXoff 模拟鼠标</button>
-          </div>
-          <Transition name="mouse-pop">
-            <div v-if="mouseBackendNotice" class="mouse-backend-popover" role="alert">
-              <InlineIcon name="warning" size="15px" />
-              <span>{{ mouseBackendNotice }}</span>
-              <button type="button" aria-label="关闭提示" @click="mouseBackendNotice = ''">×</button>
-            </div>
-          </Transition>
-        </div>
-      </div>
-      <p class="gp-hint">
-        <template v-if="activeShortcut">
-          <b class="gp-hint-name">{{ activeShortcut.label }}</b> · <span v-for="(seg, i) in hintSegments" :key="i" :class="{ 'gp-key': seg.key }">{{ seg.text }}</span>
-        </template>
-        <template v-else>鼠标悬停 或 用手柄移动选择对应按钮，查看组合与操作方式</template>
-      </p>
-      <GamepadVisualizer :settings="gp" :highlight-buttons="activeShortcut ? activeShortcut.buttons : []" />
-    </section>
-
     <!-- ── 以下内容原属「支持」页面，已合并至设置下方 ── -->
     <section class="card">
       <h3 class="card-title"><InlineIcon name="palette" /> 界面颜色</h3>
@@ -752,25 +758,13 @@ onBeforeUnmount(() => {
       </template>
     </section>
 
-    <section class="card fan-log-card" aria-label="风扇日志操作">
-      <h3 class="card-title">风扇日志</h3>
+    <section class="card fan-log-card" aria-label="诊断日志">
+      <h3 class="card-title">诊断日志</h3>
       <div class="fan-log-actions">
-        <button class="fan-log-action" :class="{ enabled: fanDiagnosticLoggingEnabled }" type="button" :disabled="fanLogBusy" :aria-pressed="fanDiagnosticLoggingEnabled" @click="toggleFanDiagnosticLogging">{{ fanDiagnosticLoggingEnabled ? '日志已开启' : '日志已关闭' }}</button>
-        <button class="fan-log-action" type="button" :disabled="fanLogBusy" @click="clearFanLogs">清空日志</button>
-        <button class="fan-log-action" type="button" :disabled="fanLogBusy" @click="exportFanLogs">导出日志到桌面</button>
+        <button class="fan-log-action" :class="{ enabled: detailLoggingEnabled }" type="button" :disabled="detailLogBusy" :aria-pressed="detailLoggingEnabled" @click="toggleDetailLogging">{{ detailLoggingEnabled ? '详细日志已开启' : '详细日志已关闭' }}</button>
+        <button class="fan-log-action" type="button" :disabled="detailLogBusy" @click="exportAllLogs">导出全部日志到桌面</button>
       </div>
-      <p v-if="fanLogStatus" class="muted body fan-log-status" role="status">{{ fanLogStatus }}</p>
-    </section>
-
-    <section class="card fan-log-card sleep-log-card" aria-label="睡眠日志操作">
-      <h3 class="card-title">睡眠日志</h3>
-      <div class="fan-log-actions">
-        <button class="fan-log-action" :class="{ enabled: sleepFacts?.enabled === true }" type="button" :disabled="sleepLogBusy" :aria-pressed="sleepFacts?.enabled === true" @click="toggleSleepFactLogging">{{ sleepFacts?.enabled === true ? '日志已开启' : '日志已关闭' }}</button>
-        <button class="fan-log-action" type="button" :disabled="sleepLogBusy" @click="clearSleepLogs">清空日志</button>
-        <button class="fan-log-action" type="button" :disabled="sleepLogBusy" @click="exportSleepLogs">导出日志到桌面</button>
-      </div>
-      <p v-if="sleepLogStatus" class="muted body fan-log-status" role="status">{{ sleepLogStatus }}</p>
-      <p v-if="sleepFacts?.logPath" class="muted body sleep-log-path">记录文件：{{ sleepFacts.logPath }}</p>
+      <p v-if="detailLogStatus" class="muted body fan-log-status" role="status">{{ detailLogStatus }}</p>
     </section>
 
     <section class="card">
@@ -822,6 +816,7 @@ onBeforeUnmount(() => {
         <div v-if="updateSnapshot.phase === 'downloading'" class="update-progress-detail">
           <span>速度 {{ formatSpeed(updateSnapshot.speedBps) }}</span>
           <span>剩余 {{ formatEta(updateSnapshot.etaSeconds) }}</span>
+          <span v-if="(updateSnapshot.resumedBytes || 0) > 0">已复用 {{ formatBytes(updateSnapshot.resumedBytes) }} 缓存</span>
         </div>
       </div>
     </section>
@@ -1092,6 +1087,106 @@ onBeforeUnmount(() => {
   background: rgba(255, 255, 255, 0.08);
   color: inherit;
   cursor: pointer;
+}
+
+/* ── 微软鼠标组件修复确认浮层（与配置重制确认保持一致）── */
+.gameinput-repair-confirm {
+  z-index: 1200;
+  background: #161d29;
+  border: 1px solid #2a3342;
+  border-radius: 12px;
+  padding: 18px 20px 17px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: calc(100vw - 16px);
+  min-height: 0;
+  overflow-y: auto;
+}
+.gameinput-repair-confirm::before {
+  content: '';
+  position: absolute;
+  width: 13px;
+  height: 13px;
+  background: #161d29;
+  border-left: 1px solid #2a3342;
+  border-top: 1px solid #2a3342;
+  transform: rotate(45deg);
+  top: -7px;
+  right: 32px;
+}
+.gameinput-repair-confirm.above::before {
+  top: auto;
+  bottom: -7px;
+  border-left: none;
+  border-top: none;
+  border-right: 1px solid #2a3342;
+  border-bottom: 1px solid #2a3342;
+}
+.gameinput-repair-title {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--text);
+  font-size: 16px;
+  font-weight: 700;
+}
+.gameinput-repair-title :deep(svg) {
+  color: var(--danger);
+}
+.gameinput-repair-desc,
+.gameinput-repair-status {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 14px;
+  line-height: 1.6;
+}
+.gameinput-repair-status {
+  color: #ffd47a;
+}
+.gameinput-repair-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 3px;
+}
+.gameinput-repair-actions button {
+  min-height: 44px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 9px;
+  background: var(--bg-input);
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.gameinput-repair-actions button small {
+  margin-left: 4px;
+  color: var(--text-dim);
+  font-size: 11px;
+}
+.gameinput-repair-actions button.danger {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 46%, transparent);
+  background: color-mix(in srgb, var(--danger) 8%, var(--bg-input));
+}
+.gameinput-repair-actions button.danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 16%, var(--bg-input));
+  border-color: var(--danger);
+}
+.gameinput-repair-actions button:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+.gameinput-repair-pop-enter-active,
+.gameinput-repair-pop-leave-active {
+  transition: opacity 0.14s ease, transform 0.14s ease;
+}
+.gameinput-repair-pop-enter-from,
+.gameinput-repair-pop-leave-to {
+  opacity: 0;
+  transform: translateY(-5px);
 }
 .mouse-pop-enter-active,
 .mouse-pop-leave-active { transition: opacity 0.12s, transform 0.12s; }

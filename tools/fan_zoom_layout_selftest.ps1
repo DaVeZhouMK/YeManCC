@@ -15,6 +15,11 @@ if ($fan -match '@media\(max-width:560px\)\{\.control-line\{grid-template-column
   throw 'fan controls still reflow to one column at narrow/high-zoom sizes'
 }
 
-$nodeCount = ([regex]::Matches($fan, 'data-gp-row="2"')).Count
-if ($nodeCount -lt 1) { throw 'fan curve nodes lost their explicit gamepad row' }
-Write-Output 'fan zoom layout selftest: 5/5 passed'
+# FAN-932 §3.2: the rows must stay continuous integers - the boot/wake mirror takes
+# row 2, the curve nodes move to 3, and the node editors to 4/5. A weak "some row 2
+# exists" check could be satisfied by the wrong control, so each stop is asserted.
+Assert-Contains $fan ':gp-row="2" :gp-col="0"' 'the boot/wake fan mirror lost its explicit gamepad row 2'
+Assert-Contains $fan ':data-gp-row="3"' 'fan curve nodes must use gamepad row 3'
+Assert-Contains $fan ':gp-row="4"' 'fan node temperature editor must use gamepad row 4'
+Assert-Contains $fan ':gp-row="5"' 'fan node duty editor must use gamepad row 5'
+Write-Output 'fan zoom layout selftest: 8/8 passed'

@@ -39,6 +39,9 @@ jobs:
             throw "Version mismatch: version.json=$version, package.json=$($package.version)"
           }
           $expectedTag = "v$version"
+          $notesPath = "docs/release-notes/$expectedTag.md"
+          if (-not (Test-Path -LiteralPath $notesPath -PathType Leaf)) { throw "Approved release notes are missing: $notesPath" }
+          "RELEASE_NOTES_PATH=$notesPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           if ('${{ github.ref_name }}' -ne $expectedTag) {
             throw "Tag mismatch: expected $expectedTag, got ${{ github.ref_name }}"
           }
@@ -54,6 +57,11 @@ jobs:
           node-version: '22'
           cache: 'pnpm'
 
+      - name: Setup .NET 10 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
       - name: Setup MSVC and Windows SDK
         uses: ilammy/msvc-dev-cmd@v1
         with:
@@ -66,10 +74,20 @@ jobs:
         shell: pwsh
         run: |
           $env:YEMAN_WORKSPACE_ROOT = $env:GITHUB_WORKSPACE
-          $releaseEnvelope = if ('${{ github.ref_name }}' -in @('v0.0.22', 'v0.0.23', 'v0.0.24', 'v0.0.25', 'v0.0.26', 'v0.0.27', 'v0.0.28')) { 'legacy-bootstrap' } elseif ('${{ github.ref_name }}' -in @('v0.0.20', 'v0.0.21')) { 'legacy-bridge' } else { 'full' }
+          # 2026-09-23 裁定：legacy 信封退役，唯一产物 = 完整包 YeManCC.zip。
+          $releaseEnvelope = 'full'
           $env:YEMAN_RELEASE_ENVELOPE = $releaseEnvelope
           pnpm run build
+          if ($LASTEXITCODE -ne 0) { throw 'Frozen source build failed.' }
+          foreach ($test in @('test:updater', 'test:updater-manager-resume', 'test:updater-resume', 'test:updater-retry', 'test:updater-rollback', 'test:fan-host-paths', 'test:fan-payload')) {
+            pnpm run $test
+            if ($LASTEXITCODE -ne 0) { throw "Release regression failed: $test" }
+          }
           powershell -NoProfile -ExecutionPolicy Bypass -File tools/package-release.ps1 -WorkspaceRoot $env:GITHUB_WORKSPACE -ReleaseEnvelope $releaseEnvelope
+          if ($LASTEXITCODE -ne 0) { throw 'Full package assembly failed.' }
+          # This regression consumes the actual archive; never run it before assembly.
+          pnpm run test:updater-install-chain
+          if ($LASTEXITCODE -ne 0) { throw 'Release install-chain regression failed.' }
 
       - name: Verify release outputs
         shell: pwsh
@@ -110,6 +128,9 @@ jobs:
           if ($localHash -ne [string]$releaseManifest.sha256) {
             throw "Release manifest SHA-256 mismatch: expected $($releaseManifest.sha256), got $localHash"
           }
+          if (Test-Path -LiteralPath (Join-Path $root 'Release\Packages\YeManCC-Complete.zip')) {
+            throw 'Release\Packages must not contain the incorrect package name YeManCC-Complete.zip.'
+          }
           Add-Type -AssemblyName System.IO.Compression.FileSystem
           $zip = [IO.Compression.ZipFile]::OpenRead((Join-Path $root 'Release\Packages\YeManCC.zip'))
           try {
@@ -123,9 +144,7 @@ jobs:
               throw "YeManCC.zip roots do not match update-manifest.json; missing: $($missingZipRoots -join ', '); unexpected: $($unexpectedZipRoots -join ', '); got: $($roots -join ', ')"
             }
             $layoutManifestEntries = @($zip.Entries | Where-Object { $_.FullName.Replace('\', '/') -eq 'YeManCC/update-manifest.json' })
-            if ('${{ github.ref_name }}' -in @('v0.0.22', 'v0.0.23', 'v0.0.24', 'v0.0.25', 'v0.0.26', 'v0.0.27', 'v0.0.28')) {
-              if ($layoutManifestEntries.Count -ne 0) { throw '${{ github.ref_name }} bootstrap ZIP must not contain YeManCC/update-manifest.json' }
-            } elseif ($layoutManifestEntries.Count -ne 1) {
+            if ($layoutManifestEntries.Count -ne 1) {
               throw 'YeManCC.zip must contain exactly one YeManCC/update-manifest.json'
             }
             $flat = @($zip.Entries | Where-Object {
@@ -137,13 +156,20 @@ jobs:
             $zip.Dispose()
           }
 
+      - name: Verify local Fan Host V2 lane before publishing
+        shell: pwsh
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File tools/fan_host_path_gate.ps1 -ProjectRoot $env:GITHUB_WORKSPACE -ReleaseZip (Join-Path $env:GITHUB_WORKSPACE 'Release\Packages\YeManCC.zip')
+          if ($LASTEXITCODE -ne 0) { throw 'Local Fan Host V2 path/identity gate failed.' }
+
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
             Release/Packages/YeManCC.zip
           overwrite_files: true
-          generate_release_notes: true
+          body_path: ${{ env.RELEASE_NOTES_PATH }}
+          generate_release_notes: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -157,6 +183,10 @@ jobs:
           if ($asset.Count -ne 1) {
             throw 'GitHub Release does not contain exactly one YeManCC.zip asset.'
           }
+          $retiredAsset = @($release.assets | Where-Object { $_.name -eq 'YeManCC-Complete.zip' })
+          if ($retiredAsset.Count -ne 0) {
+            throw 'GitHub Release must not contain the incorrect asset name YeManCC-Complete.zip.'
+          }
           $manifest = (Get-Content -LiteralPath Release\version.json -Raw -Encoding UTF8).TrimStart([char]0xFEFF) | ConvertFrom-Json
           $downloadRoot = Join-Path $env:RUNNER_TEMP 'published-yemancc'
           New-Item -ItemType Directory -Path $downloadRoot -Force | Out-Null
@@ -165,6 +195,13 @@ jobs:
           if ($publishedHash -ne [string]$manifest.sha256) {
             throw "Published asset SHA-256 mismatch: expected $($manifest.sha256), got $publishedHash"
           }
+
+      - name: Verify published Fan Host V2 lane and source-bound bytes
+        shell: pwsh
+        run: |
+          $downloadRoot = Join-Path $env:RUNNER_TEMP 'published-yemancc'
+          powershell -NoProfile -ExecutionPolicy Bypass -File tools/fan_host_path_gate.ps1 -ProjectRoot $env:GITHUB_WORKSPACE -ReleaseZip (Join-Path $downloadRoot 'YeManCC.zip')
+          if ($LASTEXITCODE -ne 0) { throw 'Published Fan Host V2 path/identity gate failed.' }
 
       - name: Preserve generated version manifest
         shell: pwsh

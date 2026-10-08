@@ -13,6 +13,8 @@ defineProps<{ name: string; size?: string }>();
 <style scoped>
 .inline-icon {
   display: inline-flex;
+  align-items: center;
+  justify-content: center;
   vertical-align: -0.18em;
   width: 1.1em;
   height: 1.1em;

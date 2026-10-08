@@ -1,6 +1,6 @@
 {
-  "version": "0.0.28",
-  "notes": "主线功能与升级器规则更新；CustomSteamLibrary 继续位于 YeManCC\\CustomSteamLibrary，PowerControl\\fan-host 暂不参与。",
+  "version": "0.0.33",
+  "notes": "主线功能与升级器规则更新；PowerControl\\\\fan-host-v2 载荷（含 HC 运行时与身份记录）随包分发，启动前做身份校验；CustomSteamLibrary 继续位于 YeManCC\\\\CustomSteamLibrary。",
   "sha256": "",
   "publishedAt": "",
   "package": "Packages/YeManCC.zip"

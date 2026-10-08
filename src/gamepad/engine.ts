@@ -17,11 +17,13 @@ import { ROUTES } from '@/router';
 import type { Router } from 'vue-router';
 import { loadPerformanceSchedule } from '@/bridge/performanceSchedule';
 import { summonGet, type GamepadSettings } from '@/bridge/yeman';
-import { isUiVisible, onUiVisibilityChange } from '@/bridge/uiLifecycle';
+import { isUiVisible, onUiVisibilityChange, getUiVisibilityState } from '@/bridge/uiLifecycle';
 import { focusGamepadElement, setGamepadFocused } from '@/gamepad/focus';
-import { enqueueGamepadTaskDetached } from '@/gamepad/serial';
-import { fanFeatureEnabled } from '@/bridge/fanFeature';
+import { enqueueGamepadTaskDetached, gamepadSerialPending } from '@/gamepad/serial';
+import { reportFrontendError } from '@/robust/frontendDiagnostics';
+import { residentNavigationRoutes } from '@/bridge/residentNavigation';
 import { spatialNavigationTarget } from '@/gamepad/spatial';
+import { InputOwnerRuntime, type RuntimeStopReason } from '@/bridge/inputOwnerRuntime';
 
 export interface GamepadEngineOptions {
   router: Router;
@@ -61,6 +63,7 @@ const TEST_B_HOLD_MS = 3000;
 let gpSettings: GamepadSettings = {
   enabled: true,
   bDoubleMinimize: true,
+  startDoubleF7: true,
   tdpShortcut: true,
   fpsShortcut: true,
   killGame: true,
@@ -146,10 +149,66 @@ let noPadStreak = 0;       // 连续无手柄帧计数（Grace 防瞬时断连�
 const NO_PAD_GRACE = 30;   // 约 0.5s@60fps：连续这么多帧无手柄才停止循环
 let summonActive = false;  // 呼出后置 true：强制视为可见，直到窗口再次隐藏（绕开 WebView2 可见态未及时刷新）
 let nativeUiInputActive = false;
+// Native is the sole physical-input reader.  Keep its connection snapshot
+// here so visibility/recovery decisions do not fall back to the browser
+// Gamepad API (which is intentionally not an acquisition path in WebView2).
+let nativePadConnected = false;
 // This is a native decision mirror, not a second gate. While true the
 // renderer only advances its browser snapshot and never dispatches actions;
 // YeManCC native has already forwarded the semantic action to the child.
 let nativeChildInputOwned = false;
+// A physical-only summon must tolerate the transient WM_KILLFOCUS generated
+// while WebView2/ROG compositor focus is settling. Treat blur as a terminal
+// owner boundary only after the canonical InputHost has actually admitted a
+// virtual target; ordinary XInput UI navigation must remain usable.
+let inputHostTargetActive = false;
+const inputOwnerRuntime = new InputOwnerRuntime();
+function publishOwnerTrace(): void {
+  if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('input:owner-trace', { detail: inputOwnerRuntime.snapshot() }));
+}
+// ── 手柄准入链取证（2026-09-16 用户批准「先稳固证据」）──
+// 目的：定位"开启 YMCC 后手柄卡住（鼠标正常）"的静默丢弃/排队点。只读诊断，
+// 不改任何准入/行为：入口门、执行门、切页 push 前后各留一行，走现成
+// reportFrontendError → native diagnostics.frontendError → frontend-errors.log
+// （含 native 侧 time/gpuMode/nativeGeneration）。与 fan-api.log 的阶段时间可直接对拍。
+let gamepadTraceSeq = 0;
+function gamepadGateSnapshot(): Record<string, unknown> {
+  const ui = getUiVisibilityState();
+  const owner = inputOwnerRuntime.snapshot();
+  return {
+    docVis: typeof document === 'undefined' ? 'n/a' : document.visibilityState,
+    uiVisible: ui.visible,
+    nativeWinVisible: ui.nativeWindowVisible,
+    powerReady: ui.powerReady,
+    owner: owner.owner,
+    epoch: owner.epoch,
+    rearm: owner.rearmRequired,
+    sourceAdmission: owner.sourceAdmission,
+    childOwned: nativeChildInputOwned,
+    summon: summonActive,
+    testMode,
+    engineReady: engineOpts != null,
+    qPending: gamepadSerialPending(),
+    qSeq: ++gamepadTraceSeq,
+    t: Math.round(performance.now()),
+  };
+}
+function traceGamepadAdmission(stage: string, action: string, detail: Record<string, unknown> = {}): void {
+  try {
+    reportFrontendError('gamepad-admission', JSON.stringify({ stage, action, ...gamepadGateSnapshot(), ...detail }));
+  } catch {
+    // 诊断绝不能成为新的失败源。
+  }
+}
+// GP-UIINPUT-2: preserve the operator-confirmed GP-UIINPUT-1 duplicate-event guard.
+let lastUiActionKey = '';
+function isDuplicateUiAction(prov: Record<string, unknown>, uiSeq: number): boolean {
+  if (!uiSeq) return false;
+  const key = `${String(prov.session ?? '')}:${uiSeq}`;
+  if (key === lastUiActionKey) return true;
+  lastUiActionKey = key;
+  return false;
+}
 type NativeUiAction =
   | 'page-prev' | 'page-next' | 'confirm' | 'back' | 'edit-game'
   | 'debug' | 'nav-left' | 'nav-right' | 'nav-up' | 'nav-down'
@@ -157,10 +216,7 @@ type NativeUiAction =
 
 // 是否有任意已连接手柄
 function hasConnectedPad(): boolean {
-  try {
-    return false;
-  } catch { /* 某些 WebView2 版本 getGamepads() 可能抛异常 */ }
-  return false;
+  return nativePadConnected;
 }
 
 // Native owns the controller state in every visibility state. The renderer
@@ -172,21 +228,45 @@ function browserLoopAllowed(): boolean {
 }
 
 // 若循环未运行则启动（幂等）：用于连接/可见/唤醒事件拉起
-function ensureLoop(opts: GamepadEngineOptions) {
-  if (rafId || !browserLoopAllowed()) return;
-  noPadStreak = 0;
-  rafId = requestAnimationFrame(() => tick(opts));
+function ensureLoop(_opts: GamepadEngineOptions) {
+  // The native-only input path has no browser pad provider (getPad is null).
+  // A native snapshot must not restart a 30-frame empty RAF polling burst;
+  // frequent snapshots otherwise keep renderer/compositor awake forever.
+  // Semantic UI actions stay event-driven through gamepad.ui-input. Separate
+  // bounded summon/focus RAF callbacks are not affected by this boundary.
+  stopGamepadLoop();
 }
 
 // 监听手柄连接/断开事件（某些 WebView2 版本需要此触发轮询）
 if (typeof window !== 'undefined') {
+  // Native publishes one coherent XInput/ROG snapshot.  This is only a
+  // renderer-side readiness mirror; it does not read the device or create a
+  // second input loop.  It also provides the missing restart/stop signal for
+  // the semantic UI loop after show/hide, reconnect and resume.
+  window.addEventListener('ipc:gamepad.state', ((e: CustomEvent<{ connected?: boolean }>) => {
+    nativePadConnected = e.detail?.connected === true;
+    if (nativePadConnected) {
+      if (engineOpts && browserLoopAllowed()) ensureLoop(engineOpts);
+    } else if (!summonActive) {
+      gamepadConnected = false;
+      stopGamepadLoop();
+    }
+  }) as EventListener);
   // 插入/切换手柄 → 立即重启循环
   window.addEventListener('native-pad-added', () => {
+    // HC source insert is only a fresh candidate; it must not silently
+    // rearm the prior owner/epoch.
+    inputOwnerRuntime.sourceInserted();
+    publishOwnerTrace();
     gamepadConnected = true;
     if (engineOpts && browserLoopAllowed()) ensureLoop(engineOpts);
   });
   // 断开 → 若已无任何手柄仍连着，停止循环（省 CPU）；仍有其他手柄则保留
   window.addEventListener('native-pad-removed', () => {
+    // HC physical-source removal is not a virtual-target/backend release:
+    // suppress only source publication and wait for an explicit rearm.
+    inputOwnerRuntime.sourceRemoved();
+    publishOwnerTrace();
     if (!hasConnectedPad()) {
       gamepadConnected = false;
       stopGamepadLoop();
@@ -196,19 +276,16 @@ if (typeof window !== 'undefined') {
     const enabled = Boolean((e as CustomEvent<{ detail?: { enabled?: boolean }; enabled?: boolean }>).detail?.enabled);
     setVisibleRoutes(enabled);
   });
-  // Fan visibility is capability-gated by the asynchronous startup handshake.
-  // Refresh the route order after that result without delaying controller
-  // startup or changing the current route.
-  window.addEventListener('fan-feature:visibility', () => {
-    // The sidebar can react before the async schedule refresh completes.
-    // Refresh the cached controller order synchronously so RB/LB sees the
-    // newly admitted Fan route in the same frame.
-    setVisibleRoutes(performanceScheduleEnabled);
-    void refreshVisibleRoutes();
-  });
   // 睡眠守护唤醒后，native 通知重启手柄引擎：重置边沿/时间戳状态，并尝试重启循环
   window.addEventListener('ipc:gamepad.restart', () => {
+    // 取证：restart 会 stop（epoch+1）再 start（epoch+1），是执行门对拍失败源之一。
+    traceGamepadAdmission('owner-restart', '', {});
+    inputOwnerRuntime.stop('suspend');
+    publishOwnerTrace();
     restartGamepadState();
+    if (summonActive) inputOwnerRuntime.summon();
+    else inputOwnerRuntime.start();
+    publishOwnerTrace();
     if (engineOpts && hasConnectedPad() && browserLoopAllowed()) ensureLoop(engineOpts);
     window.setTimeout(() => {
       if (!engineOpts || !browserLoopAllowed()) return;
@@ -216,20 +293,80 @@ if (typeof window !== 'undefined') {
       if (!active || !focusables().includes(active)) focusFirst();
     }, 120);
   });
-  window.addEventListener('ipc:gamepad.ui-input', ((e: CustomEvent<{ action?: string }>) => {
+  window.addEventListener('ipc:gamepad.ui-input', ((e: CustomEvent<{
+    action?: string; uiSeq?: number; provenance?: Record<string, unknown>;
+  }>) => {
     const action = e.detail?.action as NativeUiAction | undefined;
-    if (!engineOpts || !action || testMode) return;
+    const uiSeq = typeof e.detail?.uiSeq === 'number' ? e.detail.uiSeq : 0;
+    const prov = e.detail?.provenance ?? {};
+    // 取证（2026-09-16 用户批准）：page-prev/page-next 是"卡住"症状的本体，
+    // 对其入口/执行逐条留痕；其余动作只在被丢弃时留痕，避免刷屏。
+    const traceable = action === 'page-prev' || action === 'page-next';
+    if (!engineOpts || !action || testMode) {
+      // 原先此处为静默 return（无任何日志），是排查盲点：入口门丢弃必须留痕。
+      if (action) traceGamepadAdmission('entry-drop', action, { entryGate: !engineOpts ? 'engine-not-ready' : 'test-mode' });
+      return;
+    }
     nativeUiInputActive = true;
-    enqueueGamepadTaskDetached(() => dispatchNativeUiAction(engineOpts!, action));
+    // The native event can already be queued when blur/hidden/close advances
+    // the renderer epoch. Capture the admission tuple at enqueue time and
+    // re-check it at execution time so a stale semantic action cannot run
+    // after ownership has been revoked.
+    const admission = inputOwnerRuntime.semanticAction();
+    publishOwnerTrace();
+    if (traceable) traceGamepadAdmission('entry-pass', action, { admissionEpoch: admission.epoch });
+    enqueueGamepadTaskDetached(() => {
+      const current = inputOwnerRuntime.snapshot();
+      // `InputOwnerRuntime` is an observability mirror, not the native
+      // admission authority. A normal visible YMCC window starts in the
+      // mirror's game-consumer state, yet native UI semantic actions are
+      // still valid; only a lifecycle epoch change, hidden UI, or child-owner
+      // handoff must cancel this queued action.
+      if (current.epoch !== admission.epoch || !browserLoopAllowed() || nativeChildInputOwned) {
+        // 执行门丢弃：区分 epoch 漂移 / 可见性门 / 子窗口接管，逐项留痕。
+        traceGamepadAdmission('exec-drop', action, {
+          admissionEpoch: admission.epoch,
+          epochMatch: current.epoch === admission.epoch,
+          loopAllowed: browserLoopAllowed(),
+          childOwned: nativeChildInputOwned,
+        });
+        return;
+      }
+      if (!engineOpts || testMode) {
+        traceGamepadAdmission('exec-drop', action, { entryGate: 'engine-gone-at-exec' });
+        return;
+      }
+      if (isDuplicateUiAction(prov, uiSeq)) {
+        traceGamepadAdmission('exec-dedup', action, { uiSeq, session: prov.session });
+        return;
+      }
+      if (traceable) traceGamepadAdmission('exec-run', action, { admissionEpoch: admission.epoch });
+      dispatchNativeUiAction(engineOpts, action);
+    });
   }) as EventListener);
   window.addEventListener('ipc:gamepad.input-owner', ((e: CustomEvent<{ owner?: string }>) => {
     nativeChildInputOwned = e.detail?.owner === 'custom-steam-library';
+    traceGamepadAdmission('child-owner-change', '', { owner: e.detail?.owner ?? '' });
     if (nativeChildInputOwned) {
       prevButtons = [];
       prevAxes = [];
     }
   }) as EventListener);
+  const onInputHostCrash = () => {
+    traceGamepadAdmission('owner-stop', '', { trigger: 'input-host-crash' });
+    inputHostTargetActive = false;
+    inputOwnerRuntime.stop('crash');
+    publishOwnerTrace();
+  };
+  window.addEventListener('ipc:input-host.crash', onInputHostCrash);
+  window.addEventListener('input-host:crash', onInputHostCrash);
+  window.addEventListener('input:motion-telemetry', ((e: CustomEvent<{ hostFrame?: { hostActive?: boolean; firstFrame?: boolean } }>) => {
+    const hostFrame = e.detail?.hostFrame;
+    inputHostTargetActive = hostFrame?.hostActive === true && hostFrame?.firstFrame === true;
+  }) as EventListener);
   onUiVisibilityChange(({ visible }) => {
+    // 取证：uiVisible 是执行门 browserLoopAllowed() 的一半；翻转必须留痕。
+    traceGamepadAdmission('ui-visible-change', '', { visible });
     if (visible && engineOpts && hasConnectedPad()) {
       ensureLoop(engineOpts);
     } else if (!visible && !summonActive) {
@@ -244,6 +381,8 @@ if (typeof window !== 'undefined') {
   // ③ 重置边沿基线，避免呼出瞬间把“仍按住的 R1L1”误判成新的按下边沿（误切页）；
   // ④ 重启循环（若此前因无手柄被停 / 隐藏态未运行，现在必定拉起）。
   window.addEventListener('ipc:gamepad.summon', () => {
+    inputOwnerRuntime.summon();
+    publishOwnerTrace();
     summonActive = true;
     summonSuppress = true;
     // The native event is delivered immediately after the window is focused.
@@ -257,31 +396,68 @@ if (typeof window !== 'undefined') {
   });
   // A native tray hide ends the summon session even when Chromium does not
   // emit a matching document.visibilitychange event.
-  const clearSummonState = () => {
+  const clearSummonState = (reason: RuntimeStopReason = document.visibilityState === 'hidden' ? 'blur' : 'close') => {
+    // 取证：本函数是 epoch 递增点（stop → epoch+1），会使执行门 epoch 对拍失败。
+    traceGamepadAdmission('owner-stop', '', { trigger: 'clear-summon-state', reason });
+    inputOwnerRuntime.stop(reason);
+    publishOwnerTrace();
     summonActive = false;
     summonSuppress = false;
     shoulderReleaseLockUntil = 0;
     lbNavPending = false;
     rbNavPending = false;
+    // Rebuild the input baseline as part of the same lifecycle boundary;
+    // otherwise a post-blur edge could be compared against a pre-blur pad
+    // snapshot or leave modifier/edit state latched into the next epoch.
+    restartGamepadState();
+    sliderEditMode = false;
+    startUsedAsModifier = false;
+    testBHoldStart = 0;
+    resetInlineEditCadence();
     cancelSummonFocus();
     if (!browserLoopAllowed()) stopGamepadLoop();
   };
-  window.addEventListener('ipc:window.hidden', clearSummonState);
-  window.addEventListener('ipc:window.minimized', clearSummonState);
+  window.addEventListener('ipc:window.hidden', () => clearSummonState());
+  window.addEventListener('ipc:window.minimized', () => clearSummonState());
+  // Native emits this for WM_KILLFOCUS even while WebView2 stays document-
+  // visible. It is a strict owner boundary for an admitted virtual target;
+  // physical-only summon keeps the session through the transient focus race.
+  window.addEventListener('ipc:window.blur', () => {
+    // WM_KILLFOCUS is transient during a physical-only summon on ROG. Keep
+    // the YMCC session alive until the native window is actually hidden or a
+    // virtual target has been admitted and therefore requires strict release.
+    if (!summonActive || inputHostTargetActive || document.visibilityState === 'hidden') {
+      clearSummonState('blur');
+    }
+  });
+  // WM_SETFOCUS is the explicit recovery boundary for a prior blur. Restore
+  // game-consumer only when no summon session owns the frontend; summon itself
+  // commits ymcc-frontend in its own event and must not be overwritten here.
+  window.addEventListener('ipc:window.focus', () => {
+    if (!engineOpts || summonActive || document.visibilityState === 'hidden') return;
+    if (inputOwnerRuntime.snapshot().owner === 'none') {
+      traceGamepadAdmission('owner-start', '', { trigger: 'window-focus' });
+      inputOwnerRuntime.start();
+      restartGamepadState();
+      publishOwnerTrace();
+    }
+    if (hasConnectedPad() && browserLoopAllowed()) ensureLoop(engineOpts);
+  });
   // 回到可见（含系统唤醒窗口恢复可见）：兜底探测手柄并启动循环
   document.addEventListener('visibilitychange', () => {
+    traceGamepadAdmission('doc-visibility', '', { docVis: document.visibilityState });
     if (document.visibilityState === 'visible') {
+      if (!summonActive && inputOwnerRuntime.snapshot().owner === 'none') {
+        traceGamepadAdmission('owner-start', '', { trigger: 'doc-visible' });
+        inputOwnerRuntime.start();
+        restartGamepadState();
+        publishOwnerTrace();
+      }
       if (engineOpts && hasConnectedPad() && browserLoopAllowed()) ensureLoop(engineOpts);
     } else if (!summonActive) {
       // 窗口再次隐藏：清除呼出强制态并停止 RAF；native Raw Input 仍负责
       // 后台唤醒，不需要浏览器在托盘中持续采样。
-      summonActive = false;
-      summonSuppress = false; // 隐藏时不再需要呼出抑制，下次呼出会重新设置
-      shoulderReleaseLockUntil = 0;
-      lbNavPending = false;   // 丢弃未裁决的切页挂起，恢复可见后不误切页
-      rbNavPending = false;
-      cancelSummonFocus();
-      stopGamepadLoop();
+      clearSummonState('blur');
     }
   });
   // 设置页实时同步手柄快捷开关
@@ -319,19 +495,14 @@ function getPad(): Gamepad | null {
   return null;
 }
 
-function routeAvailable(route: (typeof ROUTES)[number]): boolean {
-  if (route.hidden) return false;
-  return route.feature !== 'fan' || fanFeatureEnabled.value;
-}
-
-let visibleRoutePaths: string[] = ROUTES.filter(routeAvailable).map((r) => r.path);
-let visibleRouteTitles: string[] = ROUTES.filter(routeAvailable).map((r) => r.title);
+// One pure route policy for pointer navigation and controller LB/RB.
+let visibleRoutePaths: string[] = residentNavigationRoutes(ROUTES, false).map((r) => r.path);
+let visibleRouteTitles: string[] = residentNavigationRoutes(ROUTES, false).map((r) => r.title);
 let performanceScheduleEnabled = false;
 
 function setVisibleRoutes(enabled: boolean) {
   performanceScheduleEnabled = enabled;
-  const hidden = enabled ? new Set(['/tdp', '/cpu']) : new Set<string>();
-  const visible = ROUTES.filter((r) => !hidden.has(r.path) && routeAvailable(r));
+  const visible = residentNavigationRoutes(ROUTES, enabled);
   visibleRoutePaths = visible.map((r) => r.path);
   visibleRouteTitles = visible.map((r) => r.title);
 }
@@ -347,18 +518,35 @@ function navigate(opts: GamepadEngineOptions, dir: -1 | 1) {
 }
 
 async function navigateNow(opts: GamepadEngineOptions, dir: -1 | 1) {
-  // Fan visibility is established asynchronously by the handshake. Rebuild
-  // just before switching so the controller order cannot lag behind the
-  // responsive sidebar and skip Fan.
+  // Reconcile quick-mode navigation without a handshake or asset probe.
   setVisibleRoutes(performanceScheduleEnabled);
   const order = visibleRoutePaths;
   const cur = opts.router.currentRoute.value.path;
   let idx = order.indexOf(cur);
   if (idx < 0) idx = 0;
   idx = (idx + dir + order.length) % order.length;
-  await opts.router.push(order[idx]);
-  await new Promise<void>((resolve) => window.setTimeout(resolve, 80));
-  focusFirst();
+  const target = order[idx];
+  const startedAt = performance.now();
+  // 取证（2026-09-16 用户批准）：push 前一行。若本行之后没有 nav-done/nav-fail，
+  // 即证明队列执行到这里被挂住（卡住本体），与"入队延迟"区分开。
+  traceGamepadAdmission('nav-start', dir < 0 ? 'page-prev' : 'page-next', {
+    from: cur, to: String(target), routeCount: order.length,
+  });
+  try {
+    await opts.router.push(target);
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 80));
+    focusFirst();
+    traceGamepadAdmission('nav-done', dir < 0 ? 'page-prev' : 'page-next', {
+      from: cur, to: String(target), route: opts.router.currentRoute.value.path,
+      ms: Math.round(performance.now() - startedAt),
+    });
+  } catch (error) {
+    traceGamepadAdmission('nav-fail', dir < 0 ? 'page-prev' : 'page-next', {
+      from: cur, to: String(target), ms: Math.round(performance.now() - startedAt),
+      error: error instanceof Error ? error.message : String(error),
+    });
+    throw error; // 保持原行为：由 enqueueGamepadTaskDetached 统一 catch
+  }
   log(opts, `切页 → ${visibleRouteTitles[idx]}`);
 }
 
@@ -378,6 +566,23 @@ function focusFirst(): boolean {
     // visibility scan and focus(); retrying on the next summon/frame is safe.
     return false;
   }
+}
+
+// A custom dropdown menu is teleported to <body>, but its trigger remains in
+// the owning page/modal. When a modal is open, never let a stale dropdown from
+// the page underneath receive navigation events; this is especially important
+// for the controller shortcut editor, whose action picker must own A/Up/Down.
+function openDropdownTrigger(): HTMLElement | null {
+  const selector = '[aria-expanded="true"][aria-haspopup="listbox"]';
+  const modals = Array.from(document.querySelectorAll<HTMLElement>('[data-gp-modal]'))
+    .filter((el) => {
+      const style = getComputedStyle(el);
+      const r = el.getBoundingClientRect();
+      return style.display !== 'none' && style.visibility !== 'hidden' && r.width > 0 && r.height > 0;
+    });
+  const modal = modals[modals.length - 1] ?? null;
+  if (modal) return modal.querySelector<HTMLElement>(selector);
+  return document.querySelector<HTMLElement>(selector);
 }
 
 function cancelSummonFocus(): void {
@@ -609,31 +814,29 @@ function moveGameCorePolicyFocus(menu: HTMLElement, base: HTMLElement, dx: numbe
   const body = base.closest<HTMLElement>('[data-gp-custom-body]');
   const row = base.closest<HTMLElement>('[data-gp-game-row]');
   const rowKey = row?.dataset.gpGameRow || '';
-  const coreRows = [
-    'custom-core-big-toggle',
-    'custom-core-big-picker',
-    'custom-core-smt-toggle',
-    'custom-core-smt-picker',
+  // 专属配置里的两列平行设置行：核心/超线程一行，手柄/陀螺仪一行。
+  const pairRows = [
+    ['custom-core-big-picker', 'custom-core-smt-picker'],
+    ['custom-input-pad', 'custom-input-gyro'],
   ];
-  if (!body || !coreRows.includes(rowKey)) return undefined;
+  if (!body || !pairRows.some((keys) => keys.includes(rowKey))) return undefined;
 
-  const targets = coreRows
-    .map((key) => ({ key, target: gameMenuControlForRow(menu, key) }))
-    .filter((item): item is { key: string; target: HTMLElement } => !!item.target);
-  const index = targets.findIndex((item) => item.key === rowKey && item.target === base);
-  if (index < 0) return null;
+  // 每行是两个平行下拉。控制器左右在同行的两列间移动、上下沿同列跨行，
+  // 而不是按 DOM（列优先）顺序或空间几何跳到相邻的 AC/DC 控件。
+  const currentRow = pairRows.findIndex((keys) => keys.includes(rowKey));
+  const currentCol = pairRows[currentRow].indexOf(rowKey);
+  if (currentCol < 0) return null;
 
-  if (dy !== 0) return targets[index + (dy > 0 ? 1 : -1)]?.target || null;
-
-  // A right/left press is also a valid way to reach the paired selector.
-  // The vertical layout remains the primary order, but this removes dependence
-  // on card width or the spatial-geometry heuristic.
   if (dx !== 0) {
-    const pairedKey = rowKey.endsWith('-toggle')
-      ? rowKey.replace('-toggle', '-picker')
-      : rowKey.replace('-picker', '-toggle');
-    const paired = targets.find((item) => item.key === pairedKey)?.target;
-    if (paired) return paired;
+    const targetKey = pairRows[currentRow][currentCol + (dx > 0 ? 1 : -1)];
+    // At a horizontal edge stay inside the visual row; generic geometry must
+    // not leak focus into a nearby AC/DC control.
+    return targetKey ? gameMenuControlForRow(menu, targetKey) || base : base;
+  }
+
+  if (dy !== 0) {
+    const targetKey = pairRows[currentRow + (dy > 0 ? 1 : -1)]?.[currentCol];
+    if (targetKey) return gameMenuControlForRow(menu, targetKey) || null;
   }
   return null;
 }
@@ -659,17 +862,18 @@ function moveGameMenuFocus(menu: HTMLElement, base: HTMLElement, dy: number): HT
   if (customPanel) {
     const footerIndex = rows.indexOf('footer');
     const customRows = ['custom-ac', 'custom-dc'];
-    if (customPanel.querySelector('[data-gp-game-row="custom-core-big-toggle"]')) customRows.push('custom-core-big-toggle');
+    // 语义行序 == 视觉行序：核心/超线程一行，手柄/陀螺仪一行，最后操作行。
     if (customPanel.querySelector('[data-gp-game-row="custom-core-big-picker"]')) customRows.push('custom-core-big-picker');
-    if (customPanel.querySelector('[data-gp-game-row="custom-core-smt-toggle"]')) customRows.push('custom-core-smt-toggle');
     if (customPanel.querySelector('[data-gp-game-row="custom-core-smt-picker"]')) customRows.push('custom-core-smt-picker');
+    if (customPanel.querySelector('[data-gp-game-row="custom-input-pad"]')) customRows.push('custom-input-pad');
+    if (customPanel.querySelector('[data-gp-game-row="custom-input-gyro"]')) customRows.push('custom-input-gyro');
     if (customPanel.querySelector('[data-gp-game-row="custom-actions"]')) customRows.push('custom-actions');
     rows.splice(footerIndex, 0, ...customRows);
   }
   const index = rows.indexOf(currentRow);
   if (index < 0) return null;
 
-  // FSR import intentionally returns to the third control in the first row:
+  // FSR import intentionally returns to the first control in the first row:
   // “切换程序”. Keep this route semantic instead of relying on visual nearest
   // distance, which changes under high UI zoom.
   if (dy < 0 && base.dataset.gpGameControl === 'fsr-import') {
@@ -1048,10 +1252,17 @@ function adjustSlider(delta: number) {
   const el = document.activeElement as HTMLElement | null;
   if (el && el.tagName === 'INPUT' && (el as HTMLInputElement).type === 'range') {
     const inp = el as HTMLInputElement;
-    const step = Number(inp.step) || 1;
+    // Opted-in Slider controls use step="any" to preserve off-grid Steam
+    // values. Their actual user-input grid must also apply to gamepad edits.
+    const step = Number(inp.dataset.gpStep) || Number(inp.step) || 1;
     const max = Number(inp.max);
     const min = Number(inp.min);
     let v = Number(inp.value) + delta * step;
+    if (inp.dataset.gpStepBase !== undefined) {
+      const base = Number(inp.dataset.gpStepBase);
+      const index = (Number(inp.value) - base) / step;
+      v = base + (delta > 0 ? Math.floor(index) + delta : Math.ceil(index) + delta) * step;
+    }
     v = Math.max(min, Math.min(max, v));
     inp.value = String(v);
     inp.dispatchEvent(new Event('input', { bubbles: true }));
@@ -1075,7 +1286,8 @@ function microAdjustSlider(now: number, heldL: boolean, heldR: boolean, lt: bool
   const held = now - sliderAccelStart;
   let step = 1;
   let interval = SLIDER_REPEAT_BASE;
-  if (held > SLIDER_ACCEL_DELAY) {
+  const accelerated = (document.activeElement as HTMLElement | null)?.dataset.gpAccelerate !== 'false';
+  if (accelerated && held > SLIDER_ACCEL_DELAY) {
     step = Math.min(1 + Math.floor((held - SLIDER_ACCEL_DELAY) / SLIDER_ACCEL_STEP), SLIDER_ACCEL_CAP);
     interval = Math.max(SLIDER_REPEAT_MIN, SLIDER_REPEAT_BASE - Math.floor(held / 400) * 15);
   }
@@ -1171,7 +1383,7 @@ function dispatchNativeUiAction(opts: GamepadEngineOptions, action: NativeUiActi
     else if (dy !== 0) sliderEditMode = false;
     return;
   }
-  const ddTrigger = document.querySelector<HTMLElement>('[aria-expanded="true"][aria-haspopup="listbox"]');
+  const ddTrigger = openDropdownTrigger();
   if (ddTrigger) {
     if (dy !== 0) {
       ddTrigger.dispatchEvent(new CustomEvent('gp:dropdown-nav', { bubbles: true, detail: { dir: dy } }));
@@ -1360,9 +1572,7 @@ function tick(opts: GamepadEngineOptions) {
           // ── 下拉菜单打开（teleport 到 body）时：只上下在菜单项内移动高亮，
           //    焦点严格限制在菜单内，不穿透到下层页面（修复手柄上下选出菜单外内容）；
           //    左右方向键不做事（与鼠标菜单一致，不再循环档位）──
-          const ddTrigger = document.querySelector<HTMLElement>(
-            '[aria-expanded="true"][aria-haspopup="listbox"]'
-          );
+          const ddTrigger = openDropdownTrigger();
           if (ddTrigger) {
             if (dirY !== 0) {
               // 上下：驱动 Dropdown 自己的 highlight（视觉与焦点一致），不跳出菜单
@@ -1398,6 +1608,9 @@ function tick(opts: GamepadEngineOptions) {
 
 export function startGamepad(opts: GamepadEngineOptions): () => void {
   engineOpts = opts;
+  inputOwnerRuntime.start();
+  traceGamepadAdmission('engine-start', '', { trigger: 'app-mount' });
+  publishOwnerTrace();
   void refreshVisibleRoutes();
   if (rafId) return () => stopGamepad();
   prevButtons = [];
@@ -1425,7 +1638,17 @@ function stopGamepadLoop() {
   rafId = 0;
 }
 export function stopGamepad() {
+  traceGamepadAdmission('engine-stop', '', {});
   if (mouseModeCleanup) { mouseModeCleanup(); mouseModeCleanup = null; }
   cancelSummonFocus();
   stopGamepadLoop();
+  inputOwnerRuntime.stop('close');
+  publishOwnerTrace();
+  restartGamepadState();
+  summonActive = false;
+  summonSuppress = false;
+  nativeUiInputActive = false;
+  nativeChildInputOwned = false;
+  inputHostTargetActive = false;
+  engineOpts = null;
 }

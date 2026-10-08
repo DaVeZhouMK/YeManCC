@@ -3,6 +3,12 @@ param()
 
 $ErrorActionPreference = 'Stop'
 
+# Windows PowerShell launched by pnpm/pwsh must resolve its own built-in modules first.
+$ownModules = Join-Path $PSHOME 'Modules'
+if (($env:PSModulePath -split ';')[0].TrimEnd('\') -ine $ownModules.TrimEnd('\')) {
+  $env:PSModulePath = $ownModules + ';' + $env:PSModulePath
+}
+
 function Get-Sha256([string]$Path) {
   return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash
 }
@@ -22,6 +28,8 @@ function Copy-TreeChecked([string]$Source, [string]$Destination) {
 }
 
 $testRoot = Join-Path ([IO.Path]::GetTempPath()) ('yeman-updater-rollback-' + [guid]::NewGuid().ToString('N'))
+$fixtureTempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\')
+if (-not ([IO.Path]::GetFullPath($testRoot).StartsWith($fixtureTempRoot + '\', [StringComparison]::OrdinalIgnoreCase))) { throw 'Rollback fixture root escapes TEMP' }
 $programSource = Join-Path $testRoot 'package\YeManCC'
 $powerControlSource = Join-Path $testRoot 'package\PowerControl'
 $exeDir = Join-Path $testRoot 'installed\YeManCC'

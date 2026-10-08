@@ -94,7 +94,9 @@ try {
   New-Item -ItemType Directory -Force -Path $portableRoot, $dataRoot, $brokenRoot | Out-Null
   Get-ChildItem -LiteralPath $sourceRoot -Force | Copy-Item -Destination $portableRoot -Recurse -Force
   Get-ChildItem -LiteralPath $sourceRoot -Force | Copy-Item -Destination $brokenRoot -Recurse -Force
-  Remove-Item -LiteralPath (Join-Path $brokenRoot 'workspace-ui') -Recurse -Force
+  $brokenUi = [IO.Path]::GetFullPath((Join-Path $brokenRoot 'workspace-ui'))
+  Assert-True $brokenUi.StartsWith([IO.Path]::GetFullPath($testRoot) + '\', [StringComparison]::OrdinalIgnoreCase) 'unsafe broken UI deletion target'
+  Remove-Item -LiteralPath $brokenUi -Recurse -Force
   [Environment]::SetEnvironmentVariable('YEMAN_STEAM_BIG_PICTURE_DATA_ROOT', $dataRoot, 'Process')
   Invoke-HealthProbe $portableRoot $dataRoot $true
   Invoke-HealthProbe $brokenRoot $dataRoot $false
@@ -104,6 +106,8 @@ try {
 } finally {
   [Environment]::SetEnvironmentVariable('YEMAN_STEAM_BIG_PICTURE_DATA_ROOT', $previousDataRoot, 'Process')
   Stop-TestWebViewProcesses $testRoot
+  $resolvedTestRoot = [IO.Path]::GetFullPath($testRoot)
+  Assert-True ($resolvedTestRoot.StartsWith($tempParent + '\', [StringComparison]::OrdinalIgnoreCase) -and $resolvedTestRoot -eq $testRoot) 'unsafe cleanup target'
   for ($attempt = 1; $attempt -le 20 -and (Test-Path -LiteralPath $testRoot); $attempt++) {
     Remove-Item -LiteralPath $testRoot -Recurse -Force -ErrorAction SilentlyContinue
     if (Test-Path -LiteralPath $testRoot) { Start-Sleep -Milliseconds 250 }

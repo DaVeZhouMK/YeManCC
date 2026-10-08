@@ -3,7 +3,6 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import AppIcon from '@/components/AppIcon.vue';
 import { focusGamepadElement } from '@/gamepad/focus';
 import Dropdown from '@/components/Dropdown.vue';
-import Toggle from '@/components/Toggle.vue';
 import {
   FLOAT_PROFILES,
   getTdpTarget,
@@ -25,8 +24,11 @@ import {
   type ScheduleProfile,
 } from '@/bridge/performanceSchedule';
 import { detectPowerMode } from '@/bridge/yeman';
+import { powerSourceMode } from '@/bridge/powerSource';
+import { on } from '@/bridge/ipc';
 import { detectedGameName, type DetectedGame } from '@/bridge/gamedetect';
 import { tryAcquireQuickAction } from '@/bridge/quickActionLock';
+import { closeJoyxoffIfRunning } from '@/bridge/gameproc';
 import {
   applyGameCorePolicy,
   clearGameCorePolicy,
@@ -74,9 +76,52 @@ const CPU_FLOAT_LABEL: Record<FloatProfile, string> = {
   aggressive: `${(FLOAT_PROFILES.aggressive.min / 1000).toFixed(1)}Ghz-${(FLOAT_PROFILES.aggressive.max / 1000).toFixed(1)}Ghz`,
 };
 
+// A3：当前游戏专属的手柄人格 / 陀螺仪开关，'follow' = 遵循全局（不下发覆盖）。
+type PadPersonaOverride = NonNullable<GameCustomProfile['padPersona']>;
+type GyroOverride = NonNullable<GameCustomProfile['gyroOverride']>;
+
+// 与手柄页同一组 4 档（显示名对齐：本机手柄 / SteamDeck / PS5 / Xbox），
+// 末尾追加「无操作」= 不下发覆盖、遵循全局（默认档）。
+const PAD_PERSONA_OPTIONS: Array<{ value: PadPersonaOverride; label: string; sub: string }> = [
+  { value: 'disabled', label: '本机手柄', sub: '关闭虚拟手柄，保持本机手柄' },
+  { value: 'steamdeck', label: 'SteamDeck', sub: '虚拟手柄：SteamDeck 布局' },
+  { value: 'dualsense-edge', label: 'PS5', sub: '虚拟手柄：DualSense Edge 布局' },
+  { value: 'elite', label: 'Xbox', sub: '虚拟手柄：Elite 布局' },
+  { value: 'follow', label: '无操作', sub: '不下发覆盖，遵循全局手柄设置' },
+];
+// 2026-09-30 用户裁决：去掉「陀螺仪开启」——改为直接用陀螺仪页的四个预设，
+// 选中任一预设即等同于启用陀螺仪（并展开该预设参数），不新建预设。
+const GYRO_OVERRIDE_OPTIONS: Array<{ value: GyroOverride; label: string; sub: string }> = [
+  { value: 'follow', label: '遵循全局', sub: '跟随陀螺仪页面开关与预设' },
+  { value: 'off', label: '陀螺仪关闭', sub: '本游戏强制关闭陀螺仪' },
+  { value: 'fps', label: 'FPS射击', sub: '启用陀螺仪并使用 FPS 射击预设' },
+  { value: 'racing', label: '赛车', sub: '启用陀螺仪并使用赛车预设' },
+  { value: 'custom', label: '自定义', sub: '启用陀螺仪并使用自定义预设' },
+  { value: 'steam', label: 'Steam', sub: '启用陀螺仪并使用 Steam 预设' },
+];
+// 旧档值（选项不再提供）：当前存档正停在 'on' 时如实显示并可切走，
+// 与手柄人格旧档同一口径——不做静默改写。
+const GYRO_LEGACY_OPTIONS: Array<{ value: GyroOverride; label: string; sub: string }> = [
+  { value: 'on', label: '陀螺仪开启（旧档）', sub: '旧配置：启用陀螺仪但不指定预设' },
+];
+const gyroOverrideOptions = computed(() => [
+  ...GYRO_OVERRIDE_OPTIONS,
+  ...GYRO_LEGACY_OPTIONS.filter((item) => item.value === gyroOverride.value),
+]);
+
+function isPadPersonaOverride(value: unknown): value is PadPersonaOverride {
+  return PAD_PERSONA_OPTIONS.some((item) => item.value === value);
+}
+
+function isGyroOverride(value: unknown): value is GyroOverride {
+  return GYRO_OVERRIDE_OPTIONS.some((item) => item.value === value) ||
+    GYRO_LEGACY_OPTIONS.some((item) => item.value === value);
+}
+
 const config = ref<GameCustomConfig>({ version: 1, entries: {}, rtss: {} });
 const schedule = ref<PerformanceScheduleConfig | null>(null);
-const powerSide = ref<PowerSide>('ac');
+const detectedPowerSide = ref<PowerSide>('ac');
+const powerSide = computed<PowerSide>(() => powerSourceMode.value ?? detectedPowerSide.value);
 const selectedModes = ref<Record<PowerSide, ScheduleMode>>({ ac: 'performance', dc: 'performance' });
 const busy = ref(false);
 const error = ref('');
@@ -85,15 +130,20 @@ const expanded = ref(false);
 const lastAppliedIdentity = ref('');
 const lastCorePolicyIdentity = ref('');
 const corePolicyCapabilities = ref<GameCorePolicyCapabilities | null>(null);
-const corePolicyEnabled = ref(false);
-const corePolicyMode = ref<GameCorePolicyMode>('default');
-const hyperThreadPolicyEnabled = ref(false);
+// A1（2026-09-29 用户裁决）：去掉「分配核心 / 超线程控制」开关，改用下拉档位
+// 派生启用状态——非「Windows 默认」档即视为该策略已启用。
+const corePolicyMode = ref<GameCorePolicyMode>('big-small');
 const hyperThreadPolicy = ref<GameHyperThreadMode>('default');
-const corePolicyStatus = ref('');
+// A2：原先落盘后回显的「已应用到当前游戏：CPU Set …」小字已删除；这里只保留
+// 布尔状态，用于拼接 announce 的成功后缀。
+const corePolicyApplied = ref(false);
+// A3：当前游戏专属手柄人格与陀螺仪开关，'follow' = 遵循全局。
+const padPersona = ref<PadPersonaOverride>('follow');
+const gyroOverride = ref<GyroOverride>('follow');
 let stopScheduleListener: (() => void) | null = null;
+let stopPowerSideListener: (() => void) | null = null;
+let stopPowerSideSettledListener: (() => void) | null = null;
 let loadRevision = 0;
-let transientApplyRetryTimer: ReturnType<typeof setTimeout> | null = null;
-let transientApplyRetryCount = 0;
 
 const key = computed(() => {
   const target = props.game;
@@ -107,15 +157,17 @@ const customEnabled = computed(() => entry.value?.enabled === true);
 const gameAvailable = computed(() => !!props.game && !!key.value);
 const gameName = computed(() => detectedGameName(props.game) || props.game?.name || key.value || '当前游戏');
 const scheduleEnabled = computed(() => schedule.value?.enabled === true);
-const corePolicyVisible = computed(() => hasConfiguration.value && (
-  corePolicyCapabilities.value?.heterogeneous === true ||
-  corePolicyCapabilities.value?.smtAvailable === true
-));
-const corePolicyCardClass = computed(() => {
-  const count = Number(corePolicyCapabilities.value?.heterogeneous === true) +
-    Number(corePolicyCapabilities.value?.smtAvailable === true);
-  return count === 1 ? 'single' : 'double';
-});
+// 功能位固定显示：核心调度 / 超线程按硬件能力决定可否操作，陀螺仪在本机手柄时不可操作。
+const corePolicySupported = computed(() => corePolicyCapabilities.value?.heterogeneous === true);
+const hyperThreadSupported = computed(() => corePolicyCapabilities.value?.smtAvailable === true);
+// A1：不再有「分配核心 / 超线程控制」开关，启用状态由下拉档位派生——
+// 非「Windows 默认」档即视为启用。
+const corePolicyActive = computed(() =>
+  corePolicyCapabilities.value?.heterogeneous === true && corePolicyMode.value !== 'default');
+const hyperThreadActive = computed(() =>
+  corePolicyCapabilities.value?.smtAvailable === true && hyperThreadPolicy.value !== 'default');
+// A3：选「本机手柄」时陀螺仪无法操作——陀螺仪下拉禁用并暗调。
+const gyroLockedByNativePad = computed(() => padPersona.value === 'disabled');
 
 function isScheduleMode(value: unknown): value is ScheduleMode {
   return typeof value === 'string' && MODE_ORDER.includes(value as ScheduleMode);
@@ -176,6 +228,10 @@ function makeEntry(
   currentSchedule: PerformanceScheduleConfig,
   modes: Record<PowerSide, ScheduleMode>,
 ): GameCustomProfile {
+  // A1：新档默认「大核为主」并立即生效——corePolicyEnabled 由档位派生写盘，
+  // 保持与旧字段兼容（老配置文件缺字段时回落到 Windows 默认 → 未启用）。
+  const corePolicyMode = isCorePolicyMode(current?.corePolicyMode) ? current.corePolicyMode : 'big-small';
+  const hyperThreadPolicy = isHyperThreadMode(current?.hyperThreadPolicy) ? current.hyperThreadPolicy : 'default';
   return {
     displayName: current?.displayName || gameName.value,
     enabled: current?.enabled ?? false,
@@ -183,63 +239,13 @@ function makeEntry(
     dcMode: modes.dc,
     ac: cloneProfile(currentSchedule.profiles.ac[modes.ac]),
     dc: cloneProfile(currentSchedule.profiles.dc[modes.dc]),
-    corePolicyEnabled: current?.corePolicyEnabled ?? false,
-    corePolicyMode: isCorePolicyMode(current?.corePolicyMode) ? current.corePolicyMode : 'default',
-    hyperThreadPolicyEnabled: current?.hyperThreadPolicyEnabled ?? false,
-    hyperThreadPolicy: isHyperThreadMode(current?.hyperThreadPolicy) ? current.hyperThreadPolicy : 'default',
+    corePolicyEnabled: corePolicyMode !== 'default',
+    corePolicyMode,
+    hyperThreadPolicyEnabled: hyperThreadPolicy !== 'default',
+    hyperThreadPolicy,
+    padPersona: isPadPersonaOverride(current?.padPersona) ? current.padPersona : 'follow',
+    gyroOverride: isGyroOverride(current?.gyroOverride) ? current.gyroOverride : 'follow',
   };
-}
-
-function isTransientApplyError(error: unknown): boolean {
-  const messageText = error instanceof Error ? error.message : String(error ?? '');
-  return messageText === 'outdated' ||
-    messageText === 'WebView2 is recovering' ||
-    messageText.includes('IPC worker queue is full or stopping');
-}
-
-function scheduleTransientApplyRetry(): void {
-  if (transientApplyRetryCount >= 2 || transientApplyRetryTimer !== null) return;
-  transientApplyRetryCount += 1;
-  transientApplyRetryTimer = setTimeout(() => {
-    transientApplyRetryTimer = null;
-    if (props.open && customEnabled.value && props.game) void applyExistingProfile();
-  }, 350 * transientApplyRetryCount);
-}
-
-async function applyExistingProfile(): Promise<void> {
-  // A user action (creating/changing/deleting a profile) owns the scheduler
-  // operation. Do not let the background refresh start a competing write.
-  if (busy.value) return;
-  const target = props.game;
-  const current = entry.value;
-  const currentSchedule = schedule.value;
-  if (target && current && current.enabled !== false && currentSchedule && scheduleEnabled.value) {
-    const identity = `${target.pid}:${target.processCreated}:${key.value}`;
-    if (lastAppliedIdentity.value !== identity) {
-      lastAppliedIdentity.value = identity;
-      try {
-        const profiles = profilesForEntry(current, currentSchedule);
-        const applied = await applyGameCustomProfiles(profiles.ac, profiles.dc, {
-          pid: target.pid,
-          processCreated: target.processCreated,
-        });
-        if (!applied) lastAppliedIdentity.value = '';
-        else transientApplyRetryCount = 0;
-      } catch (e) {
-        lastAppliedIdentity.value = '';
-        // These errors are transient during WebView/native recovery or while the
-        // native worker queue is draining. Retry quietly instead of presenting a
-        // red application failure for an operation that has not permanently failed.
-        if (isTransientApplyError(e)) {
-          scheduleTransientApplyRetry();
-        } else {
-          transientApplyRetryCount = 0;
-          announce('', `应用当前游戏专属配置失败：${(e as Error).message}`);
-        }
-      }
-    }
-  }
-  await applyCurrentCorePolicy(target, current);
 }
 
 function corePolicyTarget(target: DetectedGame | null): { pid: number; processCreated: string } | undefined {
@@ -247,13 +253,7 @@ function corePolicyTarget(target: DetectedGame | null): { pid: number; processCr
 }
 
 function corePolicyIsActive(): boolean {
-  const coreActive = corePolicyEnabled.value &&
-    corePolicyCapabilities.value?.heterogeneous === true &&
-    corePolicyMode.value !== 'default';
-  const hyperThreadActive = hyperThreadPolicyEnabled.value &&
-    corePolicyCapabilities.value?.smtAvailable === true &&
-    hyperThreadPolicy.value !== 'default';
-  return coreActive || hyperThreadActive;
+  return corePolicyActive.value || hyperThreadActive.value;
 }
 
 async function applyCurrentCorePolicy(
@@ -264,40 +264,45 @@ async function applyCurrentCorePolicy(
   // 探测失败时保持已有进程限制，避免一次短暂 IPC/系统探测错误把用户
   // 已经启用的专属策略误清掉；下一次识别刷新会继续尝试。
   if (target && current && !corePolicyCapabilities.value) return;
-  if (!target || !current || !corePolicyIsActive()) {
+  if (!target || !current || current.enabled === false || !corePolicyIsActive()) {
     const cleared = await clearGameCorePolicy(current ? corePolicyTarget(target) : undefined);
     if (!cleared) throw new Error('恢复游戏原始 CPU 设置失败');
     lastCorePolicyIdentity.value = '';
-    corePolicyStatus.value = '';
+    corePolicyApplied.value = false;
     return;
   }
   if (lastCorePolicyIdentity.value === identity) return;
   const result = await applyGameCorePolicy(
     corePolicyTarget(target)!,
-    corePolicyEnabled.value ? corePolicyMode.value : 'default',
-    hyperThreadPolicyEnabled.value ? hyperThreadPolicy.value : 'default',
+    corePolicyActive.value ? corePolicyMode.value : 'default',
+    hyperThreadActive.value ? hyperThreadPolicy.value : 'default',
   );
   if (!result?.ok || !result.applied) {
     throw new Error(result?.error || '当前游戏 CPU 设置未应用');
   }
   lastCorePolicyIdentity.value = identity;
-  corePolicyStatus.value = `已应用到当前游戏：CPU Set ${result.cpuSetCount} 个 · 亲和性 ${result.affinityMask}`;
+  corePolicyApplied.value = true;
 }
 
-async function saveCorePolicyPatch(
-  patch: Partial<Pick<GameCustomProfile, 'corePolicyEnabled' | 'corePolicyMode' | 'hyperThreadPolicyEnabled' | 'hyperThreadPolicy'>>,
-  successMessage: string,
-): Promise<void> {
-  const current = entry.value;
-  if (!current || busy.value || !props.game || !key.value) return;
+// A1/A3：气泡内下拉共用同一保存流程——写盘后立即下发。
+// enabled 字段由档位派生写盘，保持与老配置字段兼容。
+// 功能位始终可操作：尚未创建专属条目时，改动任一下拉即自动创建条目。
+async function saveGameCustomPatch(patch: Partial<GameCustomProfile>, successMessage: string): Promise<void> {
+  const currentSchedule = schedule.value;
+  if (busy.value || !props.game || !key.value || !currentSchedule) return;
   loadRevision += 1;
   const release = tryAcquireQuickAction('top-custom-core-policy');
   if (!release) {
     announce('', '已有其它快捷操作正在执行，请稍候');
     return;
   }
-  const previous = current;
-  const nextEntry: GameCustomProfile = { ...current, ...patch };
+  const previous = entry.value;
+  const nextEntry: GameCustomProfile = {
+    ...makeEntry(previous, currentSchedule, selectedModes.value),
+    ...patch,
+  };
+  if ('corePolicyMode' in patch) nextEntry.corePolicyEnabled = nextEntry.corePolicyMode !== 'default';
+  if ('hyperThreadPolicy' in patch) nextEntry.hyperThreadPolicyEnabled = nextEntry.hyperThreadPolicy !== 'default';
   const next: GameCustomConfig = {
     ...config.value,
     entries: { ...config.value.entries, [key.value]: nextEntry },
@@ -307,52 +312,72 @@ async function saveCorePolicyPatch(
     await saveGameCustomConfig(next);
     config.value = next;
     syncCorePolicyFromEntry();
-    lastCorePolicyIdentity.value = '';
-    await applyCurrentCorePolicy(props.game, nextEntry);
-    announce(`${successMessage}${corePolicyStatus.value ? '，并已应用到当前游戏' : ''}`);
+    // Input-only edits are reconciled by the input owner, not process affinity.
+    const coreChanged = 'corePolicyMode' in patch || 'corePolicyEnabled' in patch ||
+      'hyperThreadPolicy' in patch || 'hyperThreadPolicyEnabled' in patch;
+    if (coreChanged) {
+      lastCorePolicyIdentity.value = '';
+      await applyCurrentCorePolicy(props.game, nextEntry);
+    }
+    const suffix = coreChanged && corePolicyApplied.value ? '，并已应用到当前游戏' : '';
+    announce(`${successMessage}${suffix}`);
     emit('changed');
   } catch (e) {
+    // 保存失败时回滚：原本没有条目则删除刚创建的条目。
+    const rollbackEntries = { ...config.value.entries };
+    if (previous) rollbackEntries[key.value] = previous;
+    else delete rollbackEntries[key.value];
     try {
-      await saveGameCustomConfig({
-        ...config.value,
-        entries: { ...config.value.entries, [key.value]: previous },
-      });
+      await saveGameCustomConfig({ ...config.value, entries: rollbackEntries });
     } catch { /* 下一次 load 会重新读取磁盘状态。 */ }
-    config.value = {
-      ...config.value,
-      entries: { ...config.value.entries, [key.value]: previous },
-    };
+    config.value = { ...config.value, entries: rollbackEntries };
     syncCorePolicyFromEntry();
     lastCorePolicyIdentity.value = '';
-    announce('', `保存专属核心设置失败：${(e as Error).message}`);
+    announce('', `保存专属设置失败：${(e as Error).message}`);
   } finally {
     busy.value = false;
     release();
   }
 }
 
-function toggleCorePolicy(value: boolean): void {
-  const nextMode = value && corePolicyMode.value === 'default'
-    ? 'big-small' as GameCorePolicyMode
-    : corePolicyMode.value;
-  void saveCorePolicyPatch(
-    { corePolicyEnabled: value, corePolicyMode: nextMode },
-    value ? '已开启当前游戏分配核心（大核为主）' : '已关闭当前游戏分配核心',
-  );
-}
-
 function selectCorePolicyMode(value: string | number): void {
   if (!isCorePolicyMode(value)) return;
-  void saveCorePolicyPatch({ corePolicyMode: value }, `已选择核心分配：${corePolicyModeOptions.value.find((item) => item.value === value)?.label || value}`);
-}
-
-function toggleHyperThreadPolicy(value: boolean): void {
-  void saveCorePolicyPatch({ hyperThreadPolicyEnabled: value }, value ? '已开启当前游戏超线程控制' : '已关闭当前游戏超线程控制');
+  void saveGameCustomPatch({ corePolicyMode: value }, `已选择核心调度：${corePolicyModeOptions.value.find((item) => item.value === value)?.label || value}`);
 }
 
 function selectHyperThreadPolicy(value: string | number): void {
   if (!isHyperThreadMode(value)) return;
-  void saveCorePolicyPatch({ hyperThreadPolicy: value }, `已选择超线程：${hyperThreadModeOptions.find((item) => item.value === value)?.label || value}`);
+  void saveGameCustomPatch({ hyperThreadPolicy: value }, `已选择超线程开关：${hyperThreadModeOptions.find((item) => item.value === value)?.label || value}`);
+}
+
+function selectPadPersona(value: string | number): void {
+  if (!isPadPersonaOverride(value)) return;
+  // 本机手柄时陀螺仪无法操作：选择本机手柄会把陀螺仪覆盖一并回落为「遵循全局」，
+  // 运行时会强制关闭陀螺仪；此处同步清掉 UI 上的陀螺仪覆盖，避免留下非法组合。
+  const patch: Partial<GameCustomProfile> = { padPersona: value };
+  if (value === 'disabled') patch.gyroOverride = 'follow';
+  const label = PAD_PERSONA_OPTIONS.find((item) => item.value === value)?.label || value;
+  if (value === 'steamdeck') {
+    void selectSteamDeckPad(label);
+    return;
+  }
+  void saveGameCustomPatch(patch, `已选择手柄：${label}`);
+}
+
+// 2026-09-30 用户裁决：切到 SteamDeck 虚拟手柄时鼠标交给 Steam —— JoyXoff 若在跑
+// 先强行关掉，再把切换结果合成一条顶部提示（避免两条状态互相覆盖）。
+async function selectSteamDeckPad(label: string): Promise<void> {
+  const closed = await closeJoyxoffIfRunning().catch(() => false);
+  await saveGameCustomPatch(
+    { padPersona: 'steamdeck' },
+    closed ? `已选择手柄：${label}，并已关闭 JoyXoff` : `已选择手柄：${label}`,
+  );
+}
+
+function selectGyroOverride(value: string | number): void {
+  if (!isGyroOverride(value)) return;
+  if (gyroLockedByNativePad.value) return;
+  void saveGameCustomPatch({ gyroOverride: value }, `已选择陀螺仪：${gyroOverrideOptions.value.find((item) => item.value === value)?.label || value}`);
 }
 
 async function load(): Promise<void> {
@@ -366,10 +391,10 @@ async function load(): Promise<void> {
   syncCorePolicyFromEntry();
   if (!entry.value) lastAppliedIdentity.value = '';
   if (!entry.value) lastCorePolicyIdentity.value = '';
-  powerSide.value = await detectPowerMode().catch(() => 'ac');
+  detectedPowerSide.value = await detectPowerMode().catch(() => 'ac');
   corePolicyCapabilities.value = await detectGameCorePolicy();
   if (revision !== loadRevision || busy.value || !props.open) return;
-  await applyExistingProfile();
+  // Automatic policy application is owned by the resident confirmed-target watcher.
 }
 
 async function createConfiguration(): Promise<void> {
@@ -438,14 +463,17 @@ function isHyperThreadMode(value: unknown): value is GameHyperThreadMode {
 
 function syncCorePolicyFromEntry(): void {
   const current = entry.value;
-  corePolicyEnabled.value = current?.corePolicyEnabled === true;
+  // A1：档位是唯一事实来源；老配置缺字段（或只有旧 enabled 开关）时回落到
+  // Windows 默认档 = 未启用。
   corePolicyMode.value = isCorePolicyMode(current?.corePolicyMode)
     ? current!.corePolicyMode!
     : 'default';
-  hyperThreadPolicyEnabled.value = current?.hyperThreadPolicyEnabled === true;
   hyperThreadPolicy.value = isHyperThreadMode(current?.hyperThreadPolicy)
     ? current!.hyperThreadPolicy!
     : 'default';
+  // A3：同步专属手柄 / 陀螺仪覆盖。
+  padPersona.value = isPadPersonaOverride(current?.padPersona) ? current!.padPersona! : 'follow';
+  gyroOverride.value = isGyroOverride(current?.gyroOverride) ? current!.gyroOverride! : 'follow';
 }
 
 const corePolicyModeOptions = computed(() => {
@@ -628,9 +656,9 @@ watch(() => [props.open, props.game?.pid, props.game?.processCreated], () => {
 
 watch(() => gameAvailable.value, (available) => {
   if (available) return;
-  void clearGameCorePolicy().catch(() => {});
+  // Raw recognition loss must never clear the confirmed game policy here.
   lastCorePolicyIdentity.value = '';
-  corePolicyStatus.value = '';
+  corePolicyApplied.value = false;
   const activeElement = document.activeElement as HTMLElement | null;
   const focusWasInCustom = !!activeElement?.closest('[data-gp-custom-entry], [data-gp-custom-body]');
   expanded.value = false;
@@ -646,6 +674,14 @@ watch(() => gameAvailable.value, (available) => {
 
 onMounted(() => {
   window.addEventListener('game-quick-custom-back', onGamepadCustomBack);
+  const syncPowerSide = ({ ac }: { ac: boolean }): void => {
+    // sourceChanged is immediate; acChanged is the final debounced confirmation.
+    // Listening to both keeps the card responsive without losing the settled
+    // state after a noisy adapter transition.
+    detectedPowerSide.value = Boolean(ac) ? 'ac' : 'dc';
+  };
+  stopPowerSideListener = on<{ ac: boolean }>('power.sourceChanged', syncPowerSide);
+  stopPowerSideSettledListener = on<{ ac: boolean }>('power.acChanged', syncPowerSide);
   stopScheduleListener = onPerformanceScheduleChanged((next) => {
     schedule.value = next;
     syncSelectedModes();
@@ -654,11 +690,13 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
-  if (transientApplyRetryTimer !== null) clearTimeout(transientApplyRetryTimer);
-  transientApplyRetryTimer = null;
   window.removeEventListener('game-quick-custom-back', onGamepadCustomBack);
   stopScheduleListener?.();
   stopScheduleListener = null;
+  stopPowerSideListener?.();
+  stopPowerSideListener = null;
+  stopPowerSideSettledListener?.();
+  stopPowerSideSettledListener = null;
 });
 </script>
 
@@ -684,6 +722,7 @@ onUnmounted(() => {
         <AppIcon name="settings" class="custom-top-label-icon" />
         <strong>专属配置</strong>
         <small>{{ hasConfiguration ? gameName : '未配置' }}</small>
+        <span v-if="customEnabled" class="custom-top-active">当前启用</span>
       </div>
       <div class="custom-top-head-actions">
         <span class="custom-top-chevron" aria-hidden="true">{{ expanded ? '⌃' : '⌄' }}</span>
@@ -719,62 +758,73 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <div
-        v-if="corePolicyVisible"
-        class="game-core-policy-list"
-        :class="corePolicyCardClass"
-        data-gp-group="custom-core-policy"
-      >
-        <div v-if="corePolicyCapabilities?.heterogeneous" class="game-core-policy-card">
-          <div class="game-core-policy-control" data-gp-game-row="custom-core-big-toggle">
-            <Toggle
-              :model-value="corePolicyEnabled"
-              label="分配核心"
-              description="CPU Set + 进程亲和性"
-              color="accent"
-              :disabled="busy"
-              @update:model-value="toggleCorePolicy"
-            />
-          </div>
-          <div class="game-core-policy-picker game-core-policy-control" data-gp-game-row="custom-core-big-picker">
-            <small>核心组合</small>
+      <div class="game-setting-bubble" data-gp-group="custom-core-policy">
+        <div class="game-setting-title"><strong>核心线程控制</strong></div>
+        <div class="game-setting-fields">
+          <div
+            class="game-setting-field"
+            :class="{ locked: !corePolicySupported }"
+            data-gp-game-row="custom-core-big-picker"
+          >
+            <small>核心调度</small>
             <Dropdown
               :model-value="corePolicyMode"
               :options="corePolicyModeOptions"
-              :disabled="busy || !corePolicyEnabled"
+              :disabled="busy || !corePolicySupported"
               color="accent"
-              aria-label="当前游戏大小核心组合"
+              aria-label="当前游戏核心调度"
               @update:model-value="selectCorePolicyMode"
             />
           </div>
-        </div>
-
-        <div v-if="corePolicyCapabilities?.smtAvailable" class="game-core-policy-card">
-          <div class="game-core-policy-control" data-gp-game-row="custom-core-smt-toggle">
-            <Toggle
-              :model-value="hyperThreadPolicyEnabled"
-              label="超线程控制"
-              description="游戏超线程亲和性"
-              color="dc"
-              :disabled="busy"
-              @update:model-value="toggleHyperThreadPolicy"
-            />
-          </div>
-          <div class="game-core-policy-picker game-core-policy-control" data-gp-game-row="custom-core-smt-picker">
-            <small>超线程组合</small>
+          <div
+            class="game-setting-field"
+            :class="{ locked: !hyperThreadSupported }"
+            data-gp-game-row="custom-core-smt-picker"
+          >
+            <small>超线程开关</small>
             <Dropdown
               :model-value="hyperThreadPolicy"
               :options="hyperThreadModeOptions"
-              :disabled="busy || !hyperThreadPolicyEnabled"
+              :disabled="busy || !hyperThreadSupported"
               color="dc"
-              aria-label="当前游戏超线程控制"
+              aria-label="当前游戏超线程开关"
               @update:model-value="selectHyperThreadPolicy"
             />
           </div>
         </div>
       </div>
 
-      <small v-if="corePolicyStatus" class="custom-top-hint core-policy-status">{{ corePolicyStatus }}</small>
+      <div class="game-setting-bubble" data-gp-group="custom-input-override">
+        <div class="game-setting-fields">
+          <div class="game-setting-field" data-gp-game-row="custom-input-pad">
+            <small>选择手柄</small>
+            <Dropdown
+              :model-value="padPersona"
+              :options="PAD_PERSONA_OPTIONS"
+              :disabled="busy"
+              color="accent"
+              aria-label="当前游戏专属手柄"
+              @update:model-value="selectPadPersona"
+            />
+          </div>
+          <div
+            class="game-setting-field"
+            :class="{ locked: gyroLockedByNativePad }"
+            data-gp-game-row="custom-input-gyro"
+          >
+            <small>陀螺仪开关</small>
+            <Dropdown
+              :model-value="gyroOverride"
+              :options="gyroOverrideOptions"
+              :disabled="busy || gyroLockedByNativePad"
+              color="dc"
+              aria-label="当前游戏专属陀螺仪开关"
+              @update:model-value="selectGyroOverride"
+            />
+          </div>
+        </div>
+      </div>
+
       <div v-if="hasConfiguration" class="custom-top-actions" data-gp-custom-actions data-gp-game-row="custom-actions">
         <button
           type="button"
@@ -859,6 +909,17 @@ onUnmounted(() => {
 .custom-top-head > div:first-child { min-width: 0; }
 .custom-top-label { display: flex; align-items: center; gap: 7px; min-width: 0; text-align: center; }
 .custom-top-label small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.custom-top-active {
+  flex: 0 0 auto;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ok) 16%, var(--bg-input));
+  color: var(--ok);
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1.2;
+  white-space: nowrap;
+}
 .custom-top-label-icon { width: 15px; height: 15px; color: var(--accent); flex: 0 0 auto; }
 .custom-top-head strong { font-size: 13px; }
 .custom-top-head-actions { display: inline-flex; align-items: center; justify-content: flex-end; gap: 7px; min-width: 0; }
@@ -924,35 +985,31 @@ onUnmounted(() => {
 .side-name small, .mode-picker > small, .custom-top-hint { color: var(--text-dim); font-size: 11px; white-space: nowrap; }
 .mode-picker { min-width: 0; display: grid; gap: 4px; }
 .mode-picker > small { overflow: hidden; text-overflow: ellipsis; }
-.game-core-policy-list {
-  display: grid;
-  gap: 8px;
-  align-items: stretch;
-}
-.game-core-policy-list.double { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: stretch; }
-.game-core-policy-list.single { grid-template-columns: minmax(0, 1fr); }
-.game-core-policy-card {
-  min-width: 0;
-  display: grid;
-  grid-template-rows: minmax(54px, auto) auto;
-  align-content: start;
-  gap: 5px;
-  padding: 9px 10px 10px;
+/* 设置气泡：一行内「左标题 + 右侧若干平行下拉」。 */
+.game-setting-bubble {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
   border: 1px solid rgba(255,255,255,.055);
   border-radius: 9px;
   background: var(--bg-input);
 }
-.game-core-policy-control { min-width: 0; }
-.game-core-policy-card :deep(.toggle-row) { min-height: 54px; box-sizing: border-box; padding: 0 0 5px; align-items: center; }
-.game-core-policy-card :deep(.toggle-label) { font-size: 12px; }
-.game-core-policy-card :deep(.toggle-desc) {
-  white-space: normal;
-  line-height: 1.25;
+.game-setting-title { flex: 0 0 auto; min-width: 0; }
+.game-setting-title strong { font-size: 12px; }
+.game-setting-fields {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  align-items: end;
 }
-.game-core-policy-picker { display: grid; grid-template-rows: auto minmax(34px, auto); align-content: end; gap: 4px; min-width: 0; width: 100%; }
-.game-core-policy-picker > small { color: var(--text-dim); font-size: 10px; }
-.game-core-policy-picker :deep(.dd), .game-core-policy-picker :deep(.dd-trigger) { width: 100%; }
-.core-policy-status { overflow: hidden; text-overflow: ellipsis; }
+.game-setting-field { min-width: 0; display: grid; grid-template-rows: auto minmax(34px, auto); gap: 4px; }
+.game-setting-field > small { color: var(--text-dim); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.game-setting-field :deep(.dd), .game-setting-field :deep(.dd-trigger) { width: 100%; }
+/* A3：选「本机手柄」时陀螺仪无法操作，整块暗调。 */
+.game-setting-field.locked { opacity: .45; filter: saturate(.6); }
 .custom-top-hint { display: block; }
 .custom-delete-confirm {
   display: grid;

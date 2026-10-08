@@ -106,9 +106,9 @@ export function previewBackgroundOpacity(value: number): number {
   return opacity;
 }
 
-export function setBackgroundOpacity(value: number): number {
+export async function setBackgroundOpacity(value: number): Promise<number> {
   const opacity = normalizeBackgroundOpacity(value);
-  void setUiSettings({ backgroundOpacity: opacity });
+  await setUiSettings({ backgroundOpacity: opacity });
   return previewBackgroundOpacity(opacity);
 }
 
@@ -122,9 +122,9 @@ export function previewBackgroundBlur(value: number): number {
   return blur;
 }
 
-export function setBackgroundBlur(value: number): number {
+export async function setBackgroundBlur(value: number): Promise<number> {
   const blur = normalizeBackgroundBlur(value);
-  void setUiSettings({ backgroundBlur: blur });
+  await setUiSettings({ backgroundBlur: blur });
   return previewBackgroundBlur(blur);
 }
 

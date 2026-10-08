@@ -1,0 +1,3352 @@
+{
+    "schema":  "ymcc-cpu-collector-offline-validation-v1",
+    "validationScope":  "SOFTWARE_TOOL_VALIDATION_ONLY",
+    "rogRegressionPassed":  false,
+    "realCapturePerformed":  false,
+    "comparisonEligible":  false,
+    "capturedAtUtc":  "2026-10-04T06:56:57.3743471Z",
+    "status":  "PASS",
+    "exitCode":  0,
+    "runtime":  {
+                    "version":  "5.1.26100.8875",
+                    "edition":  "Desktop"
+                },
+    "parser":  {
+                   "collectorErrors":  0,
+                   "testErrors":  0,
+                   "functionCount":  58
+               },
+    "collectorPath":  "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\cpu-rog\\Collect-YMCC-CPU.ps1",
+    "collectorSha256":  "2DBA99927EA58F12274A950BD59590D72A9AEC8F1B6A1186F2125163DE000FE5",
+    "testPath":  "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\cpu-rog\\tests\\Test-YMCC-CPU-Collector.ps1",
+    "testSha256":  "011436592C519F05B41E25FC26603F693F834A9D8D026A9B83CAA8D8F4813E3E",
+    "isolation":  "AST helpers + FULL saved script param/dispatcher/serialization/catch/exit. CIM, process/native snapshots, counters, clocks, sleeps, capture-file IO and log-file metadata/open are strict fakes. Only validation JSON output is real file IO.",
+    "caseCount":  41,
+    "passedCaseCount":  41,
+    "failedCaseCount":  0,
+    "checkCount":  758,
+    "failedCheckCount":  0,
+    "cases":  [
+                  {
+                      "name":  "parser-and-path-contract",
+                      "passed":  true,
+                      "checks":  8,
+                      "failure":  null,
+                      "failureLine":  null
+                  },
+                  {
+                      "name":  "microsecond-creation-boundaries-and-full-value-pin",
+                      "passed":  true,
+                      "checks":  11,
+                      "failure":  null,
+                      "failureLine":  null
+                  },
+                  {
+                      "name":  "inventory-null-counter-regression",
+                      "passed":  true,
+                      "checks":  8,
+                      "failure":  null,
+                      "failureLine":  null
+                  },
+                  {
+                      "name":  "full-tree-accounting-privacy-and-self-cost",
+                      "passed":  true,
+                      "checks":  26,
+                      "failure":  null,
+                      "failureLine":  null
+                  },
+                  {
+                      "name":  "foreign-instance-privacy",
+                      "passed":  true,
+                      "checks":  12,
+                      "failure":  null,
+                      "failureLine":  null
+                  },
+                  {
+                      "name":  "unresolved-msedgewebview2.exe---title=YeManCC",
+                      "passed":  true,
+                      "checks":  4,
+                      "failure":  null,
+                      "failureLine":  null
+                  },
+                  {
+                      "name":  "unresolved-msedgewebview2.exe---user-data-dir=C:\\ScopeFixture\\Install-A\\YeManCC.WebView2",
+                      "passed":  true,
+                      "checks":  4,
+                      "failure":  null,
+                      "failureLine":  null
+                  },
+                  {
+                      "name":  "unresolved-YeManFanHost.exe-",
+                      "passed":  true,
+                      "checks":  4,
+                      "failure":  null,
+                      "failureLine":  null
+                  },
+                  {
+                      "name":  "unresolved-YeManInputHost.exe-",
+                      "passed":  true,
+                      "checks":  4,
+                      "failure":  null,
+                      "failureLine":  null
+                  },
+                  {
+                      "name":  "unresolved-YeManRecoveryService.exe-",
+                      "passed":  true,
+                      "checks":  4,
+                      "failure":  null,
+                      "failureLine":  null
+                  },
+                  {
+                      "name":  "unresolved-YeManTdpCtl.exe-",
+                      "passed":  true,
+                      "checks":  4,
+                      "failure":  null,
+                      "failureLine":  null
+                  },
+                  {
+                      "name":  "unresolved-YeManLightSetter.exe-",
+                      "passed":  true,
+                      "checks":  4,
+                      "failure":  null,
+                      "failureLine":  null
+                  },
+                  {
+                      "name":  "invalid-parent-time-2026-10-04T00:00:02.0000000Z",
+                      "passed":  true,
+                      "checks":  1,
+                      "failure":  null,
+                      "failureLine":  null
+                  },
+                  {
+                      "name":  "invalid-parent-time-",
+                      "passed":  true,
+                      "checks":  1,
+                      "failure":  null,
+                      "failureLine":  null
+                  },
+                  {
+                      "name":  "invalid-parent-time-not-a-time",
+                      "passed":  true,
+                      "checks":  1,
+                      "failure":  null,
+                      "failureLine":  null
+                  },
+                  {
+                      "name":  "invalid-parent-time-2026-10-04T00:00:01",
+                      "passed":  true,
+                      "checks":  1,
+                      "failure":  null,
+                      "failureLine":  null
+                  },
+                  {
+                      "name":  "equal-time-case-insensitive-path",
+                      "passed":  true,
+                      "checks":  1,
+                      "failure":  null,
+                      "failureLine":  null
+                  },
+                  {
+                      "name":  "intermediate-edge-cycle-duplicate-and-root-pin",
+                      "passed":  true,
+                      "checks":  5,
+                      "failure":  null,
+                      "failureLine":  null
+                  },
+                  {
+                      "name":  "ambiguous-same-path-roots",
+                      "passed":  true,
+                      "checks":  1,
+                      "failure":  null,
+                      "failureLine":  null
+                  },
+                  {
+                      "name":  "unknown-helper-invalid-edge",
+                      "passed":  true,
+                      "checks":  1,
+                      "failure":  null,
+                      "failureLine":  null
+                  },
+                  {
+                      "name":  "clean-and-unverified-absence",
+                      "passed":  true,
+                      "checks":  2,
+                      "failure":  null,
+                      "failureLine":  null
+                  },
+                  {
+                      "name":  "statistics-sum-before-percentiles-and-null",
+                      "passed":  true,
+                      "checks":  7,
+                      "failure":  null,
+                      "failureLine":  null
+                  },
+                  {
+                      "name":  "coverage-count-deficit-not-lost-sample-proof",
+                      "passed":  true,
+                      "checks":  3,
+                      "failure":  null,
+                      "failureLine":  null
+                  },
+                  {
+                      "name":  "deadline-scheduler-explicit-skips",
+                      "passed":  true,
+                      "checks":  1,
+                      "failure":  null,
+                      "failureLine":  null
+                  },
+                  {
+                      "name":  "full-path-failure-cim-null",
+                      "passed":  true,
+                      "checks":  8,
+                      "failure":  null,
+                      "failureLine":  null
+                  },
+                  {
+                      "name":  "full-path-failure-process-null",
+                      "passed":  true,
+                      "checks":  8,
+                      "failure":  null,
+                      "failureLine":  null
+                  },
+                  {
+                      "name":  "full-path-failure-access-denied",
+                      "passed":  true,
+                      "checks":  8,
+                      "failure":  null,
+                      "failureLine":  null
+                  },
+                  {
+                      "name":  "full-path-failure-identity-changed",
+                      "passed":  true,
+                      "checks":  8,
+                      "failure":  null,
+                      "failureLine":  null
+                  },
+                  {
+                      "name":  "full-path-failure-regression",
+                      "passed":  true,
+                      "checks":  8,
+                      "failure":  null,
+                      "failureLine":  null
+                  },
+                  {
+                      "name":  "full-path-failure-churn",
+                      "passed":  true,
+                      "checks":  8,
+                      "failure":  null,
+                      "failureLine":  null
+                  },
+                  {
+                      "name":  "full-path-failure-pid-reuse",
+                      "passed":  true,
+                      "checks":  8,
+                      "failure":  null,
+                      "failureLine":  null
+                  },
+                  {
+                      "name":  "full-path-failure-inventory-denied",
+                      "passed":  true,
+                      "checks":  8,
+                      "failure":  null,
+                      "failureLine":  null
+                  },
+                  {
+                      "name":  "full-path-failure-self-denied",
+                      "passed":  true,
+                      "checks":  8,
+                      "failure":  null,
+                      "failureLine":  null
+                  },
+                  {
+                      "name":  "full-path-failure-host-failure",
+                      "passed":  true,
+                      "checks":  8,
+                      "failure":  null,
+                      "failureLine":  null
+                  },
+                  {
+                      "name":  "missing-path-control-preflight-and-output-errors",
+                      "passed":  true,
+                      "checks":  4,
+                      "failure":  null,
+                      "failureLine":  null
+                  },
+                  {
+                      "name":  "offline-system-counter-arithmetic",
+                      "passed":  true,
+                      "checks":  530,
+                      "failure":  null,
+                      "failureLine":  null
+                  },
+                  {
+                      "name":  "full-path-fake-system-monotonic-clock",
+                      "passed":  true,
+                      "checks":  3,
+                      "failure":  null,
+                      "failureLine":  null
+                  },
+                  {
+                      "name":  "explicit-log-metadata-without-real-log-IO",
+                      "passed":  true,
+                      "checks":  10,
+                      "failure":  null,
+                      "failureLine":  null
+                  },
+                  {
+                      "name":  "native-wrapper-compile-only-no-native-call",
+                      "passed":  true,
+                      "checks":  3,
+                      "failure":  null,
+                      "failureLine":  null
+                  },
+                  {
+                      "name":  "full-path-explicit-log-manifest-serialization",
+                      "passed":  true,
+                      "checks":  4,
+                      "failure":  null,
+                      "failureLine":  null
+                  },
+                  {
+                      "name":  "evidence-whitelist-does-not-export-secrets",
+                      "passed":  true,
+                      "checks":  6,
+                      "failure":  null,
+                      "failureLine":  null
+                  }
+              ],
+    "checks":  [
+                   {
+                       "name":  "collector-and-tests-parse",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "PS51-UTF8-BOM",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "invalid-exe-path",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "invalid-exe-path",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "invalid-exe-path",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "invalid-exe-path",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "invalid-exe-path",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "fully-qualified-exe-accepted",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "same-1us-bucket-positive-0-100ns-ticks",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "unchanged-full-creation-value-reread-accepted",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "same-1us-bucket-positive-1-100ns-ticks",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "unchanged-full-creation-value-reread-accepted",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "same-1us-bucket-positive-9-100ns-ticks",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "unchanged-full-creation-value-reread-accepted",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "different-bucket-rejected--1-100ns-ticks",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "different-bucket-rejected-10-100ns-ticks",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "different-bucket-rejected-1000-100ns-ticks",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "different-bucket-rejected-20000-100ns-ticks",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "even-same-bucket-creation-change-after-pin-is-rejected",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "null-invalid-CIM-counter-is-not-successful-zero",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "null-invalid-CIM-counter-is-not-successful-zero",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "null-invalid-CIM-counter-is-not-successful-zero",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "null-invalid-CIM-counter-is-not-successful-zero",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "null-invalid-CIM-counter-is-not-successful-zero",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "null-invalid-CIM-counter-is-not-successful-zero",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "null-invalid-CIM-counter-is-not-successful-zero",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "explicit-zero-CIM-counter-remains-valid",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "complete-full-script-path-succeeds",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "13-unique-identities-with-actual-read-times",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "complete-five-process-webview-ledger",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "machine-percent-normalized-by-eight",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "one-core-percent-is-distinct",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "webview-browser",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "webview-renderer",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "webview-gpu-process",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "webview-utility",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "webview-crashpad-handler",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "classification-survives-privacy-projection",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "gyro-and-gamepad-share-once-counted-PID",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "on-request-is-not-runtime-evidence",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "no-raw-output-ROOT_PRIVATE",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "no-raw-output-OWNED_LEASE",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "no-raw-output-PRIVATE_CONFIRM",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "no-raw-output-PRIVATE_TOKEN",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "no-raw-output-PRIVATE_AUTH",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "no-raw-output-PRIVATE_PASSWORD",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "no-raw-output-PRIVATE_DATA_ROOT",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "no-raw-output---embedded-browser-webview",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "no-raw-output---type=renderer",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "owned-rows-no-commandline-field",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "inventory-count-and-latency",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "collector-cost-not-placeholder",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "full-positive-never-signs-real-ROG-comparison",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "foreign-root-barrier-does-not-pollute-target-total",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "foreign-tree-excluded",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "foreign-four-field-whitelist",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "foreign-four-field-whitelist",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "foreign-four-field-whitelist",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "foreign-four-field-whitelist",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "foreign-privacy-FOREIGN_ROOT_SECRET",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "foreign-privacy-PRIVATE_FOREIGN_PATH",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "foreign-privacy-FOREIGN_LEASE",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "foreign-privacy-FOREIGN_CONFIRM",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "foreign-privacy-FOREIGN_AUTH",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "foreign-privacy-D:\\ScopeFixture\\Install-B\\YeManCC.exe",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "unresolved-nonzero-invalid",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "unresolved-total-null",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "unresolved-component-not-zero",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "unresolved-never-signs-real-ROG-comparison",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "unresolved-nonzero-invalid",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "unresolved-total-null",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "unresolved-component-not-zero",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "unresolved-never-signs-real-ROG-comparison",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "unresolved-nonzero-invalid",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "unresolved-total-null",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "unresolved-component-not-zero",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "unresolved-never-signs-real-ROG-comparison",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "unresolved-nonzero-invalid",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "unresolved-total-null",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "unresolved-component-not-zero",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "unresolved-never-signs-real-ROG-comparison",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "unresolved-nonzero-invalid",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "unresolved-total-null",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "unresolved-component-not-zero",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "unresolved-never-signs-real-ROG-comparison",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "unresolved-nonzero-invalid",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "unresolved-total-null",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "unresolved-component-not-zero",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "unresolved-never-signs-real-ROG-comparison",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "unresolved-nonzero-invalid",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "unresolved-total-null",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "unresolved-component-not-zero",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "unresolved-never-signs-real-ROG-comparison",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "newer-missing-malformed-zoneless-parent-rejected",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "newer-missing-malformed-zoneless-parent-rejected",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "newer-missing-malformed-zoneless-parent-rejected",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "newer-missing-malformed-zoneless-parent-rejected",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "equal-creation-parent-edge-accepted",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "reused-or-missing-intermediate-creation-rejected",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "reused-or-missing-intermediate-creation-rejected",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "cycle-fails-closed",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "duplicate-PID-unproven",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "root-instance-never-repinned",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "same-path-instances-not-unioned",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "generic-descendant-not-silently-lost",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "clean-observed-absence-is-zero",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "no-rows-is-not-absence-proof",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "anti-correlated-P95-total-one-not-two",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "component-P95-sum-not-total-P95",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "null-neither-cast-to-zero-nor-silently-dropped",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "bad-interval-not-low-CPU",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "bad-interval-not-low-CPU",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "bad-interval-not-low-CPU",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "uses-actual-monotonic-span",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "actual55-expected60-does-not-imply-five-lost-samples",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "baseline-and-final-boundary-definition",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "jitter-retains-cadence-gap",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "slow-collector-explicitly-skips-slots",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "cim-null-structured-nonzero",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "cim-null-not-low-CPU",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "cim-null-safe-exception-PRIVATE_LEASE",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "cim-null-safe-exception-PRIVATE_AUTH",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "cim-null-safe-exception-INVENTORY_SECRET",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "cim-null-safe-exception-SELF_SECRET",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "cim-null-safe-exception-HOST_SECRET",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "cim-null-never-signs-real-ROG-comparison",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "process-null-structured-nonzero",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "process-null-not-low-CPU",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "process-null-safe-exception-PRIVATE_LEASE",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "process-null-safe-exception-PRIVATE_AUTH",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "process-null-safe-exception-INVENTORY_SECRET",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "process-null-safe-exception-SELF_SECRET",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "process-null-safe-exception-HOST_SECRET",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "process-null-never-signs-real-ROG-comparison",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "access-denied-structured-nonzero",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "access-denied-not-low-CPU",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "access-denied-safe-exception-PRIVATE_LEASE",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "access-denied-safe-exception-PRIVATE_AUTH",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "access-denied-safe-exception-INVENTORY_SECRET",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "access-denied-safe-exception-SELF_SECRET",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "access-denied-safe-exception-HOST_SECRET",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "access-denied-never-signs-real-ROG-comparison",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "identity-changed-structured-nonzero",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "identity-changed-not-low-CPU",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "identity-changed-safe-exception-PRIVATE_LEASE",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "identity-changed-safe-exception-PRIVATE_AUTH",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "identity-changed-safe-exception-INVENTORY_SECRET",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "identity-changed-safe-exception-SELF_SECRET",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "identity-changed-safe-exception-HOST_SECRET",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "identity-changed-never-signs-real-ROG-comparison",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "regression-structured-nonzero",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "regression-not-low-CPU",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "regression-safe-exception-PRIVATE_LEASE",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "regression-safe-exception-PRIVATE_AUTH",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "regression-safe-exception-INVENTORY_SECRET",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "regression-safe-exception-SELF_SECRET",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "regression-safe-exception-HOST_SECRET",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "regression-never-signs-real-ROG-comparison",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "churn-structured-nonzero",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "churn-not-low-CPU",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "churn-safe-exception-PRIVATE_LEASE",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "churn-safe-exception-PRIVATE_AUTH",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "churn-safe-exception-INVENTORY_SECRET",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "churn-safe-exception-SELF_SECRET",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "churn-safe-exception-HOST_SECRET",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "churn-never-signs-real-ROG-comparison",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "pid-reuse-structured-nonzero",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "pid-reuse-not-low-CPU",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "pid-reuse-safe-exception-PRIVATE_LEASE",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "pid-reuse-safe-exception-PRIVATE_AUTH",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "pid-reuse-safe-exception-INVENTORY_SECRET",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "pid-reuse-safe-exception-SELF_SECRET",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "pid-reuse-safe-exception-HOST_SECRET",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "pid-reuse-never-signs-real-ROG-comparison",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "inventory-denied-structured-nonzero",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "inventory-denied-not-low-CPU",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "inventory-denied-safe-exception-PRIVATE_LEASE",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "inventory-denied-safe-exception-PRIVATE_AUTH",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "inventory-denied-safe-exception-INVENTORY_SECRET",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "inventory-denied-safe-exception-SELF_SECRET",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "inventory-denied-safe-exception-HOST_SECRET",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "inventory-denied-never-signs-real-ROG-comparison",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "self-denied-structured-nonzero",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "self-denied-not-low-CPU",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "self-denied-safe-exception-PRIVATE_LEASE",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "self-denied-safe-exception-PRIVATE_AUTH",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "self-denied-safe-exception-INVENTORY_SECRET",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "self-denied-safe-exception-SELF_SECRET",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "self-denied-safe-exception-HOST_SECRET",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "self-denied-never-signs-real-ROG-comparison",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "host-failure-structured-nonzero",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "host-failure-not-low-CPU",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "host-failure-safe-exception-PRIVATE_LEASE",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "host-failure-safe-exception-PRIVATE_AUTH",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "host-failure-safe-exception-INVENTORY_SECRET",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "host-failure-safe-exception-SELF_SECRET",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "host-failure-safe-exception-HOST_SECRET",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "host-failure-never-signs-real-ROG-comparison",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "missing-path-before-system-read",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "states-alone-not-control-evidence",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "output-init-structured-safe-failure",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "output-write-never-success",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "system-kernel-includes-idle",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "system-raw-deltas",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "system-kernel-includes-idle",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "system-raw-deltas",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "system-kernel-includes-idle",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "system-raw-deltas",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "system-kernel-includes-idle",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "system-raw-deltas",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "invalid-system-delta",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "invalid-system-delta",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "invalid-system-delta",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "invalid-system-delta",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "invalid-system-delta",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "invalid-system-delta",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-0",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-1",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-2",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-3",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-4",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-5",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-6",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-7",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-8",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-9",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-10",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-11",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-12",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-13",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-14",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-15",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-16",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-17",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-18",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-19",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-20",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-21",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-22",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-23",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-24",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-25",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-26",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-27",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-28",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-29",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-30",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-31",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-32",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-33",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-34",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-35",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-36",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-37",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-38",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-39",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-40",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-41",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-42",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-43",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-44",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-45",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-46",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-47",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-48",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-49",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-50",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-51",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-52",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-53",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-54",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-55",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-56",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-57",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-58",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-59",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-60",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-61",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-62",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-63",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-64",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-65",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-66",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-67",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-68",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-69",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-70",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-71",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-72",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-73",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-74",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-75",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-76",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-77",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-78",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-79",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-80",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-81",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-82",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-83",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-84",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-85",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-86",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-87",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-88",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-89",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-90",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-91",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-92",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-93",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-94",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-95",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-96",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-97",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-98",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-99",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-100",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-101",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-102",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-103",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-104",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-105",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-106",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-107",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-108",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-109",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-110",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-111",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-112",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-113",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-114",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-115",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-116",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-117",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-118",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-119",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-120",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-121",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-122",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-123",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-124",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-125",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-126",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-127",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-128",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-129",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-130",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-131",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-132",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-133",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-134",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-135",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-136",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-137",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-138",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-139",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-140",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-141",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-142",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-143",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-144",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-145",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-146",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-147",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-148",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-149",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-150",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-151",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-152",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-153",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-154",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-155",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-156",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-157",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-158",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-159",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-160",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-161",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-162",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-163",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-164",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-165",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-166",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-167",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-168",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-169",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-170",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-171",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-172",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-173",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-174",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-175",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-176",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-177",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-178",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-179",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-180",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-181",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-182",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-183",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-184",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-185",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-186",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-187",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-188",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-189",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-190",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-191",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-192",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-193",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-194",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-195",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-196",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-197",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-198",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-199",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-200",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-201",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-202",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-203",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-204",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-205",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-206",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-207",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-208",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-209",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-210",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-211",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-212",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-213",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-214",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-215",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-216",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-217",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-218",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-219",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-220",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-221",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-222",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-223",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-224",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-225",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-226",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-227",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-228",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-229",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-230",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-231",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-232",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-233",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-234",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-235",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-236",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-237",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-238",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-239",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-240",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-241",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-242",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-243",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-244",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-245",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-246",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-247",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-248",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-249",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-250",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-251",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-252",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-253",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-254",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-255",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-256",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-257",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-258",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-259",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-260",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-261",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-262",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-263",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-264",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-265",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-266",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-267",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-268",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-269",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-270",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-271",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-272",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-273",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-274",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-275",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-276",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-277",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-278",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-279",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-280",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-281",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-282",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-283",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-284",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-285",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-286",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-287",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-288",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-289",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-290",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-291",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-292",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-293",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-294",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-295",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-296",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-297",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-298",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-299",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-300",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-301",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-302",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-303",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-304",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-305",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-306",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-307",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-308",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-309",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-310",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-311",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-312",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-313",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-314",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-315",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-316",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-317",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-318",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-319",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-320",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-321",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-322",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-323",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-324",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-325",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-326",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-327",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-328",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-329",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-330",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-331",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-332",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-333",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-334",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-335",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-336",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-337",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-338",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-339",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-340",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-341",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-342",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-343",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-344",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-345",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-346",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-347",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-348",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-349",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-350",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-351",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-352",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-353",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-354",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-355",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-356",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-357",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-358",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-359",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-360",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-361",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-362",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-363",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-364",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-365",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-366",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-367",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-368",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-369",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-370",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-371",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-372",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-373",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-374",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-375",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-376",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-377",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-378",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-379",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-380",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-381",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-382",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-383",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-384",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-385",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-386",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-387",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-388",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-389",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-390",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-391",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-392",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-393",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-394",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-395",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-396",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-397",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-398",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-399",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-400",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-401",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-402",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-403",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-404",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-405",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-406",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-407",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-408",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-409",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-410",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-411",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-412",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-413",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-414",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-415",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-416",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-417",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-418",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-419",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-420",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-421",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-422",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-423",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-424",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-425",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-426",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-427",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-428",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-429",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-430",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-431",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-432",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-433",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-434",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-435",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-436",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-437",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-438",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-439",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-440",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-441",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-442",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-443",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-444",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-445",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-446",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-447",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-448",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-449",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-450",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-451",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-452",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-453",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-454",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-455",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-456",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-457",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-458",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-459",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-460",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-461",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-462",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-463",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-464",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-465",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-466",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-467",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-468",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-469",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-470",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-471",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-472",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-473",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-474",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-475",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-476",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-477",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-478",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-479",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-480",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-481",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-482",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-483",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-484",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-485",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-486",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-487",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-488",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-489",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-490",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-491",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-492",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-493",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-494",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-495",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-496",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-497",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-498",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-499",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-500",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-501",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-502",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-503",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-504",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-505",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-506",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-507",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-508",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-509",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-510",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "random-counter-511",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "fake-system-baseline-not-zero",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "fake-system-interval",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "fake-over64-CIM-fallback",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "null-system-percent-not-zero",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "CPU-rates-independent-of-wall-time-offset",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "complete-system-path-faked",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "fake-system-never-signs-real-ROG-comparison",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "empty-log-parameter-not-requested",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "explicit-log-skip",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "explicit-log-metadata-bounded-to-six-fakes",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "normal-log-metadata",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "empty-and-missing-distinct",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "denial-and-reparse-not-hidden",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "stale-without-content-read-or-disabled-inference",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "log-path-and-nonallowlisted-basename-hidden",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "sensitive-and-wildcard-logs-rejected-before-IO",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "explicit-log-list-maximum-32",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "native-wrapper-compiles-in-this-runtime-without-process-read",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "compile-only-is-not-real-capture",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "CIM-six-digit-microseconds-preserved",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "full-script-explicit-empty-log-is-observed-not-not-collected",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "full-log-manifest-no-private-path-or-real-log-IO",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "log-metadata-failure-nonzero-separate-from-CPU-validity",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "full-log-never-signs-real-ROG-comparison",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "evidence-not-exported-PRIVATE_TARGET_PATH",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "evidence-not-exported-PRIVATE_INVALID_BIRTH",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "evidence-not-exported-PRIVATE_EVIDENCE_SECRET",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "evidence-not-exported-PRIVATE_TIMESTAMP",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "evidence-not-exported-PRIVATE_SESSION_SECRET",
+                       "passed":  true
+                   },
+                   {
+                       "name":  "unknown-evidence-never-verifies-runtime",
+                       "passed":  true
+                   }
+               ]
+}

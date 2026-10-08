@@ -72,7 +72,6 @@ export function initMusic(): Promise<void> {
   if (initialized) return Promise.resolve();
 
   initialization = (async () => {
-    initialized = true;
     try {
       const st = await musicApi.get();
       if (st.enabled && st.folder && st.baseUrl) {
@@ -86,6 +85,7 @@ export function initMusic(): Promise<void> {
         audio.volume = st.volume;
       }
       if (st.mode === 'random' || st.mode === 'sequential') mode.value = st.mode;
+      initialized = true;
     } catch {
       /* 启动期读取失败不阻塞界面 */
     }
@@ -153,7 +153,12 @@ export function togglePlay(): void {
     pause();
     return;
   }
-  if (index.value < 0 && tracks.value.length > 0) index.value = 0;
+  // 尚未加载音源（初次开始、停止或重新扫描后）按播放模式选曲；暂停继续不换歌。
+  if (mode.value === 'random' && tracks.value.length > 0 && !audio.getAttribute('src')) {
+    index.value = Math.floor(Math.random() * tracks.value.length);
+  } else if (index.value < 0 && tracks.value.length > 0) {
+    index.value = 0;
+  }
   playCurrent();
 }
 
@@ -244,8 +249,8 @@ export function setVolume(v: number): void {
 export async function persistVolume(): Promise<void> {
   try {
     await musicApi.setVolume(volume.value);
-  } catch {
-    /* native 写失败忽略，下次 change 再试 */
+  } catch (failure) {
+    error.value = `音量保存失败：${(failure as Error).message}`;
   }
 }
 

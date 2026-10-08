@@ -1,0 +1,94 @@
+{
+  "schemaVersion": "T22-P07-StaticEvidenceIndex.v2",
+  "bundleId": "T22-P01-P07-20260904-P05-MOCK-BOUNDARY",
+  "capturedUtc": "2026-09-04T23:19:00.0000000+08:00",
+  "cwd": "G:\\YeManCC-Work",
+  "replaces": {
+    "absolutePath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\T22-BUS-P07-P07-evidence-index-20260904.json",
+    "sha256": "9F85C7373A5C229E50FB2A850C35A0F5696E01431CF4F69AB14D2359C5BCC8F2",
+    "reason": "v1 described P05 as no consumer measurement but did not explicitly distinguish the mock's internal gameInputCount producer from an external consumer measurement producer"
+  },
+  "sourceManifest": {
+    "absolutePath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\T22-BUS-P07-current-source-manifest.json",
+    "manifestId": "T22-P00-20260904-C01-P05-P07-T21T14-DESIGN-CURRENT",
+    "sourceDigest": "3FC345530AD8D974F159D42E94176C4EFE49DC3D77E435B4E3EF9087A1FDAA10",
+    "sourceDigestAlgorithm": "SHA256(UTF8(join(sorted key files, scope + TAB + relativePath + TAB + fileSha256 + TAB + bytes + LF)))",
+    "hcHead": "06c0b9544db2b1f39abf9cd3796225ccfb096103"
+  },
+  "runtimeOperation": false,
+  "buildOrTest": false,
+  "artifacts": [
+    { "absolutePath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\T22-BUS-P07-P01-static-evidence-20260904.raw.md", "sha256": "64DF13C2D9654FDEE9EC367D1C2E1F1ADEFE0EC65F3AFF1D13A836032471D93B", "bytes": 11547 },
+    { "absolutePath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\T22-BUS-P07-P02-static-evidence-20260904.raw.md", "sha256": "A8D43E66F2AD5FBD7C93E4E0E670F0FE4C1049EB5ABD946140B9B7EC9ED9D222", "bytes": 11637 },
+    { "absolutePath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\T22-BUS-P07-P03-P04-static-evidence-20260904.raw.md", "sha256": "D1739D9540A8C019C57986A7BD23DA2B2D59A27ED93120529CA879451805D855", "bytes": 8574 },
+    { "absolutePath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\T22-BUS-P07-P05-P06-static-evidence-20260904.raw.md", "sha256": "D615B1D5DE9D799E03D188EB0EB8F311D78683BD2D0CDF34ECD01F1677ACB8B0", "bytes": 8166 },
+    { "absolutePath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\T22-BUS-P07-P05-supplement-static-evidence-20260904.raw.md", "sha256": "72115F43FE785C6E4F1900D3ED32DCE0D882CF77EE9322882074F4ADC0BC0BDA", "bytes": 7930 },
+    { "absolutePath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\T22-BUS-P07-current-source-line-map-20260904.md", "sha256": "DDA4C66FD3C5FE00D353901B3A11B1C8CB1FFB5872E6DC8C90881675D68027FD", "bytes": 8503 }
+  ],
+  "artifactRule": "The current manifest and porcelain raw are materialized after all evidence artifacts above. Evidence artifacts are excluded from sourceDigest but included in the same post-capture porcelain state.",
+  "rawCommandProvenance": {
+    "P01": "T22-BUS-P07-P01-static-evidence-20260904.raw.md: all commands exitCode 0",
+    "P02": "T22-BUS-P07-P02-static-evidence-20260904.raw.md: all commands exitCode 0",
+    "P03_P04": "T22-BUS-P07-P03-P04-static-evidence-20260904.raw.md: direct-file/metadata commands and bounded searches exitCode 0",
+    "P05_P06": "T22-BUS-P07-P05-P06-static-evidence-20260904.raw.md: all commands exitCode 0",
+    "P05_supplement": "T22-BUS-P07-P05-supplement-static-evidence-20260904.raw.md: bounded source excerpts and source-root identifier search exitCode 0"
+  },
+  "evidenceBoundaryCorrection": {
+    "id": "T22-P05-MOCK-PRODUCER-BOUNDARY-01",
+    "staticFacts": [
+      "inputCoordinatorMock.ts increments gameInputCount for game-report and ymccActionCount for ymcc-semantic-only",
+      "the same file explicitly declares no process, HID, PnP, power, or filesystem side effects",
+      "InputOwnerRuntime is a renderer observability mirror; it increments ymccActionCount only and resets gameInputCount to zero",
+      "bounded src/native/InputHost search excluding the mock located no external Steam/game-consumer measurement producer"
+    ],
+    "forbiddenInference": "Neither mock gameInputCount nor renderer gameInputCount=0 proves that Steam or a game received zero physical input.",
+    "disposition": "MOCK-PRODUCER-PRESENT / EXTERNAL-CONSUMER-MEASUREMENT-ABSENT / NOT-A-CONSUMER-MEASUREMENT / RUNTIME-BLOCKED",
+    "sourceChange": "none; a purported external-consumer measurement or block would depend on device identity and runtime consumer behavior, failing TASK E2 T22-Cxx condition (c)"
+  },
+  "auditErrors": [
+    {
+      "id": "T22-P07-CAPTURE-ERR-01",
+      "whenUtc": "2026-09-04",
+      "operation": "initial unbounded rg output collection",
+      "observed": "PowerShell reported insufficient memory; subsequent null TrimEnd error",
+      "sideEffects": ["no source write", "no evidence artifact write", "no runtime operation"],
+      "disposition": "invalid capture attempt; replaced with bounded per-file captures"
+    },
+    {
+      "id": "T22-P07-CAPTURE-ERR-02",
+      "whenUtc": "2026-09-04",
+      "operation": "exploratory sourceDigest reconstruction probe",
+      "observed": "a helper named H collided with the PowerShell Get-History alias and emitted non-terminating argument-binding errors; no usable digest was produced",
+      "sideEffects": ["no source write", "no evidence artifact write", "no runtime operation"],
+      "disposition": "discarded; v2 records a named canonical digest algorithm and a freshly computed digest instead"
+    },
+    {
+      "id": "T22-P07-CAPTURE-ERR-03",
+      "whenUtc": "2026-09-04",
+      "operation": "binary-string probe against the approximately 40 MB HIDMaestro.Core.dll archive",
+      "observed": "rg -a returned binary garbage and the tool response was truncated; it did not yield report descriptor bytes, field layout, or any usable ABI conclusion",
+      "sideEffects": ["no source write", "no evidence artifact write from that output", "no runtime operation"],
+      "disposition": "ignored as descriptor evidence; P03 remains descriptor-unverified and no descriptor layout is inferred from the truncated probe"
+    }
+  ],
+  "pStatus": {
+    "P00": "P05-CURRENT-MANIFEST-AVAILABLE / complete porcelain raw plus reproducible key-file sourceDigest verified",
+    "P01": "SOURCE-LOCATED / ACK-ABSENT / parameter-not-consumed",
+    "P02": "SOURCE-LOCATED / virtual-stick pair gate only / direct-IMU-path-unresolved",
+    "P03": "SOURCE-LOCATED / descriptor-unverified / accel-transport-absent / persona-enforcement-unresolved",
+    "P04": "SOURCE-LOCATED / native product 0x02 sink not located / dormant audit constructor plus legacy P-HID helper remain",
+    "P05": "SOURCE-LOCATED / MOCK-PRODUCER-PRESENT / EXTERNAL-CONSUMER-MEASUREMENT-ABSENT / not-a-consumer-measurement",
+    "P06": "T22-C01-SOURCE-FIX-APPLIED / release-incomplete",
+    "P07": "STATIC-EVIDENCE-BUNDLE-v2 / provenance captured / runtime evidence absent"
+  },
+  "missingForClosure": [
+    "native/Host config transaction and exact ACK/readback",
+    "same-generation provider pairing identity/unit/matrix/sequence/epoch",
+    "HIDMaestro descriptor raw bytes and report decode/readback",
+    "persona enforcement",
+    "P-HID identity/diff/restore receipts",
+    "external consumer measurement",
+    "Coordinator lifecycle/release/recovery proof"
+  ],
+  "nextAllowed": "T22 P00-P07 static bundle is ready. Re-open T21 and T14 from this P05-CURRENT manifest only; direct source changes remain limited to findings meeting TASK E2 T22-Cxx conditions."
+}
