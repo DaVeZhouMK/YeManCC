@@ -85,6 +85,17 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw 'Installed MSVC toolchain discovery failed.' }
           }
           if (-not $installation) { throw 'No installed x86/x64 MSVC toolchain was found.' }
+          # MSVC exports Platform=x64. MSBuild treats it as a project property and
+          # moves .NET outputs to bin/x64/Release, outside the frozen recipe's lane.
+          # Clear only that ambient property; project PlatformTarget/RID remain x64.
+          $env:Platform = $null
+          'Platform=' | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          $inputProperties = & dotnet msbuild InputHost/YeManInputHost.csproj -nologo -p:Configuration=Release -getProperty:Platform,PlatformTarget,OutputPath
+          if ($LASTEXITCODE -ne 0) { throw 'InputHost output-lane evaluation failed.' }
+          $inputProperties = ($inputProperties -join "`n") | ConvertFrom-Json
+          if ($inputProperties.Properties.PlatformTarget -ne 'x64' -or $inputProperties.Properties.OutputPath -ne 'bin\Release\net10.0-windows\') {
+            throw 'Frozen InputHost recipe no longer targets the approved x64 output lane.'
+          }
           $actualRoot = Join-Path $installation 'VC\Auxiliary\Build'
           $legacyRoot = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build'
           $entries = @()
