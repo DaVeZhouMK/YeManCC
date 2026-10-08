@@ -67,6 +67,55 @@ jobs:
         with:
           arch: x64
 
+      - name: Provide frozen-source Visual Studio compatibility entrypoints
+        shell: pwsh
+        run: |
+          # Only provision the disposable hosted runner. No tracked source is edited.
+          $locator = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          # Use the exact toolchain already selected by msvc-dev-cmd (including preview VS).
+          $installation = $env:VSINSTALLDIR
+          if (-not $installation -or -not (Test-Path -LiteralPath $installation -PathType Container)) {
+            $installation = (& $locator -latest -prerelease -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath | Select-Object -First 1)
+            if ($LASTEXITCODE -ne 0) { throw 'Installed MSVC toolchain discovery failed.' }
+          }
+          if (-not $installation) { throw 'No installed x86/x64 MSVC toolchain was found.' }
+          # MSVC exports Platform=x64. MSBuild treats it as a project property and
+          # moves .NET outputs to bin/x64/Release, outside the frozen recipe's lane.
+          # Clear only that ambient property; project PlatformTarget/RID remain x64.
+          $env:Platform = $null
+          'Platform=' | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          $inputProperties = & dotnet msbuild InputHost/YeManInputHost.csproj -nologo -p:Configuration=Release -getProperty:Platform,PlatformTarget,OutputPath
+          if ($LASTEXITCODE -ne 0) { throw 'InputHost output-lane evaluation failed.' }
+          $inputProperties = ($inputProperties -join "`n") | ConvertFrom-Json
+          if ($inputProperties.Properties.PlatformTarget -ne 'x64' -or $inputProperties.Properties.OutputPath -ne 'bin\Release\net10.0-windows\') {
+            throw 'Frozen InputHost recipe no longer targets the approved x64 output lane.'
+          }
+          $actualRoot = Join-Path $installation 'VC\Auxiliary\Build'
+          $legacyRoot = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build'
+          $entries = @()
+          foreach ($name in @('vcvars32.bat', 'vcvars64.bat')) {
+            $actual = Join-Path $actualRoot $name
+            $legacy = Join-Path $legacyRoot $name
+            if (-not (Test-Path -LiteralPath $actual -PathType Leaf)) { throw "Missing installed MSVC entrypoint: $actual" }
+            $created = $false
+            if (-not (Test-Path -LiteralPath $legacy -PathType Leaf)) {
+              New-Item -ItemType Directory -Path $legacyRoot -Force | Out-Null
+              $shim = "@echo off`r`ncall `"$actual`" %*`r`nexit /b %errorlevel%`r`n"
+              [IO.File]::WriteAllText($legacy, $shim, [Text.Encoding]::ASCII)
+              $created = $true
+            }
+            $entries += [ordered]@{ legacy = $legacy; installed = $actual; shimCreated = $created }
+          }
+          $probe = Join-Path $env:RUNNER_TEMP 'probe-yemancc-x86.cmd'
+          $entry32 = Join-Path $legacyRoot 'vcvars32.bat'
+          [IO.File]::WriteAllText($probe, "@echo off`r`ncall `"$entry32`"`r`nif errorlevel 1 exit /b 1`r`nif /i not `"%VSCMD_ARG_TGT_ARCH%`"==`"x86`" exit /b 2`r`nwhere cl.exe`r`nexit /b %errorlevel%`r`n", [Text.Encoding]::ASCII)
+          & $env:ComSpec /d /c $probe
+          if ($LASTEXITCODE -ne 0) { throw 'Frozen-source x86 MSVC entrypoint probe failed.' }
+          git diff --exit-code
+          if ($LASTEXITCODE -ne 0) { throw 'Runner provisioning changed tracked frozen source.' }
+          $record = [ordered]@{ tag = '${{ github.ref_name }}'; tagCommit = (git rev-parse HEAD); tagTree = (git rev-parse 'HEAD^{tree}'); installedVisualStudio = $installation; compatibilityEntrypoints = $entries; trackedSourceChanged = $false; scope = 'Hosted runner toolchain provisioning only; tagged source unchanged.' }
+          $record | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'release-runner-compatibility.json') -Encoding utf8
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
