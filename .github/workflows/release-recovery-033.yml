@@ -78,8 +78,13 @@ jobs:
         run: |
           # Only provision the disposable hosted runner. No tracked source is edited.
           $locator = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
-          $installation = (& $locator -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath | Select-Object -First 1)
-          if ($LASTEXITCODE -ne 0 -or -not $installation) { throw 'No installed x86/x64 MSVC toolchain was found.' }
+          # Use the exact toolchain already selected by msvc-dev-cmd (including preview VS).
+          $installation = $env:VSINSTALLDIR
+          if (-not $installation -or -not (Test-Path -LiteralPath $installation -PathType Container)) {
+            $installation = (& $locator -latest -prerelease -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath | Select-Object -First 1)
+            if ($LASTEXITCODE -ne 0) { throw 'Installed MSVC toolchain discovery failed.' }
+          }
+          if (-not $installation) { throw 'No installed x86/x64 MSVC toolchain was found.' }
           $actualRoot = Join-Path $installation 'VC\Auxiliary\Build'
           $legacyRoot = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build'
           $entries = @()
