@@ -1324,13 +1324,24 @@ function onDynamicBackgroundLoaded(e: Event): void {
     applyBackgroundState(state, 'dynamic');
   }).catch(() => {});
 }
-// 主窗口呼出位置：按设置项 windowPlacement 对齐到当前显示器工作区左侧/右侧（垂直居中）。
-// native window.place 用 GetMonitorInfoW 工作区 + GetWindowRect 全窗口物理像素计算，与 window.center 同源，避免 DPI/客户区尺寸不一致。
-async function applyWindowPlacement(): Promise<void> {
-  await windowApi.place(getUiSetting('windowPlacement')).catch(() => {});
-}
-// 窗口贴左侧时侧边导航栏翻到右侧（贴近屏幕中心侧），与 windowPlacement 联动。
+// Only the main renderer owns placement listeners; unrelated UI settings do not move it.
 const windowPlacement = ref<'left' | 'right'>(getUiSetting('windowPlacement'));
+async function applyWindowPlacement(): Promise<void> {
+  const placed = await windowApi.place(windowPlacement.value);
+  if (!placed) throw new Error('Native window placement failed');
+}
+function reportWindowPlacementError(error: unknown): void {
+  console.warn('[window placement]', error);
+}
+function onWindowPlacementSettingsChanged(): void {
+  const next = getUiSetting('windowPlacement');
+  if (next === windowPlacement.value) return;
+  windowPlacement.value = next;
+  void applyWindowPlacement().catch(reportWindowPlacementError);
+}
+function onWindowPlacementSummoned(): void {
+  void applyWindowPlacement().catch(reportWindowPlacementError);
+}
 onMounted(async () => {
   // A shortcut editor popup is another renderer owned by the same native
   // process, not a second YMCC application instance. Do not start the main
@@ -1342,8 +1353,6 @@ onMounted(async () => {
     window.dispatchEvent(new CustomEvent('app-startup-ready'));
     return;
   }
-  // 主窗口呼出时按设置项对齐到屏幕左/右/居中（loadUiSettings 完成前先用默认值）。
-  void applyWindowPlacement().catch(() => {});
   try {
     aiFanMockActive = parseAiFanMockSession(await app.aiFanMockSession()) !== null;
   } catch (error) {
@@ -1424,12 +1433,10 @@ onMounted(async () => {
   backgroundBlur.value = getBackgroundBlur();
   backgroundVideoAutoPause.value = getUiSetting('videoBatteryPause');
   windowPlacement.value = getUiSetting('windowPlacement');
-  // 用真实设置覆盖早先默认定位；设置页改动时实时生效。
-  void applyWindowPlacement().catch(() => {});
-  window.addEventListener('ui-settings:changed', () => {
-    windowPlacement.value = getUiSetting('windowPlacement');
-    void applyWindowPlacement().catch(() => {});
-  });
+  // Await saved placement before signalling first-paint readiness; never place using defaults first.
+  await applyWindowPlacement().catch(reportWindowPlacementError);
+  window.addEventListener('ui-settings:changed', onWindowPlacementSettingsChanged);
+  window.addEventListener('ui-settings:loaded', onWindowPlacementSettingsChanged);
   window.addEventListener('background:changed', onBackgroundChanged as EventListener);
   window.addEventListener('background:opacity-changed', onBackgroundOpacityChanged as EventListener);
   window.addEventListener('background:blur-changed', onBackgroundBlurChanged as EventListener);
@@ -1440,7 +1447,7 @@ onMounted(async () => {
   window.addEventListener('ipc:window.maximized', onBackgroundWindowShown as EventListener);
   window.addEventListener('ipc:window.summoned', onBackgroundWindowShown as EventListener);
   // 唤起（托盘呼出）时按设置项对齐主窗口位置。
-  window.addEventListener('ipc:window.summoned', () => { void applyWindowPlacement().catch(() => {}); });
+  window.addEventListener('ipc:window.summoned', onWindowPlacementSummoned);
   document.addEventListener('visibilitychange', onBackgroundVisibilityChange);
   const initialWindowState = await windowApi.getState().catch(() => null);
   if (initialWindowState) {
@@ -1650,6 +1657,9 @@ onMounted(async () => {
 onUnmounted(() => {
   stopAiFanService?.();
   stopAiFanService = null;
+  window.removeEventListener('ui-settings:changed', onWindowPlacementSettingsChanged);
+  window.removeEventListener('ui-settings:loaded', onWindowPlacementSettingsChanged);
+  window.removeEventListener('ipc:window.summoned', onWindowPlacementSummoned);
   videoPowerProbeGeneration++;
   if (videoPowerProbeTimer !== null) {
     window.clearTimeout(videoPowerProbeTimer);

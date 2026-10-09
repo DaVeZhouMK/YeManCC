@@ -211,10 +211,16 @@ function onThemeChange(value: string | number): void {
   theme.value = next;
   setTheme(next);
 }
-function onWindowPlacementChange(value: string | number): void {
-  const next = String(value) as 'left' | 'right';
-  windowPlacement.value = next;
-  void setUiSettings({ windowPlacement: next });
+async function onWindowPlacementChange(value: string | number): Promise<void> {
+  if (value !== 'left' && value !== 'right') return;
+  errMsg.value = '';
+  try {
+    await setUiSettings({ windowPlacement: value });
+    windowPlacement.value = getUiSetting('windowPlacement');
+  } catch (error) {
+    windowPlacement.value = getUiSetting('windowPlacement');
+    errMsg.value = '窗口位置保存失败：' + (error instanceof Error ? error.message : String(error));
+  }
 }
 
 // ── 识别软件关闭野蛮系统前端：总开关 + 可编辑进程名列表 ──
