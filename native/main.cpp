@@ -579,9 +579,18 @@ static bool applyFullHeightLayout(HMONITOR preferredMonitor = nullptr, bool dock
     MONITORINFO mi{sizeof(mi)};
     if (!GetMonitorInfoW(mon, &mi)) return false;
     int waX = mi.rcWork.left;
-    int waY = mi.rcWork.top;
     int waW = mi.rcWork.right - mi.rcWork.left;
-    int waH = mi.rcWork.bottom - mi.rcWork.top;
+    // 任务栏隐藏/自动隐藏时，工作区往往仍保留任务栏条带，窗口底部会留缝。
+    // 任务栏不可见或处于自动隐藏时，按整块显示器计算垂直范围，让底部贴屏幕下沿。
+    bool taskbarHidden = false;
+    if (HWND tray = FindWindowW(L"Shell_TrayWnd", nullptr)) {
+        if (!IsWindowVisible(tray)) taskbarHidden = true;
+    }
+    APPBARDATA abd{};
+    abd.cbSize = sizeof(abd);
+    if ((SHAppBarMessage(ABM_GETSTATE, &abd) & ABS_AUTOHIDE) != 0) taskbarHidden = true;
+    int waY = taskbarHidden ? mi.rcMonitor.top : mi.rcWork.top;
+    int waH = (taskbarHidden ? mi.rcMonitor.bottom : mi.rcWork.bottom) - waY;
     if (g_baseW <= 0 || g_baseH <= 0 || waW <= 0 || waH <= 0) return false;
     double R = (double)g_baseW / (double)g_baseH; // 设计基准宽高比
     int targetH = waH;                            // 横屏默认上下贴合全屏

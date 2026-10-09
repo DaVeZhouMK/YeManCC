@@ -117,13 +117,20 @@ using HWND=void*; using HMONITOR=void*; using BOOL=int;
 constexpr int FALSE=0,MONITOR_DEFAULTTONEAREST=2,SWP_NOSIZE=1,SWP_NOZORDER=4,SWP_NOACTIVATE=16;
 struct RECT{long left=0,top=0,right=0,bottom=0;};
 struct MONITORINFO{size_t size;RECT rcMonitor,rcWork;};
+using DWORD=unsigned long;using UINT=unsigned int;using LPARAM=long long;
+constexpr DWORD ABM_GETSTATE=4,ABS_AUTOHIDE=1;
+struct APPBARDATA{DWORD cbSize;HWND hWnd;UINT uCallbackMessage;UINT uEdge;RECT rc;LPARAM lParam;};
 HWND g_hwnd=reinterpret_cast<HWND>(1);bool g_fullHeight=true,zoomed=false,iconic=false,monitorOk=true,rectOk=true,posOk=true,settingsOk=true;
+bool trayExists=true,trayVisible=true;DWORD appbarState=0;RECT monitor{0,0,1920,1080};
 int g_baseW=580,g_baseH=780,moves=0,lastFlags=0;HMONITOR currentMonitor=reinterpret_cast<HMONITOR>(1),targetMonitor=currentMonitor;
 RECT work{0,0,1920,1080},windowRect{0,0,580,780};json settings=json::object();
 json ymSettingsSection(const char*){if(!settingsOk)throw std::runtime_error("settings unavailable");return settings;}
 BOOL IsWindow(HWND h){return h!=nullptr;}BOOL IsZoomed(HWND){return zoomed;}BOOL IsIconic(HWND){return iconic;}
+HWND FindWindowW(const wchar_t*,const wchar_t*){return trayExists?reinterpret_cast<HWND>(2):nullptr;}
+BOOL IsWindowVisible(HWND){return trayVisible;}
+DWORD SHAppBarMessage(DWORD,APPBARDATA*){return appbarState;}
 HMONITOR MonitorFromWindow(HWND,int){return currentMonitor;}HMONITOR focusCurrentTargetMonitor(){return targetMonitor;}
-BOOL GetMonitorInfoW(HMONITOR,MONITORINFO* mi){mi->rcWork=work;return monitorOk;}
+BOOL GetMonitorInfoW(HMONITOR,MONITORINFO* mi){mi->rcWork=work;mi->rcMonitor=monitor;return monitorOk;}
 BOOL GetWindowRect(HWND,RECT* rect){*rect=windowRect;return rectOk;}
 BOOL SetWindowPos(HWND,void*,int x,int y,int w,int h,int flags){++moves;lastFlags=flags;if(!posOk)return FALSE;int width=windowRect.right-windowRect.left,height=windowRect.bottom-windowRect.top;if(!(flags&SWP_NOSIZE)){width=w;height=h;}windowRect={x,y,x+width,y+height};return 1;}
 std::function<json(const json&)> place;
@@ -141,6 +148,8 @@ int main(){try{registerPlace();int tests=0;
  run("negative-origin secondary monitor",[&]{work={-1920,-200,0,880};expect(applyFullHeightLayout(reinterpret_cast<HMONITOR>(2)),"secondary");expect(windowRect.left==-1920&&windowRect.top==-200,"secondary coordinates");});
  run("physical DPI-sized work area",[&]{work={0,0,2560,1440};expect(applyFullHeightLayout(),"dpi area");expect(windowRect.left==0&&windowRect.right==1071&&windowRect.bottom==1440,"physical dimensions");});
  run("portrait narrow-screen protection",[&]{work={0,0,900,1600};expect(applyFullHeightLayout(),"portrait");expect(windowRect.left==0&&windowRect.right==900&&windowRect.top==195,"portrait dimensions");});
+ run("hidden taskbar extends the window to the monitor bottom",[&]{settings["windowPlacement"]="left";trayVisible=false;appbarState=0;work={0,0,1920,1040};monitor={0,0,1920,1080};expect(applyFullHeightLayout(),"hidden tray");expect(windowRect.top==0&&windowRect.bottom==1080,"screen bottom");trayVisible=true;});
+ run("auto-hidden taskbar also fills the screen",[&]{settings["windowPlacement"]="left";appbarState=ABS_AUTOHIDE;work={0,0,1920,1040};monitor={0,0,1920,1080};expect(applyFullHeightLayout(),"autohide tray");expect(windowRect.top==0&&windowRect.bottom==1080,"autohide bottom");appbarState=0;work={0,0,1920,1080};});
  run("explicit IPC right uses full-height layout",[&]{work={0,0,1920,1080};settings["windowPlacement"]="right";expect(place({{"side","right"}})==true,"IPC result");expect(windowRect.left==1117&&windowRect.bottom==1080,"IPC full height");});
  run("invalid IPC side rejected",[&]{bool rejected=false;try{place({{"side","center"}});}catch(...){rejected=true;}expect(rejected,"invalid side");});
  run("maximized/minimized window is not moved",[&]{int before=moves;zoomed=true;expect(place({{"side","left"}})==true,"max result");zoomed=false;iconic=true;expect(place({{"side","left"}})==true,"min result");iconic=false;expect(moves==before,"max/min moved");});
