@@ -572,6 +572,9 @@ static bool g_allowWebviewPermissions = false;
 // Use the existing ui settings section for every native reflow, not a second settings owner.
 static bool windowPlacementIsLeft();
 
+// 判断窗口是否铺满整块显示器（含任务栏条带）。实现位于下方焦点模块，这里前向声明。
+static bool focusWindowCoversMonitor(HWND hwnd, RECT monitorRect);
+
 // Full-height edge layout: startup, summon, DPI and work-area changes share this policy.
 static bool applyFullHeightLayout(HMONITOR preferredMonitor = nullptr, bool dockLeft = windowPlacementIsLeft()) {
     if (!g_hwnd) return false;
@@ -589,6 +592,33 @@ static bool applyFullHeightLayout(HMONITOR preferredMonitor = nullptr, bool dock
     APPBARDATA abd{};
     abd.cbSize = sizeof(abd);
     if ((SHAppBarMessage(ABM_GETSTATE, &abd) & ABS_AUTOHIDE) != 0) taskbarHidden = true;
+    // 全屏游戏会盖住任务栏，但不一定把任务栏窗口隐藏：Shell_TrayWnd 仍然可见、
+    // rcWork 也仍排除任务栏条带，可用户此刻根本看不到任务栏。只按任务栏可见性判断会
+    // 让贴边窗口的底部停在任务栏条带上。下面三种信号任一命中都按整块显示器计算。
+    if (!taskbarHidden) {
+        // 1) 系统报告全屏应用正在运行（独占全屏）。
+        QUERY_USER_NOTIFICATION_STATE quns = QUNS_NOT_PRESENT;
+        if (SUCCEEDED(SHQueryUserNotificationState(&quns)) &&
+            (quns == QUNS_BUSY || quns == QUNS_RUNNING_D3D_FULL_SCREEN)) {
+            taskbarHidden = true;
+        }
+    }
+    if (!taskbarHidden) {
+        // 2) 呼出时保存的目标窗口快照标记为全屏。呼出后前台会变成本窗口，QUNS 也随之
+        //    恢复，所以此刻只能依赖呼出前捕获的快照，否则重排一定漏判。
+        if (g_focusSession.target.valid && g_focusSession.target.fullscreen &&
+            IsWindow(g_focusSession.target.hwnd)) {
+            taskbarHidden = true;
+        }
+    }
+    if (!taskbarHidden) {
+        // 3) 当前前台窗口（非本窗口）仍铺满整块显示器，说明游戏此刻仍在全屏运行。
+        HWND foreground = GetForegroundWindow();
+        if (foreground && foreground != g_hwnd &&
+            focusWindowCoversMonitor(foreground, mi.rcMonitor)) {
+            taskbarHidden = true;
+        }
+    }
     int waY = taskbarHidden ? mi.rcMonitor.top : mi.rcWork.top;
     int waH = (taskbarHidden ? mi.rcMonitor.bottom : mi.rcWork.bottom) - waY;
     if (g_baseW <= 0 || g_baseH <= 0 || waW <= 0 || waH <= 0) return false;

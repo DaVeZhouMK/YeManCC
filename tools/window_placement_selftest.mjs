@@ -129,6 +129,15 @@ BOOL IsWindow(HWND h){return h!=nullptr;}BOOL IsZoomed(HWND){return zoomed;}BOOL
 HWND FindWindowW(const wchar_t*,const wchar_t*){return trayExists?reinterpret_cast<HWND>(2):nullptr;}
 BOOL IsWindowVisible(HWND){return trayVisible;}
 DWORD SHAppBarMessage(DWORD,APPBARDATA*){return appbarState;}
+using QUERY_USER_NOTIFICATION_STATE=int;constexpr int QUNS_NOT_PRESENT=1,QUNS_BUSY=2,QUNS_RUNNING_D3D_FULL_SCREEN=3;int qunsState=QUNS_NOT_PRESENT;
+bool SUCCEEDED(long value){return value>=0;}
+long SHQueryUserNotificationState(QUERY_USER_NOTIFICATION_STATE* state){*state=qunsState;return 0;}
+struct FocusTargetSnapshot{HWND hwnd=nullptr;bool valid=false,fullscreen=false;};
+struct FocusSessionState{FocusTargetSnapshot target;};
+FocusSessionState g_focusSession;
+HWND g_foregroundWindow=nullptr;bool foregroundCoversMonitor=false;
+HWND GetForegroundWindow(){return g_foregroundWindow;}
+bool focusWindowCoversMonitor(HWND,RECT){return foregroundCoversMonitor;}
 HMONITOR MonitorFromWindow(HWND,int){return currentMonitor;}HMONITOR focusCurrentTargetMonitor(){return targetMonitor;}
 BOOL GetMonitorInfoW(HMONITOR,MONITORINFO* mi){mi->rcWork=work;mi->rcMonitor=monitor;return monitorOk;}
 BOOL GetWindowRect(HWND,RECT* rect){*rect=windowRect;return rectOk;}
@@ -150,6 +159,8 @@ int main(){try{registerPlace();int tests=0;
  run("portrait narrow-screen protection",[&]{work={0,0,900,1600};expect(applyFullHeightLayout(),"portrait");expect(windowRect.left==0&&windowRect.right==900&&windowRect.top==195,"portrait dimensions");});
  run("hidden taskbar extends the window to the monitor bottom",[&]{settings["windowPlacement"]="left";trayVisible=false;appbarState=0;work={0,0,1920,1040};monitor={0,0,1920,1080};expect(applyFullHeightLayout(),"hidden tray");expect(windowRect.top==0&&windowRect.bottom==1080,"screen bottom");trayVisible=true;});
  run("auto-hidden taskbar also fills the screen",[&]{settings["windowPlacement"]="left";appbarState=ABS_AUTOHIDE;work={0,0,1920,1040};monitor={0,0,1920,1080};expect(applyFullHeightLayout(),"autohide tray");expect(windowRect.top==0&&windowRect.bottom==1080,"autohide bottom");appbarState=0;work={0,0,1920,1080};});
+ run("fullscreen game occluding the taskbar fills to the monitor bottom",[&]{settings["windowPlacement"]="left";trayVisible=true;appbarState=0;work={0,0,1920,1040};monitor={0,0,1920,1080};qunsState=QUNS_NOT_PRESENT;expect(applyFullHeightLayout(),"windowed");expect(windowRect.top==0&&windowRect.bottom==1040,"windowed respects taskbar");qunsState=QUNS_RUNNING_D3D_FULL_SCREEN;expect(applyFullHeightLayout(),"fullscreen");expect(windowRect.top==0&&windowRect.bottom==1080,"fullscreen bottom");qunsState=QUNS_NOT_PRESENT;work={0,0,1920,1080};});
+ run("fullscreen game snapshots fill to the monitor bottom",[&]{settings["windowPlacement"]="right";trayVisible=true;appbarState=0;work={0,0,1920,1040};monitor={0,0,1920,1080};qunsState=QUNS_NOT_PRESENT;g_focusSession.target.valid=true;g_focusSession.target.fullscreen=true;g_focusSession.target.hwnd=reinterpret_cast<HWND>(3);expect(applyFullHeightLayout(),"summon snapshot");expect(windowRect.top==0&&windowRect.bottom==1080,"snapshot bottom");g_focusSession={};g_foregroundWindow=reinterpret_cast<HWND>(4);foregroundCoversMonitor=true;expect(applyFullHeightLayout(),"live foreground");expect(windowRect.top==0&&windowRect.bottom==1080,"foreground bottom");g_foregroundWindow=nullptr;foregroundCoversMonitor=false;work={0,0,1920,1080};});
  run("explicit IPC right uses full-height layout",[&]{work={0,0,1920,1080};settings["windowPlacement"]="right";expect(place({{"side","right"}})==true,"IPC result");expect(windowRect.left==1117&&windowRect.bottom==1080,"IPC full height");});
  run("invalid IPC side rejected",[&]{bool rejected=false;try{place({{"side","center"}});}catch(...){rejected=true;}expect(rejected,"invalid side");});
  run("maximized/minimized window is not moved",[&]{int before=moves;zoomed=true;expect(place({{"side","left"}})==true,"max result");zoomed=false;iconic=true;expect(place({{"side","left"}})==true,"min result");iconic=false;expect(moves==before,"max/min moved");});
