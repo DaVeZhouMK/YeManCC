@@ -831,7 +831,9 @@ function setUiScale(scale: number) {
 // 先后更新，取最大者保证不会因为某个读数滞后而把 stage 算短（底部露出透明带）。
 function viewportSize(): { w: number; h: number } {
   const dpr = window.devicePixelRatio || 1;
-  const native = nativeViewport.value;
+  // Native window.resized is broadcast by the main HWND to child renderers.
+  // A standalone editor must use its own DOM viewport, not the main window size.
+  const native = isStandaloneEditor.value ? null : nativeViewport.value;
   const root = document.documentElement;
   const vv = window.visualViewport;
   return {
@@ -882,7 +884,7 @@ function settleScale(frames = 90) {
 }
 function onNativeResize(e: Event) {
   const detail = (e as CustomEvent<{ w?: number; h?: number }>).detail;
-  if (detail && Number(detail.w) > 0 && Number(detail.h) > 0) {
+  if (!isStandaloneEditor.value && detail && Number(detail.w) > 0 && Number(detail.h) > 0) {
     nativeViewport.value = { w: Number(detail.w), h: Number(detail.h) };
   }
   updateScale();
@@ -1827,6 +1829,9 @@ onMounted(() => {
 onUnmounted(() => {
   stageResizeObserver?.disconnect();
   stageResizeObserver = null;
+  if (settleRaf) cancelAnimationFrame(settleRaf);
+  settleRaf = 0;
+  settleFrames = 0;
   window.removeEventListener('resize', updateScale);
   window.removeEventListener('ipc:window.resized', onNativeResize as EventListener);
   window.removeEventListener('ipc:window.summoned', refreshScaleAfterSummon as EventListener);
