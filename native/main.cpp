@@ -569,18 +569,20 @@ static int  g_baseH        = 780;    // 设计基准高（缩放比例分母）
 static bool g_resizing     = false;   // WM_ENTERSIZEMOVE / WM_EXITSIZEMOVE guard
 static bool g_allowWebviewPermissions = false;
 
-// 全屏高度 + 右侧吸附布局：
-// 窗口高度 = 工作区高度（上下贴合全屏），宽度按设计基准比例缩放，并吸附屏幕右侧。
-static void applyFullHeightLayout(HMONITOR preferredMonitor = nullptr) {
-    if (!g_hwnd) return;
+// Use the existing ui settings section for every native reflow, not a second settings owner.
+static bool windowPlacementIsLeft();
+
+// Full-height edge layout: startup, summon, DPI and work-area changes share this policy.
+static bool applyFullHeightLayout(HMONITOR preferredMonitor = nullptr, bool dockLeft = windowPlacementIsLeft()) {
+    if (!g_hwnd) return false;
     HMONITOR mon = preferredMonitor ? preferredMonitor : MonitorFromWindow(g_hwnd, MONITOR_DEFAULTTONEAREST);
     MONITORINFO mi{sizeof(mi)};
-    if (!GetMonitorInfoW(mon, &mi)) return;
+    if (!GetMonitorInfoW(mon, &mi)) return false;
     int waX = mi.rcWork.left;
     int waY = mi.rcWork.top;
     int waW = mi.rcWork.right - mi.rcWork.left;
     int waH = mi.rcWork.bottom - mi.rcWork.top;
-    if (g_baseH <= 0) return;
+    if (g_baseW <= 0 || g_baseH <= 0 || waW <= 0 || waH <= 0) return false;
     double R = (double)g_baseW / (double)g_baseH; // 设计基准宽高比
     int targetH = waH;                            // 横屏默认上下贴合全屏
     int targetW = (int)round((double)targetH * R);
@@ -590,9 +592,9 @@ static void applyFullHeightLayout(HMONITOR preferredMonitor = nullptr) {
         targetW = waW;
         targetH = (int)round((double)targetW / R);
     }
-    int x = waX + waW - targetW;                  // 吸附右侧
+    int x = dockLeft ? waX : waX + waW - targetW;  // Saved left/right preference
     int y = widthLimited ? waY + (waH - targetH) / 2 : waY; // 逻辑竖屏时垂直居中
-    SetWindowPos(g_hwnd, nullptr, x, y, targetW, targetH, SWP_NOZORDER | SWP_NOACTIVATE);
+    return SetWindowPos(g_hwnd, nullptr, x, y, targetW, targetH, SWP_NOZORDER | SWP_NOACTIVATE) != FALSE;
 }
 static int  g_effectType   = 0; // 0=none, 2=mica, 3=acrylic, 4=micaAlt
 static bool g_deferFirstShow = false;       // showWhenReady: keep window hidden until WebView2 paints
@@ -2475,6 +2477,16 @@ static json ymSettingsSection(const char* section) {
     const auto all = ymSettingsRead();
     auto it = all.find(section);
     return it != all.end() && it->is_object() ? *it : json::object();
+}
+
+static bool windowPlacementIsLeft() {
+    try {
+        const auto ui = ymSettingsSection("ui");
+        return ui.is_object() && ui.contains("windowPlacement") && ui["windowPlacement"] == "left";
+    } catch (...) {
+        // Broken/unavailable settings must not prevent the shell from opening.
+        return false;
+    }
 }
 static bool ymSettingsPatchSection(const char* section, const json& patch) {
     SettingsFileGuard guard;
@@ -45589,6 +45601,25 @@ static void reg_window() {
         int y = mi.rcWork.top + (mi.rcWork.bottom - mi.rcWork.top - wh) / 2;
         SetWindowPos(g_hwnd, nullptr, x, y, 0, 0, SWP_NOSIZE | SWP_NOZORDER);
         return true;
+    });
+    ipc_on("window.place", [](const json& a) -> json {
+        const std::string side = a.value("side", std::string{});
+        if (side != "left" && side != "right") throw std::runtime_error("Invalid window placement");
+        if (!g_hwnd || !IsWindow(g_hwnd)) return false;
+        // Preserve maximized/minimized state; the saved side applies on the next normal reflow.
+        if (IsZoomed(g_hwnd) || IsIconic(g_hwnd)) return true;
+        if (g_fullHeight) return applyFullHeightLayout(focusCurrentTargetMonitor(), side == "left");
+        RECT wr{};
+        if (!GetWindowRect(g_hwnd, &wr)) return false;
+        const int ww = wr.right - wr.left, wh = wr.bottom - wr.top;
+        const HMONITOR mon = MonitorFromWindow(g_hwnd, MONITOR_DEFAULTTONEAREST);
+        MONITORINFO mi{sizeof(mi)};
+        if (!GetMonitorInfoW(mon, &mi)) return false;
+        const int workH = mi.rcWork.bottom - mi.rcWork.top;
+        const int y = mi.rcWork.top + (std::max)(0, (workH - wh) / 2);
+        const int x = side == "left" ? mi.rcWork.left : mi.rcWork.right - ww;
+        return SetWindowPos(g_hwnd, nullptr, x, y, 0, 0,
+            SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE) != FALSE;
     });
     ipc_on("window.setAlwaysOnTop", [](const json& a) -> json {
         HWND z = a.value("top", true) ? HWND_TOPMOST : HWND_NOTOPMOST;
