@@ -1,4 +1,4 @@
-﻿[CmdletBinding()]
+[CmdletBinding()]
 param([string]$OutputDirectory='', [switch]$RunSelfTests, [switch]$Publish)
 $ErrorActionPreference='Stop'
 # Windows PowerShell launched by pnpm/pwsh must resolve its own modules first.
@@ -40,6 +40,10 @@ if($Publish){
   $packageRoot=Join-Path $projectRoot 'CustomSteamLibrary'
   $manifestPath=Join-Path $packageRoot 'package-manifest.json'
   $manifest=Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
+  # Fresh child builds must inherit the active mainline release, not a stale source manifest.
+  $releaseVersion = Get-Content -LiteralPath (Join-Path $projectRoot 'version.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+  if ([string]$releaseVersion.version -notmatch '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$') { throw 'Invalid mainline version for child package' }
+  $manifest.packageVersion = [string]$releaseVersion.version
   $entry=@($manifest.fileIndex | Where-Object {$_.path -eq 'CustomSteamLibrary.exe'})
   if($entry.Count -ne 1){throw 'Host manifest entry must be unique'}
   $built=Join-Path $OutputDirectory 'CustomSteamLibrary.exe'

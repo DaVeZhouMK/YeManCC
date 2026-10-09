@@ -1,8 +1,8 @@
-﻿{
+{
     "schemaVersion":  2,
     "packageId":  "custom-steam-library",
     "packageType":  "green-child",
-    "packageVersion":  "0.0.33",
+    "packageVersion":  "0.0.34",
     "productName":  "Steam自定义游戏库",
     "productNameEnglish":  "Custom Steam Library",
     "entryPoint":  "CustomSteamLibrary.exe",

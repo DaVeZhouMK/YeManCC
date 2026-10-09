@@ -35,7 +35,7 @@ jobs:
           if ($base -ne '9d79557329c3103b9bb1764f7057b7841bb7e507') { throw 'Original source tag changed.' }
           git merge-base --is-ancestor v0.0.34 HEAD
           if ($LASTEXITCODE -ne 0) { throw 'Recovery source must retain the original release tag history.' }
-          $allowed = @('tools/updater_manager_resume_selftest.ts', '.gitattributes', '.gitignore', '.github/workflows/release-recovery-034.yml', 'decky-plugin/vendor/decky-api-1.1.3/dist/index.js', 'decky-plugin/vendor/decky-api-1.1.3/dist/types.js', 'decky-plugin/vendor/decky-api-1.1.3/dist/index.d.ts', 'decky-plugin/vendor/decky-api-1.1.3/dist/types.d.ts')
+          $allowed = @('tools/build-custom-steam-library-host.ps1', 'tools/build-custom-steam-library-worker.ps1', 'CustomSteamLibrary/package-manifest.json', 'tools/updater_manager_resume_selftest.ts', '.gitattributes', '.gitignore', '.github/workflows/release-recovery-034.yml', 'decky-plugin/vendor/decky-api-1.1.3/dist/index.js', 'decky-plugin/vendor/decky-api-1.1.3/dist/types.js', 'decky-plugin/vendor/decky-api-1.1.3/dist/index.d.ts', 'decky-plugin/vendor/decky-api-1.1.3/dist/types.d.ts')
           $changed = @(git diff --name-only v0.0.34 HEAD)
           if (@($changed | Where-Object { $_ -notin $allowed }).Count) { throw "Unapproved application source changes in dependency recovery: $($changed -join ', ')" }
           $record = [ordered]@{ releaseTag = 'v0.0.34'; originalTagCommit = $base; buildSourceCommit = (git rev-parse HEAD).Trim(); buildSourceTree = (git rev-parse 'HEAD^{tree}').Trim(); dependencyRecovery = $true; applicationSourceChanged = $false; supplementedPaths = $changed; sourceZipUsesBuildSourceCommit = $true }
@@ -245,7 +245,7 @@ jobs:
           }
           [IO.File]::WriteAllText((Join-Path $packageDir 'SHA256SUMS.txt'), (($rows -join "`n") + "`n"), [Text.Encoding]::ASCII)
           $notes = Get-Content -LiteralPath $env:RELEASE_NOTES_PATH -Raw -Encoding utf8
-          $notes += "`n`n## 源码构建身份`n`n本次补齐被 dist 忽略规则漏掉的锁定 Decky SDK 模块，并修正升级测试中写死的候选版本号。应用源码与原始 v0.0.34 标签一致；源码 ZIP 对应实际构建提交 $sourceCommit（包含依赖完整性、版本无关测试夹具与 Git/CI 元数据修复），原始标签未重写。`n"
+          $notes += "`n`n## 源码构建身份`n`n本次补齐被 dist 忽略规则漏掉的锁定 Decky SDK 模块，并修正升级测试中写死的候选版本号及子游戏库版本同步。应用源码与原始 v0.0.34 标签一致；源码 ZIP 对应实际构建提交 $sourceCommit（包含依赖完整性、版本无关测试夹具、子包版本同步与 Git/CI 元数据修复），原始标签未重写。`n"
           $notesFile = Join-Path $env:RUNNER_TEMP 'v0.0.34-release-notes.md'
           [IO.File]::WriteAllText($notesFile, $notes, [Text.UTF8Encoding]::new($false))
           "RELEASE_NOTES_PATH=$notesFile" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
