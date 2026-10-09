@@ -1324,6 +1324,24 @@ function onDynamicBackgroundLoaded(e: Event): void {
     applyBackgroundState(state, 'dynamic');
   }).catch(() => {});
 }
+// Only the main renderer owns placement listeners; unrelated UI settings do not move it.
+const windowPlacement = ref<'left' | 'right'>(getUiSetting('windowPlacement'));
+async function applyWindowPlacement(): Promise<void> {
+  const placed = await windowApi.place(windowPlacement.value);
+  if (!placed) throw new Error('Native window placement failed');
+}
+function reportWindowPlacementError(error: unknown): void {
+  console.warn('[window placement]', error);
+}
+function onWindowPlacementSettingsChanged(): void {
+  const next = getUiSetting('windowPlacement');
+  if (next === windowPlacement.value) return;
+  windowPlacement.value = next;
+  void applyWindowPlacement().catch(reportWindowPlacementError);
+}
+function onWindowPlacementSummoned(): void {
+  void applyWindowPlacement().catch(reportWindowPlacementError);
+}
 onMounted(async () => {
   // A shortcut editor popup is another renderer owned by the same native
   // process, not a second YMCC application instance. Do not start the main
@@ -1414,6 +1432,11 @@ onMounted(async () => {
   backgroundOpacity.value = getBackgroundOpacity();
   backgroundBlur.value = getBackgroundBlur();
   backgroundVideoAutoPause.value = getUiSetting('videoBatteryPause');
+  windowPlacement.value = getUiSetting('windowPlacement');
+  // Await saved placement before signalling first-paint readiness; never place using defaults first.
+  await applyWindowPlacement().catch(reportWindowPlacementError);
+  window.addEventListener('ui-settings:changed', onWindowPlacementSettingsChanged);
+  window.addEventListener('ui-settings:loaded', onWindowPlacementSettingsChanged);
   window.addEventListener('background:changed', onBackgroundChanged as EventListener);
   window.addEventListener('background:opacity-changed', onBackgroundOpacityChanged as EventListener);
   window.addEventListener('background:blur-changed', onBackgroundBlurChanged as EventListener);
@@ -1423,6 +1446,8 @@ onMounted(async () => {
   window.addEventListener('ipc:window.shown', onBackgroundWindowShown as EventListener);
   window.addEventListener('ipc:window.maximized', onBackgroundWindowShown as EventListener);
   window.addEventListener('ipc:window.summoned', onBackgroundWindowShown as EventListener);
+  // 唤起（托盘呼出）时按设置项对齐主窗口位置。
+  window.addEventListener('ipc:window.summoned', onWindowPlacementSummoned);
   document.addEventListener('visibilitychange', onBackgroundVisibilityChange);
   const initialWindowState = await windowApi.getState().catch(() => null);
   if (initialWindowState) {
@@ -1632,6 +1657,9 @@ onMounted(async () => {
 onUnmounted(() => {
   stopAiFanService?.();
   stopAiFanService = null;
+  window.removeEventListener('ui-settings:changed', onWindowPlacementSettingsChanged);
+  window.removeEventListener('ui-settings:loaded', onWindowPlacementSettingsChanged);
+  window.removeEventListener('ipc:window.summoned', onWindowPlacementSummoned);
   videoPowerProbeGeneration++;
   if (videoPowerProbeTimer !== null) {
     window.clearTimeout(videoPowerProbeTimer);
@@ -1752,7 +1780,7 @@ onUnmounted(() => {
         :style="backgroundStyle"
         aria-hidden="true"
       />
-      <div v-if="!isStandaloneEditor" class="app-body">
+      <div v-if="!isStandaloneEditor" class="app-body" :class="{ 'app-body--nav-right': windowPlacement === 'left' }">
         <NavRail />
         <main class="app-main">
           <!-- 顶部监控条：独立于页面滚动层，左右顶满 app-main，不受滚动条宽度影响 -->
@@ -1829,6 +1857,14 @@ onUnmounted(() => {
   min-height: 0;
   position: relative;
   z-index: 1;
+}
+/* 窗口贴左侧时，侧边导航栏翻到右侧（贴近屏幕中心侧）；分隔线随之移到导航栏左缘。 */
+.app-body--nav-right {
+  flex-direction: row-reverse;
+}
+.app-body--nav-right :deep(.navrail) {
+  border-right: none;
+  border-left: 1px solid #1c2533;
 }
 .standalone-body {
   width: 100%;

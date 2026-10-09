@@ -16,6 +16,7 @@
     "release": "pnpm run build && pnpm run package",
     "preview": "vite preview --outDir ../../Build/App/Web",
     "type-check": "vue-tsc --noEmit",
+    "test:window-placement": "node tools/window_placement_selftest.mjs --native",
     "test:music-player": "node tools/music_player_selftest.mjs",
     "test:music-player-alignment-browser": "node tools/music_player_alignment_browser_selftest.mjs",
     "test:steam-inline-power": "node tools/steam_inline_power_selftest.mjs",

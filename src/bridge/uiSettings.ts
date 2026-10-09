@@ -9,6 +9,7 @@ export interface UiSettings {
   videoBatteryPause: boolean;
   scheduleMonitor: boolean;
   steamChartAutoRefresh: 'none' | 'steam' | 'steamdeck';
+  windowPlacement: 'left' | 'right';
 }
 
 const DEFAULTS: UiSettings = {
@@ -19,6 +20,7 @@ const DEFAULTS: UiSettings = {
   videoBatteryPause: true,
   scheduleMonitor: true,
   steamChartAutoRefresh: 'none',
+  windowPlacement: 'right',
 };
 
 let settings: UiSettings = { ...DEFAULTS };
@@ -39,6 +41,7 @@ function normalize(input: Partial<UiSettings>): UiSettings {
     scheduleMonitor: input.scheduleMonitor !== false,
     steamChartAutoRefresh: input.steamChartAutoRefresh === 'steam' || input.steamChartAutoRefresh === 'steamdeck'
       ? input.steamChartAutoRefresh : 'none',
+    windowPlacement: input.windowPlacement === 'left' ? 'left' : 'right',
   };
 }
 

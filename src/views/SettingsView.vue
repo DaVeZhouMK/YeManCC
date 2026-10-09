@@ -63,6 +63,7 @@ const bgEnabled = ref(false);
 const bgBusy = ref(false);
 const bgKind = ref<'image' | 'video'>('image');
 const videoBatteryPause = ref(getUiSetting('videoBatteryPause'));
+const windowPlacement = ref(getUiSetting('windowPlacement'));
 const bgOpacity = ref(Math.round(getBackgroundOpacity() * 100));
 const bgOpacityMax = Math.round(BACKGROUND_OPACITY_MAX * 100);
 const bgOpacityMin = Math.round(BACKGROUND_OPACITY_MIN * 100);
@@ -209,6 +210,17 @@ function onThemeChange(value: string | number): void {
   const next = value as ThemeName;
   theme.value = next;
   setTheme(next);
+}
+async function onWindowPlacementChange(value: string | number): Promise<void> {
+  if (value !== 'left' && value !== 'right') return;
+  errMsg.value = '';
+  try {
+    await setUiSettings({ windowPlacement: value });
+    windowPlacement.value = getUiSetting('windowPlacement');
+  } catch (error) {
+    windowPlacement.value = getUiSetting('windowPlacement');
+    errMsg.value = '窗口位置保存失败：' + (error instanceof Error ? error.message : String(error));
+  }
 }
 
 // ── 识别软件关闭野蛮系统前端：总开关 + 可编辑进程名列表 ──
@@ -624,6 +636,7 @@ onMounted(async () => {
   await ensureUpdateManager();
   await loadUiSettings();
   videoBatteryPause.value = getUiSetting('videoBatteryPause');
+  windowPlacement.value = getUiSetting('windowPlacement');
   bgOpacity.value = Math.round(getBackgroundOpacity() * 100);
   bgBlur.value = getBackgroundBlur();
   dynamicEnabled.value = getDynamicBackgroundConfig().enabled;
@@ -651,7 +664,7 @@ onBeforeUnmount(() => {
     <div v-if="errMsg" class="err-bar page-error">{{ errMsg }}</div>
     <!-- ── 以下内容原属「支持」页面，已合并至设置下方 ── -->
     <section class="card">
-      <h3 class="card-title"><InlineIcon name="palette" /> 界面颜色</h3>
+      <h3 class="card-title"><InlineIcon name="star" /> 界面颜色</h3>
       <SegButton
         :model-value="theme"
         :options="[
@@ -664,6 +677,21 @@ onBeforeUnmount(() => {
         @update:model-value="onThemeChange"
       />
       <p class="muted body">当前颜色：{{ theme === 'blue-black' ? '蓝黑' : theme === 'red-black' ? '红黑' : '赛博朋克' }}</p>
+    </section>
+
+    <section class="card">
+      <h3 class="card-title"><InlineIcon name="target" /> 窗口位置</h3>
+      <SegButton
+        :model-value="windowPlacement"
+        :options="[
+          { value: 'left', label: '左侧' },
+          { value: 'right', label: '右侧' },
+        ]"
+        color="accent"
+        full
+        @update:model-value="onWindowPlacementChange"
+      />
+      <p class="muted body">主窗口启动与托盘呼出时对齐到的屏幕位置，默认右侧。</p>
     </section>
 
     <section class="card background-settings-card">
