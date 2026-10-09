@@ -1,5 +1,10 @@
 /** Real frontend update manager and IPC, with no native process/network/installation. */
 import assert from 'node:assert/strict';
+import { APP_VERSION } from '../src/version';
+// Always exercise a genuinely newer update; a literal 0.0.34 becomes stale at this release.
+const fixtureCurrentVersion = APP_VERSION;
+const versionParts = APP_VERSION.split('.').map(Number);
+const fixtureUpdateVersion = `${versionParts[0]}.${versionParts[1]}.${versionParts[2] + 1}`;
 let listener: (event: {data: any}) => void = () => {};
 const calls: {id:number;cmd:string;args:any}[] = [];
 const sha = 'A'.repeat(64);
@@ -18,10 +23,10 @@ win.chrome = {webview:{
     calls.push(request);
     queueMicrotask(() => {
       if(request.cmd === 'app.updateState') listener({data:{id:request.id,result:{
-        phase:'downloading',stage:'download',operationId:'old-operation',version:'0.0.34',sha256:sha,
+        phase:'downloading',stage:'download',operationId:'old-operation',version:fixtureUpdateVersion,sha256:sha,
         downloadedBytes:4096,totalBytes:8192,resumedBytes:4096,percent:50,
       }}});
-      else if(request.cmd === 'app.checkUpdate') listener({data:{id:request.id,result:{version:'0.0.34',sha256:sha}}});
+      else if(request.cmd === 'app.checkUpdate') listener({data:{id:request.id,result:{version:fixtureUpdateVersion,sha256:sha}}});
       else if(request.cmd === 'app.downloadUpdate') {
         listener({data:{event:'update.progress',data:{operationId:request.args.operationId,phase:'downloading',
           stage:'download',downloadedBytes:6144,totalBytes:8192,resumedBytes:4096,speedBps:2048}}});
@@ -40,12 +45,12 @@ let checks = 0;
 function check(label:string,body:()=>void){body();checks++;console.log('PASS '+label);}
 await manager.ensureUpdateManager();
 check('saved interrupted download remains retryable after manager restart',()=>{
-  assert.equal(manager.updateSnapshot.phase,'interrupted');assert.equal(manager.updateInfo.value?.version,'0.0.34');
+  assert.equal(manager.updateSnapshot.phase,'interrupted');assert.equal(manager.updateInfo.value?.version,fixtureUpdateVersion);
   assert.equal(manager.updateSnapshot.downloadedBytes,4096);assert.equal(manager.updateSnapshot.sha256,sha);
 });
 for(const phase of ['checking','downloading','validating','installing'] as const){
   manager.updateSnapshot.phase=phase;const prior=calls.length;
-  await manager.checkForUpdate('0.0.33');
+  await manager.checkForUpdate(fixtureCurrentVersion);
   check(`busy ${phase} cannot start a competing manifest request`,()=>{
     assert.equal(calls.length,prior);assert.equal(manager.updateSnapshot.phase,phase);
   });
@@ -54,8 +59,8 @@ manager.updateSnapshot.phase='interrupted';manager.updateSnapshot.stage='downloa
 await manager.downloadAndInstall();
 check('continue passes the same version and SHA to downloader',()=>{
   const call=calls.find(x=>x.cmd==='app.downloadUpdate')!;
-  assert.equal(call.args.version,'0.0.34');assert.equal(call.args.sha256,sha);
-  assert.match(call.args.url,/\/v0\.0\.34\/YeManCC\.zip$/);
+  assert.equal(call.args.version,fixtureUpdateVersion);assert.equal(call.args.sha256,sha);
+  assert.ok(call.args.url.endsWith(`/v${fixtureUpdateVersion}/YeManCC.zip`));
 });
 check('accepted native resume progress reaches the UI snapshot',()=>{assert.equal(seenResumeBytes,4096);});
 check('installation only follows a successful download IPC',()=>{
