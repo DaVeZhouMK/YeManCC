@@ -1,0 +1,10 @@
+# OpenSpeedy compatibility blocklist
+# One case-insensitive process/title/path fragment per line.
+# Matching targets are never injected and remain at 1x.
+
+minecraft
+minecraftdungeons
+dungeons-win64-shipping.exe
+java.exe
+javaw.exe
+lwjgl

@@ -1,0 +1,33 @@
+#include "resource.h"
+#include "version.h"
+
+// App icon (Y 字符徽标) — loaded by main.cpp loadAppIcon() via IDI_APP
+IDI_APP ICON "app.ico"
+
+// 版本资源（exe 属性页可见；由 scripts/write-version.mjs 生成的 version.h 注入）
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION APP_VER_MAJOR, APP_VER_MINOR, APP_VER_PATCH, 0
+ PRODUCTVERSION APP_VER_MAJOR, APP_VER_MINOR, APP_VER_PATCH, 0
+ FILEFLAGSMASK 0x3fL
+ FILEFLAGS 0x0L
+ FILEOS 0x40004L
+ FILETYPE 0x1L
+ FILESUBTYPE 0x0L
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "080404b0"
+        BEGIN
+            VALUE "FileDescription", "YeManCC 野蛮系统控制中心"
+            VALUE "FileVersion", APP_VER_STR
+            VALUE "ProductName", "YeManCC"
+            VALUE "ProductVersion", APP_VER_STR
+            VALUE "LegalCopyright", "DaVeZhouMK"
+            VALUE "OriginalFilename", "YeManCC.exe"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x804, 1200
+    END
+END

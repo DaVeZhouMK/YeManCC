@@ -1,0 +1,228 @@
+{
+  "schema": 1,
+  "version": "v2 (2026-09-23, 204-L: +sleep/error families)",
+  "note": "风扇与手柄生命周期用到的 HC/宿主信号清单 + 逐条伪装筛选；REAL-ONLY 表示不可伪装（真实硬件通道）；204-L 追加睡眠链与错误信号族（unproven/耗尽/退出码），并对齐 W3 信号清单结构",
+  "policy": [
+    "REAL-ONLY（MSI EC/WMI 读写、能力位、满速位）禁止把模拟当真实能力",
+    "oemRestoreEvidence 必须保持\"非物理读回\"语义",
+    "手柄链信号归 W6 断言；本域只记录/注入并回交原始证据"
+  ],
+  "signals": [
+    {
+      "id": "fan.host.state",
+      "chain": "fan",
+      "name": "GET /api/state → state/powerState/openCalled/openEventsCalled",
+      "source": "FanLab/real-host Program.cs Snapshot",
+      "spoofable": true,
+      "how": "沙箱宿主(mock)提供；桩件可任意取值",
+      "risk": "低（只读语义，门要求无副作用读）"
+    },
+    {
+      "id": "fan.gate.hardwareWritesEnabled",
+      "chain": "fan",
+      "name": "hardwareWritesEnabled",
+      "source": "Program.cs Snapshot",
+      "spoofable": true,
+      "how": "mock 恒 false；gate-open 桩件置 true 作负例",
+      "risk": "低（安全门前置）"
+    },
+    {
+      "id": "fan.write.observed",
+      "chain": "fan",
+      "name": "hardwareWritesObserved",
+      "source": "Program.cs；D2 形态证据",
+      "spoofable": true,
+      "how": "曲线会话+mock 写入即置 true",
+      "risk": "中（只表示观测到写入动作，不等于物理写入成功）"
+    },
+    {
+      "id": "fan.oem.restoreEvidence",
+      "chain": "fan",
+      "name": "oemRestoreEvidence / oemRestoreConfirmed",
+      "source": "D2/retrybudget 证据",
+      "spoofable": true,
+      "how": "mock 值 not-observed；显式 release 后 confirmed(true)",
+      "risk": "高（必须保持\"非物理读回\"；严禁伪装 hc-default-table-readback-confirmed）"
+    },
+    {
+      "id": "fan.hc.resumeRebuildFailed",
+      "chain": "fan",
+      "name": "409 HC_RESUME_REBUILD_FAILED",
+      "source": "合同 §28 / D2 / retrybudget",
+      "spoofable": true,
+      "how": "带曲线入睡 → 唤醒时由宿主在 mock 下产生",
+      "risk": "低（fail-closed 语义）"
+    },
+    {
+      "id": "fan.faultLocked",
+      "chain": "fan",
+      "name": "state=FaultLocked + reason=system-pending-close-failed",
+      "source": "宿主自测/retrybudget",
+      "spoofable": true,
+      "how": "曲线会话入睡即进入",
+      "risk": "中（不是\"可继续\"状态，需 release）"
+    },
+    {
+      "id": "fan.resume.nativeTrigger",
+      "chain": "fan",
+      "name": "fan-host-resume-native-trigger(status/leasePresent)",
+      "source": "fan-lifecycle（真 S3 周期 3）",
+      "spoofable": true,
+      "how": "native 触发；mock 无 lease ⇒ 401",
+      "risk": "低（记录型）"
+    },
+    {
+      "id": "hc.setFanTable",
+      "chain": "fan",
+      "name": "MSI Set_Fan(block1/2) 曲线读写",
+      "source": "HC 冻结树 ClawA1M.cs",
+      "spoofable": false,
+      "how": "不可伪装（真 EC/WMI 写）；本机无 MSI 设备",
+      "risk": "高（真实写入通道，禁止把模拟当成功）"
+    },
+    {
+      "id": "hc.getFan",
+      "chain": "fan",
+      "name": "HC Get_Fan / ReadFanDuty",
+      "source": "HC ClawA1M.cs；IDevice 占位 0",
+      "spoofable": false,
+      "how": "不可伪装（真 EC 读）；ReadFanDuty 恒 0 是占位非测量",
+      "risk": "高（不得把 0 当读数）"
+    },
+    {
+      "id": "hc.fanControlCapability",
+      "chain": "fan",
+      "name": "能力位 FanControl/FanOverride/FanOverrideEnabled",
+      "source": "HC Devices/MSI + LegionGo 分支",
+      "spoofable": false,
+      "how": "不可伪装（真设备枚举）",
+      "risk": "中（面板可见≠写路径；A1M/BZ2EM/CG3EM 死开关）"
+    },
+    {
+      "id": "hc.setFullSpeed",
+      "chain": "fan",
+      "name": "Set_Data(152) 满速位",
+      "source": "HC ClawA1M/LegionGo",
+      "spoofable": false,
+      "how": "不可伪装（真实写）",
+      "risk": "中（消费者仅 LegionGo/A2VM 触发）"
+    },
+    {
+      "id": "gp.inputHost.stopRequest",
+      "chain": "gamepad",
+      "name": "input-host-stop-request",
+      "source": "virtual-gamepad（真 S3）",
+      "spoofable": true,
+      "how": "域包装层注入等价事件（不改 W6 资产）",
+      "risk": "低（记录型）"
+    },
+    {
+      "id": "gp.inputHost.releaseReceipt",
+      "chain": "gamepad",
+      "name": "input-host-release-receipt(disposition=…)",
+      "source": "virtual-gamepad（真 S3）",
+      "spoofable": true,
+      "how": "域包装层注入",
+      "risk": "中（external-release-unproven 必须保留，不得伪装为已释放）"
+    },
+    {
+      "id": "gp.inputHost.lifecycleWork",
+      "chain": "gamepad",
+      "name": "input-host-lifecycle-work(power-suspend-no-write/power-rearm)",
+      "source": "native-lifecycle（真 S3）",
+      "spoofable": true,
+      "how": "域包装层记录+断言",
+      "risk": "低"
+    },
+    {
+      "id": "gp.hc.sleepKeepalive",
+      "chain": "gamepad",
+      "name": "hcSleepKeepalive / hostRetained",
+      "source": "native-lifecycle（真 S3）",
+      "spoofable": true,
+      "how": "字段级注入（域仅记录/断言）",
+      "risk": "低"
+    },
+    {
+      "id": "gp.keepaliveRejected",
+      "chain": "gamepad",
+      "name": "KEEPALIVE 被拒 → state-rejected",
+      "source": "192-R1B 文档（旧判断已订正）",
+      "spoofable": true,
+      "how": "域模拟拒绝路径（不自称正确契约）",
+      "risk": "中（契约归 W6）"
+    },
+    {
+      "id": "gp.controllerRemap",
+      "chain": "gamepad",
+      "name": "rog.controller-remap(attempts/hasControl/okCount)",
+      "source": "native-lifecycle（真 S3）",
+      "spoofable": true,
+      "how": "域记录（不可改 W6）",
+      "risk": "中（无真设备时 hasControl=false 属正常）"
+    },
+    {
+      "id": "sleep.typing.verdict",
+      "chain": "sleep",
+      "name": "睡眠分型判型（S3/S4/S0ix/S4_MISLABELED_AS_S3/S4_DOWNGRADED_TO_S3/S4_NOT_CONFIRMED/UNKNOWN）",
+      "source": "domains/sleep/sleep_types.json + lib_sleep_typing.ps1",
+      "spoofable": true,
+      "how": "离线判型器 + 7 个 golden fixtures",
+      "risk": "中（真机判型需 42 事件；本机不可读 ⇒ 只到 medium）"
+    },
+    {
+      "id": "sleep.series.simulated",
+      "chain": "sleep",
+      "name": "分型系列（注入式 S0ix/S3/S4 形态）",
+      "source": "lib_sleep_typeseries.ps1（-Mode typeseries）",
+      "spoofable": true,
+      "how": "沙箱宿主 + 鉴权 HTTP",
+      "risk": "低（明确 realSleepPerformed=false）"
+    },
+    {
+      "id": "sleep.rapidwake.simulated",
+      "chain": "sleep",
+      "name": "极短/入睡失败（0.1–2 s）",
+      "source": "lib_sleep_rapidwake.ps1（-Mode rapidwake）",
+      "spoofable": true,
+      "how": "同上；带曲线 0.1 s ⇒ 409 fail-closed",
+      "risk": "中（收敛窗口是 409/200 分界）"
+    },
+    {
+      "id": "fan.nofeedback.bounded",
+      "chain": "fan",
+      "name": "无反馈下有界（服务可读/状态稳定/末段收敛）",
+      "source": "extremes E7 + retrybudget",
+      "spoofable": true,
+      "how": "真宿主 70 s 零动作 / 75 s 窗口",
+      "risk": "低（历史\"一直等 HC 的 EC 成功反馈\"已修复，未有旧构建对照）"
+    },
+    {
+      "id": "err.unproven",
+      "chain": "common",
+      "name": "unproven 族（external-release-unproven / providerBindingProven:false / oemRestoreEvidence=not-observed）",
+      "source": "日志/状态面",
+      "spoofable": true,
+      "how": "正常 mock 路径自然出现",
+      "risk": "高（一律记\"未证\"，不得升格为通过）"
+    },
+    {
+      "id": "err.exhausted",
+      "chain": "common",
+      "name": "耗尽≠成功（sleep-retry-exhausted / fan-exit-recovery-unverified）",
+      "source": "宿主/native 日志",
+      "spoofable": true,
+      "how": "预算耗尽路径",
+      "risk": "高（不得当作已恢复）"
+    },
+    {
+      "id": "exit.codes",
+      "chain": "common",
+      "name": "工具退出码 0/2/3/4/5/6/7/8/9/10/12（9=假绿来源、10=BLOCKED_REQUIRED）",
+      "source": "lib/sim_core.ps1",
+      "spoofable": true,
+      "how": "各 mode 实测",
+      "risk": "中（归因边界：工具失败≠产品缺陷）"
+    }
+  ]
+}

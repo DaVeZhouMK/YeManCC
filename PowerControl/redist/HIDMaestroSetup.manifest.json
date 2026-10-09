@@ -1,0 +1,40 @@
+﻿{
+    "batch":  "GP-PREREQ-2",
+    "deviceVerified":  false,
+    "source":  [
+                   {
+                       "name":  "Program.cs",
+                       "sha256":  "9BADF1C97D3E9CAD487A9116827A9EDB2221DCBB7B8A119A9471A13A7B8C74F5"
+                   },
+                   {
+                       "name":  "AutoSetup.cs",
+                       "sha256":  "9939F5E560E6DA724995C10717D9AE29707AF5749DFD257F6BAC01F50C9A384C"
+                   },
+                   {
+                       "name":  "YeManGamepadPrerequisites.csproj",
+                       "sha256":  "60A1528798489B805505910368000CEF6B801A2297B4C04A2961D020711EB975"
+                   }
+               ],
+    "files":  [
+                  {
+                      "name":  "HIDMaestroSetup.exe",
+                      "bytes":  162304,
+                      "sha256":  "71ADF3C733B741452AAC97AB4DF442B7C5E385CABF41EBE09F8EC040FB94C783"
+                  },
+                  {
+                      "name":  "HIDMaestroSetup.dll",
+                      "bytes":  55808,
+                      "sha256":  "B5135D8DE5E59B39CC36D8BBFBBEDF2431BEE043600AE8D28ECE364250B652D9"
+                  },
+                  {
+                      "name":  "HIDMaestroSetup.deps.json",
+                      "bytes":  439,
+                      "sha256":  "85A8834E8CB62E3566FC45995E6DD763B49B0EE8FD1BF69CC1ECBF9DBDB06F7E"
+                  },
+                  {
+                      "name":  "HIDMaestroSetup.runtimeconfig.json",
+                      "bytes":  399,
+                      "sha256":  "3E965CD7CFD553C2FF4E842D8D8019AAAE2DA0A21D92FF85A87573DD8D1B95C6"
+                  }
+              ]
+}

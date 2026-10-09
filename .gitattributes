@@ -1,0 +1,57 @@
+* text=auto
+
+# Windows scripts keep native line endings.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+*.vbs text eol=crlf
+
+# Web and source files use stable LF endings across local and CI builds.
+*.css text eol=lf
+*.html text eol=lf
+*.js text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.mjs text eol=lf
+*.ts text eol=lf
+*.vue text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+
+# Runtime and SDK payloads are binary.
+*.bin binary
+*.dll binary
+*.exe binary
+*.ico binary
+*.lib binary
+*.ovl binary
+*.png binary
+*.pow binary
+*.pyd binary
+*.sys binary
+
+# Immutable SHA-bound payloads must survive checkout without EOL rewriting.
+PowerControl/fan-host/** -text
+PowerControl/handheldcompanion-runtime/** -text
+PowerControl/redist/** -text
+deps/handheldcompanion-runtime/** -text
+deps/hidmaestro/** -text
+
+# Fan source-freeze indices also bind the exact original source bytes.
+FanLab/real-host/** -text
+FanLab/fan-backend/** -text
+FanLab/LightSetter/** -text
+FanLab/fanhost-source-files.sha256 -text
+FanLab/FANHOST-SOURCE-BASELINE.json -text
+
+# release-assets.lock.json binds these fallback assets byte-for-byte.
+PowerControl/MG-AUTO/** -text
+PowerControl/pawnio/** -text
+PowerControl/OpenSpeedy/** -text
+
+# Pinned Decky SDK and redistribution licenses bind their original bytes.
+decky-plugin/vendor/decky-api-1.1.3/** -text
+decky-plugin/LICENSE.decky-api -text
+PowerControl/decky/LICENSE.decky-loader -text
+PowerControl/decky/plugins/ymcc-sidebar/LICENSE.decky-api -text
+*.tsx text eol=lf

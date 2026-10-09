@@ -1,0 +1,355 @@
+{
+  "schemaVersion": 1,
+  "baselineId": "FANHOST-REAL-HOST-20260902-HC-BOUNDARY",
+  "role": "mainline-fanhost-source-baseline",
+  "sourceDirectory": "real-host",
+  "sourceFileCount": 33,
+  "sourceFilesIndex": "fanhost-source-files.sha256",
+  "sourceFilesIndexSha256": "9244E0A57465F223B959B5D6EE9A21435BC9E3CBEA2C60FAC1686B880E0431EC",
+  "coreFiles": {
+    "Program.cs": "89F281F9302DCD97E564D68A097C41DE392EB8A8DA13DFE10ADE53C3CEFEAA3E",
+    "YeManFanHost.csproj": "E7D7EDEC05FEAFD14B159EFA8EA6288003BDC2D0F2DAB6CF33D38AFB0DB0808B"
+  },
+  "omittedArtifacts": {
+    "fileCount": 3,
+    "index": "fanhost-omitted-artifacts.sha256",
+    "indexSha256": "9E6D139AC4165728B603E5564FDA0E2152D9F1D619F098631DCF64C0C32BC0EB",
+    "reason": "Historical test output and session state; not FanHost source"
+  },
+  "importedFrom": "C:\\SOFT\\YeManCC-Work\\FanLab\\real-host",
+  "hcSourceBaseline": "HC-CANDIDATE-0.32.4.0-06c0b954-20260902",
+  "rebaseline": {
+    "approvedBy": "User 2026-10-08: fan same-type lifecycle bugs full-chain audit, not a single-point fix; FAN-943",
+    "date": "2026-10-08",
+    "previousBaselineId": "FANHOST-REAL-HOST-20260902-HC-BOUNDARY",
+    "previousRebaseline": {
+      "approvedBy": "package-release.ps1 / build-workspace.ps1 (export chain, batch export)",
+      "date": "2026-10-08",
+      "previousBaselineId": "FANHOST-REAL-HOST-20260902-HC-BOUNDARY",
+      "previousRebaseline": {
+        "approvedBy": "package-release.ps1 / build-workspace.ps1 (export chain, batch export)",
+        "date": "2026-10-08",
+        "previousBaselineId": "FANHOST-REAL-HOST-20260902-HC-BOUNDARY",
+        "previousRebaseline": {
+          "approvedBy": "package-release.ps1 / build-workspace.ps1 (export chain, batch export)",
+          "date": "2026-10-08",
+          "previousBaselineId": "FANHOST-REAL-HOST-20260902-HC-BOUNDARY",
+          "previousRebaseline": {
+            "approvedBy": "package-release.ps1 / build-workspace.ps1 (export chain, batch export)",
+            "date": "2026-10-08",
+            "previousBaselineId": "FANHOST-REAL-HOST-20260902-HC-BOUNDARY",
+            "previousRebaseline": {
+              "approvedBy": "package-release.ps1 / build-workspace.ps1 (export chain, batch export)",
+              "date": "2026-10-08",
+              "previousBaselineId": "FANHOST-REAL-HOST-20260902-HC-BOUNDARY",
+              "previousRebaseline": {
+                "approvedBy": "package-release.ps1 / build-workspace.ps1 (export chain, batch export)",
+                "date": "2026-10-07",
+                "previousBaselineId": "FANHOST-REAL-HOST-20260902-HC-BOUNDARY",
+                "previousRebaseline": {
+                  "approvedBy": "package-release.ps1 / build-workspace.ps1 (export chain, batch export)",
+                  "date": "2026-10-07",
+                  "previousBaselineId": "FANHOST-REAL-HOST-20260902-HC-BOUNDARY",
+                  "previousRebaseline": {
+                    "approvedBy": "package-release.ps1 / build-workspace.ps1 (export chain, batch export)",
+                    "date": "2026-10-06",
+                    "previousBaselineId": "FANHOST-REAL-HOST-20260902-HC-BOUNDARY",
+                    "previousRebaseline": {
+                      "approvedBy": "package-release.ps1 / build-workspace.ps1 (export chain, batch export)",
+                      "date": "2026-10-06",
+                      "previousBaselineId": "FANHOST-REAL-HOST-20260902-HC-BOUNDARY",
+                      "previousRebaseline": {
+                        "approvedBy": "package-release.ps1 / build-workspace.ps1 (export chain, batch export)",
+                        "date": "2026-10-04",
+                        "previousBaselineId": "FANHOST-REAL-HOST-20260902-HC-BOUNDARY",
+                        "previousRebaseline": {
+                          "approvedBy": "package-release.ps1 / build-workspace.ps1 (export chain, batch export)",
+                          "date": "2026-10-03",
+                          "previousBaselineId": "FANHOST-REAL-HOST-20260902-HC-BOUNDARY",
+                          "previousRebaseline": "@{approvedBy=package-release.ps1 / build-workspace.ps1 (export chain, batch export); date=2026-10-02; previousBaselineId=FANHOST-REAL-HOST-20260902-HC-BOUNDARY; previousRebaseline=@{approvedBy=package-release.ps1 / build-workspace.ps1 (export chain, batch export); date=2026-10-02; previousBaselineId=FANHOST-REAL-HOST-20260902-HC-BOUNDARY; previousRebaseline=@{approvedBy=package-release.ps1 / build-workspace.ps1 (export chain, batch export); date=2026-10-02; previousBaselineId=FANHOST-REAL-HOST-20260902-HC-BOUNDARY; previousRebaseline=@{approvedBy=package-release.ps1 / build-workspace.ps1 (export chain, batch export); date=2026-10-02; previousBaselineId=FANHOST-REAL-HOST-20260902-HC-BOUNDARY; previousRebaseline=@{approvedBy=package-release.ps1 / build-workspace.ps1 (export chain, batch export); date=2026-10-02; previousBaselineId=FANHOST-REAL-HOST-20260902-HC-BOUNDARY; previousRebaseline=@{approvedBy=package-release.ps1 / build-workspace.ps1 (export chain, batch export); date=2026-10-02; previousBaselineId=FANHOST-REAL-HOST-20260902-HC-BOUNDARY; previousRebaseline=@{approvedBy=package-release.ps1 / build-workspace.ps1 (export chain, batch export); date=2026-10-02; previousBaselineId=FANHOST-REAL-HOST-20260902-HC-BOUNDARY; previousRebaseline=@{approvedBy=Docs/Tasks/Fan/FAN-920/FAN-936-MSI-POST-USE-BOOT-FULLSPEED-ADJUDICATION-20261001.md (13a055578100c50adf17dc5fe8d2c82b6dfb8c50716de0541f9ff7831601d360) section 4/5/8 (step 8: tooled re-pin on latest mainline; F936-5d baseline-binding fail-closed self-test seams and negatives); date=2026-10-02; previousBaselineId=FANHOST-REAL-HOST-20260902-HC-BOUNDARY; previousRebaseline=@{approvedBy=Docs/Tasks/Fan/FAN-920/FAN-936-MSI-POST-USE-BOOT-FULLSPEED-ADJUDICATION-20261001.md (13a055578100c50adf17dc5fe8d2c82b6dfb8c50716de0541f9ff7831601d360) section 4/5/8 (step 8: tooled re-pin on latest mainline); date=2026-10-02; previousBaselineId=FANHOST-REAL-HOST-20260902-HC-BOUNDARY; previousRebaseline=@{approvedBy=Docs/Tasks/Fan/FAN-920/FAN-936-MSI-POST-USE-BOOT-FULLSPEED-ADJUDICATION-20261001.md (13a055578100c50adf17dc5fe8d2c82b6dfb8c50716de0541f9ff7831601d360) section 7; date=2026-10-01; previousBaselineId=FANHOST-REAL-HOST-20260902-HC-BOUNDARY; previousRebaseline=@{approvedBy=package-release.ps1 / build-workspace.ps1 (export chain, batch export); date=2026-09-30; previousBaselineId=FANHOST-REAL-HOST-20260902-HC-BOUNDARY; previousRebaseline=@{approvedBy=package-release.ps1 / build-workspace.ps1 (export chain, batch export); date=2026-09-30; previousBaselineId=FANHOST-REAL-HOST-20260902-HC-BOUNDARY; previousRebaseline=@{approvedBy=package-release.ps1 / build-workspace.ps1 (export chain, batch export); date=2026-09-29; previousBaselineId=FANHOST-REAL-HOST-20260902-HC-BOUNDARY; previousRebaseline=@{approvedBy=FAN-931 稳态 CPU 归因与优化执行裁决（2026-09-27）：P1.2 例行诊断惰性化 + P1.3 父实例一次绑定 + P0 请求入口有限计数与只读导出；无验证项被删除或弱化。; date=2026-09-27; previousBaselineId=FANHOST-REAL-HOST-20260902-HC-BOUNDARY; previousRebaseline=@{approvedBy=FAN-929-RUNTIME-PERIODIC-COST-ELIMINATION (user decision 2026-09-27); date=2026-09-27; previousBaselineId=FANHOST-REAL-HOST-20260902-HC-BOUNDARY; previousRebaseline=@{approvedBy=FAN-927-RUNTIME-ADMISSION-SIMPLIFICATION-AND-RECOVERY-ADJUDICATION-20260927.md section 2.2; date=2026-09-27; previousBaselineId=FANHOST-REAL-HOST-20260902-HC-BOUNDARY; previousRebaseline=@{approvedBy=FAN-927-RUNTIME-ADMISSION-SIMPLIFICATION-AND-RECOVERY-ADJUDICATION-20260927.md section 2; date=2026-09-27; previousBaselineId=FANHOST-REAL-HOST-20260902-HC-BOUNDARY; previousRebaseline=@{approvedBy=package-release.ps1 / build-workspace.ps1 (export chain, batch export); date=2026-09-27; previousBaselineId=FANHOST-REAL-HOST-20260902-HC-BOUNDARY; previousRebaseline=@{approvedBy=FAN-926R 重钉/恢复/导出裁决（D1/D4/D5/D6 + M5/G9，2026-09-26）与 FAN-926R 唤醒临时租约与有界等待裁决（R1/R2，2026-09-26）; date=2026-09-27; previousBaselineId=FANHOST-REAL-HOST-20260902-HC-BOUNDARY; previousRebaseline=@{approvedBy=920 v1.15 section 26.3/26.6: the isolated release candidate moves the Host's pinned HC identity to the approved candidate (HandheldCompanion.dll c7e202e6...), so FanLab/real-host/Program.cs changes and the line's own source index follows; date=2026-09-21; previousBaselineId=FANHOST-REAL-HOST-20260902-HC-BOUNDARY; previousRebaseline=@{approvedBy=920-v1.13 section 24.4 / v1.14 section 25: the fan line re-baselines its own source index after the section-18..24 batches; date=2026-09-21; previousBaselineId=FANHOST-REAL-HOST-20260902-HC-BOUNDARY; previous=@{sourceFileCount=22; sourceFilesIndexSha256=AB34C8D37826923DB67FE61CDC530A34D1EE0A13F1E6564BE6F4E401F7A9489E; coreFiles=@{Program.cs=2A3BD0ABD4F82D993039F90CFCA03097EAA9720C3D74F784527B37B19132F90E; YeManFanHost.csproj=FCF05CDC98CB515FE79867173E186AAEF263FBD7BB021A41E3AA0A8A590AC64E}}; current=@{sourceFileCount=30; sourceFilesIndexSha256=E7EC6EA828C412C686A7CDD385222F3A7888E714614B506AA808E3313D185722; coreFiles=@{Program.cs=C13251DA55A5A709B9B180FFBD365F29319CD694291BF5B10085AA6E46B07A14; YeManFanHost.csproj=3A8DC66BE0E867C38513FEADB8DF189CA319E09F5D4EC195F95E3B785DBC60CC}}; auditMethod=per-file hash comparison of the current FanLab/real-host tree (bin/obj/output excluded) against the previous index; count 22 -> 30; auditResult=@{addedFiles=Directory.Build.props Section18CandidateFakes.cs Section18CandidateLifecycle.cs Section19CandidateLifecycle.cs Section20CandidateLifecycle.cs Section21CandidateLifecycle.cs Section22CandidateLifecycle.cs Section23CandidateLifecycle.cs; changedCoreFiles=Program.cs YeManFanHost.csproj; removedFiles=}; reason=the section-18..24 batches added Directory.Build.props + Section18..23Candidate*.cs and changed Program.cs/csproj; no verification item was deleted or weakened - the index is re-derived from the tree and the previous values stay recorded here}; current=@{sourceFileCount=30; sourceFilesIndexSha256=033ACAC9E197408163A22D825C61710AEB3505EA30D0CA31FBBD65CD5CD49604; coreFiles=@{Program.cs=2F6D5C49BFE0B3B5C4C5C4D14F3CEACFC077F60CC0BE67012B01EF1B49AFC9DA; YeManFanHost.csproj=3A8DC66BE0E867C38513FEADB8DF189CA319E09F5D4EC195F95E3B785DBC60CC}}; auditMethod=per-file hash comparison of the current FanLab/real-host tree (bin/obj/output excluded) against the previous index; the only changed entry is Program.cs (Host pinned HC identity), file count stays 30; auditResult=@{addedFiles=; changedCoreFiles=Program.cs; removedFiles=}; reason=the section-26 isolated release candidate moves FanLab/real-host/Program.cs's ExpectedHcSha256 to the approved candidate HandheldCompanion.dll (c7e202e6...); no verification item was deleted or weakened, the index was re-derived from the tree, and the previous values stay recorded in previousRebaseline; previousRecorded=@{sourceFilesIndexSha256=E7EC6EA828C412C686A7CDD385222F3A7888E714614B506AA808E3313D185722; programCsSha256=C13251DA55A5A709B9B180FFBD365F29319CD694291BF5B10085AA6E46B07A14}}; current=@{sourceFileCount=30; sourceFilesIndexSha256=FEC9D1A942B029F9AFE23AE8DB7A1EF56674D95AD8ADCD11CDFCDCA5824BBEF7; coreFiles=@{Program.cs=3708A7254C982C3A4E8E95AF8CA41BAAD053B848B22B10FB434C781B4CD5F98E; YeManFanHost.csproj=3A8DC66BE0E867C38513FEADB8DF189CA319E09F5D4EC195F95E3B785DBC60CC}}; auditMethod=per-file hash comparison of the current FanLab/real-host tree (bin/obj/output/.git excluded) against the previous index supplied by this tool; values are computed, never hand-copied; auditResult=@{addedFiles=; changedCoreFiles=Program.cs; removedFiles=; changedFiles=Program.cs Section18CandidateLifecycle.cs Section19CandidateLifecycle.cs}; reason=Fan 线两次已裁决批次改动了 FanLab/real-host 的 Program.cs、Section18CandidateLifecycle.cs、Section19CandidateLifecycle.cs；索引与核心哈希按当前树重算，文件数与验证项不变，此前的值全部保留在 previousRebaseline/previousRecorded 内。补记：2026-09-02/09-21 记录的基线此后长期未随已裁决批次重录，导致 test:fanhost-source-baseline 长期 stale FAIL。; previousRecorded=@{sourceFilesIndexSha256=033ACAC9E197408163A22D825C61710AEB3505EA30D0CA31FBBD65CD5CD49604; programCsSha256=2F6D5C49BFE0B3B5C4C5C4D14F3CEACFC077F60CC0BE67012B01EF1B49AFC9DA}}; current=@{sourceFileCount=30; sourceFilesIndexSha256=9F987EF2E3C606AA2ECD2E42901AA15C32379E0514707152E405822D786B1B19; coreFiles=@{Program.cs=B9FFDD1F2B82DCECCE9F0B568127B6542AE99A511C77ACBA3E8C54371DD90A6A; YeManFanHost.csproj=3A8DC66BE0E867C38513FEADB8DF189CA319E09F5D4EC195F95E3B785DBC60CC}}; auditMethod=per-file hash comparison of the current FanLab/real-host tree (bin/obj/output/.git excluded) against the previous index supplied by this tool; values are computed, never hand-copied; auditResult=@{addedFiles=; changedCoreFiles=Program.cs; removedFiles=; changedFiles=Program.cs}; reason=export chain re-record at export time: the read-only verifier reported 'FanHost source hash mismatch: Program.cs' (tree delta added={0} removed={1} changed={2}). Recomputed from the tree by tools/rebaseline-fanhost-source-baseline.ps1; previous values are kept nested inside the baseline. delta: ~ Program.cs; previousRecorded=@{sourceFilesIndexSha256=FEC9D1A942B029F9AFE23AE8DB7A1EF56674D95AD8ADCD11CDFCDCA5824BBEF7; programCsSha256=3708A7254C982C3A4E8E95AF8CA41BAAD053B848B22B10FB434C781B4CD5F98E}}; current=@{sourceFileCount=30; sourceFilesIndexSha256=74144E1F714C0D3781A863CB2E186F5349C277995556DEF81B67EAAB3504BBBF; coreFiles=@{Program.cs=528FF13C6DBCDD76034820DE5BABBF83FE8B1D9F4E5E5409F73A04EBDF703504; YeManFanHost.csproj=3A8DC66BE0E867C38513FEADB8DF189CA319E09F5D4EC195F95E3B785DBC60CC}}; auditMethod=per-file hash comparison of the current FanLab/real-host tree (bin/obj/output/.git excluded) against the previous index supplied by this tool; values are computed, never hand-copied; auditResult=@{addedFiles=; changedCoreFiles=Program.cs; removedFiles=; changedFiles=Program.cs}; reason=FAN-927: FanLab/real-host/Program.cs replaces the per-file HC-load payload scan and the repeated HC main DLL hash with a lightweight deployment-generation record check (ValidateDeploymentGenerationForHcLoad); the record is written by the deployment boundary or by one full validation fallback. No verification item was deleted or weakened for the retained intent.; previousRecorded=@{sourceFilesIndexSha256=9F987EF2E3C606AA2ECD2E42901AA15C32379E0514707152E405822D786B1B19; programCsSha256=B9FFDD1F2B82DCECCE9F0B568127B6542AE99A511C77ACBA3E8C54371DD90A6A}}; current=@{sourceFileCount=30; sourceFilesIndexSha256=A10C639283182C04AF22E2A3B513BAB31F3D7D3F8508638DC8DB3E5CD14D0003; coreFiles=@{Program.cs=D5131C6388ED241C82553985906E18954FEA116E9FFF627535BF16EF10EEE51D; YeManFanHost.csproj=3A8DC66BE0E867C38513FEADB8DF189CA319E09F5D4EC195F95E3B785DBC60CC}}; auditMethod=per-file hash comparison of the current FanLab/real-host tree (bin/obj/output/.git excluded) against the previous index supplied by this tool; values are computed, never hand-copied; auditResult=@{addedFiles=; changedCoreFiles=Program.cs; removedFiles=; changedFiles=Program.cs}; reason=FAN-927: the ExpectedHcSha256 doc comment in FanLab/real-host/Program.cs is corrected to state that the HC content hash is now enforced at the deployment boundary (installer/verifiers) instead of at every HC load; no verification item was deleted or weakened.; previousRecorded=@{sourceFilesIndexSha256=74144E1F714C0D3781A863CB2E186F5349C277995556DEF81B67EAAB3504BBBF; programCsSha256=528FF13C6DBCDD76034820DE5BABBF83FE8B1D9F4E5E5409F73A04EBDF703504}}; current=@{sourceFileCount=30; sourceFilesIndexSha256=E7B209988E6CDA1ED13CFFD24BA46BA70033E176AAA7A748504B876E851B9CFF; coreFiles=@{Program.cs=0794BFCDAB627145DF62B4616C5CC75A438119B4C661173BB6A7A0B1DE8F6380; YeManFanHost.csproj=3A8DC66BE0E867C38513FEADB8DF189CA319E09F5D4EC195F95E3B785DBC60CC}}; auditMethod=per-file hash comparison of the current FanLab/real-host tree (bin/obj/output/.git excluded) against the previous index supplied by this tool; values are computed, never hand-copied; auditResult=@{addedFiles=; changedCoreFiles=Program.cs; removedFiles=; changedFiles=Program.cs}; reason=FAN-929: FanLab/real-host/Program.cs profile watchdog becomes event-driven one-shot (no resident 1 Hz poll), the periodic watchdog diagnostic write becomes event-only, and the AC/DC power-line alignment moves into ApplyCurveCore (write time). No verification item was deleted or weakened; the same HC-aligned power-line/profile semantics are preserved with a different trigger.; previousRecorded=@{sourceFilesIndexSha256=A10C639283182C04AF22E2A3B513BAB31F3D7D3F8508638DC8DB3E5CD14D0003; programCsSha256=D5131C6388ED241C82553985906E18954FEA116E9FFF627535BF16EF10EEE51D}}; current=@{sourceFileCount=30; sourceFilesIndexSha256=BBD49654F3B73C2E27C6849E9FC2A0B5C557F7AA1ED043807EFFA67C6C62ED91; coreFiles=@{Program.cs=ED18FAE9A41592917B55C8DF6E296D81F0208CE0DCD301BDDC2457D4B4BAE9EC; YeManFanHost.csproj=3A8DC66BE0E867C38513FEADB8DF189CA319E09F5D4EC195F95E3B785DBC60CC}}; auditMethod=per-file hash comparison of the current FanLab/real-host tree (bin/obj/output/.git excluded) against the previous index supplied by this tool; values are computed, never hand-copied; auditResult=@{addedFiles=; changedCoreFiles=Program.cs; removedFiles=; changedFiles=Program.cs}; reason=FAN-931: Program.cs adds the bounded FanPerfCounters + GET /api/perf-counters, skips the full diagnostic context for routine success events, skips the 30 s sample collection when the record would not be landed while keeping loop maintenance, binds one trusted parent instance and waits for exit instead of re-reading identity every 2 s, dedupes an already-pending loop-stop request, and adds the bounded one-shot consumers for the profile watchdog follow-ups. Verification items are preserved: the two old source-grep anchors were re-anchored to the equivalent new symbols (TryBindParentProcess + its rejection reasons).; previousRecorded=@{sourceFilesIndexSha256=E7B209988E6CDA1ED13CFFD24BA46BA70033E176AAA7A748504B876E851B9CFF; programCsSha256=0794BFCDAB627145DF62B4616C5CC75A438119B4C661173BB6A7A0B1DE8F6380}}; current=@{sourceFileCount=30; sourceFilesIndexSha256=673BC3DF9976F502420EB38CC5D9271FEB68E3A3A15800784FD4A277055ADAB3; coreFiles=@{Program.cs=4392DACB8D7DEDA6F626FB76EE43003B63B89A21A2EC14C7BB6BCF65B1BC6868; YeManFanHost.csproj=3A8DC66BE0E867C38513FEADB8DF189CA319E09F5D4EC195F95E3B785DBC60CC}}; auditMethod=per-file hash comparison of the current FanLab/real-host tree (bin/obj/output/.git excluded) against the previous index supplied by this tool; values are computed, never hand-copied; auditResult=@{addedFiles=; changedCoreFiles=Program.cs; removedFiles=; changedFiles=Program.cs Section18CandidateLifecycle.cs}; reason=export chain re-record at export time: the read-only verifier reported 'FanHost source hash mismatch: Program.cs' (tree delta added={0} removed={1} changed={2}). Recomputed from the tree by tools/rebaseline-fanhost-source-baseline.ps1; previous values are kept nested inside the baseline. delta: ~ Program.cs ~ Section18CandidateLifecycle.cs; previousRecorded=@{sourceFilesIndexSha256=BBD49654F3B73C2E27C6849E9FC2A0B5C557F7AA1ED043807EFFA67C6C62ED91; programCsSha256=ED18FAE9A41592917B55C8DF6E296D81F0208CE0DCD301BDDC2457D4B4BAE9EC}}; current=@{sourceFileCount=30; sourceFilesIndexSha256=945D7331C60D7083BB1BA52EBAB24E98B5D35ED01BB0EB01E2D63FCCE840B9F5; coreFiles=@{Program.cs=48C6D7699A6D42A12846B9BB87800FF6B2DED5BCF610ADD45006E1352C206819; YeManFanHost.csproj=3A8DC66BE0E867C38513FEADB8DF189CA319E09F5D4EC195F95E3B785DBC60CC}}; auditMethod=per-file hash comparison of the current FanLab/real-host tree (bin/obj/output/.git excluded) against the previous index supplied by this tool; values are computed, never hand-copied; auditResult=@{addedFiles=; changedCoreFiles=Program.cs; removedFiles=; changedFiles=Program.cs}; reason=export chain re-record at export time: the read-only verifier reported 'FanHost source hash mismatch: Program.cs' (tree delta added={0} removed={1} changed={2}). Recomputed from the tree by tools/rebaseline-fanhost-source-baseline.ps1; previous values are kept nested inside the baseline. delta: ~ Program.cs; previousRecorded=@{sourceFilesIndexSha256=673BC3DF9976F502420EB38CC5D9271FEB68E3A3A15800784FD4A277055ADAB3; programCsSha256=4392DACB8D7DEDA6F626FB76EE43003B63B89A21A2EC14C7BB6BCF65B1BC6868}}; current=@{sourceFileCount=30; sourceFilesIndexSha256=496C60ADAC0CAA1CC15C1647AA2239B807202756D72B591297A8919D8D8FC35F; coreFiles=@{Program.cs=BD9385C22CE5A6CDD7D7E1627E848EECC2E83EC0A42D6EB11C078B6805C3E654; YeManFanHost.csproj=3A8DC66BE0E867C38513FEADB8DF189CA319E09F5D4EC195F95E3B785DBC60CC}}; auditMethod=per-file hash comparison of the current FanLab/real-host tree (bin/obj/output/.git excluded) against the previous index supplied by this tool; values are computed, never hand-copied; auditResult=@{addedFiles=; changedCoreFiles=Program.cs; removedFiles=; changedFiles=Program.cs Section18CandidateLifecycle.cs}; reason=export chain re-record at export time: the read-only verifier reported 'FanHost source hash mismatch: Program.cs' (tree delta added={0} removed={1} changed={2}). Recomputed from the tree by tools/rebaseline-fanhost-source-baseline.ps1; previous values are kept nested inside the baseline. delta: ~ Program.cs ~ Section18CandidateLifecycle.cs; previousRecorded=@{sourceFilesIndexSha256=945D7331C60D7083BB1BA52EBAB24E98B5D35ED01BB0EB01E2D63FCCE840B9F5; programCsSha256=48C6D7699A6D42A12846B9BB87800FF6B2DED5BCF610ADD45006E1352C206819}}; current=@{sourceFileCount=30; sourceFilesIndexSha256=557ABB4B566A3AF4FE15684762B9B968BD1F408C282634F21C43B1C80D03D6EE; coreFiles=@{Program.cs=1214233DD62C89B68F25E617F9970D20E980108159973126D728C6E8F41CE74B; YeManFanHost.csproj=3A8DC66BE0E867C38513FEADB8DF189CA319E09F5D4EC195F95E3B785DBC60CC}}; auditMethod=per-file hash comparison of the current FanLab/real-host tree (bin/obj/output/.git excluded) against the previous index supplied by this tool; values are computed, never hand-copied; auditResult=@{addedFiles=; changedCoreFiles=Program.cs; removedFiles=; changedFiles=Program.cs Section18CandidateLifecycle.cs}; reason=FAN-936 MSI release routine: FanLab/real-host Program.cs gains --msi-readonly-sample, baseline binding (device/Host instance/control cycle/boot identity), structured MSI release status (ok/failed/unknown, fail-closed); Section18CandidateLifecycle.cs gains machine boot identity + baseline binding capture at self-test route session install. No files added/removed; YeManFanHost.csproj unchanged.; previousRecorded=@{sourceFilesIndexSha256=496C60ADAC0CAA1CC15C1647AA2239B807202756D72B591297A8919D8D8FC35F; programCsSha256=BD9385C22CE5A6CDD7D7E1627E848EECC2E83EC0A42D6EB11C078B6805C3E654}}; current=@{sourceFileCount=30; sourceFilesIndexSha256=4243AE4E7B38C1E36CB0EDFC54A244BCE98976575DF999C9EA8C961355BAC29C; coreFiles=@{Program.cs=1743E0F4B3BD37F2B7167EE61553229DF3A22EB19C7A495C29FFC1526AF90DCB; YeManFanHost.csproj=3A8DC66BE0E867C38513FEADB8DF189CA319E09F5D4EC195F95E3B785DBC60CC}}; auditMethod=per-file hash comparison of the current FanLab/real-host tree (bin/obj/output/.git excluded) against the previous index supplied by this tool; values are computed, never hand-copied; auditResult=@{addedFiles=; changedCoreFiles=Program.cs; removedFiles=; changedFiles=Program.cs run-chain-regression.ps1 run-r1-r4-mock-regression.ps1 run-r2-mock-regression.ps1}; reason=F936 single-closure HC rebase + F936-5f harness fixes: FanLab/real-host/Program.cs ExpectedHcSha256 moves c7e202e6 -> e8f0fbdb (pinned HC-CANDIDATE-0.32.4.0-06c0b954-20260902 DLL now hashes e8f0fbdb, matching native/authorization/payload tools); run-chain-regression.ps1, run-r1-r4-mock-regression.ps1, run-r2-mock-regression.ps1 fixed (self-test tail-JSON parse + tagged power contract generation/source). No files added or removed; YeManFanHost.csproj unchanged.; previousRecorded=@{sourceFilesIndexSha256=557ABB4B566A3AF4FE15684762B9B968BD1F408C282634F21C43B1C80D03D6EE; programCsSha256=1214233DD62C89B68F25E617F9970D20E980108159973126D728C6E8F41CE74B}}; current=@{sourceFileCount=30; sourceFilesIndexSha256=74D62FDCA3993E0B2C704509A977481FB2C1060F0E5077A0140591770776751D; coreFiles=@{Program.cs=1AFEE4AF39B0408BB1A7FBC2A1046FC1AD35EACC764B5446C7E97C201DB65D30; YeManFanHost.csproj=3A8DC66BE0E867C38513FEADB8DF189CA319E09F5D4EC195F95E3B785DBC60CC}}; auditMethod=per-file hash comparison of the current FanLab/real-host tree (bin/obj/output/.git excluded) against the previous index supplied by this tool; values are computed, never hand-copied; auditResult=@{addedFiles=; changedCoreFiles=Program.cs; removedFiles=; changedFiles=Program.cs Section18CandidateLifecycle.cs}; reason=F936-5d: add backend self-test seams (ForceStaleBaselineBootIdentity/HostInstance, MarkOperationTimedOut) in Section18CandidateLifecycle.cs and the fan936-baseline-binding-fail-closed-and-delayed-wmi-not-concurrent positive/negative checks in Program.cs; body behavior unchanged; previousRecorded=@{sourceFilesIndexSha256=4243AE4E7B38C1E36CB0EDFC54A244BCE98976575DF999C9EA8C961355BAC29C; programCsSha256=1743E0F4B3BD37F2B7167EE61553229DF3A22EB19C7A495C29FFC1526AF90DCB}}; current=@{sourceFileCount=30; sourceFilesIndexSha256=6AE6A1C6C352781F78A2A4ECF6871F294A70221157754AF7428472BCDC443A29; coreFiles=@{Program.cs=C71C6AE675FCEA3E5CBBECDFFC3E973C4A4C9D233B8E69F0BA8802F23A073599; YeManFanHost.csproj=3A8DC66BE0E867C38513FEADB8DF189CA319E09F5D4EC195F95E3B785DBC60CC}}; auditMethod=per-file hash comparison of the current FanLab/real-host tree (bin/obj/output/.git excluded) against the previous index supplied by this tool; values are computed, never hand-copied; auditResult=@{addedFiles=; changedCoreFiles=Program.cs; removedFiles=; changedFiles=Program.cs}; reason=export chain re-record at export time: the read-only verifier reported 'FanHost source hash mismatch: Program.cs' (tree delta added={0} removed={1} changed={2}). Recomputed from the tree by tools/rebaseline-fanhost-source-baseline.ps1; previous values are kept nested inside the baseline. delta: ~ Program.cs; previousRecorded=@{sourceFilesIndexSha256=74D62FDCA3993E0B2C704509A977481FB2C1060F0E5077A0140591770776751D; programCsSha256=1AFEE4AF39B0408BB1A7FBC2A1046FC1AD35EACC764B5446C7E97C201DB65D30}}; current=@{sourceFileCount=30; sourceFilesIndexSha256=FC7ABDA58325164224E3C5DBA7B7EF74354FDD5C1624BB04367DB31726B7EE6D; coreFiles=@{Program.cs=049F42CA80DC1A73E27722B389C40CD7BB4F9B122CA5D4B95CD15C7FBAC8E2E7; YeManFanHost.csproj=3A8DC66BE0E867C38513FEADB8DF189CA319E09F5D4EC195F95E3B785DBC60CC}}; auditMethod=per-file hash comparison of the current FanLab/real-host tree (bin/obj/output/.git excluded) against the previous index supplied by this tool; values are computed, never hand-copied; auditResult=@{addedFiles=; changedCoreFiles=Program.cs; removedFiles=; changedFiles=Program.cs Section18CandidateLifecycle.cs}; reason=export chain re-record at export time: the read-only verifier reported 'FanHost source hash mismatch: Program.cs' (tree delta added={0} removed={1} changed={2}). Recomputed from the tree by tools/rebaseline-fanhost-source-baseline.ps1; previous values are kept nested inside the baseline. delta: ~ Program.cs ~ Section18CandidateLifecycle.cs; previousRecorded=@{sourceFilesIndexSha256=6AE6A1C6C352781F78A2A4ECF6871F294A70221157754AF7428472BCDC443A29; programCsSha256=C71C6AE675FCEA3E5CBBECDFFC3E973C4A4C9D233B8E69F0BA8802F23A073599}}; current=@{sourceFileCount=31; sourceFilesIndexSha256=5E457CAFFE2AC0DC0BB2439885D72E70CF978B10151DC3E61F0877B8EA6551D2; coreFiles=@{Program.cs=B6B2E899F1CFD5C5D022D3CF8FC0311C981663B17323A9D172ADFBE671691B1D; YeManFanHost.csproj=3A8DC66BE0E867C38513FEADB8DF189CA319E09F5D4EC195F95E3B785DBC60CC}}; auditMethod=per-file hash comparison of the current FanLab/real-host tree (bin/obj/output/.git excluded) against the previous index supplied by this tool; values are computed, never hand-copied; auditResult=@{addedFiles=run-msi-readonly-cli-gate.ps1; changedCoreFiles=Program.cs; removedFiles=; changedFiles=Program.cs}; reason=export chain re-record at export time: the read-only verifier reported 'FanHost source file count mismatch: 31' (tree delta added={0} removed={1} changed={2}). Recomputed from the tree by tools/rebaseline-fanhost-source-baseline.ps1; previous values are kept nested inside the baseline. delta: + run-msi-readonly-cli-gate.ps1 ~ Program.cs; previousRecorded=@{sourceFilesIndexSha256=FC7ABDA58325164224E3C5DBA7B7EF74354FDD5C1624BB04367DB31726B7EE6D; programCsSha256=049F42CA80DC1A73E27722B389C40CD7BB4F9B122CA5D4B95CD15C7FBAC8E2E7}}; current=@{sourceFileCount=31; sourceFilesIndexSha256=A1DE2DBA4EFBFC7803B31376F646388356254401FF588577D99B261E80F52766; coreFiles=@{Program.cs=1E93FC836C59A995B6631991DCEC7B42373305DC74B1AA068655198E23CB280D; YeManFanHost.csproj=3A8DC66BE0E867C38513FEADB8DF189CA319E09F5D4EC195F95E3B785DBC60CC}}; auditMethod=per-file hash comparison of the current FanLab/real-host tree (bin/obj/output/.git excluded) against the previous index supplied by this tool; values are computed, never hand-copied; auditResult=@{addedFiles=; changedCoreFiles=Program.cs; removedFiles=; changedFiles=Program.cs Section18CandidateLifecycle.cs}; reason=export chain re-record at export time: the read-only verifier reported 'FanHost source hash mismatch: Program.cs' (tree delta added={0} removed={1} changed={2}). Recomputed from the tree by tools/rebaseline-fanhost-source-baseline.ps1; previous values are kept nested inside the baseline. delta: ~ Program.cs ~ Section18CandidateLifecycle.cs; previousRecorded=@{sourceFilesIndexSha256=5E457CAFFE2AC0DC0BB2439885D72E70CF978B10151DC3E61F0877B8EA6551D2; programCsSha256=B6B2E899F1CFD5C5D022D3CF8FC0311C981663B17323A9D172ADFBE671691B1D}}; current=@{sourceFileCount=31; sourceFilesIndexSha256=0899D600F608FC8F86A1922A9B6C41898EC32E47583357D7F65D92EC90DD58D4; coreFiles=@{Program.cs=49A78E1B7D8CE46F9A12E3605248824BD67BCE390552B4CF736D99FE281268E3; YeManFanHost.csproj=3A8DC66BE0E867C38513FEADB8DF189CA319E09F5D4EC195F95E3B785DBC60CC}}; auditMethod=per-file hash comparison of the current FanLab/real-host tree (bin/obj/output/.git excluded) against the previous index supplied by this tool; values are computed, never hand-copied; auditResult=@{addedFiles=; changedCoreFiles=Program.cs; removedFiles=; changedFiles=Program.cs}; reason=export chain re-record at export time: the read-only verifier reported 'FanHost source hash mismatch: Program.cs' (tree delta added={0} removed={1} changed={2}). Recomputed from the tree by tools/rebaseline-fanhost-source-baseline.ps1; previous values are kept nested inside the baseline. delta: ~ Program.cs; previousRecorded=@{sourceFilesIndexSha256=A1DE2DBA4EFBFC7803B31376F646388356254401FF588577D99B261E80F52766; programCsSha256=1E93FC836C59A995B6631991DCEC7B42373305DC74B1AA068655198E23CB280D}}; current=@{sourceFileCount=31; sourceFilesIndexSha256=E04C2B37C3203F5F61AD6035D1957B722D57B8AEF2F6CDCA206AF737F46342BA; coreFiles=@{Program.cs=75E1D8F99E47278323BA4050B8557B1DA16F439750E4782ECC07C83CA78C81A0; YeManFanHost.csproj=3A8DC66BE0E867C38513FEADB8DF189CA319E09F5D4EC195F95E3B785DBC60CC}}; auditMethod=per-file hash comparison of the current FanLab/real-host tree (bin/obj/output/.git excluded) against the previous index supplied by this tool; values are computed, never hand-copied; auditResult=@{addedFiles=; changedCoreFiles=Program.cs; removedFiles=; changedFiles=Program.cs}; reason=export chain re-record at export time: the read-only verifier reported 'FanHost source hash mismatch: Program.cs' (tree delta added={0} removed={1} changed={2}). Recomputed from the tree by tools/rebaseline-fanhost-source-baseline.ps1; previous values are kept nested inside the baseline. delta: ~ Program.cs; previousRecorded=@{sourceFilesIndexSha256=0899D600F608FC8F86A1922A9B6C41898EC32E47583357D7F65D92EC90DD58D4; programCsSha256=49A78E1B7D8CE46F9A12E3605248824BD67BCE390552B4CF736D99FE281268E3}}; current=@{sourceFileCount=31; sourceFilesIndexSha256=CB11FE54C7D7686832DA31FBD1008A262132904CCA781AF81A888206D491B346; coreFiles=@{Program.cs=911372222A616D1A9C5D706FD03926FEA4D89023DC4B4248740C6D76BC6938D0; YeManFanHost.csproj=3A8DC66BE0E867C38513FEADB8DF189CA319E09F5D4EC195F95E3B785DBC60CC}}; auditMethod=per-file hash comparison of the current FanLab/real-host tree (bin/obj/output/.git excluded) against the previous index supplied by this tool; values are computed, never hand-copied; auditResult=@{addedFiles=; changedCoreFiles=Program.cs; removedFiles=; changedFiles=Program.cs}; reason=export chain re-record at export time: the read-only verifier reported 'FanHost source hash mismatch: Program.cs' (tree delta added={0} removed={1} changed={2}). Recomputed from the tree by tools/rebaseline-fanhost-source-baseline.ps1; previous values are kept nested inside the baseline. delta: ~ Program.cs; previousRecorded=@{sourceFilesIndexSha256=E04C2B37C3203F5F61AD6035D1957B722D57B8AEF2F6CDCA206AF737F46342BA; programCsSha256=75E1D8F99E47278323BA4050B8557B1DA16F439750E4782ECC07C83CA78C81A0}}",
+                          "current": "@{sourceFileCount=31; sourceFilesIndexSha256=8EA5CE0BDF15F0B90E88B5F95FB0110C81C5DDA6BACA70085FAB262752EB40D9; coreFiles=@{Program.cs=0985F9922F750132963EC7CE28ACCB812557C1CA80B94C7685AFDE3A8E2F44A4; YeManFanHost.csproj=3A8DC66BE0E867C38513FEADB8DF189CA319E09F5D4EC195F95E3B785DBC60CC}}",
+                          "auditMethod": "per-file hash comparison of the current FanLab/real-host tree (bin/obj/output/.git excluded) against the previous index supplied by this tool; values are computed, never hand-copied",
+                          "auditResult": "@{addedFiles=; changedCoreFiles=Program.cs; removedFiles=; changedFiles=Program.cs}",
+                          "reason": "export chain re-record at export time: the read-only verifier reported 'FanHost source hash mismatch: Program.cs' (tree delta added={0} removed={1} changed={2}). Recomputed from the tree by tools/rebaseline-fanhost-source-baseline.ps1; previous values are kept nested inside the baseline. delta: ~ Program.cs",
+                          "previousRecorded": "@{sourceFilesIndexSha256=CB11FE54C7D7686832DA31FBD1008A262132904CCA781AF81A888206D491B346; programCsSha256=911372222A616D1A9C5D706FD03926FEA4D89023DC4B4248740C6D76BC6938D0}"
+                        },
+                        "current": {
+                          "sourceFileCount": 31,
+                          "sourceFilesIndexSha256": "206D37169F2016CFC94E9E4F996EAD869127D0AFA9A7E14F7785FD6461788596",
+                          "coreFiles": "@{Program.cs=DA1D4E0E839A4238AD5954B52241AA7BB0B44541B80F6B032E7F46FF10C8353A; YeManFanHost.csproj=3A8DC66BE0E867C38513FEADB8DF189CA319E09F5D4EC195F95E3B785DBC60CC}"
+                        },
+                        "auditMethod": "per-file hash comparison of the current FanLab/real-host tree (bin/obj/output/.git excluded) against the previous index supplied by this tool; values are computed, never hand-copied",
+                        "auditResult": {
+                          "addedFiles": "",
+                          "changedCoreFiles": "Program.cs",
+                          "removedFiles": "",
+                          "changedFiles": "Program.cs"
+                        },
+                        "reason": "export chain re-record at export time: the read-only verifier reported 'FanHost source hash mismatch: Program.cs' (tree delta added={0} removed={1} changed={2}). Recomputed from the tree by tools/rebaseline-fanhost-source-baseline.ps1; previous values are kept nested inside the baseline. delta: ~ Program.cs",
+                        "previousRecorded": {
+                          "sourceFilesIndexSha256": "8EA5CE0BDF15F0B90E88B5F95FB0110C81C5DDA6BACA70085FAB262752EB40D9",
+                          "programCsSha256": "0985F9922F750132963EC7CE28ACCB812557C1CA80B94C7685AFDE3A8E2F44A4"
+                        }
+                      },
+                      "current": {
+                        "sourceFileCount": 31,
+                        "sourceFilesIndexSha256": "856F1A5A327D10AB6427EE55E2BEBCFFBF27E30E9EA3A61AF2E37A0DF1A03F95",
+                        "coreFiles": {
+                          "Program.cs": "AFB63BD0A8A3CA713DC79A876DC708810F4AB03474661FB748B8895A8E63B76D",
+                          "YeManFanHost.csproj": "E7D7EDEC05FEAFD14B159EFA8EA6288003BDC2D0F2DAB6CF33D38AFB0DB0808B"
+                        }
+                      },
+                      "auditMethod": "per-file hash comparison of the current FanLab/real-host tree (bin/obj/output/.git excluded) against the previous index supplied by this tool; values are computed, never hand-copied",
+                      "auditResult": {
+                        "addedFiles": [],
+                        "changedCoreFiles": [
+                          "Program.cs",
+                          "YeManFanHost.csproj"
+                        ],
+                        "removedFiles": [],
+                        "changedFiles": [
+                          "Program.cs",
+                          "Section18CandidateLifecycle.cs",
+                          "YeManFanHost.csproj"
+                        ]
+                      },
+                      "reason": "export chain re-record at export time: the read-only verifier reported 'FanHost source hash mismatch: Program.cs' (tree delta added={0} removed={1} changed={2}). Recomputed from the tree by tools/rebaseline-fanhost-source-baseline.ps1; previous values are kept nested inside the baseline. delta: ~ Program.cs ~ Section18CandidateLifecycle.cs ~ YeManFanHost.csproj",
+                      "previousRecorded": {
+                        "sourceFilesIndexSha256": "206D37169F2016CFC94E9E4F996EAD869127D0AFA9A7E14F7785FD6461788596",
+                        "programCsSha256": "DA1D4E0E839A4238AD5954B52241AA7BB0B44541B80F6B032E7F46FF10C8353A"
+                      }
+                    },
+                    "current": {
+                      "sourceFileCount": 31,
+                      "sourceFilesIndexSha256": "2D5C308DCB76FD54EDFBD7F3ED5C791E1ECCD791608CA2504306D5678363D432",
+                      "coreFiles": {
+                        "Program.cs": "3728BC2DC37922E5B4747027CE9DD77061C14E5A364563DA478946D3DE68A92A",
+                        "YeManFanHost.csproj": "E7D7EDEC05FEAFD14B159EFA8EA6288003BDC2D0F2DAB6CF33D38AFB0DB0808B"
+                      }
+                    },
+                    "auditMethod": "per-file hash comparison of the current FanLab/real-host tree (bin/obj/output/.git excluded) against the previous index supplied by this tool; values are computed, never hand-copied",
+                    "auditResult": {
+                      "addedFiles": [],
+                      "changedCoreFiles": [
+                        "Program.cs"
+                      ],
+                      "removedFiles": [],
+                      "changedFiles": [
+                        "Program.cs"
+                      ]
+                    },
+                    "reason": "export chain re-record at export time: the read-only verifier reported 'FanHost source hash mismatch: Program.cs' (tree delta added={0} removed={1} changed={2}). Recomputed from the tree by tools/rebaseline-fanhost-source-baseline.ps1; previous values are kept nested inside the baseline. delta: ~ Program.cs",
+                    "previousRecorded": {
+                      "sourceFilesIndexSha256": "856F1A5A327D10AB6427EE55E2BEBCFFBF27E30E9EA3A61AF2E37A0DF1A03F95",
+                      "programCsSha256": "AFB63BD0A8A3CA713DC79A876DC708810F4AB03474661FB748B8895A8E63B76D"
+                    }
+                  },
+                  "current": {
+                    "sourceFileCount": 31,
+                    "sourceFilesIndexSha256": "AA1955E32F1BE59B8A7DEA1044A36912960EF61D761188EE6DA22D93D6EE008B",
+                    "coreFiles": {
+                      "Program.cs": "3A390EE2A0ED1BD736D477F6A56352D68918DF4D9FA24502CA1BB817AD1B0C8F",
+                      "YeManFanHost.csproj": "E7D7EDEC05FEAFD14B159EFA8EA6288003BDC2D0F2DAB6CF33D38AFB0DB0808B"
+                    }
+                  },
+                  "auditMethod": "per-file hash comparison of the current FanLab/real-host tree (bin/obj/output/.git excluded) against the previous index supplied by this tool; values are computed, never hand-copied",
+                  "auditResult": {
+                    "addedFiles": [],
+                    "changedCoreFiles": [
+                      "Program.cs"
+                    ],
+                    "removedFiles": [],
+                    "changedFiles": [
+                      "Program.cs"
+                    ]
+                  },
+                  "reason": "export chain re-record at export time: the read-only verifier reported 'FanHost source hash mismatch: Program.cs' (tree delta added={0} removed={1} changed={2}). Recomputed from the tree by tools/rebaseline-fanhost-source-baseline.ps1; previous values are kept nested inside the baseline. delta: ~ Program.cs",
+                  "previousRecorded": {
+                    "sourceFilesIndexSha256": "2D5C308DCB76FD54EDFBD7F3ED5C791E1ECCD791608CA2504306D5678363D432",
+                    "programCsSha256": "3728BC2DC37922E5B4747027CE9DD77061C14E5A364563DA478946D3DE68A92A"
+                  }
+                },
+                "current": {
+                  "sourceFileCount": 31,
+                  "sourceFilesIndexSha256": "A46465D764C0656E136618BE0FBB05C51FBC057EE45175C12E7D9C9F57079FCE",
+                  "coreFiles": {
+                    "Program.cs": "3A390EE2A0ED1BD736D477F6A56352D68918DF4D9FA24502CA1BB817AD1B0C8F",
+                    "YeManFanHost.csproj": "E7D7EDEC05FEAFD14B159EFA8EA6288003BDC2D0F2DAB6CF33D38AFB0DB0808B"
+                  }
+                },
+                "auditMethod": "per-file hash comparison of the current FanLab/real-host tree (bin/obj/output/.git excluded) against the previous index supplied by this tool; values are computed, never hand-copied",
+                "auditResult": {
+                  "addedFiles": [],
+                  "changedCoreFiles": [],
+                  "removedFiles": [],
+                  "changedFiles": [
+                    "README.md"
+                  ]
+                },
+                "reason": "export chain re-record at export time: the read-only verifier reported 'FanHost source hash mismatch: README.md' (tree delta added={0} removed={1} changed={2}). Recomputed from the tree by tools/rebaseline-fanhost-source-baseline.ps1; previous values are kept nested inside the baseline. delta: ~ README.md",
+                "previousRecorded": {
+                  "sourceFilesIndexSha256": "AA1955E32F1BE59B8A7DEA1044A36912960EF61D761188EE6DA22D93D6EE008B",
+                  "programCsSha256": "3A390EE2A0ED1BD736D477F6A56352D68918DF4D9FA24502CA1BB817AD1B0C8F"
+                }
+              },
+              "current": {
+                "sourceFileCount": 31,
+                "sourceFilesIndexSha256": "73D89C125B03C9E8BEFA8D0DFB6B89E8F8155DF77F662559131BB0C5AB17DA92",
+                "coreFiles": {
+                  "Program.cs": "3A390EE2A0ED1BD736D477F6A56352D68918DF4D9FA24502CA1BB817AD1B0C8F",
+                  "YeManFanHost.csproj": "E7D7EDEC05FEAFD14B159EFA8EA6288003BDC2D0F2DAB6CF33D38AFB0DB0808B"
+                }
+              },
+              "auditMethod": "per-file hash comparison of the current FanLab/real-host tree (bin/obj/output/.git excluded) against the previous index supplied by this tool; values are computed, never hand-copied",
+              "auditResult": {
+                "addedFiles": [],
+                "changedCoreFiles": [],
+                "removedFiles": [],
+                "changedFiles": [
+                  "README.md"
+                ]
+              },
+              "reason": "export chain re-record at export time: the read-only verifier reported 'FanHost source hash mismatch: README.md' (tree delta added={0} removed={1} changed={2}). Recomputed from the tree by tools/rebaseline-fanhost-source-baseline.ps1; previous values are kept nested inside the baseline. delta: ~ README.md",
+              "previousRecorded": {
+                "sourceFilesIndexSha256": "A46465D764C0656E136618BE0FBB05C51FBC057EE45175C12E7D9C9F57079FCE",
+                "programCsSha256": "3A390EE2A0ED1BD736D477F6A56352D68918DF4D9FA24502CA1BB817AD1B0C8F"
+              }
+            },
+            "current": {
+              "sourceFileCount": 32,
+              "sourceFilesIndexSha256": "5AF8B09782E0F937404D2CFC187A39F3C8B829E6FB61978358A2669AE4B66AB9",
+              "coreFiles": {
+                "Program.cs": "CAE0ACC0DC9B7366ECE427A2ACAECA5AAE536AB9A825AF5995238E895CA40A24",
+                "YeManFanHost.csproj": "E7D7EDEC05FEAFD14B159EFA8EA6288003BDC2D0F2DAB6CF33D38AFB0DB0808B"
+              }
+            },
+            "auditMethod": "per-file hash comparison of the current FanLab/real-host tree (bin/obj/output/.git excluded) against the previous index supplied by this tool; values are computed, never hand-copied",
+            "auditResult": {
+              "addedFiles": [
+                "FanCapabilityPolicy.cs"
+              ],
+              "changedCoreFiles": [
+                "Program.cs"
+              ],
+              "removedFiles": [],
+              "changedFiles": [
+                "Program.cs"
+              ]
+            },
+            "reason": "export chain re-record at export time: the read-only verifier reported 'FanHost source file count mismatch: 32' (tree delta added={0} removed={1} changed={2}). Recomputed from the tree by tools/rebaseline-fanhost-source-baseline.ps1; previous values are kept nested inside the baseline. delta: + FanCapabilityPolicy.cs ~ Program.cs",
+            "previousRecorded": {
+              "sourceFilesIndexSha256": "73D89C125B03C9E8BEFA8D0DFB6B89E8F8155DF77F662559131BB0C5AB17DA92",
+              "programCsSha256": "3A390EE2A0ED1BD736D477F6A56352D68918DF4D9FA24502CA1BB817AD1B0C8F"
+            }
+          },
+          "current": {
+            "sourceFileCount": 32,
+            "sourceFilesIndexSha256": "9C91D2999486ACA2660B0D7B2AE52F8A6E8D91D58E6A8F8330826B4EAEA3C268",
+            "coreFiles": {
+              "Program.cs": "1FA0DF452D4069A54D082A11C93CBC2A6BC5251194062A0CA545851E8336A8CA",
+              "YeManFanHost.csproj": "E7D7EDEC05FEAFD14B159EFA8EA6288003BDC2D0F2DAB6CF33D38AFB0DB0808B"
+            }
+          },
+          "auditMethod": "per-file hash comparison of the current FanLab/real-host tree (bin/obj/output/.git excluded) against the previous index supplied by this tool; values are computed, never hand-copied",
+          "auditResult": {
+            "addedFiles": [],
+            "changedCoreFiles": [
+              "Program.cs"
+            ],
+            "removedFiles": [],
+            "changedFiles": [
+              "FanCapabilityPolicy.cs",
+              "Program.cs"
+            ]
+          },
+          "reason": "export chain re-record at export time: the read-only verifier reported 'FanHost source hash mismatch: FanCapabilityPolicy.cs' (tree delta added={0} removed={1} changed={2}). Recomputed from the tree by tools/rebaseline-fanhost-source-baseline.ps1; previous values are kept nested inside the baseline. delta: ~ FanCapabilityPolicy.cs ~ Program.cs",
+          "previousRecorded": {
+            "sourceFilesIndexSha256": "5AF8B09782E0F937404D2CFC187A39F3C8B829E6FB61978358A2669AE4B66AB9",
+            "programCsSha256": "CAE0ACC0DC9B7366ECE427A2ACAECA5AAE536AB9A825AF5995238E895CA40A24"
+          }
+        },
+        "current": {
+          "sourceFileCount": 33,
+          "sourceFilesIndexSha256": "2345F1AAC09F1CB75E4E0C90DA06683842ED392C73677B76A8B908D836C918EE",
+          "coreFiles": {
+            "Program.cs": "73BC01D542FD890B366E4CD87DD331E79B055D910D22AF7D7E6CB6003D0CC3E9",
+            "YeManFanHost.csproj": "E7D7EDEC05FEAFD14B159EFA8EA6288003BDC2D0F2DAB6CF33D38AFB0DB0808B"
+          }
+        },
+        "auditMethod": "per-file hash comparison of the current FanLab/real-host tree (bin/obj/output/.git excluded) against the previous index supplied by this tool; values are computed, never hand-copied",
+        "auditResult": {
+          "addedFiles": [
+            "G1FanContractAdapter.cs"
+          ],
+          "changedCoreFiles": [
+            "Program.cs"
+          ],
+          "removedFiles": [],
+          "changedFiles": [
+            "FanCapabilityPolicy.cs",
+            "Program.cs"
+          ]
+        },
+        "reason": "export chain re-record at export time: the read-only verifier reported 'FanHost source file count mismatch: 33' (tree delta added={0} removed={1} changed={2}). Recomputed from the tree by tools/rebaseline-fanhost-source-baseline.ps1; previous values are kept nested inside the baseline. delta: + G1FanContractAdapter.cs ~ FanCapabilityPolicy.cs ~ Program.cs",
+        "previousRecorded": {
+          "sourceFilesIndexSha256": "9C91D2999486ACA2660B0D7B2AE52F8A6E8D91D58E6A8F8330826B4EAEA3C268",
+          "programCsSha256": "1FA0DF452D4069A54D082A11C93CBC2A6BC5251194062A0CA545851E8336A8CA"
+        }
+      },
+      "current": {
+        "sourceFileCount": 33,
+        "sourceFilesIndexSha256": "1959B8A3C94280D4030B55D71D2C7AF25F75FBFDD8EA291425E449D049E09797",
+        "coreFiles": {
+          "Program.cs": "1065B3CB4E1F4FCD012CF0F2BA434FB8A40A5AA1BDE8CC5BE080CCED5DCED8F8",
+          "YeManFanHost.csproj": "E7D7EDEC05FEAFD14B159EFA8EA6288003BDC2D0F2DAB6CF33D38AFB0DB0808B"
+        }
+      },
+      "auditMethod": "per-file hash comparison of the current FanLab/real-host tree (bin/obj/output/.git excluded) against the previous index supplied by this tool; values are computed, never hand-copied",
+      "auditResult": {
+        "addedFiles": [],
+        "changedCoreFiles": [
+          "Program.cs"
+        ],
+        "removedFiles": [],
+        "changedFiles": [
+          "Program.cs"
+        ]
+      },
+      "reason": "export chain re-record at export time: the read-only verifier reported 'FanHost source hash mismatch: Program.cs' (tree delta added={0} removed={1} changed={2}). Recomputed from the tree by tools/rebaseline-fanhost-source-baseline.ps1; previous values are kept nested inside the baseline. delta: ~ Program.cs",
+      "previousRecorded": {
+        "sourceFilesIndexSha256": "2345F1AAC09F1CB75E4E0C90DA06683842ED392C73677B76A8B908D836C918EE",
+        "programCsSha256": "73BC01D542FD890B366E4CD87DD331E79B055D910D22AF7D7E6CB6003D0CC3E9"
+      }
+    },
+    "current": {
+      "sourceFileCount": 33,
+      "sourceFilesIndexSha256": "9244E0A57465F223B959B5D6EE9A21435BC9E3CBEA2C60FAC1686B880E0431EC",
+      "coreFiles": {
+        "Program.cs": "89F281F9302DCD97E564D68A097C41DE392EB8A8DA13DFE10ADE53C3CEFEAA3E",
+        "YeManFanHost.csproj": "E7D7EDEC05FEAFD14B159EFA8EA6288003BDC2D0F2DAB6CF33D38AFB0DB0808B"
+      }
+    },
+    "auditMethod": "per-file hash comparison of the current FanLab/real-host tree (bin/obj/output/.git excluded) against the previous index supplied by this tool; values are computed, never hand-copied",
+    "auditResult": {
+      "addedFiles": [],
+      "changedCoreFiles": [
+        "Program.cs"
+      ],
+      "removedFiles": [],
+      "changedFiles": [
+        "Program.cs"
+      ]
+    },
+    "reason": "Common admission/generation/lease evidence and actual HostState export; hardware writers and HC source unchanged",
+    "previousRecorded": {
+      "sourceFilesIndexSha256": "1959B8A3C94280D4030B55D71D2C7AF25F75FBFDD8EA291425E449D049E09797",
+      "programCsSha256": "1065B3CB4E1F4FCD012CF0F2BA434FB8A40A5AA1BDE8CC5BE080CCED5DCED8F8"
+    }
+  },
+  "policy": {
+    "mainlineIsCanonicalAfterImport": true,
+    "currentFanHostPayloadIsUnchanged": false,
+    "currentFanHostPayloadUpgrade": "HC-CANDIDATE-0.32.4.0-06c0b954-20260902",
+    "allowedBehavioralException": "HWiNFO shared-memory temperature source"
+  }
+}

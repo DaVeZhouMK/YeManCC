@@ -1,0 +1,67 @@
+{
+  "schema": 1,
+  "name": "msi-fan-rules",
+  "version": "v1 (2026-09-22, batch 204-C)",
+  "purpose": "Model/firmware rules + byte semantics for the MSI Claw fan path, with an explicit evidence grade per fact. Nothing here is a write strategy: block/byte semantics that were only inferred stay 'unknown'.",
+  "evidenceGrades": {
+    "source-code": "read from a real source file on disk (path + line recorded)",
+    "decompiled-strings": "string/wide-char material extracted from a binary or helper dump (CT reference)",
+    "device-measured": "measured on a real MSI device (none available in this batch)",
+    "unverified": "no evidence beyond a plausible inference"
+  },
+  "deviceWhitelist": [
+    { "model": "ClawA1M", "status": "supported-readonly", "grade": "source-code", "source": "deps/handheldcompanion-runtime/source/Devices/MSI/ClawA1M.cs" },
+    { "model": "ClawA2VM", "status": "supported-readonly", "grade": "source-code", "source": "Devices/MSI/ClawA2VM.cs" },
+    { "model": "ClawBZ2EM", "status": "supported-readonly", "grade": "source-code", "source": "Devices/MSI/*.cs" },
+    { "model": "ClawCG3EM", "status": "supported-readonly", "grade": "source-code", "source": "Devices/MSI/*.cs" }
+  ],
+  "transport": {
+    "scope": "root\\WMI",
+    "path": "MSI_ACPI.InstanceName='ACPI\\PNP0C14\\0_0'",
+    "grade": "source-code",
+    "source": "ClawA1M.cs:129-130",
+    "methods": {
+      "Get_Fan": { "readOnly": true, "note": "32-byte package read; block index in byte 0" },
+      "Get_Data": { "readOnly": true },
+      "Get_AP": { "readOnly": true },
+      "Set_Fan": { "readOnly": false, "note": "write path - NOT used by ymcc_sim" },
+      "Set_Data": { "readOnly": false, "note": "write path - NOT used by ymcc_sim" }
+    },
+    "readOnlyGuarantee": "the adapter only ever calls Get_*; a static assertion in msi_domain.ps1 fails if any Set_* call site, a file/EC write token, or a write cmdlet appears in its read path"
+  },
+  "blocks": [
+    { "block": 1, "role": "CPU fan curve table", "grade": "source-code", "source": "ClawA1M.cs:1064-1083 (loop 1..2)" },
+    { "block": 2, "role": "GPU fan curve table", "grade": "source-code", "source": "ClawA1M.cs:1064-1083" },
+    { "block": 0, "role": "telemetry candidate (CT hint: Get_Fan(0) head)", "grade": "decompiled-strings", "source": "CT helper dump _scratch/ctw-helper-wide-text-fan.txt", "deviceStatus": "MSI_DEVICE_PENDING", "caution": "unit/scale/freshness unverified - never presented as RPM" },
+    { "block": 212, "role": "mode bit (Set_Data block 212, bit7)", "grade": "source-code", "source": "ClawA1M.cs:1111-1128" },
+    { "block": 152, "role": "full-speed switch (Set_Data block 152, bit7)", "grade": "source-code", "source": "ClawA1M.cs:1130+, Close() uses it at L448", "uiGate": "HC consumer only calls it for LegionGo / ClawA2VM (QuickDevicePageViewModel.cs:205-208) - dead switch for the other MSI models" }
+  ],
+  "byteSemantics": {
+    "curvePayload": {
+      "byte0": { "role": "block index", "grade": "source-code", "source": "ClawA1M.cs:1078" },
+      "bytes1_6": { "role": "six duty slots (percent)", "grade": "decompiled-strings", "source": "CT dump: 'writing slider duties [1..6]=[...] (payload[0]/[7] preserved)'", "unit": "dutyPercent", "never": "RPM (a curve byte is a duty, never a measured speed)" },
+      "byte7": { "role": "boundary/kept byte", "grade": "source-code", "source": "HC hardcodes the 8th table byte to 75 (ClawA1M.cs:379); CT preserves payload[7]", "note": "unknown whether the firmware needs it unchanged; the adapter reports it and never writes" },
+      "bytes8_31": { "role": "unknown", "grade": "unverified", "note": "preserved in raw form only; never decoded into a value" }
+    },
+    "telemetryPayload": {
+      "bytes": { "role": "unknown", "grade": "unverified", "note": "raw only; any numeric presentation stays Unknown until a device window (B2)" }
+    }
+  },
+  "unsupportedSemantics": {
+    "device-not-whitelisted": "model is not on deviceWhitelist -> refuse before decode; unknown stays Unknown / MSI_DEVICE_PENDING",
+    "block-unsupported": "block index is not 1 (CPU) or 2 (GPU) -> no curve table; refuse rather than guess a value",
+    "scale-unverified": "telemetry payload unit/scale/freshness unproven -> raw bytes only, values stay null (never 0, never RPM)",
+    "grade": "source-code",
+    "note": "the three reasons are disjoint so 'device not whitelisted / block unsupported / telemetry unknown' never collapse into one another"
+  },
+  "rpmPolicy": {
+    "rule": "curve bytes must never be displayed as RPM; unknown values are null/Unknown, never 0",
+    "grade": "unverified",
+    "reason": "HC ReadFanDuty returns 0 as a placeholder (IDevice.cs:1021-1028) and has zero callers - 0 is not a measurement"
+  },
+  "writePolicy": {
+    "batchDecision": "no EC write, no full-speed entry, no driver replacement, no global curve re-ordering in this batch",
+    "grade": "source-code",
+    "source": "204 §8.2/§8.3"
+  }
+}

@@ -1,0 +1,384 @@
+﻿<Page
+    x:Class="HandheldCompanion.Views.QuickPages.QuickApplicationsPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="clr-namespace:HandheldCompanion.Controls"
+    xmlns:converters="clr-namespace:HandheldCompanion.Converters"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:ikw="http://schemas.inkore.net/lib/ui/wpf"
+    xmlns:l="clr-namespace:HandheldCompanion.Localization"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:resx="clr-namespace:HandheldCompanion.Properties"
+    xmlns:ui="http://schemas.inkore.net/lib/ui/wpf/modern"
+    xmlns:viewmodels="clr-namespace:HandheldCompanion.ViewModels"
+    Name="QuickApplications"
+    Title="{l:Static resx:Resources.QuickApplicationsPage_Title}"
+    Margin="12,0,12,0"
+    d:Background="White"
+    d:DataContext="{d:DesignInstance Type=viewmodels:QuickApplicationsPageViewModel}"
+    d:DesignHeight="1200"
+    d:DesignWidth="640"
+    KeepAlive="True"
+    mc:Ignorable="d">
+
+    <Page.Resources>
+        <converters:WidthToColumnsConverter x:Key="WidthToColumns" DesiredItemWidth="90" />
+    </Page.Resources>
+
+    <Grid x:Name="RootGrid">
+        <ui:ContentDialog
+            Name="SnapDialog"
+            d:Visibility="Collapsed"
+            CloseButtonText="{l:Static resx:Resources.ProfilesPage_Dialogue_Cancel}"
+            PrimaryButtonStyle="{DynamicResource AccentButtonStyle}"
+            PrimaryButtonText="Snap">
+
+            <ikw:SimpleStackPanel Spacing="10">
+                <ikw:SimpleStackPanel Spacing="3">
+                    <TextBlock Style="{StaticResource BaseTextBlockStyle}" Text="Snap layouts" />
+
+                    <ikw:SimpleStackPanel
+                        HorizontalAlignment="Center"
+                        Orientation="Horizontal"
+                        Spacing="3">
+                        <ikw:SimpleStackPanel Orientation="Horizontal" Spacing="3">
+                            <RadioButton
+                                Width="48"
+                                Height="70"
+                                BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}"
+                                BorderThickness="1"
+                                Command="{Binding RadioButtonCheckedCommand}"
+                                CommandParameter="1"
+                                GroupName="groupFoo"
+                                Style="{StaticResource {x:Type ToggleButton}}" />
+                            <RadioButton
+                                Width="48"
+                                Height="70"
+                                BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}"
+                                BorderThickness="1"
+                                Command="{Binding RadioButtonCheckedCommand}"
+                                CommandParameter="3"
+                                GroupName="groupFoo"
+                                Style="{StaticResource {x:Type ToggleButton}}" />
+                        </ikw:SimpleStackPanel>
+
+                        <RadioButton
+                            Width="100"
+                            Height="70"
+                            BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}"
+                            BorderThickness="1"
+                            Command="{Binding RadioButtonCheckedCommand}"
+                            CommandParameter="9"
+                            GroupName="groupFoo"
+                            IsChecked="True"
+                            Style="{StaticResource {x:Type ToggleButton}}" />
+                    </ikw:SimpleStackPanel>
+
+                    <ikw:SimpleStackPanel
+                        HorizontalAlignment="Center"
+                        Orientation="Horizontal"
+                        Spacing="3">
+                        <ikw:SimpleStackPanel Orientation="Vertical" Spacing="3">
+                            <RadioButton
+                                Width="100"
+                                Height="38"
+                                BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}"
+                                BorderThickness="1"
+                                Command="{Binding RadioButtonCheckedCommand}"
+                                CommandParameter="2"
+                                GroupName="groupFoo"
+                                Style="{StaticResource {x:Type ToggleButton}}" />
+                            <RadioButton
+                                Width="100"
+                                Height="38"
+                                BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}"
+                                BorderThickness="1"
+                                Command="{Binding RadioButtonCheckedCommand}"
+                                CommandParameter="4"
+                                GroupName="groupFoo"
+                                Style="{StaticResource {x:Type ToggleButton}}" />
+                        </ikw:SimpleStackPanel>
+
+                        <ikw:SimpleStackPanel Orientation="Vertical" Spacing="3">
+                            <ikw:SimpleStackPanel Orientation="Horizontal" Spacing="3">
+                                <RadioButton
+                                    Width="48"
+                                    Height="38"
+                                    BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}"
+                                    BorderThickness="1"
+                                    Command="{Binding RadioButtonCheckedCommand}"
+                                    CommandParameter="5"
+                                    GroupName="groupFoo"
+                                    Style="{StaticResource {x:Type ToggleButton}}" />
+                                <RadioButton
+                                    Width="48"
+                                    Height="38"
+                                    BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}"
+                                    BorderThickness="1"
+                                    Command="{Binding RadioButtonCheckedCommand}"
+                                    CommandParameter="6"
+                                    GroupName="groupFoo"
+                                    Style="{StaticResource {x:Type ToggleButton}}" />
+                            </ikw:SimpleStackPanel>
+                            <ikw:SimpleStackPanel Orientation="Horizontal" Spacing="3">
+                                <RadioButton
+                                    Width="48"
+                                    Height="38"
+                                    BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}"
+                                    BorderThickness="1"
+                                    Command="{Binding RadioButtonCheckedCommand}"
+                                    CommandParameter="8"
+                                    GroupName="groupFoo"
+                                    Style="{StaticResource {x:Type ToggleButton}}" />
+                                <RadioButton
+                                    Width="48"
+                                    Height="38"
+                                    BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}"
+                                    BorderThickness="1"
+                                    Command="{Binding RadioButtonCheckedCommand}"
+                                    CommandParameter="7"
+                                    GroupName="groupFoo"
+                                    Style="{StaticResource {x:Type ToggleButton}}" />
+                            </ikw:SimpleStackPanel>
+                        </ikw:SimpleStackPanel>
+                    </ikw:SimpleStackPanel>
+                </ikw:SimpleStackPanel>
+
+                <ikw:SimpleStackPanel HorizontalAlignment="Stretch" Spacing="3">
+                    <TextBlock Style="{StaticResource BaseTextBlockStyle}" Text="Options" />
+
+                    <Grid HorizontalAlignment="Stretch">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition />
+                            <ColumnDefinition Width="0.2*" MinWidth="80" />
+                        </Grid.ColumnDefinitions>
+
+                        <TextBlock
+                            HorizontalAlignment="Left"
+                            VerticalAlignment="Center"
+                            Style="{StaticResource BodyTextBlockStyle}"
+                            Text="Borderless" />
+
+                        <ui:ToggleSwitch
+                            Grid.Column="1"
+                            HorizontalAlignment="Right"
+                            IsEnabled="{Binding BorderlessEnabled, Mode=OneWay, UpdateSourceTrigger=PropertyChanged}"
+                            IsOn="{Binding BorderlessToggle, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                            Style="{DynamicResource InvertedToggleSwitchStyle}" />
+                    </Grid>
+                </ikw:SimpleStackPanel>
+            </ikw:SimpleStackPanel>
+        </ui:ContentDialog>
+
+        <ikw:SimpleStackPanel Spacing="28">
+
+            <!--  Quick start  -->
+            <ikw:SimpleStackPanel Spacing="8">
+                <TextBlock Style="{StaticResource BaseTextBlockStyle}" Text="{l:Static resx:Resources.QuickApplicationsPage_QuickStart}" />
+
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+
+                    <ItemsControl
+                        ItemsSource="{Binding PagedProfiles}"
+                        VirtualizingPanel.IsVirtualizing="True"
+                        VirtualizingPanel.VirtualizationMode="Recycling">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <controls:JustifiedWrapPanel
+                                    HorizontalSpacing="3"
+                                    ItemAspectRatio="0.3"
+                                    TargetRowHeight="110"
+                                    VerticalSpacing="3" />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+
+                        <ItemsControl.ItemTemplate>
+                            <!--  your existing profile-button template  -->
+                            <DataTemplate>
+                                <Button
+                                    Padding="3"
+                                    HorizontalAlignment="Stretch"
+                                    VerticalAlignment="Stretch"
+                                    HorizontalContentAlignment="Stretch"
+                                    VerticalContentAlignment="Stretch"
+                                    Command="{Binding StartProcessCommand}"
+                                    IsEnabled="{Binding IsAvailable, UpdateSourceTrigger=PropertyChanged}">
+
+                                    <Grid>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="5*" />
+                                            <RowDefinition Height="5*" />
+                                        </Grid.RowDefinitions>
+
+                                        <Image
+                                            Width="32"
+                                            Height="32"
+                                            HorizontalAlignment="Center"
+                                            VerticalAlignment="Bottom"
+                                            Source="{Binding Icon, UpdateSourceTrigger=PropertyChanged}">
+                                            <Image.Style>
+                                                <Style TargetType="Image">
+                                                    <Style.Triggers>
+                                                        <Trigger Property="IsEnabled" Value="False">
+                                                            <Setter Property="Opacity" Value="0.20" />
+                                                        </Trigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </Image.Style>
+                                        </Image>
+
+                                        <TextBlock
+                                            Grid.Row="1"
+                                            HorizontalAlignment="Center"
+                                            VerticalAlignment="Center"
+                                            Style="{StaticResource CaptionTextBlockStyle}"
+                                            Text="{Binding Name, UpdateSourceTrigger=PropertyChanged}"
+                                            TextWrapping="Wrap" />
+                                    </Grid>
+                                </Button>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+
+                    <ui:PipsPager
+                        Grid.Column="1"
+                        Margin="12,0,0,0"
+                        HorizontalAlignment="Left"
+                        VerticalAlignment="Center"
+                        NextButtonVisibility="Visible"
+                        NumberOfPages="{Binding TotalPages}"
+                        Orientation="Vertical"
+                        PreviousButtonVisibility="Visible"
+                        SelectedPageIndex="{Binding SelectedPageIndex, Mode=TwoWay}" />
+                </Grid>
+            </ikw:SimpleStackPanel>
+
+            <!--  Processes  -->
+            <ikw:SimpleStackPanel Spacing="8">
+                <TextBlock Style="{StaticResource BaseTextBlockStyle}" Text="{l:Static resx:Resources.QuickApplicationsPage_Processes}" />
+
+                <ikw:SimpleStackPanel Spacing="3">
+                    <ui:ProgressBar IsIndeterminate="{Binding IsReady, Mode=OneWay, UpdateSourceTrigger=PropertyChanged, Converter={StaticResource InvertBooleanConverter}}" Visibility="{Binding IsReady, Mode=OneWay, UpdateSourceTrigger=PropertyChanged, Converter={StaticResource BooleanToVisibilityConverter}, ConverterParameter=False}" />
+
+                    <ItemsControl
+                        IsEnabled="{Binding IsReady, Mode=OneWay, UpdateSourceTrigger=PropertyChanged}"
+                        ItemsSource="{Binding Processes}"
+                        VirtualizingPanel.IsVirtualizing="True"
+                        VirtualizingPanel.VirtualizationMode="Recycling">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <ikw:SimpleStackPanel Orientation="Vertical" Spacing="3" />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <ui:SettingsExpander
+                                    Description="{Binding CompanyName}"
+                                    Header="{Binding ProductName}"
+                                    ItemsSource="{Binding ProcessWindows}">
+                                    <ui:SettingsExpander.HeaderIcon>
+                                        <Image
+                                            Grid.Column="0"
+                                            Width="24"
+                                            Height="24"
+                                            Source="{Binding Icon}" />
+                                    </ui:SettingsExpander.HeaderIcon>
+
+                                    <ikw:SimpleStackPanel
+                                        Grid.Column="2"
+                                        Margin="6,0,12,0"
+                                        HorizontalAlignment="Right"
+                                        Orientation="Horizontal"
+                                        Spacing="3">
+
+                                        <ToggleButton
+                                            Height="31"
+                                            HorizontalAlignment="Stretch"
+                                            VerticalAlignment="Stretch"
+                                            FontFamily="{DynamicResource SymbolThemeFontFamily}"
+                                            IsChecked="{Binding IsSuspended, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}">
+                                            <ToggleButton.Style>
+                                                <Style BasedOn="{StaticResource DefaultToggleButtonStyle}" TargetType="ToggleButton">
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding IsSuspended}" Value="True">
+                                                            <Setter Property="ToolTip" Value="{l:Static resx:Resources.QuickApplicationsPage_ResumeApplication}" />
+                                                            <Setter Property="Content" Value="&#xe768;" />
+                                                        </DataTrigger>
+                                                        <DataTrigger Binding="{Binding IsSuspended}" Value="False">
+                                                            <Setter Property="ToolTip" Value="{l:Static resx:Resources.QuickApplicationsPage_SuspendApplication}" />
+                                                            <Setter Property="Content" Value="&#xe769;" />
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </ToggleButton.Style>
+                                        </ToggleButton>
+
+                                        <Button
+                                            Height="31"
+                                            HorizontalAlignment="Stretch"
+                                            VerticalAlignment="Stretch"
+                                            Command="{Binding KillProcessCommand}"
+                                            Content="&#xe711;"
+                                            FontFamily="{DynamicResource SymbolThemeFontFamily}"
+                                            ToolTip="Terminate application" />
+                                    </ikw:SimpleStackPanel>
+
+                                    <ui:SettingsExpander.ItemTemplate>
+                                        <DataTemplate>
+                                            <ui:SettingsCard Description="{Binding Name, Mode=OneWay, UpdateSourceTrigger=PropertyChanged}">
+
+                                                <ikw:SimpleStackPanel
+                                                    Grid.Column="1"
+                                                    HorizontalAlignment="Right"
+                                                    Orientation="Horizontal"
+                                                    Spacing="3">
+
+                                                    <Button
+                                                        Height="31"
+                                                        HorizontalAlignment="Stretch"
+                                                        VerticalAlignment="Stretch"
+                                                        Command="{Binding BringProcessCommand}"
+                                                        Content="&#xe7c4;"
+                                                        FontFamily="{DynamicResource SymbolThemeFontFamily}"
+                                                        ToolTip="Snap application window" />
+
+                                                    <Button
+                                                        Height="31"
+                                                        HorizontalAlignment="Stretch"
+                                                        VerticalAlignment="Stretch"
+                                                        Command="{Binding SwapScreenCommand}"
+                                                        FontFamily="{DynamicResource SymbolThemeFontFamily}"
+                                                        IsEnabled="{Binding HasTwoScreen, Mode=OneWay, UpdateSourceTrigger=PropertyChanged}">
+                                                        <Button.Style>
+                                                            <Style BasedOn="{StaticResource AccentButtonStyle}" TargetType="Button">
+                                                                <Style.Triggers>
+                                                                    <DataTrigger Binding="{Binding IsPrimaryScreen}" Value="True">
+                                                                        <Setter Property="ToolTip" Value="Swap to secondary screen" />
+                                                                        <Setter Property="Content" Value="&#xe8a7;" />
+                                                                    </DataTrigger>
+                                                                    <DataTrigger Binding="{Binding IsPrimaryScreen}" Value="False">
+                                                                        <Setter Property="ToolTip" Value="Swap to primary screen" />
+                                                                        <Setter Property="Content" Value="&#xe78b;" />
+                                                                    </DataTrigger>
+                                                                </Style.Triggers>
+                                                            </Style>
+                                                        </Button.Style>
+                                                    </Button>
+                                                </ikw:SimpleStackPanel>
+                                            </ui:SettingsCard>
+                                        </DataTemplate>
+                                    </ui:SettingsExpander.ItemTemplate>
+                                </ui:SettingsExpander>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ikw:SimpleStackPanel>
+            </ikw:SimpleStackPanel>
+        </ikw:SimpleStackPanel>
+    </Grid>
+</Page>

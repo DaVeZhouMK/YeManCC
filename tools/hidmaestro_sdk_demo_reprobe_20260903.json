@@ -1,0 +1,32 @@
+{
+  "evidenceId": "A1-R1-HIDMAESTRO-X360-SDK-DEMO-REPROBE-20260903",
+  "status": "PASS",
+  "assetLockId": "HC-GYRO-VIRTUAL-MAINLINE-LOCK-20260903",
+  "asset": {
+    "assetId": "HIDMaestro-1.7.0",
+    "isolatedExecutable": "G:\\YeManCC-Work\\Temp\\hidmaestro-probe-20260903-01\\HIDMaestroTest\\HIDMaestroTest.exe"
+  },
+  "command": "HIDMaestroTest.exe sdk-demo xbox-360-wired",
+  "observed": {
+    "profilesLoaded": 231,
+    "driverInstall": "OK",
+    "create": "OK",
+    "reportSubmission": "323 frames at 64 Hz over 5 seconds",
+    "dispose": "OK"
+  },
+  "postCleanup": {
+    "hidMaestroPresentOnlyDevices": 0,
+    "remainingMatchingDevices": [
+      "USB\\VID_045E&PID_028E\\8&2D69411B&0&6",
+      "USB\\VID_045E&PID_028E&IG_00\\9&283E47C9&0&00",
+      "HID\\VID_045E&PID_028E&IG_00\\A&CA2443D&0&0000"
+    ],
+    "interpretation": "These three entries are the user-provided physical Xbox 360 controller, not HIDMaestro. No physical input was read."
+  },
+  "scope": "Isolated X360 virtual-device SDK demo. HC was not loaded, HidHide was not changed, no YeManCC product path was used, and no game/Steam/HIDAPI consumer assertion is made.",
+  "remaining": [
+    "Descriptor field-level encode/decode parity is not proven by this demo.",
+    "No YeManCC-to-HIDMaestro adapter exists.",
+    "HidHide and external consumer isolation remain UNENCLOSED."
+  ]
+}

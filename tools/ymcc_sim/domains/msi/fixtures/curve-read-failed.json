@@ -1,0 +1,8 @@
+{
+  "name": "curve-read-failed",
+  "kind": "curve",
+  "expect": { "ok": false, "reason": "read-failed", "duties": null, "asRpm": false },
+  "raw": [],
+  "readSuccess": false,
+  "note": "the transport reported failure: no bytes, no decode, no invented values"
+}

@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "revision": 0,
+  "closure": "UNENCLOSED",
+  "hostIdentity": null,
+  "hcAssetId": "HC-CANDIDATE-0.32.4.0-06c0b954-20260902",
+  "externalAssets": {
+    "HIDMaestro": "HIDMaestro-1.7.0",
+    "HidHide": "HidHide-1.5.230"
+  },
+  "capabilities": {
+    "mockOwnership": true,
+    "mockAssistedStick": true,
+    "mockLifecycle": true,
+    "hidMaestroX360CreateSubmitRemove": true,
+    "xinputConsumerObserved": true,
+    "hcInputIsolation": false,
+    "physicalControllerAcquisition": false,
+    "physicalHidHideSuppression": false,
+    "hidApiConsumerObserved": false,
+    "steamConsumerObserved": false,
+    "gameConsumerObserved": false
+  },
+  "realRuntimeAuthorized": true,
+  "pageVisibility": "test-sidecar-visible",
+  "runtimeVisibility": "hidden",
+  "testSidecarDirectories": {
+    "virtualGamepad": "C:\\SOFT\\YeMan\\PowerControl\\feature-assets\\virtual-gamepad",
+    "gyroMotion": "C:\\SOFT\\YeMan\\PowerControl\\feature-assets\\gyro-motion"
+  },
+  "updaterExcluded": true,
+  "reasons": [
+    "hc-isolation-unproven",
+    "physical-controller-not-present",
+    "visibility-restore-unverified",
+    "consumer-observation-incomplete"
+  ]
+}

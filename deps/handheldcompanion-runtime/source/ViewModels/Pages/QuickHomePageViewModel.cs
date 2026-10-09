@@ -1,0 +1,182 @@
+﻿using GongSolutions.Wpf.DragDrop;
+using HandheldCompanion.Controllers;
+using HandheldCompanion.Managers;
+using System;
+using System.Collections.ObjectModel;
+using System.Linq;
+using System.Windows.Data;
+
+namespace HandheldCompanion.ViewModels
+{
+    public class QuickHomePageViewModel : BaseViewModel, IDropTarget
+    {
+        public ObservableCollection<HotkeyViewModel> HotkeysList { get; set; } = [];
+
+        public QuickHomePageViewModel()
+        {
+            // Enable thread-safe access to the collection
+            BindingOperations.EnableCollectionSynchronization(HotkeysList, _collectionLock);
+
+            // raise events
+            switch (ManagerFactory.hotkeysManager.Status)
+            {
+                default:
+                case ManagerStatus.Initializing:
+                    ManagerFactory.hotkeysManager.Initialized += HotkeysManager_Initialized;
+                    break;
+                case ManagerStatus.Initialized:
+                    QueryHotkeys();
+                    break;
+            }
+
+            // manage events
+            ControllerManager.Initialized += ControllerManager_Initialized;
+
+            // raise events
+            if (ControllerManager.IsInitialized)
+                ControllerManager_Initialized();
+        }
+
+        private void ControllerManager_Initialized()
+        {
+            // manage events
+            ControllerManager.ControllerSelected += ControllerManager_ControllerSelected;
+            ControllerManager.ControllerPlugged += ControllerManager_ControllerChanged;
+            ControllerManager.ControllerUnplugged += ControllerManager_ControllerChanged;
+
+            // raise events
+            if (ControllerManager.HasTargetController && ControllerManager.GetTarget() is IController controller)
+                ControllerManager_ControllerSelected(controller);
+        }
+
+        private void HotkeysManager_Initialized()
+        {
+            QueryHotkeys();
+        }
+
+        private void ControllerManager_ControllerChanged(IController controller, bool isPowerCycling)
+        {
+            RefreshHotkeyGlyphs();
+        }
+
+        private void ControllerManager_ControllerChanged(IController controller, bool isPowerCycling, bool wasTarget)
+        {
+            RefreshHotkeyGlyphs();
+        }
+
+        private void ControllerManager_ControllerSelected(IController controller)
+        {
+            RefreshHotkeyGlyphs();
+        }
+
+        private void RefreshHotkeyGlyphs()
+        {
+            lock (_collectionLock)
+            {
+                foreach (HotkeyViewModel hotkeyViewModel in HotkeysList)
+                    hotkeyViewModel.DrawChords();
+            }
+        }
+
+        private void QueryHotkeys()
+        {
+            // manage events
+            ManagerFactory.hotkeysManager.Updated += HotkeysManager_Updated;
+            ManagerFactory.hotkeysManager.Deleted += HotkeysManager_Deleted;
+
+            // raise events
+            foreach (Hotkey hotkey in ManagerFactory.hotkeysManager.GetHotkeys().OrderByDescending(hotkey => hotkey.PinIndex != -1).ThenBy(hotkey => hotkey.ButtonFlags))
+                HotkeysManager_Updated(hotkey);
+        }
+
+        void IDropTarget.DragOver(IDropInfo dropInfo)
+        {
+            dropInfo.Effects = System.Windows.DragDropEffects.All;
+        }
+
+        void IDropTarget.Drop(IDropInfo dropInfo)
+        {
+            if (dropInfo.Data is HotkeyViewModel source)
+            {
+                if (dropInfo.TargetItem is HotkeyViewModel target)
+                {
+                    int sourceIndex = HotkeysList.IndexOf(source);
+                    int targetIndex = HotkeysList.IndexOf(target);
+
+                    if (sourceIndex >= 0 && targetIndex >= 0 && sourceIndex != targetIndex)
+                    {
+                        // Remove the source item from its original position
+                        HotkeysList.RemoveAt(sourceIndex);
+
+                        // Insert the source item at the new target position
+                        HotkeysList.Insert(targetIndex, source);
+
+                        // Determine the range of affected items and their new indices
+                        int start = Math.Min(sourceIndex, targetIndex);
+                        int end = Math.Max(sourceIndex, targetIndex);
+
+                        // Update the PinIndex of each affected item
+                        for (int i = start; i <= end; i++)
+                        {
+                            HotkeysList[i].Hotkey.PinIndex = i;
+                            ManagerFactory.hotkeysManager.UpdateOrCreateHotkey(HotkeysList[i].Hotkey);
+                        }
+                    }
+                }
+            }
+        }
+
+        private void HotkeysManager_Updated(Hotkey hotkey)
+        {
+            if (hotkey.IsInternal)
+                return;
+
+            lock (_collectionLock)
+            {
+                HotkeyViewModel? foundHotkey = HotkeysList.FirstOrDefault(p => p.Hotkey.ButtonFlags == hotkey.ButtonFlags);
+                if (foundHotkey is null)
+                {
+                    if (hotkey.IsPinned)
+                    {
+                        int index = hotkey.PinIndex;
+                        if (index > HotkeysList.Count || index < 0)
+                            index = HotkeysList.Count;
+                        HotkeysList.Insert(index, new HotkeyViewModel(hotkey, true));
+                    }
+                }
+                else
+                {
+                    if (hotkey.IsPinned)
+                        foundHotkey.Hotkey = hotkey;
+                    else
+                        HotkeysManager_Deleted(hotkey);
+                }
+            }
+        }
+
+        private void HotkeysManager_Deleted(Hotkey hotkey)
+        {
+            lock (_collectionLock)
+            {
+                HotkeyViewModel? foundHotkey = HotkeysList.FirstOrDefault(p => p.Hotkey.ButtonFlags == hotkey.ButtonFlags);
+                if (foundHotkey is not null)
+                {
+                    HotkeysList.Remove(foundHotkey);
+                    foundHotkey.Dispose();
+                }
+            }
+        }
+
+        public override void Dispose()
+        {
+            ManagerFactory.hotkeysManager.Updated -= HotkeysManager_Updated;
+            ManagerFactory.hotkeysManager.Deleted -= HotkeysManager_Deleted;
+            ControllerManager.Initialized -= ControllerManager_Initialized;
+            ControllerManager.ControllerSelected -= ControllerManager_ControllerSelected;
+            ControllerManager.ControllerPlugged -= ControllerManager_ControllerChanged;
+            ControllerManager.ControllerUnplugged -= ControllerManager_ControllerChanged;
+
+            base.Dispose();
+        }
+    }
+}

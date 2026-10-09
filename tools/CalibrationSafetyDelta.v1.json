@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 1,
+  "artifactId": "T16-CALIBRATION-SAFETY-DELTA-20260904",
+  "hcBaseline": "0.32.4.0/06c0b954",
+  "status": "SPEC-READY",
+  "runtimeClosure": "UNENCLOSED",
+  "scope": "Static safety and lifecycle delta audit. No device, sensor, HIDMaestro, HidHide, virtual-target, Steam, or game operation is performed.",
+  "hcReference": {
+    "source": "Managers/SensorsManager.cs::UpdateReport; SensorsManager.Calibrate",
+    "processOrder": ["device gyro/accel matrix", "GamepadMotion.ProcessMotion(gyro, accel, delta)", "calibrated/raw consumers"],
+    "calibrationOrder": ["ResetContinuousCalibration", "Stillness|SensorFusion", "observe confidence", "GetCalibrationOffset", "SetCalibrationOffset", "Manual"],
+    "importantNonParity": "HC can continue to offset/manual after its bounded UI calibration loop; YMCC deliberately refuses timeout-only Manual admission as a project safety delta."
+  },
+  "entries": [
+    {
+      "deltaId": "T16-F01",
+      "behavior": "manual-admission",
+      "currentCandidatePath": "native/main.cpp::inputCaptureOnGamepad",
+      "requiredAdmission": "same epoch/provider/identity/unit/matrix pair, confidence == 1, steady, finite offset, positive weight",
+      "sourceObservation": "current lane does not admit HC's explicit calibration dialog/session; GamepadMotion remains in its HC-compatible Manual/zero-offset startup state, while pair/plane admission prevents unproven motion from publishing",
+      "safeStop": "calibration-unbound",
+      "tier": "source-located",
+      "runtimeClosure": "UNENCLOSED"
+    },
+    {
+      "deltaId": "T16-F02",
+      "behavior": "timeout",
+      "currentCandidatePath": "native/main.cpp::inputCaptureOnGamepad",
+      "requiredAdmission": "five seconds is diagnostic only; it cannot set Manual or publish gyro",
+      "sourceObservation": "current lane has no timeout-to-Manual path; incomplete provider/pair/matrix admission remains safe-zero and the explicit calibration transaction is still unclosed",
+      "safeStop": "calibrate-timeout",
+      "tier": "source-located",
+      "runtimeClosure": "UNENCLOSED"
+    },
+    {
+      "deltaId": "T16-F03",
+      "behavior": "unpaired-or-stale-motion",
+      "currentCandidatePath": "native/main.cpp::inputCaptureOnGamepad",
+      "requiredAdmission": "provider capability matrix must prove same-generation gyro/accel pairing before ProcessMotion",
+      "sourceObservation": "pairProven is deliberately false pending capability binding; GamepadMotion path is skipped",
+      "safeStop": "sample-pair-unproven",
+      "tier": "product-candidate",
+      "runtimeClosure": "UNENCLOSED"
+    },
+    {
+      "deltaId": "T16-F04",
+      "behavior": "stop-and-release",
+      "currentCandidatePath": "native/main.cpp::inputCaptureStop; inputHostStop; InputHost/Program.cs::Release",
+      "requiredAdmission": "revoke -> neutral -> stop listener/target -> dispose/join -> visibility restore proof -> fresh epoch",
+      "sourceObservation": "candidate writes neutral/alive=false and stops the host; full transaction identity, epoch, join, and visibility recovery evidence remain unclosed",
+      "safeStop": "release-incomplete",
+      "tier": "product-candidate",
+      "runtimeClosure": "UNENCLOSED"
+    }
+  ],
+  "acceptance": {
+    "positive": "Only a complete, same-generation confidence==1 calibration may become Manual in a future admitted runtime transaction.",
+    "negative": ["timeout must not set Manual", "confidence=0 must not set Manual", "missing or unproven accel pair must not call ProcessMotion", "stop/crash/suspend/PnP must not be claimed recovered without neutral, release and visibility evidence"]
+  }
+}

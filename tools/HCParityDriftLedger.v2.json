@@ -1,0 +1,688 @@
+{
+    "schemaVersion":  2,
+    "ledgerId":  "HC-GYRO-VIRTUAL-DRIFT-20260904",
+    "updatedAt":  "2026-09-06T17:39:38.5155134Z",
+    "hcBaseline":  "0.32.4.0/06c0b954",
+    "closure":  "UNENCLOSED",
+    "authority":  "Docs/Tasks/GyroVirtual/TASK.md#2026-09-04-HC-同源偏差治理-BUS（主线整合）",
+    "aggregationStatus":  "T14-P20-CURRENT-SOURCE-STATIC-AGGREGATED / T10-SOURCE-IMPLEMENTED / RUNTIME-BLOCKED",
+    "t14Aggregation":  {
+                           "runId":  "T14-P20-T10-I-HC-ROUTE-20260906",
+                           "scope":  "static source/docs/provenance aggregation only; no test, build, driver, device, virtual target, HidHide, ROG OEM, Steam, game, or R1 operation",
+                           "inputs":  {
+                                          "t20":  {
+                                                      "path":  "tools/HistoricalClaimInventory.v1.json",
+                                                      "authority":  "TASK.md BUS",
+                                                      "claimCount":  21,
+                                                      "dispositionCounts":  {
+                                                                                "current-authority":  4,
+                                                                                "historical-reference":  13,
+                                                                                "superseded":  4
+                                                                            },
+                                                      "status":  "authority-reaudited against TASK.md BUS; 4/13/4 retained"
+                                                  },
+                                          "t21":  {
+                                                      "path":  "tools/MainlineClaimReconciliation.v1.json",
+                                                      "sha256":  "B00BB9E7340ECE4FAD03B2232BF21227B36D93D2EB41658704EDDB53859326D8",
+                                                      "authority":  "TASK.md BUS",
+                                                      "claimCount":  9,
+                                                      "docsReferenceCorrection":  "C1 option-2 resolved / no DGF-16 created",
+                                                      "runtimeUpgrade":  false,
+                                                      "status":  "current-source-reaudited against T22-RF00-20260906-T10-I-HC-ROUTE-STATIC-SNAPSHOT"
+                                                  },
+                                          "t19":  {
+                                                      "path":  "tools/EvidenceQualityGate.v1.json, MainlineClaimReconciliation.v1.json#provenanceReaudit, and tools/T22-RF00-T10-I-CURRENT-SOURCE-20260906-line-map.md",
+                                                      "status":  "evidence-incomplete",
+                                                      "finding":  "P20 static provenance is reproducible for its capture. T10 source implementation is no-driver protocol-tested separately; neither fact creates HID, consumer or recovery runtime evidence."
+                                                  }
+                                      },
+                           "result":  {
+                                          "dgfRange":  "DGF-01…DGF-15 only",
+                                          "unregisteredDrift":  false,
+                                          "runtimeClosure":  "UNENCLOSED / RUNTIME-BLOCKED",
+                                          "nextPermittedStep":  "Continue HC source-level parity work or perform separately authorized device evidence. Provider pairing, descriptor/readback, P-HID/P-XINPUT/P-OWNER, Steam/game consumer and recovery remain evidence-gated."
+                                      }
+                       },
+    "t22CurrentSource":  {
+                             "manifest":  {
+                                              "path":  "tools/T22-RF00-T10-I-CURRENT-SOURCE-20260906-manifest.json",
+                                              "sha256":  "9B9F24C82B567609781DBEE3B8E5D12216B147773879599AB689258167BBEE86",
+                                              "manifestId":  "T22-RF00-20260906-T10-I-HC-ROUTE-STATIC-SNAPSHOT",
+                                              "sourceDigest":  "41FF57702ECF777BD409B1D7FE5820A81F9891B1C34CB0E9CB1E2F6861B5B80C",
+                                              "porcelainSha256":  "466C1A7E4B6DD275D3A97F2922E0380169D2DE04C5C6853EC626864FFE67B248",
+                                              "hcBaseline":  "0.32.4.0/06c0b9544db2b1f39abf9cd3796225ccfb096103 clean at capture"
+                                          },
+                             "evidenceIndex":  {
+                                                   "path":  "tools/T22-RF00-T10-I-CURRENT-SOURCE-20260906-line-map.md",
+                                                   "sha256":  "959D2B4E602A87460A4AD49F2F125EDEB92BD4445B395169BF84B6C0B755DDD5",
+                                                   "runtimeOperation":  false,
+                                                   "buildOrTest":  false
+                                               },
+                             "driftToEvidence":  {
+                                                     "DGF-01":  [
+                                                                    "T22-P20-P02"
+                                                                ],
+                                                     "DGF-02":  [
+                                                                    "T22-P20-P02",
+                                                                    "T22-P20-P06"
+                                                                ],
+                                                     "DGF-03":  [
+                                                                    "T22-P20-P05"
+                                                                ],
+                                                     "DGF-04":  [
+                                                                    "T22-P20-P04",
+                                                                    "T22-P20-P05"
+                                                                ],
+                                                     "DGF-05":  [
+                                                                    "T22-P20-P03"
+                                                                ],
+                                                     "DGF-06":  [
+                                                                    "T22-P20-P03",
+                                                                    "T10-I source implementation"
+                                                                ],
+                                                     "DGF-07":  [
+                                                                    "T22-P20-P02",
+                                                                    "T22-P20-P03"
+                                                                ],
+                                                     "DGF-08":  [
+                                                                    "T22-P20-P07"
+                                                                ],
+                                                     "DGF-09":  [
+                                                                    "T22-P20-P03",
+                                                                    "T22-P20-P04"
+                                                                ],
+                                                     "DGF-10":  [
+                                                                    "T22-P20-P01"
+                                                                ],
+                                                     "DGF-11":  [
+                                                                    "T22-P20-P03",
+                                                                    "T22-P20-P06"
+                                                                ],
+                                                     "DGF-12":  [
+                                                                    "T22-P20-P04",
+                                                                    "T22-P20-P06"
+                                                                ],
+                                                     "DGF-13":  [
+                                                                    "T22-P20-P07"
+                                                                ],
+                                                     "DGF-14":  [
+                                                                    "T22-P20-P05"
+                                                                ],
+                                                     "DGF-15":  [
+                                                                    "T22-P20-P03",
+                                                                    "T22-P20-P07"
+                                                                ]
+                                                 },
+                             "reconciliation":  "All DGF-01鈥GF-15 remain within the registered range. P20 captures the current T10 named-pipe/Host lifecycle implementation and static supporting source. T10 source implementation does not close parameter-consumption, descriptor transport/source, external consumer, identity, ACK/readback, recovery, default sensor, report-rate or runtime proof. No DGF-16 is warranted."
+                         },
+    "entries":  [
+                    {
+                        "driftId":  "DGF-01",
+                        "domain":  "motion",
+                        "taskId":  "T11",
+                        "behavior":  "calibration-lock-timeout",
+                        "sourcePath":  "Managers/SensorsManager.cs; native/main.cpp",
+                        "symbol":  "SensorsManager.Calibrate; inputCaptureOnGamepad",
+                        "observedOrder":  [
+                                              "ResetContinuousCalibration",
+                                              "Stillness|SensorFusion",
+                                              "confidence/steady observation",
+                                              "Manual only at confidence==1"
+                                          ],
+                        "parityId":  "HC-MOTION-CALIBRATED-002",
+                        "ymanOwner":  "Gyro Calibration Safety",
+                        "currentClaimOrPath":  "native/main.cpp:5400-5454 now blocks unproven pairs and rejects timeout-to-Manual; gyroCalibrationSession.ts is mock-only",
+                        "disposition":  "HC-ADAPTED-SAFETY",
+                        "parityClass":  "explicit-project-delta",
+                        "status":  "spec-ready",
+                        "sourceEvidence":  [
+                                               "TASK.md#BUS/DGF-01",
+                                               "native/main.cpp:5400-5454",
+                                               "tools/gyro_calibration_session_selftest.ts",
+                                               "T11-E01"
+                                           ],
+                        "runtimeEvidence":  [
+
+                                            ],
+                        "risk":  "invalid zero offset can become sustained virtual-stick drift",
+                        "safeStop":  "safe-zero gyro contribution; retain physical base input",
+                        "rollback":  "invalidate calibration generation and return unbound",
+                        "requiredProbe":  "T16 same-generation GamepadMotion trace",
+                        "acceptance":  "confidence=0, timeout, motion, NaN, old generation and missing accel never write Manual",
+                        "closureRule":  "L2 mock plus R1 calibrated device/recovery trace; no consumer claim before R1",
+                        "decisionOrChange":  "C1-20260904-hc-parity-drift-governance",
+                        "owner":  "YeManCC Input Architecture",
+                        "reviewDate":  "2026-09-04"
+                    },
+                    {
+                        "driftId":  "DGF-02",
+                        "domain":  "lifecycle",
+                        "taskId":  "T11/T13",
+                        "behavior":  "stop-release-crash",
+                        "sourcePath":  "Managers/MotionManager.cs; src/bridge/inputLifecycleMock.ts",
+                        "symbol":  "MotionManager.Stop; InputLifecycleMock",
+                        "observedOrder":  [
+                                              "revoke",
+                                              "neutral",
+                                              "stop listener/target",
+                                              "restore visibility",
+                                              "dispose/join"
+                                          ],
+                        "parityId":  "HC-CONTROLLER-CLEAR-004",
+                        "ymanOwner":  "Input Lifecycle Coordinator",
+                        "currentClaimOrPath":  "Current named-pipe Host lifecycle has local ordered release receipts but no PnP/HID/Steam/game external release proof; visibility transaction remains mock-only.",
+                        "disposition":  "HC-ADAPTED-SAFETY",
+                        "parityClass":  "explicit-project-delta",
+                        "status":  "source-implemented / runtime-blocked",
+                        "sourceEvidence":  [
+                                               "TASK.md#BUS/DGF-02",
+                                               "src/bridge/inputLifecycleMock.ts"
+                                           ],
+                        "runtimeEvidence":  [
+
+                                            ],
+                        "risk":  "stale frames, handles or hidden paths survive sleep/PnP/crash",
+                        "safeStop":  "neutral and owner=none; do not publish old epoch",
+                        "rollback":  "release-incomplete until neutral/restore/dispose/join evidence exists",
+                        "requiredProbe":  "T16/T19 release negative fixtures",
+                        "acceptance":  "each termination path produces one complete or explicitly incomplete release proof",
+                        "closureRule":  "R1 lifecycle observation on named device/persona",
+                        "decisionOrChange":  "C1-20260904-hc-parity-drift-governance",
+                        "owner":  "YeManCC Input Architecture",
+                        "reviewDate":  "2026-09-04"
+                    },
+                    {
+                        "driftId":  "DGF-03",
+                        "domain":  "visibility",
+                        "taskId":  "T13",
+                        "behavior":  "rog-oem-xbox-disable",
+                        "sourcePath":  "Controllers/Asus/XboxAdaptiveController.cs; Devices/ASUS/ROGAlly.cs; native/main.cpp",
+                        "symbol":  "XboxAdaptiveController.Disable; ROGAlly.XBoxController; rogWriteXboxFaceEnabled",
+                        "observedOrder":  [
+                                              "ROG feature report 0x5A D1 0B 01 02 in HC slot management",
+                                              "product summon SAFE_STOP",
+                                              "lifecycle enable safety-net 0x01 only"
+                                          ],
+                        "parityId":  "HC-ROG-XBOX-ADAPTIVE-013",
+                        "ymanOwner":  "ROG Input Safety",
+                        "currentClaimOrPath":  "native/main.cpp has no rogSuppressForFrontend/rogRestoreForGame/rogWriteXboxMode; only rogWriteXboxFaceEnabled emits 0x01",
+                        "disposition":  "CONTRADICTED",
+                        "parityClass":  "explicit-project-delta",
+                        "status":  "contradicted",
+                        "sourceEvidence":  [
+                                               "TASK.md#BUS/DGF-03",
+                                               "native/main.cpp:14301,14681",
+                                               "tools/rog_hidhide_contract_static_selftest.ts",
+                                               "T13-E02"
+                                           ],
+                        "runtimeEvidence":  [
+                                                "ROG OEM Disable negative observation recorded by task contract"
+                                            ],
+                        "risk":  "Disable removes input from both Steam and YMCC",
+                        "safeStop":  "never emit 0x02 for summon/game isolation/DS4 output",
+                        "rollback":  "0x01 Enable safety-net only",
+                        "requiredProbe":  "none without a new approved C1/C2 decision",
+                        "acceptance":  "static negative path remains absent; any reintroduction is contradicted",
+                        "closureRule":  "permanent product negative; no runtime closure claim",
+                        "decisionOrChange":  "C1-20260904-hc-parity-drift-governance",
+                        "owner":  "YeManCC Input Architecture",
+                        "reviewDate":  "2026-09-04"
+                    },
+                    {
+                        "driftId":  "DGF-04",
+                        "domain":  "visibility",
+                        "taskId":  "T13",
+                        "behavior":  "p-hid-vs-xinput-consumer-isolation",
+                        "sourcePath":  "Controllers/IController.cs; native/main.cpp; src/bridge/physicalVisibilityTransaction.ts",
+                        "symbol":  "IController.HideHID/UnhideHID/CyclePort; inputHostStart; PhysicalVisibilityTransaction",
+                        "observedOrder":  [
+                                              "resolved physical identity",
+                                              "instance+container hide",
+                                              "CyclePort",
+                                              "restore diff",
+                                              "P-XINPUT separately observed"
+                                          ],
+                        "parityId":  "HC-HIDHIDE-CONTROLLER-014",
+                        "ymanOwner":  "Physical Visibility Transaction",
+                        "currentClaimOrPath":  "native InputHost start logs p-hid-deferred and does not call the legacy scan; transaction implementation is mock-only",
+                        "disposition":  "UNENCLOSED",
+                        "parityClass":  "reference-only",
+                        "status":  "blocked",
+                        "sourceEvidence":  [
+                                               "TASK.md#BUS/DGF-04",
+                                               "native/main.cpp:5233-5265",
+                                               "src/bridge/physicalVisibilityTransaction.ts",
+                                               "T13-E01",
+                                               "T13-E02"
+                                           ],
+                        "runtimeEvidence":  [
+
+                                            ],
+                        "risk":  "P-HID API result could be misreported as XInput/Steam/game isolation",
+                        "safeStop":  "P-XINPUT=UNENCLOSED; no default HidHide mutation",
+                        "rollback":  "do not start transaction; future transactions restore only their captured diff",
+                        "requiredProbe":  "T18 identity/consumer/recovery matrix plus R1",
+                        "acceptance":  "same physical identity and consumer evidence distinguishes P-HID/P-XINPUT/P-OWNER",
+                        "closureRule":  "only R1 observation can close a named P-HID scene; never infer P-XINPUT",
+                        "decisionOrChange":  "C1-20260904-hc-parity-drift-governance",
+                        "owner":  "YeManCC Input Architecture",
+                        "reviewDate":  "2026-09-04"
+                    },
+                    {
+                        "driftId":  "DGF-05",
+                        "domain":  "persona",
+                        "taskId":  "T12",
+                        "behavior":  "hidmaestro-ds4-imu-descriptor-parity",
+                        "sourcePath":  "Targets/DualShock4Target.cs; InputHost/Program.cs; src/bridge/motionSample.ts",
+                        "symbol":  "DualShock4Target report payload; HMGamepadState gyro fields; evaluateMotionPersona",
+                        "observedOrder":  [
+                                              "raw DSU gyro+accel",
+                                              "descriptor field verification",
+                                              "encode",
+                                              "decode",
+                                              "consumer observation"
+                                          ],
+                        "parityId":  "HC-VIRTUAL-TARGET-005",
+                        "ymanOwner":  "Persona Descriptor Gate",
+                        "currentClaimOrPath":  "Current Host submits standard buttons/hat/axes only; DS4 direct IMU is explicit no-report, and descriptor/reportId/length/offset/endianness remain unverified.",
+                        "disposition":  "HC-REFERENCE-ONLY",
+                        "parityClass":  "reference-only",
+                        "status":  "source-located / runtime-blocked",
+                        "sourceEvidence":  [
+                                               "TASK.md#BUS/DGF-05",
+                                               "InputHost/Program.cs:116-131",
+                                               "src/bridge/motionSample.ts",
+                                               "T12-E01"
+                                           ],
+                        "runtimeEvidence":  [
+
+                                            ],
+                        "risk":  "wrong bytes or persona can create invalid motion reports",
+                        "safeStop":  "descriptor-unverified; write no DS4 IMU bytes",
+                        "rollback":  "dualshock4 virtual-stick only or disabled",
+                        "requiredProbe":  "T17 descriptor capture/decode/submit/consumer matrix",
+                        "acceptance":  "each field has matching descriptor and decoded report evidence",
+                        "closureRule":  "R1 DS4 persona/consumer trace on verified descriptor",
+                        "decisionOrChange":  "C1-20260904-hc-parity-drift-governance",
+                        "owner":  "YeManCC Input Architecture",
+                        "reviewDate":  "2026-09-04"
+                    },
+                    {
+                        "driftId":  "DGF-06",
+                        "domain":  "motion",
+                        "taskId":  "T10",
+                        "behavior":  "parameter-consumption-and-host-ack",
+                        "sourcePath":  "Managers/MotionManager.cs; Managers/LayoutManager.cs; native/main.cpp; InputHost/Program.cs",
+                        "symbol":  "inputHostStart/inputHostSubmitPad/inputHostStopLocked; HostSession",
+                        "observedOrder":  [
+                                              "durable revision/hash",
+                                              "revoke",
+                                              "neutral",
+                                              "exact Host ACK",
+                                              "same-generation mapping/report frame"
+                                          ],
+                        "parityId":  "HC-MOTION-CALIBRATED-002",
+                        "ymanOwner":  "Gyro Config Activation",
+                        "currentClaimOrPath":  "Current native/Host route uses a locked-asset named-pipe lifecycle and Host-local tuple/ACK/first-frame receipt; UI revision/hash and full HC motion/layout consumption remain unbound/saved-pending, so neither fixed adapter config nor Host receipt is an applied UI parameter claim.",
+                        "disposition":  "UNENCLOSED",
+                        "parityClass":  "reference-only",
+                        "status":  "source-implemented / runtime-blocked",
+                        "sourceEvidence":  [
+                                               "TASK.md#AF",
+                                               "native/main.cpp",
+                                               "InputHost/Program.cs",
+                                               "tools/T10-HC-INPUTHOST-PROTOCOL-IMPLEMENTATION-EVIDENCE-20260905.md",
+                                               "tools/gyro_config_activation_selftest.ts"
+                                           ],
+                        "runtimeEvidence":  [
+
+                                            ],
+                        "risk":  "UI save, old ACK or hard-coded mapping can be misreported as applied config",
+                        "safeStop":  "do not mark UI configuration active or publish a new parameter revision without neutral, exact matching parameter-consumption acknowledgement and first matching frame",
+                        "rollback":  "retain prior active config or neutral; never fallback to constants",
+                        "requiredProbe":  "T11/T15 parameter consumption ledger, current native/Host call graph and real consumer observation",
+                        "acceptance":  "T10-F01..F08 raw/calibrated/mapped/base/report diffs and stale ACK negative",
+                        "closureRule":  "L2 integration plus R1 same consumer/recovery scene",
+                        "decisionOrChange":  "C1-20260904-hc-parity-drift-governance",
+                        "owner":  "YeManCC Input Architecture",
+                        "reviewDate":  "2026-09-04"
+                    },
+                    {
+                        "driftId":  "DGF-07",
+                        "domain":  "motion",
+                        "taskId":  "T12",
+                        "behavior":  "gyro-accel-pairing-and-sku-matrix",
+                        "sourcePath":  "Sensors/IMUGyrometer.cs; Sensors/IMUAccelerometer.cs; Devices/ASUS/XboxROGAllyX.cs; native/main.cpp",
+                        "symbol":  "ReadingChanged; XboxROGAllyX.GyroMatrix/AcceleroMatrix; inputCaptureOnGamepad",
+                        "observedOrder":  [
+                                              "gyro threshold",
+                                              "separate matrices",
+                                              "proven pair",
+                                              "ProcessMotion",
+                                              "calibrated/gravity/raw DSU layers"
+                                          ],
+                        "parityId":  "HC-MOTION-CALIBRATED-002",
+                        "ymanOwner":  "Motion Sample Gate",
+                        "currentClaimOrPath":  "motionSample.ts models separate ROG Ally X matrices; current native sets pairProven=false and records sample-pair-unproven rather than guessing a pair",
+                        "disposition":  "HC-REFERENCE-ONLY",
+                        "parityClass":  "reference-only",
+                        "status":  "spec-ready",
+                        "sourceEvidence":  [
+                                               "TASK.md#BUS/DGF-07",
+                                               "native/main.cpp:5400-5409",
+                                               "src/bridge/motionSample.ts",
+                                               "tools/motion_sample_selftest.ts",
+                                               "T12-E01"
+                                           ],
+                        "runtimeEvidence":  [
+
+                                            ],
+                        "risk":  "mixed sensor generations or matrix reuse create persistent drift/mis-mapping",
+                        "safeStop":  "sample-pair-unproven; no GamepadMotion or virtual gyro publication",
+                        "rollback":  "clear current calibration and await a ProviderCapabilityMatrix binding",
+                        "requiredProbe":  "T17 provider pairing/time-source capability matrix",
+                        "acceptance":  "gyro/accel pair positive and missing/mismatched pair negatives replay",
+                        "closureRule":  "R1 named provider identity and time pairing observation",
+                        "decisionOrChange":  "C1-20260904-hc-parity-drift-governance",
+                        "owner":  "YeManCC Input Architecture",
+                        "reviewDate":  "2026-09-04"
+                    },
+                    {
+                        "driftId":  "DGF-08",
+                        "domain":  "evidence",
+                        "taskId":  "T10-T13",
+                        "behavior":  "runtime-status-overclaim",
+                        "sourcePath":  "Docs/Tasks/GyroVirtual/30-GYRO-PARAMETER-SHIELD-RESET-ACCEL-CONTRACT-20260904.md; TASK.md",
+                        "symbol":  "T10-T13 status vocabulary",
+                        "observedOrder":  [
+                                              "source located",
+                                              "mock pass",
+                                              "isolated probe",
+                                              "R1 runtime observed"
+                                          ],
+                        "parityId":  "not-linked",
+                        "ymanOwner":  "Evidence Quality Gate",
+                        "currentClaimOrPath":  "Authoritative documents record T10 source implementation separately from unclosed T11-T13/runtime evidence; source/mock artifacts have no runtime promotion.",
+                        "disposition":  "UNENCLOSED",
+                        "parityClass":  "reference-only",
+                        "status":  "source-implemented / runtime-blocked",
+                        "sourceEvidence":  [
+                                               "TASK.md#BUS/DGF-08",
+                                               "tools/HCParityDriftLedger.v2.json"
+                                           ],
+                        "runtimeEvidence":  [
+
+                                            ],
+                        "risk":  "mock/API/packaging facts are presented as consumer closure",
+                        "safeStop":  "downgrade to the highest evidenced tier",
+                        "rollback":  "remove unsupported success language; preserve negative evidence",
+                        "requiredProbe":  "T19 claim-to-evidence scan",
+                        "acceptance":  "every claim has tier and no runtime claim lacks R1 evidence",
+                        "closureRule":  "only R1 scene-specific evidence can lift runtime state",
+                        "decisionOrChange":  "C1-20260904-hc-parity-drift-governance",
+                        "owner":  "YeManCC Release Evidence",
+                        "reviewDate":  "2026-09-04"
+                    },
+                    {
+                        "driftId":  "DGF-09",
+                        "domain":  "asset",
+                        "taskId":  "T17",
+                        "behavior":  "hidmaestro-hidhide-current-source-fact",
+                        "sourcePath":  "InputHost/Program.cs; native/main.cpp",
+                        "symbol":  "HMContext/CreateController/SubmitState; inputHostStart",
+                        "observedOrder":  [
+                                              "asset located",
+                                              "direct candidate path",
+                                              "descriptor/consumer proof"
+                                          ],
+                        "parityId":  "HC-VIRTUAL-TARGET-005",
+                        "ymanOwner":  "Input Asset Audit",
+                        "currentClaimOrPath":  "HIDMaestro and HidHide helpers exist in source; no descriptor or runtime closure follows",
+                        "disposition":  "CONTRADICTED",
+                        "parityClass":  "reference-only",
+                        "status":  "spec-ready",
+                        "sourceEvidence":  [
+                                               "TASK.md#BUS/DGF-09",
+                                               "InputHost/Program.cs",
+                                               "native/main.cpp"
+                                           ],
+                        "runtimeEvidence":  [
+
+                                            ],
+                        "risk":  "asset presence is misread as supported runtime",
+                        "safeStop":  "descriptor and consumer remain UNENCLOSED",
+                        "rollback":  "do not package/claim input runtime from asset presence",
+                        "requiredProbe":  "T17",
+                        "acceptance":  "asset identity and field matrix are separately evidenced",
+                        "closureRule":  "R1 after T17 descriptor proof",
+                        "decisionOrChange":  "C1-20260904-hc-parity-drift-governance",
+                        "owner":  "YeManCC Input Architecture",
+                        "reviewDate":  "2026-09-04"
+                    },
+                    {
+                        "driftId":  "DGF-10",
+                        "domain":  "config",
+                        "taskId":  "T15",
+                        "behavior":  "ui-cas-versus-host-ack",
+                        "sourcePath":  "src/bridge/settingsRepository.ts; src/views/GyroMotionView.vue",
+                        "symbol":  "compareAndSwapInputSettings; recordInputHostAcknowledgement; save",
+                        "observedOrder":  [
+                                              "CAS revision",
+                                              "pending hash",
+                                              "Host ACK",
+                                              "first active frame"
+                                          ],
+                        "parityId":  "HC-MOTION-CALIBRATED-002",
+                        "ymanOwner":  "Gyro Config Activation",
+                        "currentClaimOrPath":  "CAS now records saved-pending hash bookkeeping, but no native/Host caller supplies the ACK",
+                        "disposition":  "UNENCLOSED",
+                        "parityClass":  "reference-only",
+                        "status":  "spec-ready",
+                        "sourceEvidence":  [
+                                               "src/bridge/settingsRepository.ts",
+                                               "src/views/GyroMotionView.vue",
+                                               "tools/settings_cas_selftest.ts",
+                                               "T10-E01"
+                                           ],
+                        "runtimeEvidence":  [
+
+                                            ],
+                        "risk":  "saved UI may be shown as applied",
+                        "safeStop":  "status remains saved-pending unless exact Host ACK and first frame occur",
+                        "rollback":  "keep last active revision; reject stale ACK",
+                        "requiredProbe":  "T15 native/Host call graph",
+                        "acceptance":  "durable revision/hash trace carries all required identities",
+                        "closureRule":  "L2 integration and R1",
+                        "decisionOrChange":  "C1-20260904-hc-parity-drift-governance",
+                        "owner":  "YeManCC Input Architecture",
+                        "reviewDate":  "2026-09-04"
+                    },
+                    {
+                        "driftId":  "DGF-11",
+                        "domain":  "lifecycle",
+                        "taskId":  "T15/T18",
+                        "behavior":  "direct-inputhost-execution",
+                        "sourcePath":  "native/main.cpp; InputHost/Program.cs",
+                        "symbol":  "inputHostStart/inputHostWrite; RunFile",
+                        "observedOrder":  [
+                                              "native writes state file",
+                                              "Host polls",
+                                              "SubmitState"
+                                          ],
+                        "parityId":  "HC-CONTROLLER-UPDATE-001",
+                        "ymanOwner":  "InputHost Integration",
+                        "currentClaimOrPath":  "Pre-T10 state-file/forced-kill path is retired in current source. Current Host has local lifecycle receipts but no PnP/HID/Steam/game external release proof.",
+                        "disposition":  "CONTRADICTED",
+                        "parityClass":  "reference-only",
+                        "status":  "contradicted",
+                        "sourceEvidence":  [
+                                               "TASK.md#AF",
+                                               "native/main.cpp",
+                                               "InputHost/Program.cs",
+                                               "tools/T10-HC-INPUTHOST-PROTOCOL-IMPLEMENTATION-EVIDENCE-20260905.md"
+                                           ],
+                        "runtimeEvidence":  [
+
+                                            ],
+                        "risk":  "process success is misread as lifecycle/ownership proof",
+                        "safeStop":  "no contract activation; gyro remains no-report without pair proof",
+                        "rollback":  "neutral and terminate direct host only with complete release evidence",
+                        "requiredProbe":  "T15/T18/T19",
+                        "acceptance":  "single Coordinator routes all Host commands and evidence fields",
+                        "closureRule":  "R1 release/consumer trace",
+                        "decisionOrChange":  "C1-20260904-hc-parity-drift-governance",
+                        "owner":  "YeManCC Input Architecture",
+                        "reviewDate":  "2026-09-04"
+                    },
+                    {
+                        "driftId":  "DGF-12",
+                        "domain":  "visibility",
+                        "taskId":  "T13",
+                        "behavior":  "legacy-p-hid-product-coupling",
+                        "sourcePath":  "native/main.cpp; tools/GYRO-VIRTUAL-EVIDENCE-INDEX-20260903.md",
+                        "symbol":  "inputHostStart; hidHideLegacyUnadmittedGamingScan",
+                        "observedOrder":  [
+                                              "legacy helper located",
+                                              "default start deferred",
+                                              "future audited transaction only"
+                                          ],
+                        "parityId":  "HC-HIDHIDE-CONTROLLER-014",
+                        "ymanOwner":  "Physical Visibility Transaction",
+                        "currentClaimOrPath":  "legacy unadmitted scan remains located but has no production caller; default start records p-hid-deferred, and packaging/consumer claims remain invalid",
+                        "disposition":  "CONTRADICTED",
+                        "parityClass":  "explicit-project-delta",
+                        "status":  "spec-ready",
+                        "sourceEvidence":  [
+                                               "native/main.cpp:5165,5268-5296",
+                                               "tools/rog_hidhide_contract_static_selftest.ts",
+                                               "T13-E02"
+                                           ],
+                        "runtimeEvidence":  [
+
+                                            ],
+                        "risk":  "automatic hid/hide mutations without snapshot, allowlist, restore proof",
+                        "safeStop":  "p-hid-deferred; no default mutation",
+                        "rollback":  "do not enter legacy helper; future transaction records diff",
+                        "requiredProbe":  "T18/T19",
+                        "acceptance":  "call graph confirms no legacy start path and future transaction has recovery proof",
+                        "closureRule":  "R1 P-HID only; P-XINPUT stays independent",
+                        "decisionOrChange":  "C1-20260904-hc-parity-drift-governance",
+                        "owner":  "YeManCC Input Architecture",
+                        "reviewDate":  "2026-09-04"
+                    },
+                    {
+                        "driftId":  "DGF-13",
+                        "domain":  "evidence",
+                        "taskId":  "T14/T19",
+                        "behavior":  "historic-no-contradiction-claim",
+                        "sourcePath":  "Docs/Tasks/GyroVirtual/17-*; Docs/Tasks/GyroVirtual/TASK.md",
+                        "symbol":  "NO-AUTHORITATIVE-CONTRADICTION historical conclusion",
+                        "observedOrder":  [
+                                              "historical audit",
+                                              "current ledger",
+                                              "claim downgrade"
+                                          ],
+                        "parityId":  "not-linked",
+                        "ymanOwner":  "Evidence Quality Gate",
+                        "currentClaimOrPath":  "historical conclusions remain non-authoritative relative to BUS ledger",
+                        "disposition":  "CONTRADICTED",
+                        "parityClass":  "reference-only",
+                        "status":  "spec-ready",
+                        "sourceEvidence":  [
+                                               "TASK.md#BUS/DGF-13",
+                                               "Docs/Tasks/GyroVirtual/TASK.md"
+                                           ],
+                        "runtimeEvidence":  [
+
+                                            ],
+                        "risk":  "historic audit hides current source/contract drift",
+                        "safeStop":  "use v2 ledger as current fact layer",
+                        "rollback":  "downgrade historic claims",
+                        "requiredProbe":  "T19",
+                        "acceptance":  "no current release/runtime claim cites the historic audit alone",
+                        "closureRule":  "continuous docs audit",
+                        "decisionOrChange":  "C1-20260904-hc-parity-drift-governance",
+                        "owner":  "YeManCC Release Evidence",
+                        "reviewDate":  "2026-09-04"
+                    },
+                    {
+                        "driftId":  "DGF-14",
+                        "domain":  "route",
+                        "taskId":  "T18",
+                        "behavior":  "owner-isolation-scope",
+                        "sourcePath":  "Docs/Tasks/GyroVirtual/29-ATOMIC-OWNER-AND-GAME-CONSUMER-ISOLATION-20260903.md; src/bridge/inputCoordinatorMock.ts",
+                        "symbol":  "InputCoordinatorMock.handoff; P-OWNER scope",
+                        "observedOrder":  [
+                                              "owner revoke",
+                                              "neutral",
+                                              "fresh epoch",
+                                              "YMCC semantic route"
+                                          ],
+                        "parityId":  "YMCC-ROUTE-LB-RB-006",
+                        "ymanOwner":  "Physical Input Ownership",
+                        "currentClaimOrPath":  "owner mock and prior UI observation do not revoke external physical XInput consumers",
+                        "disposition":  "UNENCLOSED",
+                        "parityClass":  "reference-only",
+                        "status":  "blocked",
+                        "sourceEvidence":  [
+                                               "TASK.md#BUS/DGF-14",
+                                               "src/bridge/inputCoordinatorMock.ts"
+                                           ],
+                        "runtimeEvidence":  [
+                                                "recorded limited frontend-owner observation only"
+                                            ],
+                        "risk":  "P-OWNER result is generalized as OS/game XInput isolation",
+                        "safeStop":  "scope owner evidence to named UI consumer",
+                        "rollback":  "owner=none and cleared held/chord/shift on termination",
+                        "requiredProbe":  "T18 consumer matrix",
+                        "acceptance":  "logs distinguish game-input-count from OS/Steam visibility",
+                        "closureRule":  "R1 per device/persona/game/recovery scope",
+                        "decisionOrChange":  "C1-20260904-hc-parity-drift-governance",
+                        "owner":  "YeManCC Input Architecture",
+                        "reviewDate":  "2026-09-04"
+                    },
+                    {
+                        "driftId":  "DGF-15",
+                        "domain":  "config",
+                        "taskId":  "T10",
+                        "behavior":  "in-flight-contract-mock-slices",
+                        "sourcePath":  "src/bridge/inputConfigHash.ts; src/bridge/gyroConfigActivation.ts; src/bridge/gyroCalibrationSession.ts; src/bridge/motionSample.ts; src/bridge/physicalVisibilityTransaction.ts",
+                        "symbol":  "pure T10-T13 transaction slices",
+                        "observedOrder":  [
+                                              "source-located",
+                                              "mock-artifact-located",
+                                              "provenance-incomplete",
+                                              "integration pending",
+                                              "R1 pending"
+                                          ],
+                        "parityId":  "not-linked",
+                        "ymanOwner":  "Gyro Contract Mock Suite",
+                        "currentClaimOrPath":  "pure implementations and selftests exist, but no import/call graph binds them to native/InputHost writer",
+                        "disposition":  "UNENCLOSED",
+                        "parityClass":  "reference-only",
+                        "status":  "spec-ready",
+                        "sourceEvidence":  [
+                                               "tools/gyro_config_activation_selftest.ts",
+                                               "tools/gyro_calibration_session_selftest.ts",
+                                               "tools/motion_sample_selftest.ts",
+                                               "tools/physical_visibility_transaction_selftest.ts",
+                                               "T10-E01",
+                                               "T11-E01",
+                                               "T12-E01",
+                                               "T13-E01"
+                                           ],
+                        "runtimeEvidence":  [
+
+                                            ],
+                        "risk":  "pure mock passes are promoted to a product Host conclusion",
+                        "safeStop":  "do not bind to native runtime until T15-T19 fields and evidence pass",
+                        "rollback":  "leave all unadmitted runtime paths no-report",
+                        "requiredProbe":  "T15/T16/T17/T18/T19 call-graph and evidence audit",
+                        "acceptance":  "all pure artifacts have parity/drift linkage and no unsupported runtime claim",
+                        "closureRule":  "remain source-located/evidence-incomplete until archival provenance exists; only R1 can close runtime",
+                        "decisionOrChange":  "C1-20260904-hc-parity-drift-governance",
+                        "owner":  "YeManCC Input Architecture",
+                        "reviewDate":  "2026-09-04"
+                    }
+                ]
+}

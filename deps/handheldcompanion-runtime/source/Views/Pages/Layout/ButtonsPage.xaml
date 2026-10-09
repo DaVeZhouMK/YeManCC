@@ -1,0 +1,52 @@
+<local:ILayoutPage
+    x:Class="HandheldCompanion.Views.Pages.ButtonsPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:ikw="http://schemas.inkore.net/lib/ui/wpf"
+    xmlns:l="clr-namespace:HandheldCompanion.Localization"
+    xmlns:local="clr-namespace:HandheldCompanion.Views.Pages"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:resx="clr-namespace:HandheldCompanion.Properties"
+    xmlns:ui="http://schemas.inkore.net/lib/ui/wpf/modern"
+    xmlns:viewmodels="clr-namespace:HandheldCompanion.ViewModels"
+    Title="{l:Static resx:Resources.ProfilesPage_ControllerSettings}"
+    d:DataContext="{d:DesignInstance Type=viewmodels:ButtonsPageViewModel}"
+    d:DesignHeight="1000"
+    d:DesignWidth="1000"
+    mc:Ignorable="d">
+
+    <ikw:SimpleStackPanel Spacing="28" Visibility="{Binding IsEnabled, Mode=OneWay, UpdateSourceTrigger=PropertyChanged, Converter={StaticResource BooleanToVisibilityConverter}}">
+
+        <!--  A,B,X,Y  -->
+        <ikw:SimpleStackPanel Spacing="8" Visibility="{Binding IsABXYEnabled, Mode=OneWay, UpdateSourceTrigger=PropertyChanged, Converter={StaticResource BooleanToVisibilityConverter}}">
+            <TextBlock Style="{StaticResource BaseTextBlockStyle}" Text="{l:Static resx:Resources.ButtonsPage_ABXY}" />
+            <ItemsControl ItemTemplate="{StaticResource ButtonStackTemplate}" ItemsSource="{Binding ABXYStacks}" />
+        </ikw:SimpleStackPanel>
+
+        <!--  BUMPERS  -->
+        <ikw:SimpleStackPanel Spacing="8" Visibility="{Binding IsBUMPERSEnabled, Mode=OneWay, UpdateSourceTrigger=PropertyChanged, Converter={StaticResource BooleanToVisibilityConverter}}">
+            <TextBlock Style="{StaticResource BaseTextBlockStyle}" Text="{l:Static resx:Resources.ButtonsPage_Bumpers}" />
+            <ItemsControl ItemTemplate="{StaticResource ButtonStackTemplate}" ItemsSource="{Binding BUMPERSStacks}" />
+        </ikw:SimpleStackPanel>
+
+        <!--  BACK GRIPS  -->
+        <ikw:SimpleStackPanel Spacing="8" Visibility="{Binding IsBACKGRIPSEnabled, Mode=OneWay, UpdateSourceTrigger=PropertyChanged, Converter={StaticResource BooleanToVisibilityConverter}}">
+            <TextBlock Style="{StaticResource BaseTextBlockStyle}" Text="{l:Static resx:Resources.ButtonsPage_Back_Grips}" />
+            <ItemsControl ItemTemplate="{StaticResource ButtonStackTemplate}" ItemsSource="{Binding BACKGRIPSStacks}" />
+        </ikw:SimpleStackPanel>
+
+        <!--  MENU  -->
+        <ikw:SimpleStackPanel Spacing="8" Visibility="{Binding IsMENUEnabled, Mode=OneWay, UpdateSourceTrigger=PropertyChanged, Converter={StaticResource BooleanToVisibilityConverter}}">
+            <TextBlock Style="{StaticResource BaseTextBlockStyle}" Text="{l:Static resx:Resources.ButtonsPage_Menu}" />
+            <ItemsControl ItemTemplate="{StaticResource ButtonStackTemplate}" ItemsSource="{Binding MENUStacks}" />
+        </ikw:SimpleStackPanel>
+
+        <!--  OEM  -->
+        <ikw:SimpleStackPanel Spacing="8" Visibility="{Binding IsOEMEnabled, Mode=OneWay, UpdateSourceTrigger=PropertyChanged, Converter={StaticResource BooleanToVisibilityConverter}}">
+            <TextBlock Style="{StaticResource BaseTextBlockStyle}" Text="{l:Static resx:Resources.ButtonsPage_OEM}" />
+            <ItemsControl ItemTemplate="{StaticResource ButtonStackTemplate}" ItemsSource="{Binding OEMStacks}" />
+        </ikw:SimpleStackPanel>
+
+    </ikw:SimpleStackPanel>
+</local:ILayoutPage>

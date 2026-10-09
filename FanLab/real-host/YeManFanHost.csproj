@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>YeManFanHost</AssemblyName>
+    <RootNamespace>YeManFanHost</RootNamespace>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+  <!--
+    920-v1.5 §17.1-5：故意崩溃的探针只存在于测试专用构建。
+    正式构建（不带 -p:YemanAsyncBoundaryTest=true）**不含**该入口，因此
+    正常生产启动既不能被环境变量也不能被命令行开关改道。
+    构建测试版：dotnet build -c Release -p:YemanAsyncBoundaryTest=true
+  -->
+  <PropertyGroup Condition="'$(YemanAsyncBoundaryTest)' == 'true'">
+    <DefineConstants>$(DefineConstants);YEMAN_ASYNC_BOUNDARY_TEST</DefineConstants>
+    <!-- §17.1-5：测试 runner 的**输出与正式候选分离**，避免测试专用编译覆盖 bin\Release
+         下的正式构建物（正式候选的身份链不得被测试产物污染）。 -->
+    <BaseOutputPath>bin\TestRunner\</BaseOutputPath>
+  </PropertyGroup>
+  <ItemGroup>
+    <Content Include="YeManFanHost.json" CopyToOutputDirectory="PreserveNewest" />
+    <!--
+      HC-SLIM-01 R3 §4.2：ASUS 风扇叶组件（曲线/传输/收据）。该工程以 net10.0 独立构建，
+      不引用 HC/WPF/Windows SDK/LHM；只在 fan-provider=backend 时承担 ASUS 曲线写入。
+    -->
+    <ProjectReference Include="..\fan-backend\YeManFanBackend.csproj" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,62 @@
+{
+  "evidenceId": "A1-R1-HIDMAESTRO-X360-PROBE-20260903",
+  "status": "PASS",
+  "assetLockId": "HC-GYRO-VIRTUAL-MAINLINE-LOCK-20260903",
+  "asset": { "assetId": "HIDMaestro-1.7.0", "sha256": "A146AB8A46D2E9CE1FB2EA269FF231830607876F6F4DB7BB13CE891EF33DEECE" },
+  "probe": {
+    "archive": "G:\\YeManCC-Work\\Archives\\Migration-Backup\\20260831-152113\\YMCC-Workspace\\Build\\External\\HIDMaestro\\HIDMaestro-v1.7.0.zip",
+    "isolatedExtract": "G:\\YeManCC-Work\\Temp\\hidmaestro-probe-20260903-01",
+    "command": "HIDMaestroTest.exe emulate xbox-360-wired",
+    "driverInstall": "OK",
+    "profileLoad": "231 profiles",
+    "create": "xbox-360-wired created in 258 ms (repeat run 188 ms)",
+    "reportSubmission": "250 Hz; XInput raw reports observed",
+    "xinputConsumer": {
+      "api": "xinput1_4.dll:XInputGetState(0)",
+      "samples": 5,
+      "allReturnCode": 0,
+      "packetRange": "1390..1420",
+      "varyingAxesObserved": true,
+      "buttonsObserved": [8, 10]
+    },
+    "cleanup": "quit ACK; slot 0 disposed in 176 ms; total cleanup 182 ms"
+  },
+  "sdkDemo": {
+    "command": "HIDMaestroTest.exe sdk-demo xbox-360-wired",
+    "driverInstall": "OK",
+    "create": "OK",
+    "framesSent": 324,
+    "durationSeconds": 5,
+    "dispose": "OK",
+    "postDemoDeviceState": "no HIDMaestro/XBOX virtual device present"
+  },
+  "activeDeviceObservation": {
+    "presentDeviceCount": 3,
+    "devices": [
+      "HID\\VID_045E&PID_028E&IG_00",
+      "ROOT\\VID_045E&PID_028E&IG_00",
+      "SWD\\HIDMAESTRO"
+    ],
+    "status": "OK"
+  },
+  "descriptorProbe": {
+    "profile": "xbox-360-wired",
+    "vid": "045E",
+    "pid": "028E",
+    "reportSizeBytes": 18,
+    "inputReportId": 0,
+    "buttonCount": 10,
+    "descriptorInspect": "completed",
+    "xusbSetupDiProbe": "no XUSB-interface devices returned; XInputGetState still returned rc=0 during active run",
+    "interpretation": "HID/XInput path observed; dedicated XUSB interface evidence is absent and remains unresolved"
+  },
+  "hidEnumeration": {
+    "command": "HIDMaestroTest.exe extract-profile",
+    "interfacesFound": 21,
+    "xboxControllerPresent": false,
+    "physicalControllerAccess": "not applicable; no Xbox/XInput HID interface detected"
+  },
+  "postCleanup": { "hidMaestroPresentOnlyDevices": 0, "hidhideModified": false, "physicalControllerRequired": false },
+  "scope": "Single isolated Xbox 360 virtual persona only. No HC process started, no physical controller accessed, no HidHide visibility transaction applied.",
+  "remaining": ["HIDAPI/Steam/game consumer observation not yet performed", "HidHide diff/recovery API remains unverified"]
+}

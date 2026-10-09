@@ -1,0 +1,27 @@
+import { task } from './fixtures/decky_task_paths.mjs';
+// Production identity observation only: no PID binding, persistence or interval.
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import vm from 'node:vm';
+import {createRequire} from 'node:module';
+const root=path.resolve(import.meta.dirname,'..');const require=createRequire(path.join(root,'package.json'));const {transformSync}=require('esbuild');
+const module={exports:{}};vm.runInNewContext(transformSync(fs.readFileSync(path.join(root,'decky-plugin/src/steamRunningContext.ts'),'utf8'),{loader:'ts',format:'cjs',target:'es2020'}).code,{module,exports:module.exports});
+const {observeSteamRunning,validSteamObservation}=module.exports;
+const cases=[];function check(name,fn){fn();cases.push({name,status:'passed'});}const plain=value=>JSON.parse(JSON.stringify(value));
+check('only MainRunningApp is observed; selected library card is never a target',()=>assert.equal(observeSteamRunning({selectedApp:{appid:'480'}}).availability,'unavailable'));
+check('native Steam app ID normalized as exact decimal string',()=>assert.deepEqual(plain(observeSteamRunning({MainRunningApp:{appid:480},RunningApps:[{}]})),{availability:'observed',appId:'480',runningCount:1}));
+check('uint64 GameID stays exact without JS Number rounding',()=>{const value=observeSteamRunning({MainRunningApp:{appid:'4294967295',gameid:'18446744073709551615'},RunningApps:[{}]});assert.equal(value.appId,'4294967295');assert.equal(value.gameId,'18446744073709551615');});
+check('unsafe numeric GameID is not guessed or coerced into a string ID',()=>{const value=observeSteamRunning({MainRunningApp:{appid:'480',gameid:18446744073709551615},RunningApps:[{}]});assert.equal(value.appId,'480');assert.equal(value.gameId,undefined);});
+check('none requires a confirmed empty running list',()=>assert.deepEqual(plain(observeSteamRunning({MainRunningApp:undefined,RunningApps:[]})),{availability:'none',runningCount:0}));
+check('missing running API does not prove no game',()=>assert.equal(observeSteamRunning({MainRunningApp:undefined}).availability,'unavailable'));
+check('multiple running apps remain ambiguous, not a proven PID match',()=>assert.equal(observeSteamRunning({MainRunningApp:{appid:'480'},RunningApps:[{},{}]}).availability,'ambiguous'));
+check('contradictory empty list and MainRunningApp remain ambiguous',()=>assert.equal(observeSteamRunning({MainRunningApp:{appid:'480'},RunningApps:[]}).availability,'ambiguous'));
+check('throwing Steam getter fails closed',()=>{const router={get MainRunningApp(){throw new Error('changed API');}};assert.equal(observeSteamRunning(router).availability,'unavailable');});
+check('negative/zero/nondecimal/out-of-range AppID fail closed',()=>{for(const appid of [-1,0,4294967296,'480a',' 480','9007199254740993'])assert.equal(observeSteamRunning({MainRunningApp:{appid},RunningApps:[{}]}).availability,'unavailable');});
+check('leading zero observation canonicalized at local source',()=>assert.equal(observeSteamRunning({MainRunningApp:{appid:'000480'},RunningApps:[{}]}).appId,'480'));
+check('wire observations reject noncanonical or oversized identity',()=>{for(const value of [{availability:'observed',appId:'000480'},{availability:'observed',appId:480},{availability:'observed',appId:'4294967296'},{availability:'observed',appId:'480',gameId:'18446744073709551616'}])assert.equal(validSteamObservation(value),false);});
+check('wire observations cannot carry shell, path, curve or arbitrary state',()=>assert.equal(validSteamObservation({availability:'observed',appId:'480',path:'C:/wrong.exe'}),false));
+check('wire none/unavailable never carry old game IDs',()=>{assert.equal(validSteamObservation({availability:'none',runningCount:0,appId:'480'}),false);assert.equal(validSteamObservation({availability:'unavailable',gameId:'480'}),false);});
+check('a single snapshot getter call has no async or polling side effects',()=>{let calls=0;const router={get MainRunningApp(){calls++;return {appid:'480'};},RunningApps:[{}]};observeSteamRunning(router);assert.equal(calls,1);});
+fs.writeFileSync(path.resolve(task,'validation/STEAM-RUNNING-OBSERVATION-SELFTEST.json'),JSON.stringify({project:'YMCC Decky 侧边栏',cases:cases.length,results:cases,actualSteam:false,configWrites:0,persistentIdMappingImplemented:false,newIntervals:0},null,2));console.log(`Steam runtime observation tests passed: ${cases.length}`);

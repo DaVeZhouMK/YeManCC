@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "revision": 1,
+  "closure": "UNENCLOSED",
+  "source": "current-yemancc-native-route-migration",
+  "entries": [
+    {
+      "schemaVersion": 1,
+      "revision": 1,
+      "closure": "UNENCLOSED",
+      "routeId": "ymcc-native-lb-rb-summon",
+      "physicalControlId": "LB+RB",
+      "hcParityId": null,
+      "owner": null,
+      "releaseProofId": null,
+      "sourcePath": "src/gamepad/engine.ts",
+      "sourceFact": "existing native summon route; migration candidate only"
+    },
+    {
+      "schemaVersion": 1,
+      "revision": 1,
+      "closure": "UNENCLOSED",
+      "routeId": "ymcc-native-b-double-tap-minimize",
+      "physicalControlId": "B double-tap",
+      "hcParityId": null,
+      "owner": null,
+      "releaseProofId": null,
+      "sourcePath": "src/bridge/yeman.ts",
+      "sourceFact": "existing native minimize route; migration candidate only"
+    },
+    {
+      "schemaVersion": 1,
+      "revision": 1,
+      "closure": "UNENCLOSED",
+      "routeId": "ymcc-native-start-dpad-adjust",
+      "physicalControlId": "Start+D-pad",
+      "hcParityId": null,
+      "owner": null,
+      "releaseProofId": null,
+      "sourcePath": "src/bridge/yeman.ts",
+      "sourceFact": "existing native adjustment route; migration candidate only"
+    }
+  ]
+}

@@ -1,0 +1,449 @@
+﻿<Page
+    x:Class="HandheldCompanion.Views.Pages.ControllerPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:behaviors="clr-namespace:HandheldCompanion.Behaviors"
+    xmlns:converters="clr-namespace:HandheldCompanion.Converters"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:ikw="http://schemas.inkore.net/lib/ui/wpf"
+    xmlns:l="clr-namespace:HandheldCompanion.Localization"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:resx="clr-namespace:HandheldCompanion.Properties"
+    xmlns:ui="http://schemas.inkore.net/lib/ui/wpf/modern"
+    xmlns:viewmodels="clr-namespace:HandheldCompanion.ViewModels"
+    Name="Controller"
+    Title="{l:Static resx:Resources.ControllerPage_Controller}"
+    Margin="20"
+    d:Background="White"
+    d:DataContext="{d:DesignInstance Type=viewmodels:ControllerPageViewModel}"
+    d:DesignHeight="2200"
+    d:DesignWidth="1000"
+    KeepAlive="True"
+    Loaded="Page_Loaded"
+    mc:Ignorable="d">
+
+    <Page.Resources>
+        <converters:InverseAppThemeConverter x:Key="InverseAppThemeConverter" />
+    </Page.Resources>
+
+    <Grid Name="MainGrid">
+        <Image
+            Margin="20,120,0,0"
+            HorizontalAlignment="Left"
+            VerticalAlignment="Top"
+            Opacity="0.4"
+            Source="{Binding Artwork, Mode=OneWay, UpdateSourceTrigger=PropertyChanged}"
+            Stretch="None"
+            Visibility="Visible">
+            <Image.OpacityMask>
+                <RadialGradientBrush Center="0.6,0.4" GradientOrigin="0.6,0.4" RadiusX="1" RadiusY="1.2">
+                    <GradientStop Offset="0.0" Color="{DynamicResource MaskGradientStartColor}" />
+                    <GradientStop Offset="0.4" Color="{DynamicResource MaskGradientEndColor}" />
+                </RadialGradientBrush>
+            </Image.OpacityMask>
+        </Image>
+
+        <StackPanel>
+            <TextBlock
+                Margin="0,0,0,8"
+                behaviors:TextBlockUpperCase.IsUpperCase="True"
+                Style="{StaticResource CapitalAccentTextBlockStyle}"
+                Text="{Binding Name, RelativeSource={RelativeSource AncestorType=Page}}" />
+
+            <ikw:SimpleStackPanel IsEnabled="{Binding ScanHardwareCardEnabled}" Spacing="28">
+
+                <!--  Virtual devices  -->
+                <ikw:SimpleStackPanel Spacing="8">
+                    <DockPanel>
+                        <TextBlock Style="{StaticResource BaseTextBlockStyle}" Text="{l:Static resx:Resources.ControllerPage_VirtualDevices}" />
+                        <TextBlock
+                            Margin="4,0,0,0"
+                            Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}"
+                            Text="{l:Static resx:Resources.ControllerPage_VirtualDevicesDesc}" />
+                    </DockPanel>
+
+                    <ikw:SimpleStackPanel Spacing="3">
+                        <ui:InfoBar
+                            Name="WarningNoVirtual"
+                            Title="{l:Static resx:Resources.ControllerPage_NoVirtualControllerWarning}"
+                            IsClosable="False"
+                            IsOpen="True"
+                            Message="{l:Static resx:Resources.ControllerPage_NoVirtualControllerDesc}"
+                            Severity="Error"
+                            Visibility="{Binding WarningNoVirtualVisibility}" />
+                        <ui:InfoBar
+                            Name="WarningConnectRetrying"
+                            Title="{l:Static resx:Resources.ControllerPage_VirtualConnectRetryWarning}"
+                            IsClosable="False"
+                            IsOpen="True"
+                            Message="{Binding ConnectRetryMessage, Mode=OneWay, UpdateSourceTrigger=PropertyChanged}"
+                            Severity="Informational"
+                            Visibility="{Binding WarningConnectRetryingVisibility, Mode=OneWay, UpdateSourceTrigger=PropertyChanged}" />
+                        <ui:InfoBar
+                            Name="WarningVirtualNotSlot1"
+                            Title="{l:Static resx:Resources.ControllerPage_VirtualControllerNotOnSlot1Warning}"
+                            IsClosable="False"
+                            IsOpen="True"
+                            Message="{l:Static resx:Resources.ControllerPage_VirtualControllerNotOnSlot1Desc}"
+                            Severity="Warning"
+                            Visibility="{Binding WarningVirtualNotSlot1Visibility}">
+                            <ui:InfoBar.ActionButton>
+                                <Button
+                                    HorizontalAlignment="Right"
+                                    Click="b_SlotFixNow_Click"
+                                    Style="{DynamicResource AccentButtonStyle}"
+                                    ToolTip="Adjust controllers order"
+                                    Visibility="{Binding SlotFixNowVisibility}">
+                                    Adjust order
+                                </Button>
+                            </ui:InfoBar.ActionButton>
+                        </ui:InfoBar>
+                        <ItemsControl
+                            Name="VirtualDevices"
+                            d:Visibility="Visible"
+                            ItemTemplate="{StaticResource ControllerTemplate}"
+                            ItemsSource="{Binding VirtualControllers}"
+                            Visibility="{Binding VirtualDevicesVisibility}">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <ikw:SimpleStackPanel Orientation="Vertical" Spacing="3" />
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                        </ItemsControl>
+                    </ikw:SimpleStackPanel>
+                </ikw:SimpleStackPanel>
+
+                <!--  Input devices  -->
+                <ikw:SimpleStackPanel Spacing="8">
+                    <DockPanel>
+                        <TextBlock Style="{StaticResource BaseTextBlockStyle}" Text="{l:Static resx:Resources.ControllerPage_PhysicalDevices}" />
+                        <TextBlock
+                            Margin="4,0,0,0"
+                            Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}"
+                            Text="{l:Static resx:Resources.ControllerPage_PhysicalDevicesDesc}" />
+                    </DockPanel>
+                    <ikw:SimpleStackPanel Spacing="3">
+                        <ui:InfoBar
+                            Name="WarningNoPhysical"
+                            Title="{l:Static resx:Resources.ControllerPage_NoPhysicalControllerDetectedWarning}"
+                            IsClosable="False"
+                            IsOpen="True"
+                            Message="{l:Static resx:Resources.ControllerPage_NoPhysicalControllerDetectedWarningDesc}"
+                            Severity="Error"
+                            Visibility="{Binding WarningNoPhysicalVisibility}" />
+                        <ui:InfoBar
+                            Name="HintsNotMuted"
+                            Title="{l:Static resx:Resources.ControllerPage_PhysicalControllerNotHiddenWarning}"
+                            IsClosable="False"
+                            IsOpen="True"
+                            Message="{l:Static resx:Resources.ControllerPage_PhysicalControllerNotHiddenDesc}"
+                            Severity="Error"
+                            Visibility="{Binding HintsNotMutedVisibility}" />
+                        <ItemsControl
+                            Name="PhysicalDevices"
+                            d:Visibility="Visible"
+                            ItemTemplate="{StaticResource ControllerTemplate}"
+                            ItemsSource="{Binding PhysicalControllers}"
+                            Visibility="{Binding PhysicalDevicesVisibility}">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <ikw:SimpleStackPanel Orientation="Vertical" Spacing="3" />
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                        </ItemsControl>
+
+                        <ui:SettingsCard Name="ScanHardwareCard" Header="{l:Static resx:Resources.ControllerPage_ScanForHardwareChanges}">
+                            <Button Command="{Binding ScanHardwareCommand}" Style="{DynamicResource AccentButtonStyle}">Scan</Button>
+                        </ui:SettingsCard>
+
+                        <ui:ProgressBar IsIndeterminate="{Binding IsScanningHardware, Mode=OneWay}" Visibility="{Binding ScanHardwareVisibility, Mode=OneWay, UpdateSourceTrigger=PropertyChanged}" />
+                    </ikw:SimpleStackPanel>
+                </ikw:SimpleStackPanel>
+
+                <!--  Controller settings  -->
+                <ikw:SimpleStackPanel Spacing="8">
+                    <TextBlock Style="{StaticResource BaseTextBlockStyle}" Text="{l:Static resx:Resources.ControllerPage_VirtualDeviceSettings}" />
+                    <ikw:SimpleStackPanel Name="ControllerSettings" Spacing="3">
+                        <!--  Controller status  -->
+                        <ui:SettingsCard Description="{l:Static resx:Resources.ControllerPage_VirtualStatusDesc}" Header="{l:Static resx:Resources.ControllerPage_VirtualStatus}">
+                            <ui:SettingsCard.HeaderIcon>
+                                <ui:FontIcon Glyph="&#xECF0;" />
+                            </ui:SettingsCard.HeaderIcon>
+
+                            <ComboBox Name="cB_ServiceSwitch" SelectionChanged="cB_ServiceSwitch_SelectionChanged">
+                                <ComboBoxItem Content="{l:Static resx:Resources.Enum_HIDstatus_Disconnected}" />
+                                <ComboBoxItem Content="{l:Static resx:Resources.Enum_HIDstatus_Connected}" />
+                            </ComboBox>
+                        </ui:SettingsCard>
+
+                        <ui:InfoBar
+                            Name="HintsHIDManagedByProfile"
+                            Title="{l:Static resx:Resources.ControllerPage_HIDManagedByProfileWarning}"
+                            IsClosable="False"
+                            IsOpen="True"
+                            Message="{l:Static resx:Resources.ControllerPage_HIDManagedByProfileDesc}"
+                            Severity="Warning"
+                            Visibility="{Binding HIDManagedByProfileVisibility}" />
+
+                        <ui:InfoBar
+                            Name="HintsHIDManagedBySteamHybrid"
+                            Title="{l:Static resx:Resources.ControllerPage_HIDManagedByProfileWarning}"
+                            IsClosable="False"
+                            IsOpen="True"
+                            Message="The virtual controller type is being managed by the currently applied Steam Deck controller mode."
+                            Severity="Warning"
+                            Visibility="{Binding HIDManagedBySteamHybridVisibility}" />
+
+                        <!--  Controller type  -->
+                        <ui:SettingsCard Description="{l:Static resx:Resources.ControllerPage_VirtualTypeDesc}" Header="{l:Static resx:Resources.ControllerPage_VirtualType}">
+                            <ui:SettingsCard.HeaderIcon>
+                                <ui:FontIcon Glyph="&#xE7FC;" />
+                            </ui:SettingsCard.HeaderIcon>
+
+                            <ComboBox
+                                Name="cB_HidMode"
+                                IsEnabled="{Binding HidModeEnabled}"
+                                SelectionChanged="cB_HidMode_SelectionChanged">
+                                <ComboBoxItem Content="{l:Static resx:Resources.Enum_HIDmode_Xbox360Controller}" Tag="0" />
+                                <ComboBoxItem Content="{l:Static resx:Resources.Enum_HIDmode_DualShock4Controller}" Tag="1" />
+                                <ComboBoxItem Content="{l:Static resx:Resources.Enum_HIDmode_DualSenseController}" Tag="2" />
+                                <ComboBoxItem Content="{l:Static resx:Resources.Enum_HIDmode_SteamDeckController}" Tag="3" />
+                                <ComboBoxItem Content="{l:Static resx:Resources.Enum_HIDmode_SwitchProController}" Tag="4" />
+                                <ComboBoxItem Content="{l:Static resx:Resources.Enum_HIDmode_SteamController}" Tag="6" />
+                            </ComboBox>
+                        </ui:SettingsCard>
+
+                        <!--  Vibration Strength  -->
+                        <ui:SettingsCard Description="{l:Static resx:Resources.ControllerPage_VibrationStrengthDesc}" Header="{l:Static resx:Resources.ControllerPage_VibrationStrength}">
+                            <ui:SettingsCard.HeaderIcon>
+                                <ui:FontIcon Glyph="&#xE877;" />
+                            </ui:SettingsCard.HeaderIcon>
+
+                            <DockPanel>
+                                <TextBox
+                                    Height="31"
+                                    HorizontalAlignment="Right"
+                                    VerticalAlignment="Center"
+                                    HorizontalContentAlignment="Center"
+                                    IsReadOnly="True"
+                                    Text="{Binding Value, StringFormat={}{0:N0}%, Source={x:Reference SliderStrength}, Mode=OneWay}" />
+                                <Slider
+                                    x:Name="SliderStrength"
+                                    Width="200"
+                                    Margin="6,0,0,0"
+                                    IsMoveToPointEnabled="True"
+                                    IsSnapToTickEnabled="True"
+                                    LargeChange="10"
+                                    Maximum="100"
+                                    Minimum="0"
+                                    SmallChange="1"
+                                    TickFrequency="1"
+                                    ToolTip="{Binding Value, StringFormat={}{0:N0}%, RelativeSource={RelativeSource Self}, Mode=OneWay}"
+                                    ValueChanged="SliderStrength_ValueChanged"
+                                    Value="100" />
+                            </DockPanel>
+                        </ui:SettingsCard>
+
+                        <!--  Controller management  -->
+                        <ui:SettingsCard Description="{l:Static resx:Resources.ControllerPage_ControllerManagementDesc}" Header="{l:Static resx:Resources.ControllerPage_ControllerManagement}">
+                            <ui:SettingsCard.HeaderIcon>
+                                <ui:FontIcon Glyph="&#xedab;" />
+                            </ui:SettingsCard.HeaderIcon>
+
+                            <StackPanel Orientation="Horizontal">
+                                <!--  Manual MUST be index 0 (default), Automatic index 1  -->
+                                <ComboBox
+                                    Name="cB_ControllerSlotManagementMode"
+                                    SelectedIndex="{Binding ControllerSlotManagementModeIndex, Mode=OneWay}"
+                                    SelectionChanged="cB_ControllerSlotManagementMode_SelectionChanged">
+                                    <ComboBoxItem Content="Manual" />
+                                    <ComboBoxItem Content="Automatic" />
+                                </ComboBox>
+                            </StackPanel>
+                        </ui:SettingsCard>
+
+                        <ui:SettingsCard
+                            Description="Controller update rate. A higher rate improves responsiveness but increases CPU usage"
+                            Header="Update rate"
+                            IsEnabled="{Binding IsMasterIntervalSettingEnabled}">
+                            <ui:SettingsCard.HeaderIcon>
+                                <ui:FontIcon Icon="{x:Static ui:SegoeFluentIcons.Stopwatch}" />
+                            </ui:SettingsCard.HeaderIcon>
+
+                            <ComboBox Name="cB_MasterInterval" SelectionChanged="cB_MasterInterval_SelectionChanged">
+                                <ComboBoxItem Content="125 Hz" />
+                                <ComboBoxItem Content="250 Hz" />
+                                <ComboBoxItem Content="500 Hz" />
+                                <ComboBoxItem Content="1000 Hz" />
+                            </ComboBox>
+                        </ui:SettingsCard>
+
+                        <ui:InfoBar
+                            Title="{Binding MasterIntervalInfoBarTitle}"
+                            IsClosable="False"
+                            IsOpen="{Binding IsMasterIntervalInfoBarOpen}"
+                            Message="{Binding MasterIntervalInfoBarMessage}"
+                            Severity="Informational" />
+                    </ikw:SimpleStackPanel>
+                </ikw:SimpleStackPanel>
+
+                <!--  Steam Deck settings  -->
+                <ikw:SimpleStackPanel
+                    d:Visibility="Visible"
+                    Spacing="8"
+                    Visibility="{Binding ElementName=SteamDeckPanel, Path=Visibility}">
+                    <TextBlock Style="{StaticResource BaseTextBlockStyle}" Text="Steam Deck settings" />
+                    <ikw:SimpleStackPanel Name="SteamDeckPanel" Spacing="3">
+                        <!--  Mute virtual controller (Steam Deck)  -->
+                        <ui:SettingsCard Description="{l:Static resx:Resources.ControllerPage_SteamControllerModeDesc}" Header="{l:Static resx:Resources.ControllerPage_SteamControllerMode}">
+                            <ui:SettingsCard.HeaderIcon>
+                                <ui:FontIcon Glyph="&#xE789;" />
+                            </ui:SettingsCard.HeaderIcon>
+
+                            <ComboBox Name="cB_SCModeController" SelectionChanged="cB_SCModeController_SelectionChanged">
+                                <ComboBoxItem Content="{l:Static resx:Resources.ControllerPage_SteamControllerModeHybrid}" />
+                                <ComboBoxItem Content="{l:Static resx:Resources.ControllerPage_SteamControllerModeExclusive}" />
+                            </ComboBox>
+                        </ui:SettingsCard>
+
+                        <!--  Vibration Interval  -->
+                        <ui:SettingsCard Description="Change controller vibration interval" Header="Vibration interval">
+                            <ui:SettingsCard.HeaderIcon>
+                                <ui:FontIcon Glyph="&#xE877;" />
+                            </ui:SettingsCard.HeaderIcon>
+
+                            <DockPanel>
+                                <TextBox
+                                    Height="31"
+                                    HorizontalAlignment="Right"
+                                    VerticalAlignment="Center"
+                                    HorizontalContentAlignment="Center"
+                                    IsReadOnly="True"
+                                    Text="{Binding Value, StringFormat={}{0:N0}ms, Source={x:Reference SliderInterval}, Mode=OneWay}" />
+                                <Slider
+                                    x:Name="SliderInterval"
+                                    Width="200"
+                                    Margin="6,0,0,0"
+                                    VerticalAlignment="Center"
+                                    IsMoveToPointEnabled="True"
+                                    IsSnapToTickEnabled="True"
+                                    LargeChange="2"
+                                    Maximum="20"
+                                    Minimum="1"
+                                    SmallChange="1"
+                                    TickFrequency="1"
+                                    TickPlacement="BottomRight"
+                                    ToolTip="{Binding Value, StringFormat={}{0:N0}%, RelativeSource={RelativeSource Self}, Mode=OneWay}"
+                                    ValueChanged="SliderInterval_ValueChanged"
+                                    Value="100" />
+                            </DockPanel>
+                        </ui:SettingsCard>
+                    </ikw:SimpleStackPanel>
+                </ikw:SimpleStackPanel>
+
+                <!--  Physical controller settings  -->
+                <ikw:SimpleStackPanel Spacing="8">
+                    <TextBlock Style="{StaticResource BaseTextBlockStyle}" Text="{l:Static resx:Resources.ControllerPage_PhysicalDeviceSettings}" />
+                    <ikw:SimpleStackPanel Name="DeviceSpecificPanel" Spacing="3">
+
+                        <!--  Connect on plug  -->
+                        <ui:SettingsCard Description="{l:Static resx:Resources.ControllerPage_ConnectWhenPluggedDesc}" Header="{l:Static resx:Resources.ControllerPage_ConnectWhenPlugged}">
+                            <ui:SettingsCard.HeaderIcon>
+                                <ui:FontIcon Glyph="&#xE95F;" />
+                            </ui:SettingsCard.HeaderIcon>
+
+                            <ComboBox Name="cB_ControllerPlugBehavior" SelectionChanged="cB_ControllerPlugBehavior_SelectionChanged">
+                                <ComboBoxItem Content="{l:Static resx:Resources.ControllerPage_PlugBehavior_DoNothing}" />
+                                <ComboBoxItem Content="{l:Static resx:Resources.ControllerPage_PlugBehavior_AlwaysAsk}" />
+                                <ComboBoxItem Content="{l:Static resx:Resources.ControllerPage_PlugBehavior_AutoConnect}" />
+                            </ComboBox>
+                        </ui:SettingsCard>
+
+                        <!--  Vibrate on connect  -->
+                        <ui:SettingsCard Description="{l:Static resx:Resources.ControllerPage_VibrateDeviceDesc}" Header="{l:Static resx:Resources.ControllerPage_VibrateDevice}">
+                            <ui:SettingsCard.HeaderIcon>
+                                <ui:FontIcon Glyph="&#xE877;" />
+                            </ui:SettingsCard.HeaderIcon>
+
+                            <ui:ToggleSwitch Name="Toggle_Vibrate" Toggled="Toggle_Vibrate_Toggled" />
+                        </ui:SettingsCard>
+
+                        <!--  Clock on connect  -->
+                        <ui:SettingsCard Description="{l:Static resx:Resources.ControllerPage_CloakDeviceDesc}" Header="{l:Static resx:Resources.ControllerPage_CloakDevice}">
+                            <ui:SettingsCard.HeaderIcon>
+                                <ui:FontIcon Glyph="&#xED1A;" />
+                            </ui:SettingsCard.HeaderIcon>
+
+                            <ui:ToggleSwitch Name="Toggle_Cloaked" Toggled="Toggle_Cloaked_Toggled" />
+                        </ui:SettingsCard>
+
+                        <!--  Uncloak on disconnect  -->
+                        <ui:SettingsCard Description="{l:Static resx:Resources.ControllerPage_UncloakOnDisconnectDesc}" Header="{l:Static resx:Resources.ControllerPage_UncloakOnDisconnect}">
+                            <ui:SettingsCard.HeaderIcon>
+                                <ui:FontIcon Glyph="&#xE7B3;" />
+                            </ui:SettingsCard.HeaderIcon>
+
+                            <ui:ToggleSwitch Name="Toggle_UncloakOnDisconnect" Toggled="Toggle_UncloakOnDisconnect_Toggled" />
+                        </ui:SettingsCard>
+
+                        <!--  Uncloak on close  -->
+                        <ui:SettingsCard Description="{l:Static resx:Resources.ControllerPage_UncloakOnCloseDesc}" Header="{l:Static resx:Resources.ControllerPage_UncloakOnClose}">
+                            <ui:SettingsCard.HeaderIcon>
+                                <ui:FontIcon Glyph="&#xE7B3;" />
+                            </ui:SettingsCard.HeaderIcon>
+
+                            <ui:ToggleSwitch Name="Toggle_UncloakOnClose" Toggled="Toggle_UncloakOnClose_Toggled" />
+                        </ui:SettingsCard>
+                    </ikw:SimpleStackPanel>
+                </ikw:SimpleStackPanel>
+
+                <!--  Non-game controller layouts  -->
+                <ikw:SimpleStackPanel Spacing="8">
+                    <TextBlock Style="{StaticResource BaseTextBlockStyle}" Text="{l:Static resx:Resources.ControllerPage_NonGameControllerLayouts}" />
+                    <ikw:SimpleStackPanel Spacing="3">
+
+                        <ui:SettingsCard
+                            Click="Button_Layout_Click"
+                            Description="{l:Static resx:Resources.ControllerPage_DesktopLayoutDefineController}"
+                            Header="{l:Static resx:Resources.ControllerPage_DesktopLayout}"
+                            IsClickEnabled="True"
+                            IsEnabled="{Binding LayoutManagerReady, Mode=OneWay, UpdateSourceTrigger=PropertyChanged}"
+                            Tag="Navigation">
+                            <ui:SettingsCard.HeaderIcon>
+                                <ui:FontIcon Glyph="&#xE713;" />
+                            </ui:SettingsCard.HeaderIcon>
+                        </ui:SettingsCard>
+                    </ikw:SimpleStackPanel>
+                </ikw:SimpleStackPanel>
+
+                <!--  Related support  -->
+                <ikw:SimpleStackPanel Spacing="8">
+                    <TextBlock Style="{StaticResource BaseTextBlockStyle}" Text="{l:Static resx:Resources.ControllerPage_RelatedSupport}" />
+                    <ikw:SimpleStackPanel Spacing="3">
+                        <ui:SettingsExpander Header="{l:Static resx:Resources.ControllerPage_HelpWithControllerSettings}" IsExpanded="True">
+                            <ui:SettingsExpander.HeaderIcon>
+                                <ui:FontIcon Glyph="&#xf6fa;" />
+                            </ui:SettingsExpander.HeaderIcon>
+
+                            <ui:SettingsExpander.Items>
+                                <ui:SettingsCard HorizontalContentAlignment="Left" ContentAlignment="Left">
+                                    <StackPanel Margin="-12,0,0,0" Orientation="Vertical">
+                                        <ui:HyperlinkButton Content="{l:Static resx:Resources.ControllerPage_TestControllerInputs}" NavigateUri="https://hardwaretester.com/gamepad" />
+                                        <ui:HyperlinkButton
+                                            Command="{Binding OpenWindowsControl}"
+                                            CommandParameter="joy.cpl"
+                                            Content="{l:Static resx:Resources.ControllerPage_ConfiguringControllersSettings}" />
+                                        <ui:HyperlinkButton
+                                            Command="{Binding NavigateSettings}"
+                                            CommandParameter="ms-settings:connecteddevices"
+                                            Content="{l:Static resx:Resources.ControllerPage_TroobleshootingBluetoothControllersConnectionIssues}" />
+                                    </StackPanel>
+                                </ui:SettingsCard>
+                            </ui:SettingsExpander.Items>
+                        </ui:SettingsExpander>
+                    </ikw:SimpleStackPanel>
+                </ikw:SimpleStackPanel>
+            </ikw:SimpleStackPanel>
+        </StackPanel>
+    </Grid>
+</Page>

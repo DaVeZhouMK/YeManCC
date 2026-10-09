@@ -1,0 +1,19 @@
+// Read actual installed files with the exact ORIGINAL store/normalizers. No native shell or hardware owner.
+import fs from 'node:fs';import path from 'node:path';import crypto from 'node:crypto';import assert from 'node:assert/strict';import {createRequire} from 'node:module';
+import {root,load,functions,main,backup} from './fixtures/decky_game_memory_store.mjs';import {task} from './fixtures/decky_task_paths.mjs';
+const require=createRequire(path.join(root,'package.json')),ts=require('typescript');
+const directory=path.dirname(main),unified=path.join(directory,'yeman-settings.json');const allowed=new Set([main,backup,unified,unified+'.bak']),reads=[];
+const hash=p=>crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex');const before=new Map([...allowed].filter(p=>fs.existsSync(p)).map(p=>[p,hash(p)]));
+const blocked=name=>()=>{throw Error('Read-only probe forbids: '+name);},moduleBlocked=name=>new Proxy({}, {get:(_,key)=>blocked(name+'.'+String(key))});
+function checked(p){if(!allowed.has(p))throw Error('Undeclared file read '+p);}
+const disk={exists:async p=>{checked(p);return fs.existsSync(p);},readTextFile:async(p,max=2e6)=>{checked(p);reads.push(p);assert.ok(fs.statSync(p).size<=max);return fs.readFileSync(p,'utf8');},writeTextFileAtomic:blocked('write')};
+const saved=fs.existsSync(unified)?JSON.parse(await disk.readTextFile(unified)):{};
+const modules={'./api':{fs:disk,powerLifecycle:moduleBlocked('power')},'./settingsRepository':{readSettingsSection:async section=>structuredClone(saved[section]||{}),getSettingsGeneration:()=>0,assertSettingsGeneration:blocked('assert/write'),mergeSettings:blocked('merge/write'),replaceSettingsSection:blocked('replace'),saveSettingsSection:blocked('save')},'./gamePolicyTarget':moduleBlocked('gamePolicy'),'./gamedetect':moduleBlocked('gamedetect'),'./yeman':moduleBlocked('hardware'),'./cpuProfiles':moduleBlocked('cpuProfiles'),'./autofloat':moduleBlocked('autofloat')};
+assert.ok(fs.existsSync(main),'Actual game-custom file required; never create/migrate it from this probe');
+const source=fs.readFileSync(path.join(root,'src/bridge/performanceSchedule.ts'),'utf8');const store=load(source,modules);const game=await store.loadGameCustomConfig(),schedule=await store.loadPerformanceSchedule();
+const fanFile=fs.readFileSync(path.join(root,'src/bridge/fanFeature.ts'),'utf8'),tree=ts.createSourceFile('fanFeature.ts',fanFile,ts.ScriptTarget.Latest,true,ts.ScriptKind.TS);
+const constants=tree.statements.filter(n=>ts.isVariableStatement(n)&&n.declarationList.declarations.some(d=>['DEFAULT_FAN_PRESET_CURVES','DEFAULT_FAN_SETTINGS'].includes(d.name.getText(tree)))).map(n=>n.getText(tree)).join('\n');
+const defaults=load(constants+'\nexport const readonlyFanDefaults=DEFAULT_FAN_SETTINGS;');const fan=structuredClone(saved.fan||defaults.readonlyFanDefaults);
+for(const [p,sha] of before)assert.equal(hash(p),sha);for(const p of allowed)assert.equal(fs.existsSync(p),before.has(p));
+const report={project:'YMCC 控制台',stage:'Mainline19',realInstalledFiles:true,actualOriginalStore:true,realFilePaths:reads,fileFingerprints:[...before].map(([path,sha256])=>({path,sha256})),gameEntries:Object.keys(game.entries).length,originalExeKeys:Object.keys(game.entries),scheduleSource:fs.existsSync(unified)&&saved.performanceSchedule?'persisted-original-settings':'original-factory-defaults-no-persisted-section',activeModes:schedule.active,fanSource:saved.fan?'persisted-original-settings':'original-factory-defaults-no-persisted-section',fanPreset:fan.preset,realConfigWrites:0,physicalHardwareWrites:0,actualNativeAppExecuted:false,actualNativeGameObservation:false,actualLiveSteamMirror:false,scope:'Genuine disk-to-original-model read validation, NOT live YMCC/Steam or hardware acceptance'};
+fs.writeFileSync(path.join(task,'validation/MAINLINE19-REAL-CONFIG-READONLY.json'),JSON.stringify(report,null,2));console.log(JSON.stringify(report));

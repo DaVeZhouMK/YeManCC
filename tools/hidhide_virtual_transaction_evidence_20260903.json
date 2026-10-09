@@ -1,0 +1,18 @@
+{
+  "evidenceId": "A1-B08-HIDHIDE-VIRTUAL-TRANSACTION-20260903",
+  "status": "PARTIAL",
+  "scope": "Temporary HIDMaestro virtual Xbox 360 SWD devnode only; no physical device entries changed",
+  "before": { "cloak": "off", "hiddenEntryCount": 4 },
+  "transaction": [
+    "created temporary HIDMaestro xbox-360-wired persona",
+    "added SWD\\HIDMAESTRO\\CE818F7F2BDC0001_0000 to HidHide hidden list",
+    "enabled cloak",
+    "observed device remained visible through Get-PnpDevice (status OK)",
+    "disabled cloak",
+    "removed temporary SWD entry"
+  ],
+  "after": { "cloak": "off", "hiddenEntryCount": 4, "temporaryEntryPresent": false, "virtualDevicePresent": false },
+  "conclusion": "Configuration mutation and rollback are proven; effective cloaking of this SWD virtual devnode was not observed, so physical-input suppression remains UNENCLOSED.",
+  "mutated": true,
+  "rollback": "completed"
+}

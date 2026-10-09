@@ -1,0 +1,159 @@
+{
+  "schemaVersion": 1,
+  "baselineName": "MAINLINE-OPT-INHERITANCE-1",
+  "generatedFrom": "Docs/Tasks/CpuOptimization/Evidence-20260919-MODES/opt-manifest.ps1 (registry transplanted; this file is the migratable source-tree copy)",
+  "lineage": [
+    { "name": "DEV_OPT_BASE_0",  "kind": "baseline-arm", "optimizations": ["A/B-batch", "C-batch", "C6a-H"] },
+    { "name": "DEV_OPT_BASE_0R", "kind": "baseline-arm", "optimizations": ["A/B-batch", "C-batch", "C6a-H"] },
+    { "name": "DEV_OPT_BASE_1",  "kind": "candidate-arm", "optimizations": ["A/B-batch", "C-batch", "C6a-H", "C7a-R1", "C15a", "C17a"] },
+    { "name": "MAINLINE-OPT-INHERITANCE-1", "kind": "adopted-baseline", "optimizations": ["A/B-batch", "C-batch", "C6a-H", "C7a-R1", "C15a", "C17a"] }
+  ],
+  "parentBaseline": {
+    "name": "DEV_OPT_BASE_1",
+    "manifestRef": "Docs/Tasks/CpuOptimization/Evidence-20260919-MODES/opt-manifests/DEV_OPT_BASE_1__build.json",
+    "manifestSha256": "",
+    "note": "manifestRef is documentation provenance only; the gate never reads it (no machine-absolute Docs path dependency)."
+  },
+  "versionCompatibility": {
+    "sourceScope": ["native", "InputHost", "src", "public", "deps/json", "scripts"],
+    "compileFlags": ["/std:c++20", "/utf-8", "/EHsc", "/MT", "/O2", "/bigobj", "/DNDEBUG", "/DUNICODE", "/D_UNICODE"],
+    "sdkLockSourceConstant": "kInputHostLockedCoreSha256",
+    "sdkLockFile": "HIDMaestro.Core.dll",
+    "requireSdkLockMatch": true,
+    "note": "Per-build source tree digest / toolchain / dependency hashes are bound by the gate at Capture time; no fixed product hash is baked here on purpose."
+  },
+  "mustMatchClasses": ["native-exe", "host-apphost", "host-managed-dll", "sdk-dll", "frontend", "config"],
+  "mustMatchClassesExcludeGenerated": ["frontend", "config"],
+  "sharedRuntimeRoutes": {
+    "runtimeId": "HC-CANDIDATE-0.32.4.0-06c0b954-20260902",
+    "stages": [
+      "package",
+      "install"
+    ],
+    "sha256": {
+      "Nefarius.Utilities.DeviceManagement.dll": "B5EAF086634438F2774F6B65DD14254AAA078BF1EBFEB004F997314B61272B7C",
+      "Newtonsoft.Json.dll": "A28C251DFE36D881E9E2462E171441B8B0EC156FE3F452602C9149B1B9EFE05B"
+    },
+    "note": "The same required sdk-dll logical identities and hashes are checked at the authoritative HC runtime location for thin production layouts. No expected-absent exception; local duplicate is rejected. Build lane still checks its local copies."
+  },
+  "artifacts": {
+    "classRules": {
+      "native-exe":       ["@app/YeManCC.exe", "@app/YeManRecoveryService.exe"],
+      "host-apphost":     ["@pc/YeManInputHost.exe"],
+      "host-managed-dll": ["@pc/YeManInputHost.dll", "@pc/YeManInputHost.deps.json", "@pc/YeManInputHost.runtimeconfig.json"],
+      "sdk-dll":          ["@pc/HIDMaestro.Core.dll", "@pc/Nefarius.Drivers.HidHide.dll",
+                           "@pc/Nefarius.Utilities.DeviceManagement.dll", "@pc/Nefarius.Vicius.Abstractions.dll",
+                           "@pc/Newtonsoft.Json.dll", "@pc/Microsoft.Extensions.DependencyInjection.Abstractions.dll",
+                           "@pc/Microsoft.Extensions.Logging.Abstractions.dll"],
+      "frontend":         ["@web/index.html", "@web/assets/**", "@web/gamepad-base.png", "@web/hls.min.js",
+                           "@web/YeMan-Support.html", "@web/icons/**"],
+      "config":           ["@web/app.config.json", "@web/version.json"]
+    },
+    "legacySentinels": [],
+    "legacySentinelsNote": "Intentionally empty. Mixing an older native / Host / SDK generation is detected generically by comparing every must-match artifact hash against the per-build BuildManifest (see Gate mode). A hard-coded deny-list was rejected because the current ground-truth HIDMaestro.Core.dll is the 40MB BD42A99B... image and must NOT be treated as legacy."
+  },
+  "packagingGeneratedFiles": [
+    {
+      "relativePath": "version.json",
+      "class": "config",
+      "source": "source-root version.json (ProjectRoot/version.json)",
+      "generationRule": "byte-identical copy of the source-tree version.json; its .version must equal package.json version and match strict semver",
+      "validation": "sha256(candidate) == sha256(sourceRoot/version.json)",
+      "recordHash": true
+    },
+    {
+      "relativePath": "YeMan-Support.html",
+      "class": "frontend",
+      "source": "source-root YeMan-Support.html (ProjectRoot/YeMan-Support.html)",
+      "generationRule": "byte-identical copy of the source-tree YeMan-Support.html",
+      "validation": "sha256(candidate) == sha256(sourceRoot/YeMan-Support.html)",
+      "recordHash": true
+    }
+  ],
+  "stageLayouts": {
+    "build":          { "app": "Build/App/Native",                        "pc": "Build/App/Native/InputHost",                                       "web": "Build/App/Web" },
+    "package":        { "app": "Build/Package/CompleteRoot/YeManCC",      "pc": "Build/Package/CompleteRoot/PowerControl/feature-assets/virtual-gamepad", "web": "Build/Package/CompleteRoot/YeManCC" },
+    "package-update": { "app": "Build/Package/UpdateRoot/YeManCC",        "pc": "Build/Package/UpdateRoot/PowerControl/feature-assets/virtual-gamepad",   "web": "Build/Package/UpdateRoot/YeManCC" },
+    "release":        { "app": "Release/YeManCC",                         "pc": "Release/PowerControl/feature-assets/virtual-gamepad",               "web": "Release/YeManCC" },
+    "install":        { "app": "C:/SOFT/YeMan/YeManCC",                   "pc": "C:/SOFT/YeMan/PowerControl/feature-assets/virtual-gamepad",          "web": "C:/SOFT/YeMan/YeManCC" }
+  },
+  "stageExpect": {
+    "build":          { "absentClasses": [], "absentRel": ["frontend|YeMan-Support.html", "config|version.json"] },
+    "package":        { "absentClasses": [], "absentRel": [] },
+    "package-update": { "absentClasses": ["host-apphost", "host-managed-dll", "sdk-dll"], "absentRel": [] },
+    "release":        { "absentClasses": ["host-apphost", "host-managed-dll", "sdk-dll"], "absentRel": [] },
+    "install":        { "absentClasses": [], "absentRel": [] }
+  },
+  "optimizations": [
+    {
+      "name": "A/B-batch",
+      "status": "adopted",
+      "evidence": "58 / 59 (batch A HidHide periodic reconcile, batch B device identity cache)",
+      "probeTarget": "host",
+      "markers": ["hidhideQuery"],
+      "anchors": [
+        { "file": "InputHost/Program.cs", "text": "HIDHIDE_QUERY_STATE" },
+        { "file": "native/main.cpp", "text": "HIDHIDE_QUERY_STATE" }
+      ]
+    },
+    {
+      "name": "C-batch",
+      "status": "adopted",
+      "evidence": "18 / 71 / 122 (empty-slot discovery separated from real-time sampling)",
+      "probeTarget": "native",
+      "markers": ["discoveryDirtyPasses", "slotDiscovery"],
+      "anchors": [
+        { "file": "native/main.cpp", "text": "kXInputSlotDiscoveryIntervalMs" },
+        { "file": "native/main.cpp", "text": "g_xinputDiscoveryLastTick" }
+      ]
+    },
+    {
+      "name": "C6a-H",
+      "status": "adopted",
+      "evidence": "117-121 (hand-written SUBMIT_FRAME serialization + provider cache + hex table)",
+      "probeTarget": "native",
+      "markers": ["c6a-wire-parity-ok"],
+      "anchors": [
+        { "file": "native/main.cpp", "text": "inputHostVerifySubmitFrameParity" },
+        { "file": "native/main.cpp", "text": "kSubmitFrameKeyCount" },
+        { "file": "native/main.cpp", "text": "C6aNumberTextCache" },
+        { "file": "native/main.cpp", "text": "inputHostCryptoProvider" }
+      ]
+    },
+    {
+      "name": "C7a-R1",
+      "status": "adopted",
+      "evidence": "116 sec 3 / 127 sec 3.3 (success-receipt fast path with strict shape gate)",
+      "probeTarget": "native",
+      "markers": ["c7a-receipt-fastpath-ok"],
+      "anchors": [
+        { "file": "native/main.cpp", "text": "verifyAgainstDom" },
+        { "file": "native/main.cpp", "text": "inputHostVerifySubmitFrameParity" }
+      ]
+    },
+    {
+      "name": "C15a",
+      "status": "adopted",
+      "evidence": "127 sec 3.3 / 130 (RID_HEADER source probe + confirmed negative cache; gamepadEval cadence preserved)",
+      "probeTarget": "native",
+      "markers": ["headerFallbacks", "negativeHits"],
+      "anchors": [
+        { "file": "native/main.cpp", "text": "hidHideRawInputNegativeCacheHit" },
+        { "file": "native/main.cpp", "text": "c15aHeaderRead" },
+        { "file": "native/main.cpp", "text": "g_hidResolveCacheGeneration" }
+      ]
+    },
+    {
+      "name": "C17a",
+      "status": "adopted",
+      "evidence": "130 sec 1 (gyro.telemetry single-ownership move; wire-byte parity + fallback)",
+      "probeTarget": "native",
+      "markers": ["c17a-gyro-wire-parity-mismatch"],
+      "anchors": [
+        { "file": "native/main.cpp", "text": "ipc_emit_owned_gyro_telemetry" },
+        { "file": "native/main.cpp", "text": "gamepadSerialPostOwnedEvent" },
+        { "file": "native/main.cpp", "text": "g_c17aParityFailures" }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "name": "telemetry-block0",
+  "kind": "telemetry",
+  "expect": { "ok": true, "rawOnly": true, "values": null, "reason": "scale-unverified", "asRpm": false },
+  "raw": [0, 12, 34, 56, 78, 90, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+  "readSuccess": true,
+  "note": "CT hints at Get_Fan(0) telemetry; until a device window proves unit/scale/freshness the decoder returns the raw bytes and null values - never a fabricated RPM"
+}

@@ -1,0 +1,5 @@
+LIBRARY YMCCOverlayBridge
+EXPORTS
+    Start
+    Stop
+    Setup

@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "artifactId": "T17-PERSONA-DESCRIPTOR-PARITY-20260904",
+  "hcBaseline": "0.32.4.0/06c0b954",
+  "status": "STATIC-DESCRIPTOR-CAPTURED / RUNTIME-UNENCLOSED",
+  "runtimeClosure": "UNENCLOSED",
+  "scope": "Descriptor/decode/submit/consumer audit. HC target-source layout is a reference, not proof of HIDMaestro descriptor parity.",
+  "personas": [
+    {
+      "persona": "xbox360",
+      "hcReference": "Xbox 360 target has no DS4 IMU report plane",
+      "requiredFields": [],
+      "descriptorStatus": "static-profile-captured / no-IMU-plane",
+      "runtimeStatus": "virtual-stick-only; ds4-imu rejected",
+      "safeStop": "persona-motion-unsupported"
+    },
+    {
+      "persona": "dualshock4",
+      "hcReference": "Targets/DualShock4Target.cs::InputLength=31; BuildReport writes gyro/accel at bytes 19..30. This is a VIIPER layout, not HIDMaestro DS4 v2 byte parity.",
+      "staticProfileEvidence": "tools/T22-BUS-P12-E02-HIDMAESTRO-EMBEDDED-PROFILE-STATIC-EVIDENCE-20260905.json captures profile fields; tools/T22-BUS-P12-E03-HIDMAESTRO-DS4-ENCODER-STATIC-EVIDENCE-20260905.json proves dualshock-4-v2 semantic -> HMGamepadState int16 field -> little-endian bytes 15/17/19 and 21/23/25.",
+      "requiredFields": ["canonical same-provider/same-epoch raw gyro plus raw accel transport; calibrated-gyro-only is not HC DualShock4Target source parity", "descriptor-specific HC conversion to HMGamepadState.GyroPitch/Yaw/Roll and AccelX/Y/Z int16 fields; GyroDpsX/Y/Z does not feed this DS4 encoder", "current-source accel transport", "encoded raw report plus independent decoder/readback", "named consumer observation"],
+      "descriptorStatus": "static-profile-and-encoder-captured / product-transport-mismatch / readback-unverified",
+      "currentCandidate": "CURRENT RF00 source correction: InputHost/Program.cs assigns no GyroDpsX/Y/Z, GyroPitch/Yaw/Roll, or AccelX/Y/Z fields; it submits only Buttons, Hat, and standard Axes. Native retains diagnostic gx/gy/gz transport behind pairProven && g_gmLocked, but the current Host does not write those values into HMGamepadState. The locked DS4 VendorBlobCodec consumes six int16 fields only when its extended route is armed; current direct DS4 IMU therefore remains fail-closed and cannot claim HC semantic parity.",
+      "supersededHistoricalCandidate": "Historical P12/E03 source scope: InputHost/Program.cs sets only float HMGamepadState.GyroDpsX/Y/Z. This wording is preserved as historical evidence and must not be read as current-source fact.",
+      "runtimeStatus": "UNENCLOSED",
+      "safeStop": "direct-ds4-imu-transport-source-or-readback-unverified"
+    }
+  ],
+  "rejectRules": ["unknown persona or reportId", "report length/offset/endianness not captured and decoded", "dualshock4 ds4-imu requested without descriptor verification", "xbox360 ds4-imu requested", "virtual-stick and ds4-imu claimed as one contribution"],
+  "evidenceSchema": ["persona", "physicalIdentity", "providerId", "configRevision", "configHash", "descriptorCapture", "encodedBytes", "decodedFields", "submitResult", "namedConsumer", "neutralAndRelease"]
+}

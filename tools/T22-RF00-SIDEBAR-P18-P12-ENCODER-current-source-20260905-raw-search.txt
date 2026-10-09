@@ -1,0 +1,211 @@
+# P18 static raw-search record
+## Current InputHost DS4 fields
+128-        {
+129-            Buttons = MapButtons(buttons),
+130-            Hat = MapHat(buttons),
+131-            Axes = HMGamepadStateHelpers.StandardAxes(profile, GetF(root, "lx"), GetF(root, "ly"), GetF(root, "rx"), GetF(root, "ry"), GetF(root, "lt"), GetF(root, "rt")),
+132:            GyroDpsX = GetF(root, "gx"),
+133:            GyroDpsY = GetF(root, "gy"),
+134:            GyroDpsZ = GetF(root, "gz"),
+135-        };
+136-        controller.SubmitState(in state);
+137-    }
+138-
+## Current native motion transport / pair gate
+4907-static GmGetSpace g_gmPlayer = nullptr;
+4908-static GmGetSpace g_gmWorld = nullptr;
+4909-static void* g_gm = nullptr;
+4910-static GmProcess g_gmProcess = nullptr;
+4911:static GmGet3 g_gmGetCal = nullptr;
+4912-static GmGetOffset g_gmGetOffset = nullptr;
+4913-static GmGetConf g_gmGetConf = nullptr;
+4914-static GmIsSteady g_gmIsSteady = nullptr;
+4915-static GmSetMode g_gmSetMode = nullptr;
+--
+4934-    g_gmPauseCal = (GmStartCal)GetProcAddress(g_gmDll, "PauseContinuousCalibration");
+4935-    g_gmResetCal = (GmStartCal)GetProcAddress(g_gmDll, "ResetContinuousCalibration");
+4936-    g_gmSetOffset = (GmSetOffset)GetProcAddress(g_gmDll, "SetCalibrationOffset");
+4937-    g_gmProcess = (GmProcess)GetProcAddress(g_gmDll, "ProcessMotion");
+4938:    g_gmGetCal = (GmGet3)GetProcAddress(g_gmDll, "GetCalibratedGyro");
+4939-    g_gmPlayer = (GmGetSpace)GetProcAddress(g_gmDll, "GetPlayerSpaceGyro");
+4940-    g_gmWorld = (GmGetSpace)GetProcAddress(g_gmDll, "GetWorldSpaceGyro");
+4941-    g_gmGetOffset = (GmGetOffset)GetProcAddress(g_gmDll, "GetCalibrationOffset");
+4942-    g_gmGetConf = (GmGetConf)GetProcAddress(g_gmDll, "GetAutoCalibrationConfidence");
+4943-    g_gmIsSteady = (GmIsSteady)GetProcAddress(g_gmDll, "GetAutoCalibrationIsSteady");
+4944:    if (!create || !g_gmProcess || !g_gmGetCal || !g_gmSetMode || !g_gmResetCal || !g_gmSetOffset || !g_gmGetOffset) {
+4945-        FreeLibrary(g_gmDll); g_gmDll = nullptr; g_gmProcess = nullptr; return;
+4946-    }
+4947-    g_gm = create();
+4948-    if (!g_gm) return;
+--
+5315-    if (posAbs <= 0.f) return 0.f;
+5316-    if (posAbs >= 1.f) return 1.f;
+5317-    return posAbs;
+5318-}
+5319:static json inputHostSubmitPad(const XINPUT_GAMEPAD& pad, double cgx, double cgy, double cgz, float psx, float psy, float wsx, float wsy, bool steady, bool calLocked) {
+5320-    if (!g_inputHostProcess) {
+5321-        return {
+5322-            {"stateWrite", "not-running"},
+5323-            {"persona", "dualshock4"},
+--
+5354-        {"rx", rx / 32767.0},
+5355-        {"ry", ry / 32767.0},
+5356-        {"lt", pad.bLeftTrigger / 255.0},
+5357-        {"rt", pad.bRightTrigger / 255.0},
+5358:        {"gx", cgx}, {"gy", cgy}, {"gz", cgz}
+5359-    };
+5360-    // This is a native state-file write receipt only. It proves neither that
+5361-    // InputHost consumed the file nor that a HID/game consumer observed it.
+5362-    const bool stateWrite = inputHostWrite(state);
+--
+5473-    // T12: the current two independent Windows sensor reads do not yet carry
+5474-    // a ProviderCapabilityMatrix pairing proof.  Do not pair their latest
+5475-    // values by guesswork: missing proof is SAFE_STOP for GamepadMotion and
+5476-    // virtual gyro output. Physical buttons/sticks remain forwarded below.
+5477:    const bool pairProven = false;
+5478:    if (g_gm && gyro && accel && !pairProven && !g_gmPairUnprovenLogged) {
+5479-        g_gmPairUnprovenLogged = true;
+5480-        inputCaptureAppend({
+5481-            {"t", now}, {"kind", "sample-pair-unproven"},
+5482-            {"reason", "provider-capability-matrix-not-bound"},
+5483-            {"gyro", true}, {"accel", true}, {"safeZero", true}
+5484-        });
+5485-    }
+5486:    if (g_gm && g_gmProcess && g_gmGetCal && gyro && accel && pairProven) {
+5487-        float dt = 0.016f;
+5488-        if (g_gmLastTick != 0 && now > g_gmLastTick) dt = (float)(now - g_gmLastTick) / 1000.0f;
+5489-        if (dt < 0.001f) dt = 0.001f;
+5490-        if (dt > 0.1f) dt = 0.1f;
+5491-        g_gmLastTick = now;
+5492-        g_gmProcess(g_gm, (float)mgx, (float)mgy, (float)mgz, (float)maxa, (float)may, (float)maz, dt);
+5493-        float cx=0, cy=0, cz=0;
+5494:        g_gmGetCal(g_gm, &cx, &cy, &cz);
+5495-        cgx = cx; cgy = cy; cgz = cz;
+5496-        if (g_gmPlayer) g_gmPlayer(g_gm, &psx, &psy, 1.41f);
+5497-        if (g_gmWorld) g_gmWorld(g_gm, &wsx, &wsy, 0.125f);
+5498-        if (g_gmGetOffset) g_gmGetOffset(g_gm, &ox, &oy, &oz);
+--
+5553-        {"ry", pad.sThumbRY},
+5554-        {"imu", {
+5555-            {"gyro", gyro},
+5556-            {"accel", accel},
+5557:            {"gx", cgx}, {"gy", cgy}, {"gz", cgz},
+5558-            {"ax", maxa}, {"ay", may}, {"az", maz},
+5559:            {"raw", {{"gx", gx}, {"gy", gy}, {"gz", gz}, {"ax", ax}, {"ay", ay}, {"az", az}}},
+5560:            {"matrix", {{"gx", mgx}, {"gy", mgy}, {"gz", mgz}}},
+5561-            {"matrixIdentity", matrixIdentity},
+5562-            {"event", {
+5563-                {"gyro", {{"sequence", gyroSequence}, {"timestamp100ns", gyroTimestamp100ns}, {"receiptTick", gyroReceiptTick}}},
+5564-                {"accel", {{"sequence", accelSequence}, {"timestamp100ns", accelTimestamp100ns}, {"receiptTick", accelReceiptTick}}}
+--
+5571-            {"worldSpace", {{"x", wsx}, {"y", wsy}}}
+5572-        }}
+5573-    };
+5574-    inputCaptureAppend(rec);
+5575:    // pairProven and calibration lock are both required before motion is
+5576-    // admitted to the direct HIDMaestro GyroDps path. Keep the raw and mapped
+5577-    // values in capture telemetry for diagnosis, but fail closed for the Host
+5578-    // state-file so unpaired/uncalibrated samples cannot bypass the virtual-
+5579-    // stick safe-zero gate.
+5580:    const bool gyroSubmitAllowed = pairProven && g_gmLocked;
+5581:    const json hostFrame = inputHostSubmitPad(
+5582-        pad,
+5583-        gyroSubmitAllowed ? cgx : 0.0,
+5584-        gyroSubmitAllowed ? cgy : 0.0,
+5585-        gyroSubmitAllowed ? cgz : 0.0,
+## Locked HC raw motion target contract
+G:\YeManCC-Work\Isolated\HC-Candidate-0.32.4.0-06c0b954-20260902\HandheldCompanion\Helpers\GamepadMotion.cs-132-                -gravZ,
+G:\YeManCC-Work\Isolated\HC-Candidate-0.32.4.0-06c0b954-20260902\HandheldCompanion\Helpers\GamepadMotion.cs-133-                this.deltaTime);
+G:\YeManCC-Work\Isolated\HC-Candidate-0.32.4.0-06c0b954-20260902\HandheldCompanion\Helpers\GamepadMotion.cs-134-        }
+G:\YeManCC-Work\Isolated\HC-Candidate-0.32.4.0-06c0b954-20260902\HandheldCompanion\Helpers\GamepadMotion.cs-135-
+G:\YeManCC-Work\Isolated\HC-Candidate-0.32.4.0-06c0b954-20260902\HandheldCompanion\Helpers\GamepadMotion.cs:136:        public void GetRawGyro(out float x, out float y, out float z)
+G:\YeManCC-Work\Isolated\HC-Candidate-0.32.4.0-06c0b954-20260902\HandheldCompanion\Helpers\GamepadMotion.cs-137-        {
+G:\YeManCC-Work\Isolated\HC-Candidate-0.32.4.0-06c0b954-20260902\HandheldCompanion\Helpers\GamepadMotion.cs-138-            x = gyroX;
+G:\YeManCC-Work\Isolated\HC-Candidate-0.32.4.0-06c0b954-20260902\HandheldCompanion\Helpers\GamepadMotion.cs-139-            y = gyroY;
+G:\YeManCC-Work\Isolated\HC-Candidate-0.32.4.0-06c0b954-20260902\HandheldCompanion\Helpers\GamepadMotion.cs-140-            z = gyroZ;
+--
+G:\YeManCC-Work\Isolated\HC-Candidate-0.32.4.0-06c0b954-20260902\HandheldCompanion\Helpers\GamepadMotion.cs-147-        {
+G:\YeManCC-Work\Isolated\HC-Candidate-0.32.4.0-06c0b954-20260902\HandheldCompanion\Helpers\GamepadMotion.cs-148-            return _madgwick.GetQuaternion();
+G:\YeManCC-Work\Isolated\HC-Candidate-0.32.4.0-06c0b954-20260902\HandheldCompanion\Helpers\GamepadMotion.cs-149-        }
+G:\YeManCC-Work\Isolated\HC-Candidate-0.32.4.0-06c0b954-20260902\HandheldCompanion\Helpers\GamepadMotion.cs-150-
+G:\YeManCC-Work\Isolated\HC-Candidate-0.32.4.0-06c0b954-20260902\HandheldCompanion\Helpers\GamepadMotion.cs:151:        public void GetRawAcceleration(out float x, out float y, out float z)
+G:\YeManCC-Work\Isolated\HC-Candidate-0.32.4.0-06c0b954-20260902\HandheldCompanion\Helpers\GamepadMotion.cs-152-        {
+G:\YeManCC-Work\Isolated\HC-Candidate-0.32.4.0-06c0b954-20260902\HandheldCompanion\Helpers\GamepadMotion.cs-153-            x = accelX;
+G:\YeManCC-Work\Isolated\HC-Candidate-0.32.4.0-06c0b954-20260902\HandheldCompanion\Helpers\GamepadMotion.cs-154-            y = accelY;
+G:\YeManCC-Work\Isolated\HC-Candidate-0.32.4.0-06c0b954-20260902\HandheldCompanion\Helpers\GamepadMotion.cs-155-            z = accelZ;
+--
+G:\YeManCC-Work\Isolated\HC-Candidate-0.32.4.0-06c0b954-20260902\HandheldCompanion\Targets\DualShock4Target.cs-86-            }
+G:\YeManCC-Work\Isolated\HC-Candidate-0.32.4.0-06c0b954-20260902\HandheldCompanion\Targets\DualShock4Target.cs-87-
+G:\YeManCC-Work\Isolated\HC-Candidate-0.32.4.0-06c0b954-20260902\HandheldCompanion\Targets\DualShock4Target.cs-88-            if (gamepadMotion is not null)
+G:\YeManCC-Work\Isolated\HC-Candidate-0.32.4.0-06c0b954-20260902\HandheldCompanion\Targets\DualShock4Target.cs-89-            {
+G:\YeManCC-Work\Isolated\HC-Candidate-0.32.4.0-06c0b954-20260902\HandheldCompanion\Targets\DualShock4Target.cs:90:                gamepadMotion.GetRawGyro(out float gx, out float gy, out float gz);
+G:\YeManCC-Work\Isolated\HC-Candidate-0.32.4.0-06c0b954-20260902\HandheldCompanion\Targets\DualShock4Target.cs:91:                gamepadMotion.GetRawAcceleration(out float ax, out float ay, out float az);
+G:\YeManCC-Work\Isolated\HC-Candidate-0.32.4.0-06c0b954-20260902\HandheldCompanion\Targets\DualShock4Target.cs:92:                short gxs = InputUtils.RoundClampToShort(InputUtils.Clamp(gx, -2048.0f, 2048.0f) * 16.0f);
+G:\YeManCC-Work\Isolated\HC-Candidate-0.32.4.0-06c0b954-20260902\HandheldCompanion\Targets\DualShock4Target.cs:93:                short gys = InputUtils.RoundClampToShort(InputUtils.Clamp(gy, -2048.0f, 2048.0f) * 16.0f);
+G:\YeManCC-Work\Isolated\HC-Candidate-0.32.4.0-06c0b954-20260902\HandheldCompanion\Targets\DualShock4Target.cs:94:                short gzs = InputUtils.RoundClampToShort(InputUtils.Clamp(gz, -2048.0f, 2048.0f) * 16.0f);
+G:\YeManCC-Work\Isolated\HC-Candidate-0.32.4.0-06c0b954-20260902\HandheldCompanion\Targets\DualShock4Target.cs:95:                short axs = InputUtils.RoundClampToShort(InputUtils.Clamp(ax * 9.81f, -64.0f, 64.0f) * 512.0f);
+G:\YeManCC-Work\Isolated\HC-Candidate-0.32.4.0-06c0b954-20260902\HandheldCompanion\Targets\DualShock4Target.cs:96:                short ays = InputUtils.RoundClampToShort(InputUtils.Clamp(ay * 9.81f, -64.0f, 64.0f) * 512.0f);
+G:\YeManCC-Work\Isolated\HC-Candidate-0.32.4.0-06c0b954-20260902\HandheldCompanion\Targets\DualShock4Target.cs:97:                short azs = InputUtils.RoundClampToShort(InputUtils.Clamp(az * 9.81f, -64.0f, 64.0f) * 512.0f);
+G:\YeManCC-Work\Isolated\HC-Candidate-0.32.4.0-06c0b954-20260902\HandheldCompanion\Targets\DualShock4Target.cs-98-                data[19] = (byte)(gxs & 0xFF); data[20] = (byte)((gxs >> 8) & 0xFF);
+G:\YeManCC-Work\Isolated\HC-Candidate-0.32.4.0-06c0b954-20260902\HandheldCompanion\Targets\DualShock4Target.cs-99-                data[21] = (byte)(gys & 0xFF); data[22] = (byte)((gys >> 8) & 0xFF);
+G:\YeManCC-Work\Isolated\HC-Candidate-0.32.4.0-06c0b954-20260902\HandheldCompanion\Targets\DualShock4Target.cs-100-                data[23] = (byte)(gzs & 0xFF); data[24] = (byte)((gzs >> 8) & 0xFF);
+G:\YeManCC-Work\Isolated\HC-Candidate-0.32.4.0-06c0b954-20260902\HandheldCompanion\Targets\DualShock4Target.cs-101-                data[25] = (byte)(axs & 0xFF); data[26] = (byte)((axs >> 8) & 0xFF);
+--
+G:\YeManCC-Work\Isolated\HC-Candidate-0.32.4.0-06c0b954-20260902\HandheldCompanion\Targets\DualShock4Target.cs-105-            else
+G:\YeManCC-Work\Isolated\HC-Candidate-0.32.4.0-06c0b954-20260902\HandheldCompanion\Targets\DualShock4Target.cs-106-            {
+G:\YeManCC-Work\Isolated\HC-Candidate-0.32.4.0-06c0b954-20260902\HandheldCompanion\Targets\DualShock4Target.cs-107-                var gyro = inputs.GyroState.GetGyroscope(GyroState.SensorState.DSU);
+G:\YeManCC-Work\Isolated\HC-Candidate-0.32.4.0-06c0b954-20260902\HandheldCompanion\Targets\DualShock4Target.cs-108-                var accel = inputs.GyroState.GetAccelerometer(GyroState.SensorState.DSU);
+G:\YeManCC-Work\Isolated\HC-Candidate-0.32.4.0-06c0b954-20260902\HandheldCompanion\Targets\DualShock4Target.cs:109:                short gxs = InputUtils.RoundClampToShort(InputUtils.Clamp(gyro.X, -2048.0f, 2048.0f) * 16.0f);
+G:\YeManCC-Work\Isolated\HC-Candidate-0.32.4.0-06c0b954-20260902\HandheldCompanion\Targets\DualShock4Target.cs:110:                short gys = InputUtils.RoundClampToShort(InputUtils.Clamp(gyro.Y, -2048.0f, 2048.0f) * 16.0f);
+G:\YeManCC-Work\Isolated\HC-Candidate-0.32.4.0-06c0b954-20260902\HandheldCompanion\Targets\DualShock4Target.cs:111:                short gzs = InputUtils.RoundClampToShort(InputUtils.Clamp(gyro.Z, -2048.0f, 2048.0f) * 16.0f);
+G:\YeManCC-Work\Isolated\HC-Candidate-0.32.4.0-06c0b954-20260902\HandheldCompanion\Targets\DualShock4Target.cs:112:                short axs = InputUtils.RoundClampToShort(InputUtils.Clamp(accel.X * 9.81f, -64.0f, 64.0f) * 512.0f);
+G:\YeManCC-Work\Isolated\HC-Candidate-0.32.4.0-06c0b954-20260902\HandheldCompanion\Targets\DualShock4Target.cs:113:                short ays = InputUtils.RoundClampToShort(InputUtils.Clamp(accel.Y * 9.81f, -64.0f, 64.0f) * 512.0f);
+G:\YeManCC-Work\Isolated\HC-Candidate-0.32.4.0-06c0b954-20260902\HandheldCompanion\Targets\DualShock4Target.cs:114:                short azs = InputUtils.RoundClampToShort(InputUtils.Clamp(accel.Z * 9.81f, -64.0f, 64.0f) * 512.0f);
+G:\YeManCC-Work\Isolated\HC-Candidate-0.32.4.0-06c0b954-20260902\HandheldCompanion\Targets\DualShock4Target.cs-115-                data[19] = (byte)(gxs & 0xFF); data[20] = (byte)((gxs >> 8) & 0xFF);
+G:\YeManCC-Work\Isolated\HC-Candidate-0.32.4.0-06c0b954-20260902\HandheldCompanion\Targets\DualShock4Target.cs-116-                data[21] = (byte)(gys & 0xFF); data[22] = (byte)((gys >> 8) & 0xFF);
+G:\YeManCC-Work\Isolated\HC-Candidate-0.32.4.0-06c0b954-20260902\HandheldCompanion\Targets\DualShock4Target.cs-117-                data[23] = (byte)(gzs & 0xFF); data[24] = (byte)((gzs >> 8) & 0xFF);
+G:\YeManCC-Work\Isolated\HC-Candidate-0.32.4.0-06c0b954-20260902\HandheldCompanion\Targets\DualShock4Target.cs-118-                data[25] = (byte)(axs & 0xFF); data[26] = (byte)((axs >> 8) & 0xFF);
+## P18 authority / E03 references
+G:\YeManCC-Work\Docs\Tasks\GyroVirtual\T10-HC-CORE-BOUNDARY-AND-INPUTHOST-ARCHITECTURE-AUDIT-20260905.md-125-
+G:\YeManCC-Work\Docs\Tasks\GyroVirtual\T10-HC-CORE-BOUNDARY-AND-INPUTHOST-ARCHITECTURE-AUDIT-20260905.md-126-当前 `HMGamepadState` 静态字段包含 `AccelX/Y/Z`，但 `InputHost/Program.cs` 仅设置 `GyroDpsX/Y/Z`，native state-file 也只传 `gx/gy/gz`。这构成可定位的 DS4 accel transport 缺口；进一步的 encoder 结论见下一节。该缺口已同步到 `PersonaDescriptorParity.v1.json`，保持 safe-stop。
+G:\YeManCC-Work\Docs\Tasks\GyroVirtual\T10-HC-CORE-BOUNDARY-AND-INPUTHOST-ARCHITECTURE-AUDIT-20260905.md-127-
+G:\YeManCC-Work\Docs\Tasks\GyroVirtual\T10-HC-CORE-BOUNDARY-AND-INPUTHOST-ARCHITECTURE-AUDIT-20260905.md:128:### 6.6 BUS-P12-E03：DS4 profile → encoder → state 字段链路（静态闭口，不是 runtime）
+G:\YeManCC-Work\Docs\Tasks\GyroVirtual\T10-HC-CORE-BOUNDARY-AND-INPUTHOST-ARCHITECTURE-AUDIT-20260905.md-129-
+G:\YeManCC-Work\Docs\Tasks\GyroVirtual\T10-HC-CORE-BOUNDARY-AND-INPUTHOST-ARCHITECTURE-AUDIT-20260905.md:130:可复核原始数据见 [DS4 encoder static evidence](../../../Mainline/YeManCC-source/YeManCC/tools/T22-BUS-P12-E03-HIDMAESTRO-DS4-ENCODER-STATIC-EVIDENCE-20260905.json)。本轮只读取锁定 `HIDMaestro.Core.dll` 的 PE metadata、resource 和 IL；没有加载该程序集、创建对象或运行 Host/driver/device。
+G:\YeManCC-Work\Docs\Tasks\GyroVirtual\T10-HC-CORE-BOUNDARY-AND-INPUTHOST-ARCHITECTURE-AUDIT-20260905.md-131-
+G:\YeManCC-Work\Docs\Tasks\GyroVirtual\T10-HC-CORE-BOUNDARY-AND-INPUTHOST-ARCHITECTURE-AUDIT-20260905.md-132-- `HMGamepadState.GyroPitch/Yaw/Roll` 与 `AccelX/Y/Z` 都是 `int16`；`GyroDpsX/Y/Z` 是不同的 `float32` 字段。
+G:\YeManCC-Work\Docs\Tasks\GyroVirtual\T10-HC-CORE-BOUNDARY-AND-INPUTHOST-ARCHITECTURE-AUDIT-20260905.md-133-- locked `dualshock-4-v2` profile 的 `gyroPitch / gyroYaw / gyroRoll / accelX / accelY / accelZ` 在 `VendorBlobProgram.Compile` 中被编译为 source `7…12`；`VendorBlobCodec.EncodeInput` 对 `source - 7` 的六分支依序读取上述 **six int16** state fields，再以 low byte、high byte写入对应 `B / B+1`。这已经静态证明 HIDMaestro 内的 **profile semantic → same-named state field → signed little-endian field**，而不是“字段可能存在”。
+--
+G:\YeManCC-Work\Docs\Tasks\GyroVirtual\TASK.md-1-# 手柄 × 按键自定义 × 陀螺仪主线任务
+G:\YeManCC-Work\Docs\Tasks\GyroVirtual\TASK.md-2-
+G:\YeManCC-Work\Docs\Tasks\GyroVirtual\TASK.md-3-状态：`MAINLINE-V1-DESIGN-FRAMEWORK-PARTIALLY-CLOSED / P17-STATIC-SNAPSHOT-RECORDED / T20-T21-T14-STATIC-REAUDITED-AT-SNAPSHOT / T10-T13-IMPLEMENTATION-PREPARATION-ONLY / RUNTIME-BLOCKED`
+G:\YeManCC-Work\Docs\Tasks\GyroVirtual\TASK.md:4:> **2026-09-05 current-source gate:** P17 已在 `2026-09-05T04:48:38.6795365Z` 冻结 53 个 key file，并完成 `T20 → T21 → T14` 的 snapshot-only 回链；证据见 [P17 manifest](../../../Mainline/YeManCC-source/YeManCC/tools/T22-RF00-SIDEBAR-P17-C16-HOSTFRAME-current-source-20260905-manifest.json)、[raw porcelain](../../../Mainline/YeManCC-source/YeManCC/tools/T22-RF00-SIDEBAR-P17-C16-HOSTFRAME-current-source-20260905-porcelain.raw.txt)、[raw search](../../../Mainline/YeManCC-source/YeManCC/tools/T22-RF00-SIDEBAR-P17-C16-HOSTFRAME-current-source-20260905-raw-search.txt) 与 [P17 render-repair note](../../../Mainline/YeManCC-source/YeManCC/tools/T22-RF00-SIDEBAR-P17-C16-HOSTFRAME-RENDER-REPAIR-20260905.md)。原 P17 line-map/report 有未展开模板和 NUL render defect，保留原字节与 hash 但不得当作独立干净文本证据。本 TASK 的本次回写发生在 capture 后，因此 P17 只能作为可归属的**冻结快照**；任何后续 source 或 authority 修改都必须再 RF00，不能把它写成 live/current runtime 资格。全程仅静态读取/哈希/文档与 claim 回链；不得把 manifest、mock、API 定位、前端 preview 或单次日志提升为 runtime 闭环。
+G:\YeManCC-Work\Docs\Tasks\GyroVirtual\TASK.md-5-
+G:\YeManCC-Work\Docs\Tasks\GyroVirtual\TASK.md-6-本目录是新的主线设计任务，不是旧 A3 的恢复任务。历史 A3 只保留为 mock 与负例证据；不得直接迁入其 runtime、资产或版本结论。
+G:\YeManCC-Work\Docs\Tasks\GyroVirtual\TASK.md-7-
+--
+G:\YeManCC-Work\Docs\Tasks\GyroVirtual\TASK.md-538-
+G:\YeManCC-Work\Docs\Tasks\GyroVirtual\TASK.md-539-这确认了“HC 路线保留 motion/lifecycle 语义、HID 仅做 descriptor-specific adapter”的重大分歧边界；禁止复用 HC wire offset。当前 InputHost 只赋 `GyroDpsX/Y/Z`，不赋 `AccelX/Y/Z`，native state-file 也没有 accel transport；其 encoder 字段连接已在 E03 继续收敛。
+G:\YeManCC-Work\Docs\Tasks\GyroVirtual\TASK.md-540-
+G:\YeManCC-Work\Docs\Tasks\GyroVirtual\TASK.md:541:#### BUS-P12-E03：锁定 DS4 encoder 的字段链路与当前 product mismatch（2026-09-05）
+G:\YeManCC-Work\Docs\Tasks\GyroVirtual\TASK.md-542-
+G:\YeManCC-Work\Docs\Tasks\GyroVirtual\TASK.md:543:只读 PE metadata/resource/IL 证据见 [E03](../../../Mainline/YeManCC-source/YeManCC/tools/T22-BUS-P12-E03-HIDMAESTRO-DS4-ENCODER-STATIC-EVIDENCE-20260905.json)，没有加载 `HIDMaestro.Core.dll`、运行 InputHost/driver、创建虚拟设备或操作实体/Steam/游戏。
+G:\YeManCC-Work\Docs\Tasks\GyroVirtual\TASK.md-544-
+G:\YeManCC-Work\Docs\Tasks\GyroVirtual\TASK.md-545-**已证明的事实：**`dualshock-4-v2` profile 的 `gyroPitch / gyroYaw / gyroRoll / accelX / accelY / accelZ` 先由 `VendorBlobProgram.Compile` 编译为 source `7…12`；`VendorBlobCodec.EncodeInput` 再依序读取 `HMGamepadState` 的同名六个 `int16` 字段，并以 low-byte / high-byte 写入 profile 的 `int16-le` report field。`GyroDpsX/Y/Z` 是另一组 `float32` 字段，whole-DLL direct-reference scan 未发现它们进入 DS4 `VendorBlobCodec`；它们只在 `SwitchProPacker` 有 direct read。因而 `InputHost/Program.cs` 目前只赋 `GyroDpsX/Y/Z` 不能编码 DS4 extended IMU；若 future pair gate 被错误打开，DS4 encoder 会看到未赋值的 gyro/accel `int16` 默认零。
+G:\YeManCC-Work\Docs\Tasks\GyroVirtual\TASK.md-546-
+--
+G:\YeManCC-Work\Docs\Tasks\GyroVirtual\TASK.md-637-- manifestId：`T22-RF00-20260905-SIDEBAR-P17-C16-HOSTFRAME-STATIC-SNAPSHOT`；53 个 key file；sourceDigest：`1F0BC93F0F327FE10E54551FCE77DFA9884E633CC59079DCC6D666D82F343647`。
+G:\YeManCC-Work\Docs\Tasks\GyroVirtual\TASK.md-638-- 完整 YMCC porcelain raw：406 entries，SHA-256 `7F0A6C798818AC280399223F1193332772266336221F1879D270155AEBCCAEF4`。
+G:\YeManCC-Work\Docs\Tasks\GyroVirtual\TASK.md-639-- P17 相对 P16 增加 `App.vue`、`ipc.ts`、`inputContracts.ts`、`gyroMotionMapperMock.ts`、`virtualReportAssembler.ts` 与 `input_contracts_selftest.ts`，使 C16 的 native → IPC → UI authoritative host-frame 与原 mock preview 都进入同一静态 scope。
+G:\YeManCC-Work\Docs\Tasks\GyroVirtual\TASK.md:640:- [P17 manifest](../../../Mainline/YeManCC-source/YeManCC/tools/T22-RF00-SIDEBAR-P17-C16-HOSTFRAME-current-source-20260905-manifest.json) 记录 53 个 key path/bytes/SHA；[raw porcelain](../../../Mainline/YeManCC-source/YeManCC/tools/T22-RF00-SIDEBAR-P17-C16-HOSTFRAME-current-source-20260905-porcelain.raw.txt) 与 [raw search](../../../Mainline/YeManCC-source/YeManCC/tools/T22-RF00-SIDEBAR-P17-C16-HOSTFRAME-current-source-20260905-raw-search.txt) 保留 capture raw。原 P01–P07 line-map/report 的 render defect、原 hash 和替代阅读路径见 [P17 render-repair note](../../../Mainline/YeManCC-source/YeManCC/tools/T22-RF00-SIDEBAR-P17-C16-HOSTFRAME-RENDER-REPAIR-20260905.md)。
+G:\YeManCC-Work\Docs\Tasks\GyroVirtual\TASK.md-641-
+G:\YeManCC-Work\Docs\Tasks\GyroVirtual\TASK.md-642-#### T20 / T21 / T14 回链（Fact）
+G:\YeManCC-Work\Docs\Tasks\GyroVirtual\TASK.md-643-
+G:\YeManCC-Work\Docs\Tasks\GyroVirtual\TASK.md-644-1. **T20：**[HistoricalClaimInventory.v1.json](../../../Mainline/YeManCC-source/YeManCC/tools/HistoricalClaimInventory.v1.json) 保持 21 条 `4 current-authority / 13 historical-reference / 4 superseded`；未分类为 0。TASK BUS 是唯一主线 authority，已删除的 31/32 没有恢复。
+G:\YeManCC-Work\Docs\Tasks\GyroVirtual\TASK.md-645-2. **T21：**[MainlineClaimReconciliation.v1.json](../../../Mainline/YeManCC-source/YeManCC/tools/MainlineClaimReconciliation.v1.json) 的 9 条 REC 逐条重绑为同一 P17 `manifestId + sourceDigest + P17 Pxx`；REC-09 仍为 `C1 option-2 resolved / no DGF-16 created`；`runtimeUpgrade=false`。
+G:\YeManCC-Work\Docs\Tasks\GyroVirtual\TASK.md-646-3. **T14：**[HCParityDriftLedger.v2.json](../../../Mainline/YeManCC-source/YeManCC/tools/HCParityDriftLedger.v2.json) 将既有 `DGF-01…DGF-15` 重新映射到 P17 Pxx；未新建 DGF，C16 只作为 DGF-06 的 native state-file transport/UI provenance 纠偏，不改变 DGF 状态或 closure。
+G:\YeManCC-Work\Docs\Tasks\GyroVirtual\TASK.md:647:4. P17 三段汇总的可复核阅读路径见 [P17 render-repair note](../../../Mainline/YeManCC-source/YeManCC/tools/T22-RF00-SIDEBAR-P17-C16-HOSTFRAME-RENDER-REPAIR-20260905.md)；原 report 保留为 hash-bound defective artifact，不再单独作为干净文本摘要引用。
+G:\YeManCC-Work\Docs\Tasks\GyroVirtual\TASK.md-648-
+G:\YeManCC-Work\Docs\Tasks\GyroVirtual\TASK.md-649-#### 无数据时必须保持的缺口（Gap；不得猜测补齐）
+G:\YeManCC-Work\Docs\Tasks\GyroVirtual\TASK.md-650-
+

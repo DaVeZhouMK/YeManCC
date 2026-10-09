@@ -1,0 +1,609 @@
+﻿<Page
+    x:Class="HandheldCompanion.Views.QuickPages.QuickOverlayPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:ikw="http://schemas.inkore.net/lib/ui/wpf"
+    xmlns:l="clr-namespace:HandheldCompanion.Localization"
+    xmlns:lvc="clr-namespace:LiveCharts.Wpf;assembly=LiveCharts.Wpf"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:resx="clr-namespace:HandheldCompanion.Properties"
+    xmlns:ui="http://schemas.inkore.net/lib/ui/wpf/modern"
+    xmlns:viewmodels="clr-namespace:HandheldCompanion.ViewModels"
+    Name="QuickDevice"
+    Title="{l:Static resx:Resources.QuickOverlayPage_Title}"
+    Margin="12,0,12,0"
+    d:Background="White"
+    d:DataContext="{d:DesignInstance Type=viewmodels:OverlayPageViewModel}"
+    d:DesignHeight="1200"
+    d:DesignWidth="640"
+    KeepAlive="True"
+    Loaded="OnLoaded"
+    Unloaded="OnUnloaded"
+    mc:Ignorable="d">
+
+    <ikw:SimpleStackPanel Spacing="28">
+
+        <!--  Header  -->
+        <Border CornerRadius="{DynamicResource ControlCornerRadius}">
+            <DockPanel>
+                <Image
+                    Name="ProfileIcon"
+                    Width="24"
+                    Height="24"
+                    HorizontalAlignment="Center"
+                    Source="{Binding ProcessIcon, Mode=OneWay, UpdateSourceTrigger=PropertyChanged}" />
+
+                <ikw:SimpleStackPanel Margin="12,0,0,0" VerticalAlignment="Center">
+                    <TextBlock Style="{StaticResource BodyTextBlockStyle}" Text="{Binding ProcessName, Mode=OneWay, UpdateSourceTrigger=PropertyChanged}" />
+                    <TextBlock
+                        Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}"
+                        Style="{StaticResource CaptionTextBlockStyle}"
+                        Text="{Binding ProcessPath, Mode=OneWay, UpdateSourceTrigger=PropertyChanged}"
+                        TextWrapping="NoWrap" />
+                </ikw:SimpleStackPanel>
+            </DockPanel>
+        </Border>
+
+        <!--  Framerate  -->
+        <ikw:SimpleStackPanel Spacing="8">
+            <TextBlock Style="{StaticResource BaseTextBlockStyle}" Text="Framerate" />
+
+            <ikw:SimpleStackPanel Spacing="3">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition />
+                        <ColumnDefinition />
+                    </Grid.ColumnDefinitions>
+
+                    <ikw:SimpleStackPanel Margin="0,0,3,0" Spacing="3">
+                        <Border
+                            Height="64"
+                            Padding="12"
+                            Background="{DynamicResource ExpanderHeaderBackground}"
+                            CornerRadius="{DynamicResource ControlCornerRadius}">
+
+                            <ikw:SimpleStackPanel
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                Orientation="Horizontal">
+                                <TextBlock
+                                    d:Text="10"
+                                    FontSize="20"
+                                    Foreground="{DynamicResource NavigationViewSelectionIndicatorForeground}"
+                                    Style="{StaticResource BaseTextBlockStyle}"
+                                    Text="{Binding Framerate, Mode=OneWay, UpdateSourceTrigger=PropertyChanged}" />
+                                <TextBlock
+                                    Margin="6,0,0,0"
+                                    Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}"
+                                    Text="FPS" />
+                            </ikw:SimpleStackPanel>
+                        </Border>
+                    </ikw:SimpleStackPanel>
+
+                    <ikw:SimpleStackPanel
+                        Grid.Column="1"
+                        Margin="3,0,0,0"
+                        Spacing="3">
+                        <Border
+                            Grid.Column="1"
+                            Height="64"
+                            Padding="12"
+                            Background="{DynamicResource ExpanderHeaderBackground}"
+                            CornerRadius="{DynamicResource ControlCornerRadius}">
+
+                            <ikw:SimpleStackPanel
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                Orientation="Horizontal">
+                                <TextBlock
+                                    d:Text="8.1"
+                                    FontSize="20"
+                                    Foreground="{DynamicResource NavigationViewSelectionIndicatorForeground}"
+                                    Style="{StaticResource BaseTextBlockStyle}"
+                                    Text="{Binding Frametime, Mode=OneWay, UpdateSourceTrigger=PropertyChanged}" />
+                                <TextBlock
+                                    Margin="6,0,0,0"
+                                    Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}"
+                                    Text="ms" />
+                            </ikw:SimpleStackPanel>
+                        </Border>
+                    </ikw:SimpleStackPanel>
+                </Grid>
+            </ikw:SimpleStackPanel>
+        </ikw:SimpleStackPanel>
+
+        <!--  CPU/GPU  -->
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition />
+                <ColumnDefinition />
+            </Grid.ColumnDefinitions>
+
+            <ikw:SimpleStackPanel
+                Grid.Column="0"
+                Margin="0,0,3,0"
+                Spacing="3">
+
+                <TextBlock Style="{StaticResource BaseTextBlockStyle}" Text="CPU" />
+                <TextBlock
+                    Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}"
+                    Style="{StaticResource CaptionTextBlockStyle}"
+                    Text="{Binding CPUName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                    TextWrapping="NoWrap" />
+
+                <!--  CPU Power  -->
+                <Border
+                    Height="80"
+                    Padding="12"
+                    Background="{DynamicResource ExpanderHeaderBackground}"
+                    CornerRadius="{DynamicResource ControlCornerRadius}">
+
+                    <ikw:SimpleStackPanel
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Stretch"
+                        Orientation="Horizontal"
+                        Spacing="12">
+
+                        <StackPanel VerticalAlignment="Center">
+                            <ui:FontIcon
+                                Height="31"
+                                FontFamily="{DynamicResource SymbolThemeFontFamily}"
+                                Glyph="&#xeb3c;" />
+                            <DockPanel>
+                                <TextBlock
+                                    MinWidth="20"
+                                    d:Text="100"
+                                    Text="{Binding CPUPower, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                <TextBlock VerticalAlignment="Center" Foreground="{DynamicResource NavigationViewSelectionIndicatorForeground}">
+                                    W
+                                </TextBlock>
+                            </DockPanel>
+                        </StackPanel>
+
+                        <StackPanel VerticalAlignment="Center">
+                            <ui:FontIcon
+                                Height="31"
+                                FontFamily="{DynamicResource SymbolThemeFontFamily}"
+                                Glyph="&#xecad;" />
+                            <DockPanel>
+                                <TextBlock
+                                    MinWidth="20"
+                                    d:Text="100"
+                                    Text="{Binding CPUTemperature, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                <TextBlock VerticalAlignment="Center" Foreground="{DynamicResource NavigationViewSelectionIndicatorForeground}">
+                                    °C
+                                </TextBlock>
+                            </DockPanel>
+                        </StackPanel>
+
+                        <StackPanel VerticalAlignment="Center">
+                            <Grid>
+                                <ui:FontIcon
+                                    Height="31"
+                                    FontFamily="{DynamicResource SymbolThemeFontFamily}"
+                                    Glyph="&#xe964;" />
+                                <ProgressBar
+                                    VerticalAlignment="Bottom"
+                                    Maximum="100"
+                                    Value="{Binding CPULoad, Mode=OneWay}" />
+                            </Grid>
+
+                            <DockPanel>
+                                <TextBlock
+                                    MinWidth="20"
+                                    d:Text="50"
+                                    Text="{Binding CPULoad, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                <TextBlock VerticalAlignment="Center" Foreground="{DynamicResource NavigationViewSelectionIndicatorForeground}">
+                                    %
+                                </TextBlock>
+                            </DockPanel>
+                        </StackPanel>
+                    </ikw:SimpleStackPanel>
+                </Border>
+            </ikw:SimpleStackPanel>
+
+            <ikw:SimpleStackPanel
+                Grid.Column="1"
+                Margin="3,0,0,0"
+                Spacing="3">
+                <TextBlock Style="{StaticResource BaseTextBlockStyle}" Text="GPU" />
+                <TextBlock
+                    Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}"
+                    Style="{StaticResource CaptionTextBlockStyle}"
+                    Text="{Binding GPUName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                    TextWrapping="Wrap" />
+
+                <!--  GPU Power  -->
+                <Border
+                    Height="80"
+                    Padding="12"
+                    Background="{DynamicResource ExpanderHeaderBackground}"
+                    CornerRadius="{DynamicResource ControlCornerRadius}">
+
+                    <ikw:SimpleStackPanel
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Stretch"
+                        Orientation="Horizontal"
+                        Spacing="12">
+
+                        <StackPanel VerticalAlignment="Center" Visibility="{Binding HasGPUPower, Mode=OneWay, UpdateSourceTrigger=PropertyChanged, Converter={StaticResource BooleanToVisibilityConverter}}">
+                            <ui:FontIcon
+                                Height="31"
+                                FontFamily="{DynamicResource SymbolThemeFontFamily}"
+                                Glyph="&#xeb3c;" />
+                            <DockPanel>
+                                <TextBlock
+                                    MinWidth="20"
+                                    d:Text="100"
+                                    Text="{Binding GPUPower, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                <TextBlock VerticalAlignment="Center" Foreground="{DynamicResource NavigationViewSelectionIndicatorForeground}">
+                                    W
+                                </TextBlock>
+                            </DockPanel>
+                        </StackPanel>
+
+                        <StackPanel VerticalAlignment="Center" Visibility="{Binding HasGPUTemperature, Mode=OneWay, UpdateSourceTrigger=PropertyChanged, Converter={StaticResource BooleanToVisibilityConverter}}">
+                            <ui:FontIcon
+                                Height="31"
+                                FontFamily="{DynamicResource SymbolThemeFontFamily}"
+                                Glyph="&#xecad;" />
+                            <DockPanel>
+                                <TextBlock
+                                    MinWidth="20"
+                                    d:Text="100"
+                                    Text="{Binding GPUTemperature, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                <TextBlock VerticalAlignment="Center" Foreground="{DynamicResource NavigationViewSelectionIndicatorForeground}">
+                                    °C
+                                </TextBlock>
+                            </DockPanel>
+                        </StackPanel>
+
+                        <StackPanel VerticalAlignment="Center" Visibility="{Binding HasGPULoad, Mode=OneWay, UpdateSourceTrigger=PropertyChanged, Converter={StaticResource BooleanToVisibilityConverter}}">
+                            <Grid>
+                                <ui:FontIcon
+                                    Height="31"
+                                    FontFamily="{DynamicResource SymbolThemeFontFamily}"
+                                    Glyph="&#xe964;" />
+                                <ProgressBar
+                                    VerticalAlignment="Bottom"
+                                    Maximum="100"
+                                    Value="{Binding GPULoad, Mode=OneWay}" />
+                            </Grid>
+                            <DockPanel>
+                                <TextBlock
+                                    MinWidth="20"
+                                    d:Text="50"
+                                    Text="{Binding GPULoad, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                <TextBlock VerticalAlignment="Center" Foreground="{DynamicResource NavigationViewSelectionIndicatorForeground}">
+                                    %
+                                </TextBlock>
+                            </DockPanel>
+                        </StackPanel>
+                    </ikw:SimpleStackPanel>
+                </Border>
+            </ikw:SimpleStackPanel>
+        </Grid>
+
+        <!--  Overlay  -->
+        <ikw:SimpleStackPanel Spacing="8">
+            <TextBlock Style="{StaticResource BaseTextBlockStyle}" Text="{l:Static resx:Resources.OverlayPage_Overlay}" />
+
+            <ikw:SimpleStackPanel Spacing="3">
+                <!--  Overlay display level  -->
+                <Border
+                    Padding="15,12,12,12"
+                    Background="{DynamicResource ExpanderHeaderBackground}"
+                    CornerRadius="{DynamicResource ControlCornerRadius}">
+
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="5*" MinWidth="100" />
+                            <ColumnDefinition Width="5*" MinWidth="100" />
+                        </Grid.ColumnDefinitions>
+
+                        <DockPanel>
+                            <ui:FontIcon
+                                Height="40"
+                                HorizontalAlignment="Center"
+                                FontFamily="{DynamicResource SymbolThemeFontFamily}"
+                                Glyph="&#xE78B;" />
+
+                            <ikw:SimpleStackPanel Margin="12,0,0,0" VerticalAlignment="Center">
+                                <TextBlock Style="{StaticResource BodyTextBlockStyle}" Text="{l:Static resx:Resources.OverlayPage_OverlayDisplayLevel}" />
+                                <TextBlock
+                                    Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}"
+                                    Style="{StaticResource CaptionTextBlockStyle}"
+                                    Text="{l:Static resx:Resources.OverlayPage_OverlayDisplayLevelDesc}"
+                                    TextWrapping="Wrap" />
+                            </ikw:SimpleStackPanel>
+                        </DockPanel>
+
+                        <ComboBox
+                            Grid.Column="1"
+                            Margin="6,0,0,0"
+                            HorizontalAlignment="Stretch"
+                            VerticalAlignment="Center"
+                            IsEnabled="{Binding IsRunningRTSS, Mode=OneWay, UpdateSourceTrigger=PropertyChanged}"
+                            IsReadOnly="True"
+                            SelectedIndex="{Binding OnScreenDisplayLevel, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}">
+
+                            <ComboBoxItem Content="{l:Static resx:Resources.OverlayPage_OverlayDisplayLevel_Disabled}" />
+                            <ComboBoxItem Content="{l:Static resx:Resources.OverlayPage_OverlayDisplayLevel_Minimal}" />
+                            <ComboBoxItem Content="{l:Static resx:Resources.OverlayPage_OverlayDisplayLevel_Extended}" IsEnabled="{Binding IsRunningLHM, Mode=OneWay, UpdateSourceTrigger=PropertyChanged}" />
+                            <ComboBoxItem Content="{l:Static resx:Resources.OverlayPage_OverlayDisplayLevel_Full}" IsEnabled="{Binding IsRunningLHM, Mode=OneWay, UpdateSourceTrigger=PropertyChanged}" />
+                            <ComboBoxItem Content="{l:Static resx:Resources.OverlayPage_OverlayDisplayLevel_Custom}" />
+                            <ComboBoxItem Content="{l:Static resx:Resources.OverlayPage_OverlayDisplayLevel_External}" />
+                        </ComboBox>
+                    </Grid>
+                </Border>
+
+                <!--  Custom Settings  -->
+                <ikw:SimpleStackPanel Name="StackCustomSettings" Spacing="3">
+                    <ikw:SimpleStackPanel.Style>
+                        <Style TargetType="{x:Type ikw:SimpleStackPanel}">
+                            <Setter Property="Visibility" Value="Collapsed" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding OnScreenDisplayLevel, UpdateSourceTrigger=PropertyChanged}" Value="4">
+                                    <Setter Property="Visibility" Value="Visible" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </ikw:SimpleStackPanel.Style>
+
+                    <Border
+                        Padding="15,12,12,12"
+                        Background="{DynamicResource ExpanderHeaderBackground}"
+                        CornerRadius="{DynamicResource ControlCornerRadius}">
+
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="5*" MinWidth="200" />
+                                <ColumnDefinition Width="5*" MinWidth="200" />
+                            </Grid.ColumnDefinitions>
+
+                            <DockPanel>
+                                <ikw:SimpleStackPanel Margin="30,0,0,0" VerticalAlignment="Center">
+                                    <TextBlock Style="{StaticResource BodyTextBlockStyle}" Text="{l:Static resx:Resources.OverlayPage_TimeLevel}" />
+                                    <TextBlock
+                                        Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}"
+                                        Style="{StaticResource CaptionTextBlockStyle}"
+                                        Text="{l:Static resx:Resources.OverlayPage_TimeLevelDesc}"
+                                        TextWrapping="Wrap" />
+                                </ikw:SimpleStackPanel>
+                            </DockPanel>
+
+                            <ComboBox
+                                Grid.Column="1"
+                                Margin="12,0,0,0"
+                                HorizontalAlignment="Stretch"
+                                IsReadOnly="True"
+                                SelectedIndex="{Binding OnScreenDisplayTimeLevel, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}">
+
+                                <ComboBoxItem Content="{l:Static resx:Resources.OverlayPage_OverlayDisplayCustomLevel_Disabled}" />
+                                <ComboBoxItem Content="{l:Static resx:Resources.OverlayPage_OverlayDisplayCustomLevel_Minimal}" />
+                                <ComboBoxItem Content="{l:Static resx:Resources.OverlayPage_OverlayDisplayCustomLevel_Full}" />
+                            </ComboBox>
+                        </Grid>
+                    </Border>
+
+                    <Border
+                        Padding="15,12,12,12"
+                        Background="{DynamicResource ExpanderHeaderBackground}"
+                        CornerRadius="{DynamicResource ControlCornerRadius}">
+
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="5*" MinWidth="200" />
+                                <ColumnDefinition Width="5*" MinWidth="200" />
+                            </Grid.ColumnDefinitions>
+
+                            <DockPanel>
+                                <ikw:SimpleStackPanel Margin="30,0,0,0" VerticalAlignment="Center">
+                                    <TextBlock Style="{StaticResource BodyTextBlockStyle}" Text="{l:Static resx:Resources.OverlayPage_FPSLevel}" />
+                                    <TextBlock
+                                        Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}"
+                                        Style="{StaticResource CaptionTextBlockStyle}"
+                                        Text="{l:Static resx:Resources.OverlayPage_FPSLevelDesc}"
+                                        TextWrapping="Wrap" />
+                                </ikw:SimpleStackPanel>
+                            </DockPanel>
+
+                            <ComboBox
+                                Grid.Column="1"
+                                Margin="12,0,0,0"
+                                HorizontalAlignment="Stretch"
+                                IsReadOnly="True"
+                                SelectedIndex="{Binding OnScreenDisplayFPSLevel, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}">
+
+                                <ComboBoxItem Content="{l:Static resx:Resources.OverlayPage_OverlayDisplayCustomLevel_Disabled}" />
+                                <ComboBoxItem Content="{l:Static resx:Resources.OverlayPage_OverlayDisplayCustomLevel_Minimal}" />
+                                <ComboBoxItem Content="{l:Static resx:Resources.OverlayPage_OverlayDisplayCustomLevel_Full}" />
+                            </ComboBox>
+                        </Grid>
+                    </Border>
+
+                    <Border
+                        Padding="15,12,12,12"
+                        Background="{DynamicResource ExpanderHeaderBackground}"
+                        CornerRadius="{DynamicResource ControlCornerRadius}">
+
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="5*" MinWidth="200" />
+                                <ColumnDefinition Width="5*" MinWidth="200" />
+                            </Grid.ColumnDefinitions>
+
+                            <DockPanel>
+                                <ikw:SimpleStackPanel Margin="30,0,0,0" VerticalAlignment="Center">
+                                    <TextBlock Style="{StaticResource BodyTextBlockStyle}" Text="{l:Static resx:Resources.OverlayPage_CPULevel}" />
+                                    <TextBlock
+                                        Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}"
+                                        Style="{StaticResource CaptionTextBlockStyle}"
+                                        Text="{l:Static resx:Resources.OverlayPage_CPULevelDesc}"
+                                        TextWrapping="Wrap" />
+                                </ikw:SimpleStackPanel>
+                            </DockPanel>
+
+                            <ComboBox
+                                Grid.Column="1"
+                                Margin="12,0,0,0"
+                                HorizontalAlignment="Stretch"
+                                IsReadOnly="True"
+                                SelectedIndex="{Binding OnScreenDisplayCPULevel, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}">
+
+                                <ComboBoxItem Content="{l:Static resx:Resources.OverlayPage_OverlayDisplayCustomLevel_Disabled}" />
+                                <ComboBoxItem Content="{l:Static resx:Resources.OverlayPage_OverlayDisplayCustomLevel_Minimal}" />
+                                <ComboBoxItem Content="{l:Static resx:Resources.OverlayPage_OverlayDisplayCustomLevel_Full}" />
+                            </ComboBox>
+                        </Grid>
+                    </Border>
+
+                    <Border
+                        Padding="15,12,12,12"
+                        Background="{DynamicResource ExpanderHeaderBackground}"
+                        CornerRadius="{DynamicResource ControlCornerRadius}">
+
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="5*" MinWidth="200" />
+                                <ColumnDefinition Width="5*" MinWidth="200" />
+                            </Grid.ColumnDefinitions>
+
+                            <DockPanel>
+                                <ikw:SimpleStackPanel Margin="30,0,0,0" VerticalAlignment="Center">
+                                    <TextBlock Style="{StaticResource BodyTextBlockStyle}" Text="{l:Static resx:Resources.OverlayPage_RAMLevel}" />
+                                    <TextBlock
+                                        Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}"
+                                        Style="{StaticResource CaptionTextBlockStyle}"
+                                        Text="{l:Static resx:Resources.OverlayPage_RAMLevelDesc}"
+                                        TextWrapping="Wrap" />
+                                </ikw:SimpleStackPanel>
+                            </DockPanel>
+
+                            <ComboBox
+                                Grid.Column="1"
+                                Margin="12,0,0,0"
+                                HorizontalAlignment="Stretch"
+                                IsReadOnly="True"
+                                SelectedIndex="{Binding OnScreenDisplayRAMLevel, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}">
+
+                                <ComboBoxItem Content="{l:Static resx:Resources.OverlayPage_OverlayDisplayCustomLevel_Disabled}" />
+                                <ComboBoxItem Content="{l:Static resx:Resources.OverlayPage_OverlayDisplayCustomLevel_Minimal}" />
+                                <ComboBoxItem Content="{l:Static resx:Resources.OverlayPage_OverlayDisplayCustomLevel_Full}" />
+                            </ComboBox>
+                        </Grid>
+                    </Border>
+
+                    <Border
+                        Padding="15,12,12,12"
+                        Background="{DynamicResource ExpanderHeaderBackground}"
+                        CornerRadius="{DynamicResource ControlCornerRadius}">
+
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="5*" MinWidth="200" />
+                                <ColumnDefinition Width="5*" MinWidth="200" />
+                            </Grid.ColumnDefinitions>
+
+                            <DockPanel>
+                                <ikw:SimpleStackPanel Margin="30,0,0,0" VerticalAlignment="Center">
+                                    <TextBlock Style="{StaticResource BodyTextBlockStyle}" Text="{l:Static resx:Resources.OverlayPage_GPULevel}" />
+                                    <TextBlock
+                                        Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}"
+                                        Style="{StaticResource CaptionTextBlockStyle}"
+                                        Text="{l:Static resx:Resources.OverlayPage_GPULevelDesc}"
+                                        TextWrapping="Wrap" />
+                                </ikw:SimpleStackPanel>
+                            </DockPanel>
+
+                            <ComboBox
+                                Grid.Column="1"
+                                Margin="12,0,0,0"
+                                HorizontalAlignment="Stretch"
+                                IsReadOnly="True"
+                                SelectedIndex="{Binding OnScreenDisplayGPULevel, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}">
+
+                                <ComboBoxItem Content="{l:Static resx:Resources.OverlayPage_OverlayDisplayCustomLevel_Disabled}" />
+                                <ComboBoxItem Content="{l:Static resx:Resources.OverlayPage_OverlayDisplayCustomLevel_Minimal}" />
+                                <ComboBoxItem Content="{l:Static resx:Resources.OverlayPage_OverlayDisplayCustomLevel_Full}" />
+                            </ComboBox>
+                        </Grid>
+                    </Border>
+
+                    <Border
+                        Padding="15,12,12,12"
+                        Background="{DynamicResource ExpanderHeaderBackground}"
+                        CornerRadius="{DynamicResource ControlCornerRadius}">
+
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="5*" MinWidth="200" />
+                                <ColumnDefinition Width="5*" MinWidth="200" />
+                            </Grid.ColumnDefinitions>
+
+                            <DockPanel>
+                                <ikw:SimpleStackPanel Margin="30,0,0,0" VerticalAlignment="Center">
+                                    <TextBlock Style="{StaticResource BodyTextBlockStyle}" Text="{l:Static resx:Resources.OverlayPage_VRAMLevel}" />
+                                    <TextBlock
+                                        Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}"
+                                        Style="{StaticResource CaptionTextBlockStyle}"
+                                        Text="{l:Static resx:Resources.OverlayPage_VRAMLevelDesc}"
+                                        TextWrapping="Wrap" />
+                                </ikw:SimpleStackPanel>
+                            </DockPanel>
+
+                            <ComboBox
+                                Grid.Column="1"
+                                Margin="12,0,0,0"
+                                HorizontalAlignment="Stretch"
+                                IsReadOnly="True"
+                                SelectedIndex="{Binding OnScreenDisplayVRAMLevel, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}">
+
+                                <ComboBoxItem Content="{l:Static resx:Resources.OverlayPage_OverlayDisplayCustomLevel_Disabled}" />
+                                <ComboBoxItem Content="{l:Static resx:Resources.OverlayPage_OverlayDisplayCustomLevel_Minimal}" />
+                                <ComboBoxItem Content="{l:Static resx:Resources.OverlayPage_OverlayDisplayCustomLevel_Full}" />
+                            </ComboBox>
+                        </Grid>
+                    </Border>
+
+                    <Border
+                        Padding="15,12,12,12"
+                        Background="{DynamicResource ExpanderHeaderBackground}"
+                        CornerRadius="{DynamicResource ControlCornerRadius}">
+
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="5*" MinWidth="200" />
+                                <ColumnDefinition Width="5*" MinWidth="200" />
+                            </Grid.ColumnDefinitions>
+
+                            <DockPanel>
+                                <ikw:SimpleStackPanel Margin="30,0,0,0" VerticalAlignment="Center">
+                                    <TextBlock Style="{StaticResource BodyTextBlockStyle}" Text="{l:Static resx:Resources.OverlayPage_BATTLevel}" />
+                                    <TextBlock
+                                        Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}"
+                                        Style="{StaticResource CaptionTextBlockStyle}"
+                                        Text="{l:Static resx:Resources.OverlayPage_BATTLevelDesc}"
+                                        TextWrapping="Wrap" />
+                                </ikw:SimpleStackPanel>
+                            </DockPanel>
+
+                            <ComboBox
+                                Grid.Column="1"
+                                Margin="12,0,0,0"
+                                HorizontalAlignment="Stretch"
+                                IsReadOnly="True"
+                                SelectedIndex="{Binding OnScreenDisplayBATTLevel, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}">
+
+                                <ComboBoxItem Content="{l:Static resx:Resources.OverlayPage_OverlayDisplayCustomLevel_Disabled}" />
+                                <ComboBoxItem Content="{l:Static resx:Resources.OverlayPage_OverlayDisplayCustomLevel_Minimal}" />
+                                <ComboBoxItem Content="{l:Static resx:Resources.OverlayPage_OverlayDisplayCustomLevel_Full}" />
+                            </ComboBox>
+                        </Grid>
+                    </Border>
+                </ikw:SimpleStackPanel>
+            </ikw:SimpleStackPanel>
+        </ikw:SimpleStackPanel>
+    </ikw:SimpleStackPanel>
+</Page>

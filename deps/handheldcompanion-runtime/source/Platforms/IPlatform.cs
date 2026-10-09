@@ -1,0 +1,505 @@
+﻿using GameLib.Core;
+using HandheldCompanion.Misc;
+using HandheldCompanion.Shared;
+using HandheldCompanion.Utils;
+using System;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.Diagnostics;
+using System.Drawing;
+using System.IO;
+using System.Linq;
+using System.Security;
+using System.Threading;
+using Timer = System.Timers.Timer;
+
+namespace HandheldCompanion.Platforms;
+
+[Flags]
+public enum GamePlatform
+{
+    Generic = 0,
+    Steam = 1,
+    Origin = 2,
+    UbisoftConnect = 4,
+    GOG = 8,
+    BattleNet = 16,
+    Epic = 32,
+    RiotGames = 64,
+    Rockstar = 128,
+    EADesktop = 256,
+    MicrosoftStore = 512,
+
+    All = Generic | Steam | Origin | UbisoftConnect | GOG | BattleNet | Epic | RiotGames | Rockstar | EADesktop | MicrosoftStore
+}
+
+public enum PlatformStatus
+{
+    None = 0,
+    Ready = 1,
+    Started = 2,
+    Stopped = 3,
+    Stalled = 4,
+    Starting = 5,
+    Stopping = 6,
+}
+
+public abstract class IPlatform : IDisposable
+{
+    protected readonly object updateLock = new();
+    protected List<string> BlacklistIds = new List<string>();
+
+    private Process? _Process;
+
+    public virtual string Name { get; set; } = string.Empty;
+    public virtual string ExecutableName { get; set; } = string.Empty;
+    public virtual string InstallPath { get; set; } = string.Empty;
+    public virtual string ExecutablePath { get; set; } = string.Empty;
+    public virtual bool IsInstalled { get; set; }
+
+    protected Version? ExpectedVersion;
+
+    protected bool IsStarting;
+
+    protected bool KeepAlive;
+    protected int MaxTentative = 3;
+
+    protected List<string> Modules = [];
+
+    public GamePlatform PlatformType;
+
+    protected Timer? PlatformWatchdog;
+    protected string SettingsPath = string.Empty;
+    public PlatformStatus Status;
+
+    protected int Tentative;
+    protected string Url = string.Empty;
+
+    protected FileSystemWatcher? systemWatcher;
+
+    protected Process? Process
+    {
+        get
+        {
+            try
+            {
+                if (_Process is not null)
+                    return _Process;
+
+                Process[] processes = ProcessUtils.GetProcessesByExecutable(ExecutableName);
+                if (processes.Length == 0)
+                    return null;
+
+                _Process = processes.FirstOrDefault();
+                _Process?.Exited += _Process_Exited;
+                _Process?.EnableRaisingEvents = true;
+
+                SetStatus(PlatformStatus.Started);
+
+                return _Process;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+    }
+
+    public bool IsRunning
+    {
+        get
+        {
+            try
+            {
+                if (Process is null)
+                    return false;
+
+                SetStatus(PlatformStatus.Started);
+                return !Process.HasExited;
+            }
+            catch
+            {
+            }
+
+            return false;
+        }
+    }
+
+    public bool HasModules
+    {
+        get
+        {
+            foreach (var file in Modules)
+            {
+                var filename = Path.Combine(InstallPath, file);
+                if (File.Exists(filename))
+                    continue;
+                return false;
+            }
+
+            return true;
+        }
+    }
+
+    ~IPlatform()
+    {
+        Dispose();
+    }
+
+    public virtual void Dispose()
+    {
+        if (PlatformWatchdog is not null)
+        {
+            PlatformWatchdog.Stop();
+            PlatformWatchdog.Dispose();
+            PlatformWatchdog = null;
+        }
+
+        GC.SuppressFinalize(this);
+    }
+
+    private void _Process_Exited(object? sender, EventArgs e)
+    {
+        if (_Process is null)
+            return;
+
+        SetStatus(PlatformStatus.Stopped);
+
+        _Process = null;
+    }
+
+    protected void SetStatus(PlatformStatus status)
+    {
+        if (Status == status)
+            return;
+
+        Status = status;
+        Updated?.Invoke(status);
+
+        LogManager.LogInformation("Platform {0} is {1}", this.GetType().Name, Status);
+    }
+
+    protected void SettingsValueChaned(string name, object? value)
+    {
+        SettingValueChanged?.Invoke(name, Convert.ToString(value) ?? string.Empty);
+    }
+
+    public string GetName()
+    {
+        return Name;
+    }
+
+    public string GetInstallPath()
+    {
+        return InstallPath;
+    }
+
+    public string GetSettingsPath()
+    {
+        return SettingsPath;
+    }
+
+    public virtual string GetSetting(string key)
+    {
+        return string.Empty;
+    }
+
+    public virtual bool IsRelated(ProcessEx process)
+    {
+        try
+        {
+            // Check executables
+            if (GetGames().Any(game => game.Executables.Contains(process.Path)))
+                return true;
+
+            // Loop through the modules of the process
+            Process? platformProcess = process.Process;
+            if (platformProcess is null)
+                return false;
+
+            foreach (ProcessModule module in platformProcess.Modules)
+            {
+                try
+                {
+                    if (Modules.Contains(module.ModuleName, StringComparer.InvariantCultureIgnoreCase))
+                        return true;
+                }
+                catch (Win32Exception) { }
+                catch (InvalidOperationException) { }
+            }
+        }
+        catch { }
+
+        return false;
+    }
+
+    public virtual bool Start()
+    {
+        KeepAlive = true;
+
+        // start watchdog
+        PlatformWatchdog?.Start();
+
+        return true;
+    }
+
+    public virtual bool Stop(bool kill = false)
+    {
+        KeepAlive = false;
+
+        // raise event
+        SetStatus(PlatformStatus.Stopping);
+
+        // stop watchdog
+        PlatformWatchdog?.Stop();
+
+        if (kill)
+            KillProcess();
+
+        return true;
+    }
+
+    public virtual void Refresh()
+    { }
+
+    protected virtual void Process_Exited(object? sender, EventArgs e)
+    {
+        LogManager.LogDebug("{0} has exited", GetType());
+
+        if (KeepAlive)
+        {
+            if (Tentative < MaxTentative)
+            {
+                StartProcess();
+            }
+            else
+            {
+                LogManager.LogError("Something wen't wrong while trying to start {0}", GetType());
+                Stop();
+
+                // reset tentative counter
+                Tentative = 0;
+
+                // raise event
+                SetStatus(PlatformStatus.Stalled);
+            }
+        }
+    }
+
+    public virtual bool StartProcess()
+    {
+        try
+        {
+            // set lock
+            IsStarting = true;
+
+            Process? process = null;
+            while (process is null && Tentative < MaxTentative)
+            {
+                // increase tentative counter
+                Tentative++;
+
+                LogManager.LogDebug("Starting {0}, tentative: {1}/{2}", GetType(), Tentative, MaxTentative);
+
+                // raise event
+                SetStatus(PlatformStatus.Starting);
+
+                process = Process.Start(new ProcessStartInfo
+                {
+                    FileName = ExecutablePath,
+                    WindowStyle = ProcessWindowStyle.Minimized,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                });
+
+                Thread.Sleep(500);
+            }
+
+            if (process is not null && !process.HasExited)
+            {
+                process.EnableRaisingEvents = true;
+                process.Exited += Process_Exited;
+
+                process.WaitForInputIdle(3000);
+
+                // (re)start watchdog
+                PlatformWatchdog?.Start();
+
+                // release lock
+                IsStarting = false;
+
+                LogManager.LogDebug("{0} has started", GetType());
+
+                return true;
+            }
+        }
+        catch
+        {
+        }
+
+        return false;
+    }
+
+    public virtual bool StopProcess()
+    {
+        return false;
+    }
+
+    public bool KillProcess()
+    {
+        if (Process is null)
+            return false;
+
+        try
+        {
+            Process.Kill();
+
+            // raise event
+            SetStatus(PlatformStatus.Stopped);
+
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    public virtual IEnumerable<IGame> GetGames()
+    {
+        return new List<IGame>();
+    }
+
+    public virtual Image GetLogo()
+    {
+        return null!;
+    }
+
+    public bool IsFileOverwritten(string FilePath, byte[] content)
+    {
+        try
+        {
+            var configPath = Path.Combine(InstallPath, FilePath);
+            if (!File.Exists(configPath))
+                return false;
+
+            var diskContent = File.ReadAllBytes(configPath);
+            return content.SequenceEqual(diskContent);
+        }
+        catch (DirectoryNotFoundException)
+        {
+            // Steam was installed, but got removed
+            return false;
+        }
+        catch (IOException)
+        {
+            LogManager.LogError("Couldn't locate {0} configuration file", PlatformType);
+            return false;
+        }
+    }
+
+    public bool ResetFile(string FilePath)
+    {
+        try
+        {
+            var configPath = Path.Combine(InstallPath, FilePath);
+            if (!File.Exists(configPath))
+                return false;
+
+            var origPath = $"{configPath}.orig";
+            if (!File.Exists(origPath))
+                return false;
+
+            FileAttributes attr = File.GetAttributes(configPath);
+
+            // unset read-only
+            attr = attr & ~FileAttributes.ReadOnly;
+            File.SetAttributes(configPath, attr);
+
+            File.Move(origPath, configPath, true);
+            return true;
+        }
+        catch (FileNotFoundException)
+        {
+            // File was not found (which is valid as it might be before first start of the application)
+            LogManager.LogError("Couldn't locate {0} configuration file", PlatformType);
+            return false;
+        }
+        catch (DirectoryNotFoundException)
+        {
+            // Steam was installed, but got removed
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
+        catch (SecurityException)
+        {
+            return false;
+        }
+        catch (IOException)
+        {
+            LogManager.LogError("Failed to overwrite {0} configuration file", PlatformType);
+            return false;
+        }
+    }
+
+    public bool OverwriteFile(string FilePath, byte[] content, bool backup)
+    {
+        try
+        {
+            var configPath = Path.Combine(InstallPath, FilePath);
+            if (!FileUtils.IsFileWritable(configPath))
+                return false;
+
+            // file has already been overwritten
+            if (IsFileOverwritten(FilePath, content))
+                return false;
+
+            if (backup)
+            {
+                var origPath = $"{configPath}.orig";
+                File.Copy(configPath, origPath, true);
+            }
+
+            File.WriteAllBytes(configPath, content);
+
+            FileAttributes attr = File.GetAttributes(configPath);
+
+            // set read-only
+            attr = attr | FileAttributes.ReadOnly;
+            File.SetAttributes(configPath, attr);
+
+            return true;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
+        catch (SecurityException)
+        {
+            return false;
+        }
+        catch (DirectoryNotFoundException)
+        {
+            // Steam was installed, but got removed
+            return false;
+        }
+        catch (IOException)
+        {
+            LogManager.LogError("Failed to overwrite {0} configuration file", PlatformType);
+            return false;
+        }
+    }
+
+    #region events
+
+    public event StartedEventHandler? Updated;
+    public delegate void StartedEventHandler(PlatformStatus status);
+
+    public event SettingValueChangedEventHandler? SettingValueChanged;
+    public delegate void SettingValueChangedEventHandler(string name, object value);
+
+    #endregion
+}

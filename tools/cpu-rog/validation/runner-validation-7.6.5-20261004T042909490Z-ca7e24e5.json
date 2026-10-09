@@ -1,0 +1,286 @@
+{
+  "schemaVersion": 1,
+  "timestampUtc": "2026-10-04T04:29:09.4879188Z",
+  "powershellVersion": "7.6.5",
+  "scope": "local-software-tool-validation-only",
+  "localToolValidation": true,
+  "rogRegressionPassed": false,
+  "rogToolRegression": "NOT_RUN",
+  "rogProductRegression": "NOT_RUN",
+  "rogCpuAB": "NOT_RUN",
+  "realProductProcessesTouched": false,
+  "realElevationPerformed": false,
+  "realCpuSamplingPerformed": false,
+  "realPortCallsPerformed": false,
+  "casesTotal": 66,
+  "casesPassed": 66,
+  "casesFailed": 0,
+  "cases": [
+    {
+      "name": "source parser validation only",
+      "passed": true
+    },
+    {
+      "name": "static finite operations no forbidden commands or local paths",
+      "passed": true
+    },
+    {
+      "name": "validate default never invokes runtime controls",
+      "passed": true
+    },
+    {
+      "name": "copied default wrapper spaces Chinese portable path",
+      "passed": true
+    },
+    {
+      "name": "wrapper invalid action structured failure",
+      "passed": true
+    },
+    {
+      "name": "wrapper missing parameter value structured failure",
+      "passed": true
+    },
+    {
+      "name": "wrapper unknown argument opaque value not leaked",
+      "passed": true
+    },
+    {
+      "name": "wrapper preflight missing path",
+      "passed": true
+    },
+    {
+      "name": "wrapper missing target file",
+      "passed": true
+    },
+    {
+      "name": "wrapper bad hash cannot reach process control",
+      "passed": true
+    },
+    {
+      "name": "wrapper no hash cannot authorize observed hash",
+      "passed": true
+    },
+    {
+      "name": "wrapper known hash is not user action authorization",
+      "passed": true
+    },
+    {
+      "name": "lifecycle wrapper failure safe",
+      "passed": true
+    },
+    {
+      "name": "fan wrapper failure safe",
+      "passed": true
+    },
+    {
+      "name": "worker wrapper missing request safe",
+      "passed": true
+    },
+    {
+      "name": "output unique session repeat refuses overwrite",
+      "passed": true
+    },
+    {
+      "name": "bad numeric argument safe result",
+      "passed": true
+    },
+    {
+      "name": "config cannot authorize control",
+      "passed": true
+    },
+    {
+      "name": "private start arguments rejected",
+      "passed": true
+    },
+    {
+      "name": "exact paired public start arguments accepted",
+      "passed": true
+    },
+    {
+      "name": "paired public start argument mismatch rejected",
+      "passed": true
+    },
+    {
+      "name": "UTC JSON stable across zh-CN and en-US",
+      "passed": true
+    },
+    {
+      "name": "preflight unknown hash is read-only discovery",
+      "passed": true
+    },
+    {
+      "name": "status exact fake root no commandLine serialization",
+      "passed": true
+    },
+    {
+      "name": "PID reused birth rejected",
+      "passed": true
+    },
+    {
+      "name": "process changed path rejected",
+      "passed": true
+    },
+    {
+      "name": "different current user rejected",
+      "passed": true
+    },
+    {
+      "name": "observe without control evidence remains non-S0 non-S4 non-AB",
+      "passed": true
+    },
+    {
+      "name": "capture missing runtime evidence does not call collector",
+      "passed": true
+    },
+    {
+      "name": "capture opaque evidence not formal proof nor copied into result",
+      "passed": true
+    },
+    {
+      "name": "permission failure is not capability absence",
+      "passed": true
+    },
+    {
+      "name": "normal fake root close only never force",
+      "passed": true
+    },
+    {
+      "name": "normal close unavailable no forced fallback",
+      "passed": true
+    },
+    {
+      "name": "fake restart process evidence is not frontend ready",
+      "passed": true
+    },
+    {
+      "name": "failed restart stop cannot cause start",
+      "passed": true
+    },
+    {
+      "name": "fake start rejects already running root",
+      "passed": true
+    },
+    {
+      "name": "fake start actual target high proof required",
+      "passed": true
+    },
+    {
+      "name": "fake hidden RunAs waits finite worker only",
+      "passed": true
+    },
+    {
+      "name": "fake RunAs refusal no bypass",
+      "passed": true
+    },
+    {
+      "name": "worker lower fake token safely records failure",
+      "passed": true
+    },
+    {
+      "name": "worker cannot take arbitrary request namespace",
+      "passed": true
+    },
+    {
+      "name": "fan exact LocalAppData namespace",
+      "passed": true
+    },
+    {
+      "name": "fan exact paired isolated derived namespace",
+      "passed": true
+    },
+    {
+      "name": "fan duplicated CLI session refused",
+      "passed": true
+    },
+    {
+      "name": "fan paired SID mismatch refused",
+      "passed": true
+    },
+    {
+      "name": "fan CLI equals spoof refused",
+      "passed": true
+    },
+    {
+      "name": "fan reply strict mock zero writes FILETIME safe projection",
+      "passed": true
+    },
+    {
+      "name": "fan physical write true refused",
+      "passed": true
+    },
+    {
+      "name": "fan false string spoof refused",
+      "passed": true
+    },
+    {
+      "name": "fan reused host FILETIME refused",
+      "passed": true
+    },
+    {
+      "name": "fan wrong host parent refused",
+      "passed": true
+    },
+    {
+      "name": "fan request mismatch refused",
+      "passed": true
+    },
+    {
+      "name": "manifest copied hashes sizes checked not ROG proof",
+      "passed": true
+    },
+    {
+      "name": "manifest mismatch safe failure",
+      "passed": true
+    },
+    {
+      "name": "manifest traversal refused",
+      "passed": true
+    },
+    {
+      "name": "manifest false ROG passed refused",
+      "passed": true
+    },
+    {
+      "name": "fixtures did not sleep or call real sampler or process control",
+      "passed": true
+    },
+    {
+      "name": "CLI LogFile multiple explicit values parsed like StartArgument",
+      "passed": true
+    },
+    {
+      "name": "LogFile forwarded only to inert collector metadata interface",
+      "passed": true
+    },
+    {
+      "name": "LogFile wildcard failure never exports original path",
+      "passed": true
+    },
+    {
+      "name": "default sample interval matches 250ms task book",
+      "passed": true
+    },
+    {
+      "name": "reparse directory gate uses fake filesystem item no junction created",
+      "passed": true
+    },
+    {
+      "name": "normal exit timeout with fake owned child no force or restart",
+      "passed": true
+    },
+    {
+      "name": "capture root gate binds externally trusted hash and exact process",
+      "passed": true
+    },
+    {
+      "name": "capture root gate refuses stale prior success",
+      "passed": true
+    },
+    {
+      "name": "worker mock success is single-use exact user proof not product regression",
+      "passed": true
+    }
+  ],
+  "fixtureMode": "temporary inert wrappers + synthetic collector + fake process/control/native seams",
+  "fixtureRetainedForAudit": true
+}

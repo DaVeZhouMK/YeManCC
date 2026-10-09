@@ -1,0 +1,12 @@
+{
+  "name": "sleeptype-s4-not-confirmed",
+  "expect": { "type": "S4_NOT_CONFIRMED", "confidence": "low", "downgrade": false },
+  "facts": {
+    "pcfgA": "The following sleep states are available on this system:\n    Standby (S3)\n    Hibernate\n\nThe following sleep states are not available on this system:\n    Standby (S0 Low Power Idle)",
+    "requested": "s4",
+    "hiberfilExists": true,
+    "hiberfilUpdated": false,
+    "gapSeconds": null
+  },
+  "note": "an S4 request that produced neither a disk write nor a suspend gap must stay unconfirmed; the operator forbade further sleep triggers on 2026-09-22, so no more attempts are made"
+}

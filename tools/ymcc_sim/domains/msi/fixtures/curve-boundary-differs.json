@@ -1,0 +1,8 @@
+{
+  "name": "curve-boundary-differs",
+  "kind": "curve",
+  "expect": { "ok": true, "blockIndex": 1, "duties": [30, 40, 55, 70, 80, 90], "payload7": 64, "boundaryPreserved": false, "asRpm": false },
+  "raw": [1, 30, 40, 55, 70, 80, 90, 64, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+  "readSuccess": true,
+  "note": "payload[7] is NOT 75 here: the decoder must report boundaryPreserved=false (CT's whole safety argument is about this byte) and must still not write anything"
+}

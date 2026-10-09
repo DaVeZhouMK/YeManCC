@@ -1,0 +1,64 @@
+{
+  "schemaVersion": "T22-BUS-StaticProfileEvidence.v1",
+  "evidenceId": "T22-BUS-P12-E02-HIDMAESTRO-EMBEDDED-PROFILE-STATIC-20260905",
+  "capturedUtc": "2026-09-05",
+  "captureMode": "PE metadata/resource read only; HIDMaestro.Core.dll not loaded; no driver, Host, virtual controller, device, Steam or game operation",
+  "runtimeClosure": "UNENCLOSED",
+  "lockedCore": {
+    "path": "InputHost/bin/Release/net10.0-windows/HIDMaestro.Core.dll",
+    "bytes": 40755712,
+    "sha256": "BD42A99BCB260435CE25796C54A4B792F8A2CED6AB78659C0CF926011663938E",
+    "mvid": "c61e2715-47ae-4cf3-87f7-244c330ef80e",
+    "assembly": "HIDMaestro.Core, Version=1.7.0.0, Culture=neutral, PublicKeyToken=null",
+    "archiveSha256": "A146AB8A46D2E9CE1FB2EA269FF231830607876F6F4DB7BB13CE891EF33DEECE"
+  },
+  "profiles": {
+    "xbox360": {
+      "resource": "HIDMaestro.Profiles.microsoft\\xbox-360-wired.json",
+      "resourceBytes": 1670,
+      "resourceSha256": "C3A1DB15DAB7C9D0981D82A4311631C62E5CDA04FA3C17A59686D06351AFCE13",
+      "id": "xbox-360-wired",
+      "vid": "0x045E",
+      "pid": "0x028E",
+      "inputReportSize": 18,
+      "extendedReport": null,
+      "imu": false,
+      "staticDisposition": "DS4 IMU plane absent; persona-motion-unsupported remains required."
+    },
+    "dualshock4": {
+      "resource": "HIDMaestro.Profiles.sony\\dualshock-4-v2.json",
+      "resourceBytes": 4869,
+      "resourceSha256": "95E76EFAF5886D6D580138490078952324A5FED54A431B6797EF9681E04EC716",
+      "id": "dualshock-4-v2",
+      "vid": "0x054C",
+      "pid": "0x09CC",
+      "inputReportSize": 64,
+      "extendedReport": {
+        "reportId": "0x01",
+        "size": 64,
+        "gyro": ["gyroPitch:int16-le@15", "gyroYaw:int16-le@17", "gyroRoll:int16-le@19"],
+        "accel": ["accelX:int16-le@21", "accelY:int16-le@23", "accelZ:int16-le@25"]
+      },
+      "imu": { "accelerometer": true, "gyroscope": true, "magnetometer": false }
+    }
+  },
+  "hcReference": {
+    "dualshock4": "DualShock4Target: InputLength=31; GamepadMotion raw gyro encodes at bytes 19..24 after clamp ±2048 and *16; accel at 25..30 after g*9.81 clamp ±64 and *512.",
+    "xbox360": "Xbox360Target: InputLength=20 and BuildReport does not encode GamepadMotion IMU."
+  },
+  "currentProductCandidate": {
+    "inputHost": "Program.cs sets HMGamepadState.GyroDpsX/Y/Z only; it does not assign AccelX/Y/Z.",
+    "transport": "native one-way state-file carries gx/gy/gz and no accel fields."
+  },
+  "staticConclusion": [
+    "HIDMaestro profile resources are statically captured; descriptor identity/report ID/report size/field offsets/endianness are no longer unknown.",
+    "HC VIIPER DS4 wire layout and HIDMaestro DS4 v2 wire layout are not byte-identical; direct HC offset reuse is prohibited.",
+    "HC motion/lifecycle semantics may be retained only through a descriptor-specific semantic adapter.",
+    "The static material does not prove GyroDpsX/Y/Z or AccelX/Y/Z to report-field axis/sign/unit/scale encoding, SubmitState readback, virtual-device enumeration, consumer observation, neutral/release, or recovery."
+  ],
+  "safeStop": [
+    "dualshock4 DS4-IMU remains descriptor-encoder-or-readback-unverified",
+    "xbox360 DS4-IMU remains persona-motion-unsupported",
+    "no direct IMU publication until T12 transport mapping and T15/T16 runtime evidence are complete"
+  ]
+}

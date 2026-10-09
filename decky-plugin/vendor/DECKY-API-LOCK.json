@@ -1,0 +1,32 @@
+{
+  "name": "@decky/api",
+  "version": "1.1.3",
+  "archiveSha256": "273227cd80104fd5a9307328b798c299abaa174111e36808128e616fdabeb807",
+  "archiveBytes": 13206,
+  "files": [
+    {
+      "relative": "dist/index.js",
+      "bytes": 1748,
+      "sha256": "9fdcc09e2a9596e05a71dd2ac758f1d0d9c69a18ff74a04862eac150312f3f17"
+    },
+    {
+      "relative": "dist/types.js",
+      "bytes": 11,
+      "sha256": "8e609bb71c20b858c77f0e9f90bb1319db8477b13f9f965f1a1e18524bf50881"
+    },
+    {
+      "relative": "LICENSE",
+      "bytes": 26527,
+      "sha256": "38965778962143b687faff3a5b69ef22dd228e0ca4f5a3752893e016ede87c6a"
+    },
+    {
+      "relative": "package.json",
+      "bytes": 2042,
+      "sha256": "8be297dad38eefd6e80b3a6b3f5083e875a7dd1261f866c91efbf4e380867aa1"
+    }
+  ],
+  "installedIntoNodeModules": false,
+  "packageScriptsExecuted": false,
+  "newRuntimeExeDlls": 0,
+  "role": "Compile-time cached public SDK; selected code bundled into passive plugin"
+}

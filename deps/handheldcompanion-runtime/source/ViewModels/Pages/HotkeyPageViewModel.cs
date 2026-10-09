@@ -1,0 +1,186 @@
+﻿using HandheldCompanion.Controllers;
+using HandheldCompanion.Inputs;
+using HandheldCompanion.Managers;
+using System;
+using System.Collections.Generic;
+using System.Collections.ObjectModel;
+using System.Linq;
+using System.Windows.Data;
+using System.Windows.Input;
+
+namespace HandheldCompanion.ViewModels
+{
+    public class HotkeyPageViewModel : BaseViewModel
+    {
+        public ObservableCollection<HotkeyViewModel> HotkeysList { get; set; } = [];
+        public ICommand CreateHotkeyCommand { get; private set; }
+
+        public bool Rumble
+        {
+            get
+            {
+                return ManagerFactory.settingsManager.GetBoolean("HotkeyRumbleOnExecution");
+            }
+            set
+            {
+                ManagerFactory.settingsManager.SetProperty("HotkeyRumbleOnExecution", value);
+                OnPropertyChanged(nameof(Rumble));
+            }
+        }
+
+        public HotkeyPageViewModel()
+        {
+            // Enable thread-safe access to the collection
+            BindingOperations.EnableCollectionSynchronization(HotkeysList, _collectionLock);
+
+            // raise events
+            switch (ManagerFactory.hotkeysManager.Status)
+            {
+                default:
+                case ManagerStatus.Initializing:
+                    ManagerFactory.hotkeysManager.Initialized += HotkeysManager_Initialized;
+                    break;
+                case ManagerStatus.Initialized:
+                    QueryHotkeys();
+                    break;
+            }
+
+            // manage events
+            ControllerManager.Initialized += ControllerManager_Initialized;
+            InputsManager.Initialized += InputsManager_Initialized;
+
+            // raise events
+            if (ControllerManager.IsInitialized)
+                ControllerManager_Initialized();
+            if (InputsManager.IsInitialized)
+                InputsManager_Initialized();
+
+            CreateHotkeyCommand = new DelegateCommand(async () =>
+            {
+                ManagerFactory.hotkeysManager.UpdateOrCreateHotkey(new Hotkey());
+            });
+        }
+
+        private void ControllerManager_Initialized()
+        {
+            // manage events
+            ControllerManager.ControllerSelected += ControllerManager_ControllerSelected;
+
+            // raise events
+            if (ControllerManager.HasTargetController && ControllerManager.GetTarget() is IController controller)
+                ControllerManager_ControllerSelected(controller);
+        }
+
+        private void ControllerManager_ControllerSelected(Controllers.IController Controller)
+        {
+            // (re)draw chords on controller update
+            List<HotkeyViewModel> hotkeyViewModels;
+            lock (_collectionLock)
+            {
+                hotkeyViewModels = HotkeysList.ToList();
+            }
+
+            foreach (HotkeyViewModel hotkeyViewModel in hotkeyViewModels)
+                hotkeyViewModel.DrawChords();
+        }
+
+        private void InputsManager_Initialized()
+        {
+            // manage events
+            InputsManager.StartedListening += InputsManager_StartedListening;
+            InputsManager.StoppedListening += InputsManager_StoppedListening;
+        }
+
+        private void HotkeysManager_Initialized()
+        {
+            QueryHotkeys();
+        }
+
+        private void QueryHotkeys()
+        {
+            // manage events
+            ManagerFactory.hotkeysManager.Updated += HotkeysManager_Updated;
+            ManagerFactory.hotkeysManager.Deleted += HotkeysManager_Deleted;
+
+            foreach (Hotkey hotkey in ManagerFactory.hotkeysManager.GetHotkeys().OrderBy(hotkey => hotkey.ButtonFlags))
+                HotkeysManager_Updated(hotkey);
+        }
+
+        private void HotkeysManager_Updated(Hotkey hotkey)
+        {
+            if (hotkey.IsInternal)
+                return;
+
+            HotkeyViewModel? foundHotkey;
+            lock (_collectionLock)
+            {
+                foundHotkey = HotkeysList.FirstOrDefault(p => p.Hotkey.ButtonFlags == hotkey.ButtonFlags);
+                if (foundHotkey is null)
+                    HotkeysList.Add(new HotkeyViewModel(hotkey));
+                else
+                    foundHotkey.Hotkey = hotkey;
+            }
+
+            OnPropertyChanged(nameof(HotkeysList));
+        }
+
+        private void HotkeysManager_Deleted(Hotkey hotkey)
+        {
+            HotkeyViewModel? foundHotkey;
+            lock (_collectionLock)
+            {
+                foundHotkey = HotkeysList.FirstOrDefault(p => p.Hotkey.ButtonFlags == hotkey.ButtonFlags);
+                if (foundHotkey is not null)
+                {
+                    HotkeysList.Remove(foundHotkey);
+                    foundHotkey.Dispose();
+                }
+            }
+
+            OnPropertyChanged(nameof(HotkeysList));
+        }
+
+        private void InputsManager_StartedListening(ButtonFlags buttonFlags, InputsChordTarget chordTarget)
+        {
+            HotkeyViewModel? foundHotkey;
+            lock (_collectionLock)
+            {
+                foundHotkey = HotkeysList.FirstOrDefault(h => h.Hotkey.ButtonFlags == buttonFlags);
+            }
+
+            foundHotkey?.SetListening(true, chordTarget);
+        }
+
+        private void InputsManager_StoppedListening(ButtonFlags buttonFlags, InputsChord storedChord)
+        {
+            HotkeyViewModel? foundHotkey;
+            lock (_collectionLock)
+            {
+                foundHotkey = HotkeysList.FirstOrDefault(h => h.Hotkey.ButtonFlags == buttonFlags);
+            }
+
+            foundHotkey?.SetListening(false, storedChord.chordTarget);
+        }
+
+        public override void Dispose()
+        {
+            base.Dispose();
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                // manage events
+                ManagerFactory.hotkeysManager.Updated -= HotkeysManager_Updated;
+                ManagerFactory.hotkeysManager.Deleted -= HotkeysManager_Deleted;
+                ManagerFactory.hotkeysManager.Initialized -= HotkeysManager_Initialized;
+                InputsManager.StartedListening -= InputsManager_StartedListening;
+                InputsManager.StoppedListening -= InputsManager_StoppedListening;
+                ControllerManager.ControllerSelected -= ControllerManager_ControllerSelected;
+            }
+
+            base.Dispose(disposing);
+        }
+    }
+}

@@ -1,0 +1,2017 @@
+<script setup lang="ts">
+import { ref, computed, provide, onMounted, onUnmounted, nextTick, watch } from 'vue';
+import { useRouter } from 'vue-router';
+import NavRail from '@/components/NavRail.vue';
+import DebugView from '@/components/DebugView.vue';
+import { useDebugStore } from '@/stores/debug';
+import { startGamepad } from '@/gamepad/engine';
+import { enqueueGamepadTaskDetached } from '@/gamepad/serial';
+import { on } from '@/bridge/ipc';
+import { applyCpuAutostart } from '@/bridge/autostart';
+import { applyTrayResident } from '@/bridge/trayResident';
+import { getFloatInfo, applyCpuAutoEnable, setAutofloatPowerControlDir } from '@/bridge/autofloat';
+import { readTdpAutoApply, applyAutoTdpIfNeeded } from '@/bridge/tdpAutoApply';
+import { app, fs, powerLifecycle, windowApi } from '@/bridge/api';
+import { initMusic } from '@/bridge/music';
+import { readTdp, setTdp, toggleTask, taskExists, detectPowerMode, detectPowerModeReliable, detectPowerModeStable, reconcileRememberedPowerScheme, resumeTdpDaemonAfterWake, getSleepPowerPlanOptimizationEnabled, optimizeSleepPowerPlans } from '@/bridge/yeman';
+import TopMonitorBar from '@/components/TopMonitorBar.vue';
+import { applyTheme } from '@/bridge/theme';
+import { cyclePerformanceScheduleMode, getPerformanceScheduleOwnership, refreshPerformanceScheduleCoreMode, restorePerformanceScheduleIfConfigured, SkipApplyError } from '@/bridge/performanceSchedule';
+import { getMouseModeState } from '@/bridge/gameproc';
+import {
+  backgroundGet,
+  getBackgroundBlur,
+  getBackgroundOpacity,
+  type BackgroundKind,
+  type BackgroundState,
+} from '@/bridge/background';
+import {
+  cleanGameTitle,
+  getDynamicBackgroundConfig,
+  refreshDynamicBackground,
+} from '@/bridge/dynamicBackground';
+import { detectGame, subscribeGameStatus, type DetectedGame } from '@/bridge/gamedetect';
+import { startGamePolicyRuntime, stopGamePolicyRuntime } from '@/bridge/gamePolicyRuntime';
+import { applyIndependentFrameRates } from '@/bridge/frameRateLimits';
+import { startDeckyMirrorHost } from '@/bridge/deckyMirrorHost';
+let deckyMirrorHost: ReturnType<typeof startDeckyMirrorHost> | null = null;
+import { startGameInputOverrideWatch, stopGameInputOverrideWatch } from '@/bridge/gameInputOverride';
+import { BOOT_CONTROL_CENTER_TASK, bootMirrorExists, ensureRtssOverlayInstalled, setPowerControlDir, toggleBootMirror } from '@/bridge/yeman';
+import { getUiSetting, loadUiSettings } from '@/bridge/uiSettings';
+import { topMonitorData, type TopMonData } from '@/bridge/topmon';
+import { nextLowBatteryStatic, shouldSkipVideoReconcile } from '@/bridge/backgroundPolicy';
+import { runPowerResumeTransaction } from '@/bridge/powerResume';
+import { readSettingsSection, saveSettingsSection } from '@/bridge/settingsRepository';
+import { isUiVisible, onUiVisibilityChange, setNativeWindowVisible } from '@/bridge/uiLifecycle';
+import { rememberPowerSourceMode, startForegroundPowerSourceRefresh } from '@/bridge/powerSource';
+import {
+  getFanFeatureSettings,
+  getFanPresetCurve,
+  initializeFanFeature,
+  rememberFanDevice,
+  setFanControlActive,
+} from '@/bridge/fanFeature';
+import { fanDiagnosticLog, fanLifecycleEvidence } from '@/bridge/fanDiagnostics';
+import { fanHostLifecycle, resolveFanHostConfig } from '@/bridge/fanHost';
+import { setGyroVirtualFeatureAssetsRoot } from '@/bridge/gyroVirtualFeature';
+import { startAiFanService } from '@/bridge/aiFanService';
+import { parseAiFanMockSession, projectAiFanErrorCode } from '@/bridge/aiFanMock';
+let aiFanMockActive = false;
+let aiCpuIsolated = false;
+let stopAiFanService: (() => void) | null = null;
+
+applyTheme(
+  document.documentElement.dataset.theme === 'cyberpunk'
+    ? 'cyberpunk'
+    : document.documentElement.dataset.theme === 'red-black'
+      ? 'red-black'
+      : 'blue-black',
+);
+
+// Visibility gates decorative rendering only; native control/renewal remain active.
+const uiVisible = ref(isUiVisible());
+
+const BOOT_TASK = BOOT_CONTROL_CENTER_TASK;
+const BOOT_CFG = 'C:\\SOFT\\YeMan\\PowerControl\\boot_config.json';
+// 开机启动自愈：若 boot_config.json 记录"开"但计划任务被删除（Windows 更新/杀软），自动重建
+async function healBootTask() {
+  try {
+    const startup = await readSettingsSection<any>('startupDesired');
+    if (startup.bootControlCenter === true && !(await bootMirrorExists())) {
+      await toggleBootMirror(true);
+    }
+  } catch { /* 配置文件不存在或无权限，忽略 */ }
+}
+
+// ── FAN-932：风扇「开机/休眠唤醒启动风扇」偏好（startupDesired.fanControl）的唯一自动启动编排入口 ──
+// 开机与唤醒共用本函数，不在两个事件处理器里各写一份 start/apply 规则。要求（裁决 §2.1）：
+//   1) 按 `boot` 或电源代次去重并串行执行，重复的 resume-ready / renderer 重建不重复写曲线；
+//   2) 偏好非严格 true 立即返回（本路径只读一次设置，不启动 Host、不发 HTTP、不碰 HC）；
+//   3) 已有活动控制意图优先（崩溃接续/活动会话/唤醒已恢复的曲线），绝不用默认曲线覆盖用户曲线；
+//   4) 设备门必须同时满足 allowed && writeReady 才继续 apply；
+//   5) apply 前再次核对代次、偏好与活动意图，期间被取代就取消本次写入；
+//   6) 失败按现有失败路径记录，不改写成“已启动”，也不在同一代内无限重试。
+let fanAutoStartChain: Promise<void> = Promise.resolve();
+let fanBootAutoStartDone = false;
+const fanAutoStartGenerations = new Set<number>();
+function ensureFanAutoStart(reason: 'boot' | 'resume', generation = 0): Promise<void> {
+  // Explicit AI session has its own requests; do not inherit real stored on-state.
+  if (aiFanMockActive) return Promise.resolve();
+  if (reason === 'boot') {
+    if (fanBootAutoStartDone) return Promise.resolve();
+    fanBootAutoStartDone = true;
+  } else {
+    if (generation <= 0 || fanAutoStartGenerations.has(generation)) return Promise.resolve();
+    fanAutoStartGenerations.add(generation);
+  }
+  const run = fanAutoStartChain.then(async () => {
+    try {
+      if (fanHostLifecycle.hasControlIntent) return;
+      const startup = await readSettingsSection<{ fanControl?: boolean }>('startupDesired');
+      if (startup.fanControl !== true) return;
+      const gate = await fanHostLifecycle.start();
+      if (!gate.allowed || !gate.writeReady) {
+        fanDiagnosticLog('lifecycle.auto-start-blocked', {
+          reason, generation, allowed: gate.allowed, writeReady: gate.writeReady, gate: gate.reason ?? '',
+        });
+        return;
+      }
+      // apply 前最后一次核对：代次未过期、仍无活动意图、偏好仍开。
+      if (reason === 'resume' && generation !== latestResumeGeneration) {
+        fanDiagnosticLog('lifecycle.auto-start-superseded', { reason, generation, latest: latestResumeGeneration });
+        return;
+      }
+      if (fanHostLifecycle.hasControlIntent) return;
+      const stillOn = await readSettingsSection<{ fanControl?: boolean }>('startupDesired');
+      if (stillOn.fanControl !== true) return;
+      const fanSettings = getFanFeatureSettings();
+      if (fanSettings.featureEnabled !== true) return;
+      // 必须使用用户保存的 preset 曲线，不得用写死的默认曲线代替。
+      await fanHostLifecycle.apply(getFanPresetCurve(fanSettings.preset));
+      fanDiagnosticLog('lifecycle.auto-start-applied', { reason, generation, preset: fanSettings.preset });
+    } catch (error) {
+      fanDiagnosticLog('lifecycle.auto-start-failed', {
+        reason, generation, error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+  fanAutoStartChain = run.catch(() => {});
+  return run;
+}
+
+const router = useRouter();
+const store = useDebugStore();
+// The legacy deep-link route keeps the editor document free of the main YMCC
+// navigation/monitor chrome. The normal controller entry now renders the
+// editor as a full-screen, centered bubble in the main WebView.
+const isStandaloneEditor = computed(() => router.currentRoute.value.path === '/button-mapping/shortcuts');
+const backgroundUrl = ref('');
+const backgroundKind = ref<BackgroundKind>('image');
+const backgroundVideo = ref<HTMLVideoElement | null>(null);
+const backgroundOpacity = ref(getBackgroundOpacity());
+const backgroundBlur = ref(getBackgroundBlur());
+const backgroundVideoAutoPause = ref(getUiSetting('videoBatteryPause'));
+const onAcPower = ref(false);
+type VideoPowerState = 'unknown' | 'desktop' | 'charging' | 'discharging';
+// Do not create a video decoder until the first power reading is known. This
+// prevents a brief play() on battery while startup probes are still pending.
+const videoPowerState = ref<VideoPowerState>('unknown');
+let lastVideoPowerTs = 0;
+let pendingVideoPowerState: Exclude<VideoPowerState, 'unknown'> | null = null;
+let pendingVideoPowerSamples = 0;
+const VIDEO_POWER_EVENT_SETTLE_MS = 5000;
+let videoPowerEventSettleUntil = 0;
+let videoPowerProbeGeneration = 0;
+let videoPowerProbeTimer: number | null = null;
+const documentVisible = ref(document.visibilityState === 'visible');
+const nativeWindowVisible = ref(document.visibilityState === 'visible');
+const backgroundVideoSuspended = ref(false);
+const lowBatteryStatic = ref(false);
+const videoDesired = ref(false);
+const backgroundVideoGeneration = ref(0);
+const dynamicBackgroundActive = ref(false);
+const backgroundSource = ref<'fixed' | 'dynamic'>('fixed');
+const backgroundFallbackUrls = ref<string[]>([]);
+const backgroundFallbackIndex = ref(0);
+// 只有图片或未被暂停的视频真正作为背景层显示时，才隐藏默认黑底。
+// 视频在电池保护/窗口隐藏时会暂时卸载，此时仍需要黑底托住半透明界面。
+const hasVisibleBackgroundMedia = computed(() => Boolean(
+  backgroundUrl.value && (
+    backgroundKind.value === 'image' ||
+    (backgroundKind.value === 'video' && !backgroundVideoSuspended.value)
+  ),
+));
+let appliedBackgroundIdentity: string | null = null;
+let lastDynamicGameIdentity: string | null = null;
+let dynamicBackgroundGeneration = 0;
+let lastFixedBackgroundState: BackgroundState | null = null;
+const BACKGROUND_RETRY_WINDOW_MS = 2 * 60 * 1000;
+const BACKGROUND_RETRY_INTERVAL_MS = 5000;
+const DYNAMIC_BACKGROUND_NO_GAME_GRACE_MS = 4000;
+let backgroundRetryTimer: number | null = null;
+let backgroundRetryUntil = 0;
+let dynamicBackgroundNoGameTimer: number | null = null;
+let resumeVideoTimer: number | null = null;
+let hlsInstance: { destroy: () => void; on: (event: string, callback: (...args: any[]) => void) => void; loadSource: (url: string) => void; attachMedia: (video: HTMLVideoElement) => void } | null = null;
+function isVideoPlaybackBlockedByPower(): boolean {
+  return backgroundVideoAutoPause.value &&
+    videoPowerState.value !== 'desktop' &&
+    videoPowerState.value !== 'charging';
+}
+// 每次隐藏、切源、销毁或重新挂载媒体都会推进 epoch。异步 nextTick/HLS 回调
+// 必须匹配当前 epoch，避免隐藏后旧回调重新挂载视频或触发重试。
+let backgroundMediaEpoch = 0;
+function isHlsUrl(url: string): boolean {
+  return /\.m3u8(?:\?|$)/i.test(url);
+}
+function destroyHls(): void {
+  hlsInstance?.destroy();
+  hlsInstance = null;
+}
+function invalidateBackgroundMedia(): number {
+  backgroundMediaEpoch += 1;
+  destroyHls();
+  return backgroundMediaEpoch;
+}
+function clearBackgroundRetry(): void {
+  if (backgroundRetryTimer !== null) {
+    window.clearTimeout(backgroundRetryTimer);
+    backgroundRetryTimer = null;
+  }
+  backgroundRetryUntil = 0;
+}
+function formatRetryRemaining(ms: number): string {
+  const totalSeconds = Math.max(0, Math.ceil(ms / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return minutes > 0 ? `${minutes}分${seconds.toString().padStart(2, '0')}秒` : `${seconds}秒`;
+}
+function scheduleBackgroundRetry(message: string): void {
+  if (backgroundKind.value !== 'video' || !backgroundUrl.value ||
+      (backgroundSource.value === 'dynamic' && !getDynamicBackgroundConfig().enabled)) return;
+  const now = Date.now();
+  if (backgroundRetryUntil <= now) backgroundRetryUntil = now + BACKGROUND_RETRY_WINDOW_MS;
+  const remaining = backgroundRetryUntil - now;
+  if (remaining <= 0) {
+    clearBackgroundRetry();
+    window.dispatchEvent(new CustomEvent('dynamic-background:progress', { detail: `失败：${message}` }));
+    return;
+  }
+  if (backgroundRetryTimer !== null) window.clearTimeout(backgroundRetryTimer);
+  const delay = Math.min(BACKGROUND_RETRY_INTERVAL_MS, remaining);
+  window.dispatchEvent(new CustomEvent('dynamic-background:progress', {
+    detail: `播放失败，${Math.ceil(delay / 1000)}秒后重试（剩余 ${formatRetryRemaining(remaining)}）`,
+  }));
+  backgroundRetryTimer = window.setTimeout(() => {
+    backgroundRetryTimer = null;
+    if (Date.now() >= backgroundRetryUntil || backgroundKind.value !== 'video' || !backgroundUrl.value ||
+        backgroundVideoSuspended.value || isVideoPlaybackBlockedByPower() ||
+        (backgroundSource.value === 'dynamic' && !getDynamicBackgroundConfig().enabled)) {
+      const finalMessage = Date.now() >= backgroundRetryUntil ? message : 'Steam 在线视频播放失败';
+      clearBackgroundRetry();
+      window.dispatchEvent(new CustomEvent('dynamic-background:progress', { detail: `失败：${finalMessage}` }));
+      return;
+    }
+    const urls = backgroundFallbackUrls.value;
+    backgroundFallbackIndex.value = 0;
+    backgroundVideoGeneration.value++;
+    backgroundUrl.value = urls[0] || backgroundUrl.value;
+    window.dispatchEvent(new CustomEvent('dynamic-background:progress', {
+      detail: `正在重试 Steam 在线视频（剩余 ${formatRetryRemaining(backgroundRetryUntil - Date.now())}）`,
+    }));
+    void nextTick(async () => {
+      if (backgroundVideoSuspended.value) return;
+      const video = backgroundVideo.value;
+      if (!video || backgroundKind.value !== 'video') return;
+      if (!isHlsUrl(backgroundUrl.value)) video.load();
+      await setupBackgroundVideo();
+      await reconcileBackgroundVideo();
+    });
+  }, delay);
+}
+async function setupBackgroundVideo(): Promise<void> {
+  const epoch = ++backgroundMediaEpoch;
+  await nextTick();
+  if (epoch !== backgroundMediaEpoch) return;
+  const video = backgroundVideo.value;
+  if (!video || backgroundKind.value !== 'video' || !backgroundUrl.value) {
+    destroyHls();
+    return;
+  }
+  destroyHls();
+  if (!isHlsUrl(backgroundUrl.value)) return;
+  const sourceUrl = backgroundUrl.value;
+  const HlsCtor = (window as any).Hls;
+  if (HlsCtor?.isSupported?.()) {
+    const hls = new HlsCtor({
+      enableWorker: true,
+      lowLatencyMode: false,
+      startLevel: 0,
+      capLevelToPlayerSize: true,
+      maxBufferLength: 20,
+    });
+    hlsInstance = hls;
+    hls.on(HlsCtor.Events.MEDIA_ATTACHED, () => {
+      if (epoch !== backgroundMediaEpoch || hlsInstance !== hls || backgroundVideoSuspended.value || backgroundUrl.value !== sourceUrl) {
+        hls.destroy();
+        return;
+      }
+      hls.loadSource(sourceUrl);
+    });
+    const generation = backgroundVideoGeneration.value;
+    hls.on(HlsCtor.Events.ERROR, (_event: unknown, data: { fatal?: boolean }) => {
+      if (epoch === backgroundMediaEpoch && hlsInstance === hls && !backgroundVideoSuspended.value && generation === backgroundVideoGeneration.value && data?.fatal) {
+        onBackgroundVideoError();
+      }
+    });
+    hls.attachMedia(video);
+    return;
+  }
+  if (video.canPlayType('application/vnd.apple.mpegurl')) video.src = backgroundUrl.value;
+}
+const backgroundStyle = computed(() =>
+  backgroundUrl.value && backgroundKind.value === 'image'
+    ? {
+        backgroundImage: `url("${backgroundUrl.value}")`,
+        opacity: String(backgroundOpacity.value),
+        filter: `blur(${backgroundBlur.value}px) saturate(1.12) contrast(1.08)`,
+      }
+    : undefined,
+);
+function applyBackgroundState(state: BackgroundState | null | undefined, source: 'fixed' | 'dynamic' = 'fixed'): void {
+  const kind = state?.kind === 'video' ? 'video' : 'image';
+  const urls = Array.isArray(state?.fallbackUrls)
+    ? state.fallbackUrls.filter((url): url is string => typeof url === 'string' && url.length > 0)
+    : [];
+  const requestedUrl = state?.enabled && state.url ? state.url : '';
+  const effectiveUrl = requestedUrl || urls[0] || '';
+  const identity = JSON.stringify([
+    source,
+    Boolean(state?.enabled && effectiveUrl),
+    kind,
+    effectiveUrl,
+    urls,
+  ]);
+  if (identity === appliedBackgroundIdentity) return;
+  appliedBackgroundIdentity = identity;
+  clearBackgroundRetry();
+  // Stop the old element before changing source/state. The pause handler is
+  // intent-aware, so this cannot enqueue an unwanted auto-resume.
+  videoDesired.value = false;
+  backgroundVideo.value?.pause();
+  invalidateBackgroundMedia();
+  backgroundVideoGeneration.value++;
+  backgroundSource.value = source;
+  backgroundKind.value = kind;
+  backgroundVideoSuspended.value = backgroundKind.value === 'video' &&
+    (!documentVisible.value || !nativeWindowVisible.value || lowBatteryStatic.value ||
+      isVideoPlaybackBlockedByPower());
+  backgroundFallbackUrls.value = urls;
+  const index = requestedUrl && urls.length ? Math.max(0, urls.indexOf(requestedUrl)) : 0;
+  backgroundFallbackIndex.value = index;
+  backgroundUrl.value = effectiveUrl;
+  void nextTick(async () => {
+    const video = backgroundVideo.value;
+    if (video && backgroundKind.value === 'video' && !isHlsUrl(backgroundUrl.value)) video.load();
+    await setupBackgroundVideo();
+    await reconcileBackgroundVideo();
+  });
+}
+function onBackgroundChanged(e: Event): void {
+  const state = (e as CustomEvent<BackgroundState>).detail;
+  lastFixedBackgroundState = state || null;
+  if (dynamicBackgroundActive.value) return;
+  applyBackgroundState(state);
+}
+function onBackgroundOpacityChanged(e: Event): void {
+  const opacity = Number((e as CustomEvent<{ opacity?: number }>).detail?.opacity);
+  if (Number.isFinite(opacity)) backgroundOpacity.value = opacity;
+}
+function onBackgroundBlurChanged(e: Event): void {
+  const blur = Number((e as CustomEvent<{ blur?: number }>).detail?.blur);
+  if (Number.isFinite(blur)) backgroundBlur.value = blur;
+}
+
+async function reconcileBackgroundVideo(): Promise<void> {
+  await nextTick();
+  const video = backgroundVideo.value;
+  const epoch = backgroundMediaEpoch;
+  const shouldPlay = Boolean(
+    video &&
+    backgroundKind.value === 'video' &&
+    backgroundUrl.value &&
+    (backgroundSource.value === 'fixed' || getDynamicBackgroundConfig().enabled) &&
+    !backgroundVideoSuspended.value &&
+    documentVisible.value &&
+    nativeWindowVisible.value &&
+    !lowBatteryStatic.value &&
+    !isVideoPlaybackBlockedByPower(),
+  );
+  if (!video) {
+    videoDesired.value = shouldPlay;
+    return;
+  }
+  if (epoch !== backgroundMediaEpoch || video !== backgroundVideo.value) return;
+  // Autoplay can leave the element playing while the remembered intent is
+  // still false; do not skip the pause operation in that state.
+  if (shouldSkipVideoReconcile(
+    videoDesired.value,
+    shouldPlay,
+    !video.paused && !video.ended,
+  )) return;
+  videoDesired.value = shouldPlay;
+  if (!shouldPlay) {
+    video.pause();
+    return;
+  }
+  // The element is intentionally not marked autoplay. Wait for metadata so
+  // the explicit play() below cannot turn a newly mounted or HLS-backed video
+  // into a false playback failure while its source is still being attached.
+  if (video.readyState < 1) {
+    videoDesired.value = false;
+    return;
+  }
+  video.muted = true;
+  try {
+    await video.play();
+    if (epoch !== backgroundMediaEpoch || video !== backgroundVideo.value ||
+        !getDynamicBackgroundConfig().enabled && backgroundSource.value === 'dynamic') {
+      video.pause();
+    }
+  } catch {
+    if (epoch !== backgroundMediaEpoch || video !== backgroundVideo.value) return;
+    videoDesired.value = false;
+    onBackgroundVideoError();
+  }
+}
+
+function onBackgroundVideoLoaded(): void {
+  videoDesired.value = false;
+  void reconcileBackgroundVideo();
+}
+
+function onBackgroundVideoCanPlay(): void {
+  videoDesired.value = false;
+  void reconcileBackgroundVideo();
+}
+
+function onBackgroundVideoPause(): void {
+  if (!videoDesired.value) return;
+  const shouldResume = Boolean(
+    backgroundKind.value === 'video' &&
+    backgroundUrl.value &&
+    (backgroundSource.value === 'fixed' || getDynamicBackgroundConfig().enabled) &&
+    !backgroundVideoSuspended.value &&
+    documentVisible.value &&
+    nativeWindowVisible.value &&
+    !lowBatteryStatic.value &&
+    !isVideoPlaybackBlockedByPower(),
+  );
+  if (shouldResume) {
+    videoDesired.value = false;
+    window.setTimeout(() => void reconcileBackgroundVideo(), 100);
+  }
+}
+
+function classifyVideoPower(data: TopMonData): Exclude<VideoPowerState, 'unknown'> | null {
+  if (!data.hasBattery) return 'desktop';
+  if (data.chargeW < -0.5) return 'discharging';
+  if (data.chargeW > 0.5) return 'charging';
+  return null;
+}
+
+function updateLowBatteryStatic(data: TopMonData | null): void {
+  const shouldStatic = nextLowBatteryStatic(
+    lowBatteryStatic.value,
+    data,
+    backgroundVideoAutoPause.value,
+  );
+  if (shouldStatic === lowBatteryStatic.value) return;
+  lowBatteryStatic.value = shouldStatic;
+  reconcileBackgroundLifecycle();
+}
+
+function shouldSuspendBackgroundVideo(): boolean {
+  return backgroundKind.value === 'video' &&
+    (!documentVisible.value || !nativeWindowVisible.value || lowBatteryStatic.value ||
+      isVideoPlaybackBlockedByPower());
+}
+
+function reconcileBackgroundLifecycle(): void {
+  if (backgroundKind.value !== 'video') return;
+  if (shouldSuspendBackgroundVideo()) {
+    if (!backgroundVideoSuspended.value) suspendBackgroundVideo();
+    return;
+  }
+  if (backgroundVideoSuspended.value) {
+    resumeBackgroundVideo();
+    return;
+  }
+  void reconcileBackgroundVideo();
+}
+
+function suspendBackgroundVideo(): void {
+  if (backgroundKind.value !== 'video') return;
+  clearBackgroundRetry();
+  videoDesired.value = false;
+  backgroundVideo.value?.pause();
+  invalidateBackgroundMedia();
+  backgroundVideoSuspended.value = true;
+}
+
+function pauseBackgroundVideoForWindow(): void {
+  if (backgroundKind.value !== 'video') return;
+  clearBackgroundRetry();
+  videoDesired.value = false;
+  backgroundVideo.value?.pause();
+}
+
+function resumeBackgroundVideo(): void {
+  if (shouldSuspendBackgroundVideo()) return;
+  if (!backgroundVideoSuspended.value) {
+    void reconcileBackgroundVideo();
+    return;
+  }
+  backgroundVideoSuspended.value = false;
+  void nextTick(async () => {
+    if (backgroundVideoSuspended.value || !documentVisible.value || !nativeWindowVisible.value) return;
+    const video = backgroundVideo.value;
+    if (!video || backgroundKind.value !== 'video' || !backgroundUrl.value) return;
+    if (!isHlsUrl(backgroundUrl.value)) video.load();
+    await setupBackgroundVideo();
+    // Media recovery is independent from the power transaction. A decoder
+    // that does not resolve play() after S3 must never hold input/hardware
+    // recovery open.
+    void reconcileBackgroundVideo();
+  });
+}
+
+function observeVideoPower(data: TopMonData | null): void {
+  if (!data) return;
+  const next = classifyVideoPower(data);
+  if (!next || data.ts === lastVideoPowerTs) return;
+  lastVideoPowerTs = data.ts;
+  if (Date.now() < videoPowerEventSettleUntil && next !== videoPowerState.value) return;
+  updateLowBatteryStatic(data);
+  if (next === videoPowerState.value) {
+    pendingVideoPowerState = null;
+    pendingVideoPowerSamples = 0;
+    return;
+  }
+  if (pendingVideoPowerState !== next) {
+    pendingVideoPowerState = next;
+    pendingVideoPowerSamples = 0;
+  }
+  pendingVideoPowerSamples += 1;
+  if (pendingVideoPowerSamples < 2) return;
+  videoPowerState.value = next;
+  pendingVideoPowerState = null;
+  pendingVideoPowerSamples = 0;
+  reconcileBackgroundLifecycle();
+}
+
+function applyVideoPowerMode(mode: 'ac' | 'dc', authoritative = false): void {
+  onAcPower.value = mode === 'ac';
+  videoPowerState.value = mode === 'ac' ? 'charging' : 'discharging';
+  pendingVideoPowerState = null;
+  pendingVideoPowerSamples = 0;
+  if (mode === 'ac') lowBatteryStatic.value = false;
+  if (authoritative) videoPowerEventSettleUntil = Date.now() + VIDEO_POWER_EVENT_SETTLE_MS;
+  reconcileBackgroundLifecycle();
+}
+
+function requestVideoPowerCheck(delayMs = 0, expectedMode?: 'ac' | 'dc'): void {
+  const generation = ++videoPowerProbeGeneration;
+  if (videoPowerProbeTimer !== null) {
+    window.clearTimeout(videoPowerProbeTimer);
+    videoPowerProbeTimer = null;
+  }
+  const check = async () => {
+    const mode = await detectPowerModeReliable();
+    if (generation !== videoPowerProbeGeneration || !mode || expectedMode && mode !== expectedMode) return;
+    applyVideoPowerMode(mode, true);
+  };
+  if (delayMs > 0) {
+    videoPowerProbeTimer = window.setTimeout(() => {
+      videoPowerProbeTimer = null;
+      void check();
+    }, delayMs);
+  } else {
+    void check();
+  }
+}
+
+function onVideoPowerSourceChanged(ac: boolean): void {
+  const mode = ac ? 'ac' : 'dc';
+  applyVideoPowerMode(mode, true);
+  requestVideoPowerCheck(300, mode);
+}
+
+watch(topMonitorData, (data) => {
+  observeVideoPower(data);
+}, { immediate: true });
+
+watch([backgroundUrl, backgroundKind], () => {
+  void nextTick(reconcileBackgroundVideo);
+});
+
+function onBackgroundVideoError(message = 'Steam 在线视频播放失败'): void {
+  videoDesired.value = false;
+  invalidateBackgroundMedia();
+  if (backgroundSource.value === 'dynamic' && !getDynamicBackgroundConfig().enabled) return;
+  if (backgroundVideoSuspended.value) return;
+  if (backgroundKind.value !== 'video') return;
+  const urls = backgroundFallbackUrls.value;
+  const nextIndex = backgroundFallbackIndex.value + 1;
+  if (nextIndex >= urls.length) {
+    backgroundFallbackIndex.value = 0;
+    scheduleBackgroundRetry(message);
+    return;
+  }
+  window.dispatchEvent(new CustomEvent('dynamic-background:progress', {
+    detail: `视频线路失败，正在切换 ${nextIndex + 1}/${urls.length}`,
+  }));
+  backgroundFallbackIndex.value = nextIndex;
+  backgroundVideoGeneration.value++;
+  backgroundUrl.value = urls[nextIndex];
+    void nextTick(async () => {
+      if (backgroundVideoSuspended.value) return;
+      const video = backgroundVideo.value;
+    if (!video || backgroundKind.value !== 'video') return;
+    if (!isHlsUrl(backgroundUrl.value)) video.load();
+    await setupBackgroundVideo();
+    await reconcileBackgroundVideo();
+  });
+}
+
+function onBackgroundVideoPlaying(): void {
+  clearBackgroundRetry();
+  if (dynamicBackgroundActive.value && isHlsUrl(backgroundUrl.value)) {
+    window.dispatchEvent(new CustomEvent('dynamic-background:progress', {
+      detail: '正在播放 Steam 在线视频',
+    }));
+  }
+}
+// 启动耗时采样：模块加载起点
+const APP_START = performance.now();
+(window as any).__appStart = APP_START;
+const showDebug = ref(false);
+function toggleDebug() {
+  showDebug.value = !showDebug.value;
+}
+
+// ── 全局刷新触发器：支持页刷新按钮触发所有已挂载页面 refresh() ──
+const globalRefreshKey = ref(0);
+provide('globalRefreshKey', globalRefreshKey);
+
+// ── 模拟鼠标内页锁定 ──
+// 不再进行 JoyXoff 5 秒后台轮询。程序启动只同步一次；之后仅由真实开/关操作事件更新。
+async function syncMouseModeAtStartup(): Promise<void> {
+  try {
+    const state = await getMouseModeState();
+    window.dispatchEvent(new CustomEvent('gp:mouse-mode', {
+      detail: { on: state.on, backend: state.backend },
+    }));
+  } catch {
+    // 启动同步失败保持默认未锁定；不生成后台重试或错误轮询。
+  }
+}
+function onBackgroundVisibilityChange(): void {
+  documentVisible.value = document.visibilityState === 'visible';
+  // Page visibility and native HWND visibility are independent after a
+  // WebView2 controller reload. Never turn a tray-hidden window "visible"
+  // merely because Chromium restored the document.
+  if (!documentVisible.value) {
+    pauseBackgroundVideoForWindow();
+    return;
+  }
+  resumeBackgroundVideo();
+}
+function onBackgroundWindowHidden(): void {
+  nativeWindowVisible.value = false;
+  setNativeWindowVisible(false);
+  stopDynamicBackgroundWatch();
+  pauseBackgroundVideoForWindow();
+}
+function onBackgroundWindowShown(): void {
+  nativeWindowVisible.value = true;
+  setNativeWindowVisible(true);
+  resumeBackgroundVideo();
+  requestVideoPowerCheck();
+}
+function powerEventGeneration(e: Event): number {
+  return Number((e as CustomEvent<{ generation?: number }>).detail?.generation) || 0;
+}
+function notePowerTransitionGeneration(e: Event): number {
+  const generation = powerEventGeneration(e);
+  if (generation > 0) {
+    latestResumeGeneration = Math.max(latestResumeGeneration, generation);
+    if (resumeRetryTimer) {
+      clearTimeout(resumeRetryTimer);
+      resumeRetryTimer = null;
+    }
+    for (const oldGeneration of resumeRetryCounts.keys()) {
+      if (oldGeneration < generation) resumeRetryCounts.delete(oldGeneration);
+    }
+  }
+  return generation;
+}
+function onPowerSuspending(e: Event): void {
+  const generation = notePowerTransitionGeneration(e);
+  if (generation > 0) fanHostLifecycle.setPowerGeneration(generation);
+  fanHostLifecycle.observePowerBoundary('suspending', generation);
+  // F4 has exactly one production lifecycle authority: native sends the
+  // generation-tagged /api/suspend command. The renderer only freezes local
+  // UI writes and keeps its generation/coordinator view coherent; it must not
+  // race native with a second HC CurrentDevice.Close request.
+  // FanView can be evicted from KeepAlive, so the root owns the navigation
+  // indicator at the power boundary as well.
+  setFanControlActive(false);
+  if (resumeVideoTimer !== null) {
+    window.clearTimeout(resumeVideoTimer);
+    resumeVideoTimer = null;
+  }
+  // Do not leave a decoder/HLS pipeline alive across S3. A stale media
+  // pipeline can leave WebView2 visible while its page input is unavailable.
+  suspendBackgroundVideo();
+}
+function onPowerResuming(e: Event): void {
+  const generation = notePowerTransitionGeneration(e);
+  fanHostLifecycle.observePowerBoundary('resuming', generation);
+  if (resumeVideoTimer !== null) {
+    window.clearTimeout(resumeVideoTimer);
+    resumeVideoTimer = null;
+  }
+  suspendBackgroundVideo();
+}
+function onPowerResumeReady(generation: number | undefined): void {
+  const resumeGeneration = Number(generation) || 0;
+  if (resumeGeneration <= 0) return;
+  latestResumeGeneration = Math.max(latestResumeGeneration, resumeGeneration);
+  onFanResumeReady(resumeGeneration);
+  scheduleResumeTransaction(resumeGeneration);
+}
+
+/**
+ * FAN-938 R6.4: `power.resumed` is the durable native commit edge.  It is a
+ * valid Fan wake boundary even when the optional one-shot `fan.resume-ready`
+ * event was lost during WebView2/renderer recreation.  FanHost owns the
+ * idempotent resume promise and the HC/Open/OpenEvents chain; App only starts
+ * that Fan-local compensation and never treats it as an OEM acknowledgement.
+ */
+function requestFanCommittedResume(generation: number): void {
+  if (!Number.isSafeInteger(generation) || generation <= 0) return;
+  void fanHostLifecycle.resumeAfterCommittedPowerWake(generation).catch((error) => {
+    fanDiagnosticLog('lifecycle.resume-committed-wake-failed', {
+      generation,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  });
+}
+// FAN-938 R4: a Fan-only Ready notification must not restart the shared input/UI transaction.
+function onFanResumeReady(resumeGeneration: number): void {
+  if (!Number.isSafeInteger(resumeGeneration) || resumeGeneration <= 0) return;
+  if (resumeGeneration < fanHostLifecycle.coordinatorSnapshot.powerGeneration) return;
+  fanHostLifecycle.setPowerGeneration(resumeGeneration);
+  // F5 is the only pre-commit admission edge for the isolated FanHost. It is
+  // distinct from `resumed`, which native publishes after resumeComplete.
+  fanHostLifecycle.observePowerBoundary('resume-ready', resumeGeneration);
+  // HC SystemReady opens the device fire-and-forget: start the fan rebuild in
+  // the background and never gate the native Ready commit on it. The fan
+  // coordinator keeps the fan write gate closed until this rebuild completes;
+  // the guard/mount compensation recover a lost rebuild without blocking wake.
+  // FAN-932 §2.2：唤醒必须先**完成**现有 resume（含已有活动曲线的恢复），再按偏好自动启动。
+  // 本事件处理器保持非阻塞（按代异步事务），不改成同步等待；resume 失败/被取代时
+  // 本代**不做默认曲线 fallback**，也不覆盖用户曲线。
+  void fanHostLifecycle.resume().catch((error) => {
+    fanDiagnosticLog('lifecycle.resume-fire-and-forget-failed', {
+      generation: resumeGeneration,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return false as const;
+  }).then((resumeOk) => {
+    if (resumeOk === false) return; // resume 失败：本代不自动启动
+    if (fanHostLifecycle.hasControlIntent) return; // 已有曲线已恢复：不重复写
+    return ensureFanAutoStart('resume', resumeGeneration);
+  });
+}
+function onPowerResumed(e: Event): void {
+  // A few native builds omitted the generation on the final commit event even
+  // though the preceding resume edge had already recorded it.  Reuse the
+  // durable latest generation instead of silently dropping Fan compensation.
+  const generation = powerEventGeneration(e) || latestResumeGeneration;
+  latestResumeGeneration = Math.max(latestResumeGeneration, generation);
+  fanHostLifecycle.setPowerGeneration(generation);
+  fanHostLifecycle.observePowerBoundary('resumed', generation);
+  // F5 is normally admitted by `power.resume-ready`, but that notification is
+  // one-shot and may be lost while WebView2 is recreated.  The committed
+  // native edge is the Fan-only compensation path; FanHost shares any already
+  // running F5 promise so this never opens HC twice.
+  requestFanCommittedResume(generation);
+  scheduleSleepPowerPlanOptimization();
+  if (resumeVideoTimer !== null) window.clearTimeout(resumeVideoTimer);
+  resumeVideoTimer = window.setTimeout(() => {
+    resumeVideoTimer = null;
+    if (documentVisible.value && nativeWindowVisible.value) resumeBackgroundVideo();
+  }, 250);
+  requestVideoPowerCheck();
+}
+function onBackgroundVideoPauseChanged(e: Event): void {
+  backgroundVideoAutoPause.value = Boolean(
+    (e as CustomEvent<{ enabled?: boolean }>).detail?.enabled,
+  );
+  if (!backgroundVideoAutoPause.value) lowBatteryStatic.value = false;
+  updateLowBatteryStatic(topMonitorData.value);
+  reconcileBackgroundLifecycle();
+}
+function onUiSettingsLoaded(): void {
+  backgroundOpacity.value = getBackgroundOpacity();
+  backgroundBlur.value = getBackgroundBlur();
+  backgroundVideoAutoPause.value = getUiSetting('videoBatteryPause');
+  updateLowBatteryStatic(topMonitorData.value);
+}
+// ── UI 缩放层：设计基准 580×780，整体在窗口中居中显示 ──
+// 用户偏好 2026-08-04：在原本「按窗口高度贴齐」基础上再放大 30%，居中后左右两侧留空更协调。
+// 视觉允许高度方向溢出（被裁剪的部分由 .app-content 滚动兜底），但宽度方向不许超窗口，避免点击区跑到屏幕外。
+const BASE_W = 580;
+const BASE_H = 780;
+const SCALE_BOOST = 1.3; // "再放大 30%"
+const uiScale = ref(1);
+const viewportHeight = ref(window.innerHeight);
+// 原生 WM_SIZE 下发的物理客户区尺寸。窗口从隐藏状态被呼出时，WebView2 恢复渲染前
+// window.innerWidth/Height 仍是旧值；只依赖它会让 stage 高度停在旧尺寸，底部露出透明带。
+const nativeViewport = ref<{ w: number; h: number } | null>(null);
+function setUiScale(scale: number) {
+  uiScale.value = scale;
+  // Dropdown 等 Teleport 到 body 的浮层不在 .app-stage 的 zoom 树中。
+  // 把同一缩放值发布到根节点，供这些浮层同步字号与控件尺寸。
+  document.documentElement.style.setProperty('--ui-scale', String(scale));
+}
+// 视口尺寸取「原生上报值」与「JS 测量值」的较大者：两者一致时无副作用，原生值更新
+// 更及时时以它为准，避免呼出瞬间读到过期视口。native 未设置 WebView 缩放因子，故
+// 物理像素按 devicePixelRatio 换算即为 CSS 像素。
+// documentElement/visualViewport 是额外兜底：WebView2 从隐藏恢复时三种读数可能
+// 先后更新，取最大者保证不会因为某个读数滞后而把 stage 算短（底部露出透明带）。
+function viewportSize(): { w: number; h: number } {
+  const dpr = window.devicePixelRatio || 1;
+  // Native window.resized is broadcast by the main HWND to child renderers.
+  // A standalone editor must use its own DOM viewport, not the main window size.
+  const native = isStandaloneEditor.value ? null : nativeViewport.value;
+  const root = document.documentElement;
+  const vv = window.visualViewport;
+  return {
+    w: Math.max(
+      window.innerWidth,
+      root ? root.clientWidth : 0,
+      vv ? vv.width : 0,
+      native ? native.w / dpr : 0,
+    ),
+    h: Math.max(
+      window.innerHeight,
+      root ? root.clientHeight : 0,
+      vv ? vv.height : 0,
+      native ? native.h / dpr : 0,
+    ),
+  };
+}
+function updateScale() {
+  const { w, h } = viewportSize();
+  viewportHeight.value = h;
+  if (h <= 0 || w <= 0) {
+    setUiScale(1);
+    return;
+  }
+  // 用户视觉目标：在原本 innerHeight/BASE_H 的基础上再乘 1.3
+  const boosted = (h / BASE_H) * SCALE_BOOST;
+  // 宽度兜底：BASE_W * scale 不能超过 innerWidth（避免焦点跑到屏幕外）
+  const widthCapped = w / BASE_W;
+  setUiScale(Math.min(boosted, widthCapped));
+}
+// 呼出/尺寸变化后视口读数可能分多帧才稳定（WebView2 隐藏→恢复、DWM 合成延迟）。
+// 按「帧数」而非墙钟时间收尾：窗口隐藏时 rAF 会被暂停，墙钟计时会提前结束。
+let settleFrames = 0;
+let settleRaf = 0;
+function settleScale(frames = 90) {
+  if (settleRaf) {
+    settleFrames = Math.max(settleFrames, frames);
+    return;
+  }
+  settleFrames = frames;
+  const step = () => {
+    updateScale();
+    settleFrames -= 1;
+    if (settleFrames > 0) settleRaf = requestAnimationFrame(step);
+    else settleRaf = 0;
+  };
+  settleRaf = requestAnimationFrame(step);
+}
+function onNativeResize(e: Event) {
+  const detail = (e as CustomEvent<{ w?: number; h?: number }>).detail;
+  if (!isStandaloneEditor.value && detail && Number(detail.w) > 0 && Number(detail.h) > 0) {
+    nativeViewport.value = { w: Number(detail.w), h: Number(detail.h) };
+  }
+  updateScale();
+  settleScale();
+}
+// 呼出后 WebView2 才恢复渲染，此时原生尺寸消息可能晚于 DOM 视口更新到达。跨多帧重算
+// 兜底，确保视口稳定后再定稿缩放与 stage 高度。
+function refreshScaleAfterSummon() {
+  updateScale();
+  settleScale();
+}
+const scalerStyle = computed(() => {
+  if (isStandaloneEditor.value) {
+    return {
+      width: '100%',
+      height: '100%',
+      zoom: 1,
+      '--gamepad-safe-bottom': '0px',
+    };
+  }
+  const scale = Math.max(uiScale.value, 0.01);
+  // 设计基准 580×780 与窗口宽高比一致时，stage 恰好铺满窗口。但当实际视口比设计
+  // 比例更高（例如隐藏任务栏后窗口底部吸附到屏幕下沿、高度增加），按宽度算出的
+  // 缩放会让 stage 高度小于视口，底部露出透明带（底板/背景层没有延伸）。
+  // 这里让 stage 至少撑满视口高度，保证底板与背景层始终覆盖整个窗口。
+  const stageHeight = Math.max(BASE_H, Math.ceil(viewportHeight.value / scale));
+  return {
+    width: BASE_W + 'px',
+    height: stageHeight + 'px',
+    // zoom 同时参与布局和命中测试；transform 只放大绘制层，会让 WebView2
+    // 看到的坐标与鼠标点击坐标分离，表现为内容区"看得到但点不到"。
+    zoom: scale,
+    // Keep the physical safe area proportional to the viewport, then convert
+    // it back to the zoomed layout coordinate space used by app-content.
+    '--gamepad-safe-bottom': `${Math.max(32, Math.min(64, viewportHeight.value * 0.06)) / Math.max(0.5, uiScale.value)}px`,
+  };
+});
+
+// M8: Start button toggles the debug panel via the same 'ipc:gamepad-start' event.
+function onGamepadStart() {
+  toggleDebug();
+}
+function onGamepadRefresh() {
+  globalRefreshKey.value++;
+}
+// ── 手柄后台（Start+上/下）：自动模式切换已编辑档位；手动模式实时调节并记忆 TDP 最大值 ──
+function onGamepadTdpDelta(e: Event) {
+  const d = Number((e as CustomEvent<{ delta?: number }>).detail?.delta) || 0;
+  if (d !== 0) {
+    enqueueGamepadTaskDetached(() => applyGamepadTdp(d));
+  }
+}
+async function applyGamepadTdp(delta: number) {
+  try {
+    if (await getPerformanceScheduleOwnership() === 'auto') {
+      const result = await cyclePerformanceScheduleMode(delta > 0 ? 1 : -1);
+      if (result.applied) {
+        globalRefreshKey.value++;
+        window.dispatchEvent(new CustomEvent('gamepad:performance-mode-changed', {
+          detail: { side: result.side, mode: result.mode },
+        }));
+      }
+      return;
+    }
+    const mode = await detectPowerMode().catch(() => null);
+    if (!mode) return;
+    const cur = await readTdp(mode).catch(() => null);
+    if (cur == null) return;
+    const next = Math.max(2, Math.min(200, cur + delta));
+    await setTdp(mode, next, { apply: true, save: true });
+    globalRefreshKey.value++;
+  } catch (e) {
+    console.error('[gamepad tdp-delta]', e);
+  }
+}
+// 手柄后台（Start+左/右）：native 直接按当前野蛮系统电源 AC/DC 侧调节亮度。
+function onGamepadBrightness(e: Event) {
+  const detail = (e as CustomEvent<{ ok?: boolean; value?: number; mode?: 'ac' | 'dc'; reason?: string }>).detail || {};
+  if (detail.ok === false && detail.reason === 'not-yeman') {
+    console.info('[gamepad brightness] ignored: current power scheme is not YeMan');
+  }
+  globalRefreshKey.value++;
+}
+function onGamepadMouseToggle(e: Event) {
+  const detail = (e as CustomEvent<{
+    ok?: boolean;
+    on?: boolean;
+    backend?: 'gamebar' | 'joyxoff';
+    error?: string;
+  }>).detail || {};
+  if (detail.ok === false) {
+    window.dispatchEvent(new CustomEvent('mouse-mode:error', { detail }));
+    return;
+  }
+  window.dispatchEvent(new CustomEvent('gp:mouse-mode', {
+    detail: { on: Boolean(detail.on), backend: detail.backend },
+  }));
+}
+function onFanGuardState(e: Event): void {
+  const detail = (e as CustomEvent<{ active?: boolean }>).detail ?? {};
+  setFanControlActive(detail.active === true);
+}
+
+async function applyProgramControls() {
+  const tdp = await readTdp('ac');
+  const floating = getFloatInfo().enabled;
+  const scheduleOwned = await getPerformanceScheduleOwnership().catch(() => false);
+  // 启动自动应用 TDP：仅当开关开启且帧数目标浮动优化未接管时，才把保存的 TDP 最大值下发硬件。
+  // 浮动开启时由 autofloat 管理 TDP，这里跳过（开关此时不生效）。
+  if (tdp != null && !floating && scheduleOwned !== 'auto') {
+    const auto = await readTdpAutoApply();
+    if (auto.boot) void setTdp('ac', tdp, { apply: true, save: false }).catch(() => {});
+  }
+  // Independent AC/DC + dedicated FPS ownership; never restore an AC scalar
+  // over a battery/dedicated owner or let an optimizer retake RTSS.
+  void applyIndependentFrameRates().catch(() => {});
+}
+
+let stopGamepad: (() => void) | null = null;
+let stopGyroTelemetry: (() => void) | null = null;
+// 手柄后台（未开浮动时）调节 RTSS 帧率上限：setRtssLimit 较重（LoadProfile+UpdateProfiles），
+// 连发时每步重载会卡出转圈；2 秒尾随防抖，与 CPU 滑块 scheduleActivate 一致。
+// 壳订阅系统 AC/DC 插拔事件（推送式，已在 native 侧做 5s 尾防抖 + 频繁切换熔断），
+// 到达即刷新一次所有已挂载页面数据。
+let stopAcWatch: (() => void) | null = null;
+let stopPowerSourceWatch: (() => void) | null = null;
+let stopForegroundPowerSource: (() => void) | null = null;
+let stopResumeWatch: (() => void) | null = null;
+let stopFanResumeWatch: (() => void) | null = null;
+let stopSchemeWatch: (() => void) | null = null;
+let stopDynamicBackground: (() => void) | null = null;
+let stopUiVisibility: (() => void) | null = null;
+let sleepPlanOptimizationTimer: number | null = null;
+let sleepPlanOptimizationQueue: Promise<void> = Promise.resolve();
+let sleepPlanOptimizationQueued = false;
+let sleepPlanOptimizationRunning = false;
+let sleepPlanOptimizationPending = false;
+
+// 睡眠电源计划优化属于低频后台任务。串行执行，避免 AC/DC 或方案事件叠加时
+// 同时写入多个电源计划；事件处理本身不等待这个队列。
+function scheduleSleepPowerPlanOptimization(): void {
+  if (sleepPlanOptimizationRunning) {
+    sleepPlanOptimizationPending = true;
+    return;
+  }
+  if (sleepPlanOptimizationQueued) return;
+  sleepPlanOptimizationQueued = true;
+  const run = sleepPlanOptimizationQueue.then(async () => {
+    sleepPlanOptimizationQueued = false;
+    if (!(await powerLifecycleReadyForWrites())) return;
+    if (!(await getSleepPowerPlanOptimizationEnabled())) return;
+    sleepPlanOptimizationRunning = true;
+    try {
+      const result = await optimizeSleepPowerPlans();
+      if (!result.ok) console.error('[sleep power plan optimization]', result.failed[0]);
+    } catch (error) {
+      console.error('[sleep power plan optimization]', error);
+    } finally {
+      sleepPlanOptimizationRunning = false;
+      if (sleepPlanOptimizationPending) {
+        sleepPlanOptimizationPending = false;
+        window.setTimeout(() => scheduleSleepPowerPlanOptimization(), 0);
+      }
+    }
+  });
+  sleepPlanOptimizationQueue = run.catch(() => {});
+}
+let latestResumeGeneration = 0;
+let committedResumeGeneration = 0;
+let resumeLifecycleActive = true;
+// Recovery notifications are normally delivered as events. WebView2 can be
+// recreated during the same window, however, and a freshly mounted page may
+// miss the one-shot `power.resume-ready` event. Serialize compensating
+// recovery attempts and let newer power generations supersede stale work.
+let resumeTransaction: Promise<void> = Promise.resolve();
+let resumeRetryTimer: ReturnType<typeof setTimeout> | null = null;
+const resumeRetryCounts = new Map<number, number>();
+const MAX_RESUME_TRANSACTION_RETRIES = 3;
+
+function scheduleResumeRetry(generation: number, reason: string): void {
+  if (!resumeLifecycleActive || generation !== latestResumeGeneration ||
+      generation <= committedResumeGeneration || resumeRetryTimer) return;
+  const retryCount = (resumeRetryCounts.get(generation) ?? 0) + 1;
+  resumeRetryCounts.set(generation, retryCount);
+  if (retryCount <= MAX_RESUME_TRANSACTION_RETRIES) {
+    resumeRetryTimer = setTimeout(() => {
+      resumeRetryTimer = null;
+      scheduleResumeTransaction(generation);
+    }, Math.min(2000, 500 * retryCount));
+    return;
+  }
+  window.dispatchEvent(new CustomEvent('power.resume-degraded', {
+    detail: { generation, reason },
+  }));
+}
+
+async function powerLifecycleReadyForWrites(): Promise<boolean> {
+  const state = await powerLifecycle.get().catch(() => null);
+  return state?.phase === 'ready' && state.hardwareWritesAllowed === true;
+}
+
+// AC/DC broadcasts can arrive while Windows/native are still settling the
+// adapter state. A single read in that window can select the previous side and
+// make a dedicated game profile appear stuck on battery/AC. Coalesce rapid
+// events and only commit after the reported side is observed steadily enough;
+// a newer event invalidates every older attempt.
+const POWER_CHANGE_RETRY_DELAYS_MS = [0, 250, 750, 1500] as const;
+let powerChangeRestoreGeneration = 0;
+let powerChangeRestoreTimer: ReturnType<typeof setTimeout> | null = null;
+
+function schedulePowerChangePerformanceRestore(expectedSide: 'ac' | 'dc'): void {
+  const generation = ++powerChangeRestoreGeneration;
+  if (powerChangeRestoreTimer !== null) {
+    window.clearTimeout(powerChangeRestoreTimer);
+    powerChangeRestoreTimer = null;
+  }
+
+  const retry = (attempt: number): void => {
+    if (generation !== powerChangeRestoreGeneration) return;
+    const delay = POWER_CHANGE_RETRY_DELAYS_MS[attempt];
+    if (delay === undefined) return;
+    powerChangeRestoreTimer = window.setTimeout(() => {
+      powerChangeRestoreTimer = null;
+      void run(attempt);
+    }, delay);
+  };
+
+  const run = async (attempt: number): Promise<void> => {
+    if (generation !== powerChangeRestoreGeneration) return;
+    const actualSide = await detectPowerMode().catch(() => null);
+    if (actualSide !== expectedSide || !(await powerLifecycleReadyForWrites())) {
+      retry(attempt + 1);
+      return;
+    }
+
+    try {
+      const schemeOwner = await reconcileRememberedPowerScheme();
+      if (generation !== powerChangeRestoreGeneration) return;
+      // In manual Windows-scheme mode, inspect/apply only a game-exclusive
+      // entry. Do not let the ordinary global scheduler take ownership back.
+      const owner = await restorePerformanceScheduleIfConfigured(expectedSide, {
+        dedicatedOnly: schemeOwner !== 'auto',
+      });
+      if (generation !== powerChangeRestoreGeneration) return;
+      if (owner !== 'auto') await applyCpuAutoEnable().catch(() => {});
+    } catch (error) {
+      // A stale power-side read or an in-flight game/power transition is a
+      // retryable condition, not permission to leave the old AC/DC profile.
+      if (error instanceof SkipApplyError || attempt + 1 < POWER_CHANGE_RETRY_DELAYS_MS.length) {
+        retry(attempt + 1);
+      }
+    }
+  };
+
+  retry(0);
+}
+
+function scheduleResumeTransaction(generation: number): void {
+  if (!resumeLifecycleActive || !Number.isFinite(generation) || generation <= 0) return;
+  latestResumeGeneration = Math.max(latestResumeGeneration, generation);
+  if (generation !== latestResumeGeneration) return;
+  if (generation <= committedResumeGeneration) return;
+
+  resumeTransaction = resumeTransaction.then(async () => {
+    const targetGeneration = latestResumeGeneration;
+    if (targetGeneration <= committedResumeGeneration) return;
+    const isCurrent = () => resumeLifecycleActive && latestResumeGeneration === targetGeneration &&
+      committedResumeGeneration < targetGeneration;
+
+    const mode = await detectPowerModeStable().catch(() => 'ac' as const);
+    if (!isCurrent()) return;
+    onAcPower.value = mode === 'ac';
+    // Do not let a stalled media decoder delay the native wake commit.
+    void reconcileBackgroundVideo();
+
+    const daemonRequired = getFloatInfo().enabled ||
+      (await getPerformanceScheduleOwnership().catch(() => 'none' as const)) === 'auto';
+    const result = await runPowerResumeTransaction(targetGeneration, daemonRequired, {
+      // HC SystemReady is synchronous and opens the device fire-and-forget; the
+      // FanHost F5 already started from `power.resume-ready` and never gates the
+      // native Ready commit. The fan coordinator keeps the fan write gate closed
+      // until that background rebuild completes.
+      resumeDaemon: resumeTdpDaemonAfterWake,
+      completeResume: (resumeGeneration, meta) => powerLifecycle.completeResume(resumeGeneration, meta),
+      isGenerationCurrent: isCurrent,
+      daemonAttempts: 2,
+      commitAttempts: 3,
+      daemonRetryDelayMs: 350,
+      commitRetryDelayMs: 250,
+    });
+    if (!isCurrent()) return;
+    if (!result.committed) {
+      scheduleResumeRetry(targetGeneration, result.reason ?? 'resume_commit_failed');
+      return;
+    }
+
+    // HC SystemReady does not wait for the device open; the fan rebuild runs in
+    // the background from `power.resume-ready`. The resident ten-second guard is
+    // observation-only and cannot race this generation with a second /api/resume
+    // or curve write after the coordinator admitted the rebuild.
+
+    committedResumeGeneration = targetGeneration;
+    resumeRetryCounts.delete(targetGeneration);
+    const schemeOwner = await reconcileRememberedPowerScheme().catch(() => 'yeman' as const);
+    const performanceOwner = await restorePerformanceScheduleIfConfigured(mode, {
+      dedicatedOnly: schemeOwner !== 'auto',
+    }).catch(() => null);
+    if (performanceOwner !== null && performanceOwner !== 'auto') {
+      await applyCpuAutoEnable().catch(() => {});
+      await applyAutoTdpIfNeeded('wake', mode).catch(() => {});
+    }
+    // CCD and undervolt settings use separate native controls from the Windows
+    // power plan. Re-apply the remembered safe values after S3/S0 hardware
+    // handles and Raw Input are ready.
+    await applyCpuAutostart().catch(() => {});
+  }).catch((error) => {
+    // Unexpected frontend errors must use the same bounded retry path instead
+    // of being silently swallowed while native remains in Resuming.
+    scheduleResumeRetry(
+      latestResumeGeneration,
+      error instanceof Error ? error.message : String(error),
+    );
+  });
+}
+
+function onDynamicBackgroundSettingChanged(): void {
+  const generation = ++dynamicBackgroundGeneration;
+  if (dynamicBackgroundNoGameTimer !== null) {
+    window.clearTimeout(dynamicBackgroundNoGameTimer);
+    dynamicBackgroundNoGameTimer = null;
+  }
+  if (!getDynamicBackgroundConfig().enabled) {
+    stopDynamicBackgroundWatch();
+    lastDynamicGameIdentity = null;
+    dynamicBackgroundActive.value = false;
+    // Remove the current Steam media immediately. If a fixed MP4 exists,
+    // background.get below will install it as a separate, allowed source.
+    applyBackgroundState(null, 'fixed');
+    void backgroundGet().then((state) => {
+      if (generation === dynamicBackgroundGeneration && !getDynamicBackgroundConfig().enabled) {
+        const fixedState = state || lastFixedBackgroundState;
+        lastFixedBackgroundState = fixedState;
+        applyBackgroundState(fixedState, 'fixed');
+      }
+    }).catch(() => {
+      if (generation === dynamicBackgroundGeneration && !getDynamicBackgroundConfig().enabled) {
+        applyBackgroundState(lastFixedBackgroundState, 'fixed');
+      }
+    });
+    return;
+  }
+  if (!isUiVisible()) return;
+  startDynamicBackgroundWatch();
+  void detectGame(true).then(async (game) => {
+    if (generation !== dynamicBackgroundGeneration || !getDynamicBackgroundConfig().enabled) return;
+    if (!game) {
+      window.dispatchEvent(new CustomEvent('dynamic-background:progress', { detail: '未识别到当前游戏' }));
+      return;
+    }
+    window.dispatchEvent(new CustomEvent('dynamic-background:progress', { detail: `正在访问 Steam：${cleanGameTitle(game.title || game.name)}` }));
+    const result = await refreshDynamicBackground(game);
+    if (generation !== dynamicBackgroundGeneration || !getDynamicBackgroundConfig().enabled || !result) return;
+    lastDynamicGameIdentity = `${game.pid}:${game.processCreated || ''}:${game.path || game.name}`;
+    dynamicBackgroundActive.value = true;
+    applyBackgroundState(result.state as BackgroundState, 'dynamic');
+    window.dispatchEvent(new CustomEvent('dynamic-background:progress', {
+      detail: result.source === 'video'
+        ? `正在缓冲在线视频：${result.gameName}`
+        : `已使用 Steam 背景图：${result.gameName}`,
+    }));
+  }).catch((error) => {
+    if (generation !== dynamicBackgroundGeneration || !getDynamicBackgroundConfig().enabled) return;
+    window.dispatchEvent(new CustomEvent('dynamic-background:progress', { detail: `失败：${(error as Error).message || 'Steam 连接失败'}` }));
+  });
+}
+function onGameRulesChanged(): void {
+  const generation = ++dynamicBackgroundGeneration;
+  if (dynamicBackgroundNoGameTimer !== null) {
+    window.clearTimeout(dynamicBackgroundNoGameTimer);
+    dynamicBackgroundNoGameTimer = null;
+  }
+  lastDynamicGameIdentity = null;
+  if (!getDynamicBackgroundConfig().enabled) return;
+
+  // A rules update is authoritative: a game that was just blacklisted must
+  // not keep its already-installed Steam media through the normal brief-null
+  // tolerance used while processes are starting or switching renderers.
+  dynamicBackgroundActive.value = false;
+  applyBackgroundState(lastFixedBackgroundState, 'fixed');
+  if (lastFixedBackgroundState) return;
+
+  // The initial fixed-background read can fail during WebView recovery. Fill
+  // that snapshot opportunistically without allowing it to overwrite a newer
+  // game/rules result.
+  void backgroundGet().then((state) => {
+    if (generation !== dynamicBackgroundGeneration || !getDynamicBackgroundConfig().enabled) return;
+    lastFixedBackgroundState = state;
+    applyBackgroundState(state, 'fixed');
+  }).catch(() => {});
+}
+
+function scheduleDynamicBackgroundNoGameClear(): void {
+  if (dynamicBackgroundNoGameTimer !== null) return;
+  dynamicBackgroundNoGameTimer = window.setTimeout(() => {
+    dynamicBackgroundNoGameTimer = null;
+    void detectGame(true).then((current) => {
+      if (current) {
+        onDynamicGameStatus(current);
+        return;
+      }
+      if (!getDynamicBackgroundConfig().enabled) return;
+      dynamicBackgroundGeneration++;
+      lastDynamicGameIdentity = null;
+      dynamicBackgroundActive.value = false;
+      applyBackgroundState(lastFixedBackgroundState, 'fixed');
+    }).catch(() => {
+      // Keep the current media during a transient valve/IPC failure. The next
+      // scheduled game-status poll will make the authoritative decision.
+    });
+  }, DYNAMIC_BACKGROUND_NO_GAME_GRACE_MS);
+}
+
+function onDynamicGameStatus(game: DetectedGame | null): void {
+  const generation = ++dynamicBackgroundGeneration;
+  void (async () => {
+    if (!getDynamicBackgroundConfig().enabled || !game) {
+      if (dynamicBackgroundNoGameTimer !== null) {
+        window.clearTimeout(dynamicBackgroundNoGameTimer);
+        dynamicBackgroundNoGameTimer = null;
+      }
+      // A short no-game interval is normal while a title starts or switches
+      // renderers. It is not permission to retain the old title indefinitely.
+      if (getDynamicBackgroundConfig().enabled && dynamicBackgroundActive.value) {
+        scheduleDynamicBackgroundNoGameClear();
+        return;
+      }
+      lastDynamicGameIdentity = null;
+      dynamicBackgroundActive.value = false;
+      const state = await backgroundGet().catch(() => null);
+      if (generation === dynamicBackgroundGeneration) {
+        applyBackgroundState(state, 'fixed');
+      }
+      return;
+    }
+    if (dynamicBackgroundNoGameTimer !== null) {
+      window.clearTimeout(dynamicBackgroundNoGameTimer);
+      dynamicBackgroundNoGameTimer = null;
+    }
+    if (!game.processCreated) return;
+    const gameIdentity = `${game.pid}:${game.processCreated}:${game.path || game.name}`;
+    if (gameIdentity === lastDynamicGameIdentity) return;
+    // The old media belongs to a different valve target. Do not display it
+    // while Steam data for the new target is still being resolved.
+    lastDynamicGameIdentity = null;
+    dynamicBackgroundActive.value = false;
+    applyBackgroundState(lastFixedBackgroundState, 'fixed');
+    try {
+      const result = await refreshDynamicBackground(game);
+      if (result && generation === dynamicBackgroundGeneration && getDynamicBackgroundConfig().enabled) {
+        lastDynamicGameIdentity = gameIdentity;
+        dynamicBackgroundActive.value = true;
+        applyBackgroundState(result.state as BackgroundState, 'dynamic');
+      }
+    } catch (error) {
+      if (generation !== dynamicBackgroundGeneration || !getDynamicBackgroundConfig().enabled) return;
+      const message = (error as Error).message || 'Steam 连接失败';
+      window.dispatchEvent(new CustomEvent('dynamic-background:progress', { detail: `失败：${message}` }));
+      console.warn('[dynamic background]', error);
+    }
+  })();
+}
+function startDynamicBackgroundWatch(): void {
+  if (stopDynamicBackground || !getDynamicBackgroundConfig().enabled || !isUiVisible()) return;
+  stopDynamicBackground = subscribeGameStatus(onDynamicGameStatus);
+}
+function stopDynamicBackgroundWatch(): void {
+  stopDynamicBackground?.();
+  stopDynamicBackground = null;
+}
+function onDynamicBackgroundLoaded(e: Event): void {
+  const state = (e as CustomEvent<BackgroundState>).detail;
+  if (!state?.url || !getDynamicBackgroundConfig().enabled) return;
+  const generation = ++dynamicBackgroundGeneration;
+  void detectGame(true).then((game) => {
+    if (generation !== dynamicBackgroundGeneration || !game ||
+        !game.processCreated || Number(state.pid) !== game.pid ||
+        String(state.processCreated || '') !== String(game.processCreated)) return;
+    lastDynamicGameIdentity = `${game.pid}:${game.processCreated}:${game.path || game.name}`;
+    dynamicBackgroundActive.value = true;
+    applyBackgroundState(state, 'dynamic');
+  }).catch(() => {});
+}
+// Only the main renderer owns placement listeners; unrelated UI settings do not move it.
+const windowPlacement = ref<'left' | 'right'>(getUiSetting('windowPlacement'));
+async function applyWindowPlacement(): Promise<void> {
+  const placed = await windowApi.place(windowPlacement.value);
+  if (!placed) throw new Error('Native window placement failed');
+}
+function reportWindowPlacementError(error: unknown): void {
+  console.warn('[window placement]', error);
+}
+function onWindowPlacementSettingsChanged(): void {
+  const next = getUiSetting('windowPlacement');
+  if (next === windowPlacement.value) return;
+  windowPlacement.value = next;
+  void applyWindowPlacement().catch(reportWindowPlacementError);
+}
+function onWindowPlacementSummoned(): void {
+  void applyWindowPlacement().catch(reportWindowPlacementError);
+}
+onMounted(async () => {
+  // A shortcut editor popup is another renderer owned by the same native
+  // process, not a second YMCC application instance. Do not start the main
+  // renderer's gamepad engine, FanHost lifecycle, tray/autostart jobs,
+  // background watchers, or power transaction listeners in this document.
+  // The editor itself talks to native IPC directly and still receives the
+  // broadcast recording events it needs.
+  if (isStandaloneEditor.value) {
+    window.dispatchEvent(new CustomEvent('app-startup-ready'));
+    return;
+  }
+  deckyMirrorHost = startDeckyMirrorHost();
+  try {
+    aiFanMockActive = parseAiFanMockSession(await app.aiFanMockSession()) !== null;
+  } catch (error) {
+    if (!/^unknown: app\.aiFanMockSession$/.test(String(error instanceof Error ? error.message : error))) {
+      // Unknown capability state must not accidentally arm stored real fan intent.
+      aiFanMockActive = true;
+      fanDiagnosticLog('ai.mock-session-unreadable', { policy: 'fan-auto-start-suppressed' });
+    }
+  }
+  resumeLifecycleActive = true;
+  // Register the one-shot native wake events before the first awaited startup
+  // operation. A controller recreated during S3 recovery can otherwise miss
+  // resume-ready while settings/background initialization is still running.
+  window.addEventListener('ipc:power.suspending', onPowerSuspending as EventListener);
+  window.addEventListener('ipc:power.resuming', onPowerResuming as EventListener);
+  window.addEventListener('ipc:power.resumed', onPowerResumed as EventListener);
+  window.addEventListener('fan:guard-state', onFanGuardState as EventListener);
+  stopResumeWatch = on<{ generation?: number }>('power.resume-ready', ({ generation }) => {
+    onPowerResumeReady(generation);
+  });
+  stopFanResumeWatch = on<{ generation?: number }>('fan.resume-ready', ({ generation }) => {
+    onFanResumeReady(Number(generation) || 0);
+  });
+  const lifecycleAtMountPromise = powerLifecycle.get().catch(() => null);
+  try {
+    const isolation = await app.aiCpuIsolatedSession() as any;
+    if (!isolation || isolation.schemaVersion !== 1 || typeof isolation.enabled !== 'boolean') throw new Error('AI_ISOLATION_CAPABILITY_INVALID');
+    aiCpuIsolated = isolation.enabled === true;
+    if (aiCpuIsolated && (isolation.physicalFeatureEvidence !== false || typeof isolation.sessionId !== 'string')) throw new Error('AI_ISOLATION_CAPABILITY_INVALID');
+  } catch (error) {
+    if (String(error instanceof Error ? error.message : error) !== 'unknown: app.aiCpuIsolatedSession') throw error;
+  }
+  // Use the native-resolved PowerControl directory before startup recovery or
+  // TDP calls. Native owns settings.write validation, so deriving this path
+  // independently from exeDir can split the frontend/native settings contract
+  // on machines where the executable and sidecar directory are laid out
+  // differently (notably Intel test systems).
+  let nativePowerControlDir: string | null = null;
+  try {
+    const dir = await app.powerControlDir();
+    nativePowerControlDir = dir || null;
+    if (dir) {
+      setPowerControlDir(dir);
+      setAutofloatPowerControlDir(dir);
+      setGyroVirtualFeatureAssetsRoot(dir);
+    }
+  } catch { /* fixed formal path remains the compatibility fallback */ }
+  // Provision the RTSS bridge at every main YMCC startup, not just when
+  // monitoring is enabled. This optional repair must not delay UI readiness,
+  // start/restart RTSS, or change the user's currently selected template.
+  if (!aiCpuIsolated) void ensureRtssOverlayInstalled().catch((error) => {
+    store.pushLog({ cmd: 'rtss.startup-install', args: {}, ok: false, error: String(error) });
+  });
+  // GP-926R3: sidebar/routes are resident. Do not probe optional input assets at shell startup.
+  // Fan settings must load only after the native-resolved PowerControl path is
+  // installed; otherwise a child NavRail mount could write defaults to the
+  // compatibility path before native startup finishes resolving directories.
+  await initializeFanFeature();
+
+  // FanHost handshake is optional hardware discovery and must not delay the
+  // controller receiver. The page can already be visible/clickable while the
+  // handshake is in progress, so register Native UI actions first.
+  window.addEventListener('ipc:gamepad-start', onGamepadStart as EventListener);
+  window.addEventListener('ipc:gamepad.refresh', onGamepadRefresh as EventListener);
+  window.addEventListener('ipc:gamepad.tdp-delta', onGamepadTdpDelta as EventListener);
+  window.addEventListener('ipc:gamepad.brightness', onGamepadBrightness as EventListener);
+  window.addEventListener('ipc:gamepad.mouse-toggle', onGamepadMouseToggle as EventListener);
+  stopGamepad = startGamepad({ router, onAction: (l) => store.pushGamepad(l) });
+  stopGyroTelemetry = on('gyro.telemetry', (data) => {
+    window.dispatchEvent(new CustomEvent('input:motion-telemetry', { detail: data }));
+  });
+
+  // Finish settings and background initialization before the optional
+  // FanHost handshake. The native splash waits for this signal, so the first
+  // visible frame is already in its normal background state.
+  await loadUiSettings();
+  backgroundOpacity.value = getBackgroundOpacity();
+  backgroundBlur.value = getBackgroundBlur();
+  backgroundVideoAutoPause.value = getUiSetting('videoBatteryPause');
+  windowPlacement.value = getUiSetting('windowPlacement');
+  // Await saved placement before signalling first-paint readiness; never place using defaults first.
+  await applyWindowPlacement().catch(reportWindowPlacementError);
+  window.addEventListener('ui-settings:changed', onWindowPlacementSettingsChanged);
+  window.addEventListener('ui-settings:loaded', onWindowPlacementSettingsChanged);
+  window.addEventListener('background:changed', onBackgroundChanged as EventListener);
+  window.addEventListener('background:opacity-changed', onBackgroundOpacityChanged as EventListener);
+  window.addEventListener('background:blur-changed', onBackgroundBlurChanged as EventListener);
+  window.addEventListener('ipc:window.minimized', onBackgroundWindowHidden as EventListener);
+  window.addEventListener('ipc:window.hidden', onBackgroundWindowHidden as EventListener);
+  window.addEventListener('ipc:window.restored', onBackgroundWindowShown as EventListener);
+  window.addEventListener('ipc:window.shown', onBackgroundWindowShown as EventListener);
+  window.addEventListener('ipc:window.maximized', onBackgroundWindowShown as EventListener);
+  window.addEventListener('ipc:window.summoned', onBackgroundWindowShown as EventListener);
+  // 唤起（托盘呼出）时按设置项对齐主窗口位置。
+  window.addEventListener('ipc:window.summoned', onWindowPlacementSummoned);
+  document.addEventListener('visibilitychange', onBackgroundVisibilityChange);
+  const initialWindowState = await windowApi.getState().catch(() => null);
+  if (initialWindowState) {
+    nativeWindowVisible.value = Boolean(initialWindowState.visible && !initialWindowState.minimized);
+    setNativeWindowVisible(nativeWindowVisible.value);
+  }
+  const initialBackgroundState = await backgroundGet().catch(() => null);
+  lastFixedBackgroundState = initialBackgroundState;
+  applyBackgroundState(initialBackgroundState, 'fixed');
+  startDynamicBackgroundWatch();
+  // 专属配置的「选择手柄 / 陀螺仪开关」覆盖：常驻订阅，不随窗口可见性暂停，
+  // 否则游戏运行时窗口隐藏会让覆盖无法下发/恢复。
+  startGameInputOverrideWatch();
+  startGamePolicyRuntime();
+  stopUiVisibility = onUiVisibilityChange(({ visible }) => {
+    uiVisible.value = visible;
+    if (visible) {
+      startDynamicBackgroundWatch();
+      resumeBackgroundVideo();
+    } else {
+      stopDynamicBackgroundWatch();
+      pauseBackgroundVideoForWindow();
+    }
+  });
+  window.addEventListener('dynamic-background:settings-changed', onDynamicBackgroundSettingChanged);
+  window.addEventListener('dynamic-background:loaded', onDynamicBackgroundLoaded as EventListener);
+  window.addEventListener('ipc:game.rules.changed', onGameRulesChanged as EventListener);
+  const initialPowerMode = await detectPowerModeReliable();
+  if (initialPowerMode) {
+    rememberPowerSourceMode(initialPowerMode);
+    applyVideoPowerMode(initialPowerMode, true);
+  }
+  else onAcPower.value = (await detectPowerMode().catch(() => 'dc')) === 'ac';
+  await reconcileBackgroundVideo();
+  window.dispatchEvent(new CustomEvent('app-startup-ready'));
+
+  // FAN-926R U2 / FAN-932 §2.3: shell admission itself stays inert. The renderer
+  // registers only the side-effect-free Fan configuration and the identity sink.
+  // This block does NOT spawn the Fan Host, call /api/handshake, open HC, acquire
+  // a lease or start any Fan timer. The preference-driven boot auto-start is a
+  // separate step that runs after the renderer reattach decision below; page entry
+  // remains a non-start path.
+  try {
+    const configuredFan = getFanFeatureSettings();
+    if (nativePowerControlDir) fanHostLifecycle.setConfig(resolveFanHostConfig(nativePowerControlDir));
+    fanHostLifecycle.setSavedIdentity(aiFanMockActive ? null : configuredFan.deviceIdentity ?? null);
+    fanHostLifecycle.setDeviceIdentitySink(aiFanMockActive ? undefined : (identity) => {
+      void rememberFanDevice(identity).catch(() => {});
+    });
+    if (aiFanMockActive) stopAiFanService = await startAiFanService({
+      lifecycle: fanHostLifecycle, preset: getFanPresetCurve,
+      onError: (error) => {
+        // R11 T-04 / R12：只保留**显式枚举**的自有固定码（不是匹配 `AI_FAN_*` 形状），
+        // 其余一律折叠，避免未受信任载荷或原始异常进入诊断。
+        // 走免门有限责任收据（fanLifecycleEvidence），使默认关闭详细日志时"下一次失败"
+        // 依然落盘可判读，而不是整条消失。
+        fanLifecycleEvidence('ai.mock-request-failed', {
+          reason: projectAiFanErrorCode(error, 'AI_FAN_UNCLASSIFIED_FAILURE'),
+        });
+      },
+    });
+    fanDiagnosticLog('lifecycle.shell-admission-deferred', { phase: fanHostLifecycle.phase });
+  } catch (error) {
+    // A configuration/identity wiring failure must never gate YMCC startup, the
+    // controller path or the fan entry. The fan page reports its own
+    // connect/permission state when the user asks for it.
+    fanDiagnosticLog('lifecycle.shell-admission-failure', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+  // 程序启动只同步一次；之后仅在模拟鼠标真实开/关时更新内页锁定。
+  void syncMouseModeAtStartup();
+  window.addEventListener('background:video-battery-pause-changed', onBackgroundVideoPauseChanged as EventListener);
+  window.addEventListener('ui-settings:loaded', onUiSettingsLoaded as EventListener);
+  window.addEventListener('ui-settings:changed', onUiSettingsLoaded as EventListener);
+  stopPowerSourceWatch = on<{ ac: boolean; generation?: number }>('power.sourceChanged', ({ ac }) => {
+    onVideoPowerSourceChanged(ac);
+    // sourceChanged is the immediate native notification; acChanged is a
+    // later 5-second tail-debounced confirmation. Start the dedicated
+    // profile restore here so a stable plug/unplug applies promptly, while
+    // the debounced event below still provides the final settling pass.
+    schedulePowerChangePerformanceRestore(Boolean(ac) ? 'ac' : 'dc');
+  });
+  // AC/DC 插拔：刷新数据；自动模式由性能调度重新应用当前电源侧组合。
+  stopAcWatch = on<{ ac: boolean; generation?: number }>('power.acChanged', async ({ ac }) => {
+    onAcPower.value = Boolean(ac);
+    onVideoPowerSourceChanged(Boolean(ac));
+    globalRefreshKey.value++;
+    scheduleSleepPowerPlanOptimization();
+    // Resume commit will perform one authoritative re-apply after AC/DC is
+    // stable. Ignore intermediate broadcasts while native writes are gated.
+    if (!await powerLifecycleReadyForWrites()) return;
+    // FAN-929（2026-09-27 用户裁决）：风扇控制的 AC/DC 电源档重放。原来由 Host 侧 1 Hz
+    // watchdog 轮询发现电源线变化（稳态恒定 CPU 成本），现改为事件驱动：由这里触发一次
+    // 曲线重放，Host 在写入点按当前电源档重新捕获模板并做 route 就绪校验。
+    void fanHostLifecycle.reapplyActiveCurve('ac-changed');
+    // 事件侧只负责发起一次有界、可取消的恢复；实际 AC/DC 侧确认和
+    // 专属优先级由 schedulePowerChangePerformanceRestore 串行完成。
+    schedulePowerChangePerformanceRestore(Boolean(ac) ? 'ac' : 'dc');
+  });
+  stopForegroundPowerSource = startForegroundPowerSourceRefresh((mode) => {
+    const changed = onAcPower.value !== (mode === 'ac');
+    applyVideoPowerMode(mode, true);
+    // A missed source notification must also restore the correct global/game
+    // profile. Reuse existing ownership/generation/write guards only on change;
+    // merely showing the same AC/DC side never replays fan/CPU/TDP settings.
+    if (changed) schedulePowerChangePerformanceRestore(mode);
+  });
+  // Compensate for a one-shot resume event that was emitted while WebView2
+  // was being recreated.  The native lifecycle remains `resuming` until the
+  // same commit path succeeds, so querying it is safe and idempotent.
+  const lifecycleAtMount = await lifecycleAtMountPromise;
+  if (lifecycleAtMount?.phase === 'resuming' && lifecycleAtMount.resumeReady === true) {
+    onPowerResumeReady(Number(lifecycleAtMount.generation));
+  } else if (lifecycleAtMount?.phase === 'ready' && lifecycleAtMount.resumeReady === true) {
+    // The durable native state can outlive the one-shot resume-ready event
+    // when the renderer is recreated after the native commit.  Rebind the
+    // Fan-local generation and let the idempotent committed-wake path restore
+    // any remembered curve; no shared sleep strategy or OEM proof is changed.
+    const committedGeneration = Number(lifecycleAtMount.generation) || 0;
+    if (committedGeneration > 0) {
+      latestResumeGeneration = Math.max(latestResumeGeneration, committedGeneration);
+      fanHostLifecycle.setPowerGeneration(committedGeneration);
+      fanHostLifecycle.observePowerBoundary('resumed', committedGeneration);
+      requestFanCommittedResume(committedGeneration);
+    }
+  } else if (lifecycleAtMount?.phase === 'resuming') {
+    // Native has not delivered F5 yet. Wait for its durable resume-ready
+    // event instead of letting a remounted renderer fabricate that boundary.
+    latestResumeGeneration = Math.max(latestResumeGeneration, Number(lifecycleAtMount.generation) || 0);
+  } else if (lifecycleAtMount && lifecycleAtMount.phase !== 'ready') {
+    latestResumeGeneration = Math.max(latestResumeGeneration, Number(lifecycleAtMount.generation) || 0);
+  }
+  // FAN-927 §5（2026-09-27 用户批准）：渲染器重建 / 主程序非正常退出后重开的**唯一**事件入口。
+  // 依据完全来自 native 活动记录：本 run 已确认的意图只接上已有会话（不重开 HC、不重发曲线）；
+  // 崩溃前仍有效的记录才做一次有界恢复；无依据时零动作（不启动 Host、不发 HTTP）。
+  const fanReattach = fanHostLifecycle.reattachAfterRendererRestart().catch((error) => {
+    fanDiagnosticLog('lifecycle.renderer-restart-hook-failed', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return false;
+  });
+  // FAN-932 §2.1.4：偏好驱动的开机自动启动必须**等接续判定完成**后再执行（不能 `void` 发出
+  // reattach 后立刻另起自动启动，否则可能抢在接续前下发第二条曲线）。串进同一流程后再启动；
+  // 若接续已恢复活动曲线，ensureFanAutoStart 会因 hasControlIntent 直接 no-op。
+  void fanReattach.then(() => ensureFanAutoStart('boot'));
+  // 性能调度统一负责自动模式 CPU/TDP 应用；不再加载或回刷 AC/DC CPU 锁定配置。
+  // 性能调度由用户首次选择模式后才接管启动恢复；未配置时保持原 CPU 自动启用链路不变。
+  stopSchemeWatch = on('power.schemeChanged', async () => {
+    if (aiCpuIsolated) return;
+    scheduleSleepPowerPlanOptimization();
+    // Intermediate broadcasts are expected while Windows restores a scheme.
+    // The serialized resume transaction reconciles once after the gate opens.
+    if (!await powerLifecycleReadyForWrites()) return;
+    await reconcileRememberedPowerScheme()
+      .then(async (schemeOwner) => {
+        // Refresh the active page after reconciliation without changing ownership.
+        globalRefreshKey.value++;
+        const performanceOwner = await restorePerformanceScheduleIfConfigured(undefined, {
+          dedicatedOnly: schemeOwner !== 'auto',
+        }).catch(() => null);
+        if (performanceOwner !== null && performanceOwner !== 'auto') {
+          await applyCpuAutoEnable().catch(() => {});
+        }
+      })
+      .catch(() => {});
+  });
+  // A freshly recreated page can mount while native is still Resuming. Do not
+  // let normal boot restoration race the gated wake transaction; the latter
+  // performs one authoritative CPU/TDP re-apply after commit.
+  if (!aiCpuIsolated && await powerLifecycleReadyForWrites()) {
+    const schemeOwnerAtBoot = await reconcileRememberedPowerScheme().catch(() => 'yeman' as const);
+    const performanceOwnerAtBoot = await restorePerformanceScheduleIfConfigured(undefined, {
+      dedicatedOnly: schemeOwnerAtBoot !== 'auto',
+    }).catch(() => null);
+    if (performanceOwnerAtBoot === 'auto' && schemeOwnerAtBoot === 'auto') {
+      // Some boot tasks/OEM services rewrite the three hybrid-core values
+      // after the first restore.  Reapply only the saved core mode after the
+      // system settles; manual mode never enters this path.
+      window.setTimeout(() => {
+        void refreshPerformanceScheduleCoreMode().catch(() => {});
+      }, 3000);
+    } else if (performanceOwnerAtBoot !== null && performanceOwnerAtBoot !== 'auto') {
+      await applyCpuAutoEnable().catch(() => {});
+      await applyProgramControls().catch(() => {});
+    }
+  }
+
+  // ── 任务栏常驻偏好：启动期按持久化套用（默认不常驻，由设置/总闸驱动）──
+  applyTrayResident().catch(() => {});
+  // ── 音乐播放：启动期恢复已配置的音乐目录（不自动播放）──
+  void initMusic();
+  // ── 开机启动自愈：若用户曾开启但计划任务被误删，自动重建 ──
+  if (!aiCpuIsolated) healBootTask().catch(() => {});
+
+  // ── CPU「30秒自行启用」：打开程序 30 秒后，按记录状态自动套用 CCD / 降压 ──
+  // 延迟 30 秒是开机保护：避免降压过猛（如 risk 档）在开机瞬间直接死机。
+  if (!aiCpuIsolated) sleepPlanOptimizationTimer = window.setTimeout(() => {
+    sleepPlanOptimizationTimer = null;
+    scheduleSleepPowerPlanOptimization();
+  }, 30000);
+  if (!aiCpuIsolated) window.setTimeout(() => {
+    applyCpuAutostart().catch(() => {});
+  }, 30000);
+
+  if (!aiFanMockActive && !aiCpuIsolated) deckyMirrorHost?.ready();
+});
+onUnmounted(() => {
+  deckyMirrorHost?.stop(); deckyMirrorHost = null;
+  stopAiFanService?.();
+  stopAiFanService = null;
+  window.removeEventListener('ui-settings:changed', onWindowPlacementSettingsChanged);
+  window.removeEventListener('ui-settings:loaded', onWindowPlacementSettingsChanged);
+  window.removeEventListener('ipc:window.summoned', onWindowPlacementSummoned);
+  videoPowerProbeGeneration++;
+  if (videoPowerProbeTimer !== null) {
+    window.clearTimeout(videoPowerProbeTimer);
+    videoPowerProbeTimer = null;
+  }
+  if (dynamicBackgroundNoGameTimer !== null) {
+    window.clearTimeout(dynamicBackgroundNoGameTimer);
+    dynamicBackgroundNoGameTimer = null;
+  }
+  resumeLifecycleActive = false;
+  if (resumeRetryTimer) {
+    clearTimeout(resumeRetryTimer);
+    resumeRetryTimer = null;
+  }
+  powerChangeRestoreGeneration++;
+  if (powerChangeRestoreTimer !== null) {
+    window.clearTimeout(powerChangeRestoreTimer);
+    powerChangeRestoreTimer = null;
+  }
+  if (sleepPlanOptimizationTimer !== null) {
+    window.clearTimeout(sleepPlanOptimizationTimer);
+    sleepPlanOptimizationTimer = null;
+  }
+  clearBackgroundRetry();
+  if (resumeVideoTimer !== null) {
+    window.clearTimeout(resumeVideoTimer);
+    resumeVideoTimer = null;
+  }
+  invalidateBackgroundMedia();
+  stopDynamicBackgroundWatch();
+  stopGameInputOverrideWatch();
+  stopGamePolicyRuntime();
+  stopUiVisibility?.();
+  stopUiVisibility = null;
+  window.removeEventListener('background:changed', onBackgroundChanged as EventListener);
+  window.removeEventListener('background:opacity-changed', onBackgroundOpacityChanged as EventListener);
+  window.removeEventListener('background:blur-changed', onBackgroundBlurChanged as EventListener);
+  window.removeEventListener('ipc:gamepad-start', onGamepadStart as EventListener);
+  window.removeEventListener('ipc:gamepad.refresh', onGamepadRefresh as EventListener);
+  window.removeEventListener('ipc:gamepad.tdp-delta', onGamepadTdpDelta as EventListener);
+  window.removeEventListener('ipc:gamepad.brightness', onGamepadBrightness as EventListener);
+  window.removeEventListener('ipc:gamepad.mouse-toggle', onGamepadMouseToggle as EventListener);
+  window.removeEventListener('ipc:window.minimized', onBackgroundWindowHidden as EventListener);
+  window.removeEventListener('ipc:window.hidden', onBackgroundWindowHidden as EventListener);
+  window.removeEventListener('ipc:window.restored', onBackgroundWindowShown as EventListener);
+  window.removeEventListener('ipc:window.shown', onBackgroundWindowShown as EventListener);
+  window.removeEventListener('ipc:window.maximized', onBackgroundWindowShown as EventListener);
+  window.removeEventListener('ipc:window.summoned', onBackgroundWindowShown as EventListener);
+  window.removeEventListener('background:video-battery-pause-changed', onBackgroundVideoPauseChanged as EventListener);
+  window.removeEventListener('ipc:power.suspending', onPowerSuspending as EventListener);
+  window.removeEventListener('ipc:power.resuming', onPowerResuming as EventListener);
+  window.removeEventListener('ipc:power.resumed', onPowerResumed as EventListener);
+  window.removeEventListener('fan:guard-state', onFanGuardState as EventListener);
+  window.removeEventListener('ui-settings:loaded', onUiSettingsLoaded as EventListener);
+  window.removeEventListener('ui-settings:changed', onUiSettingsLoaded as EventListener);
+  window.removeEventListener('dynamic-background:settings-changed', onDynamicBackgroundSettingChanged);
+  window.removeEventListener('dynamic-background:loaded', onDynamicBackgroundLoaded as EventListener);
+  window.removeEventListener('ipc:game.rules.changed', onGameRulesChanged as EventListener);
+  document.removeEventListener('visibilitychange', onBackgroundVisibilityChange);
+  stopGamepad?.();
+  stopGyroTelemetry?.();
+  stopAcWatch?.();
+  stopPowerSourceWatch?.();
+  stopForegroundPowerSource?.();
+  stopForegroundPowerSource = null;
+  stopResumeWatch?.();
+  stopFanResumeWatch?.();
+  stopSchemeWatch?.();
+  // Fan Host shutdown has one canonical owner: the native app-exit boundary
+  // (or NavRail.quit, which awaits the same lifecycle before app.exit).  A
+  // second close from root unmount races that HC gate and can turn one
+  // firmware timeout into duplicate /api/close requests.  HC itself has only
+  // one Window_Closed -> CurrentDevice.Close() path, so root unmount must not
+  // invent a second device-session close.
+});
+
+// ── UI 缩放：监听窗口尺寸 / 原生 resize 事件，保持设计比例填满窗口 ──
+let stageResizeObserver: ResizeObserver | null = null;
+onMounted(() => {
+  updateScale();
+  settleScale();
+  window.addEventListener('resize', updateScale);
+  window.addEventListener('ipc:window.resized', onNativeResize as EventListener);
+  // 呼出后重新定稿：原生尺寸消息可能早于 WebView2 视口恢复到达。
+  window.addEventListener('ipc:window.summoned', refreshScaleAfterSummon as EventListener);
+  window.visualViewport?.addEventListener('resize', updateScale);
+  // 原生 reflow（隐藏任务栏后窗口吸底变高）可能不派发 window resize，
+  // 用 ResizeObserver 监测文档根节点尺寸变化兜底，避免内容层停留在旧尺寸、
+  // 底部露出透明带。
+  if (typeof ResizeObserver !== 'undefined') {
+    stageResizeObserver = new ResizeObserver(() => {
+      updateScale();
+      settleScale();
+    });
+    stageResizeObserver.observe(document.documentElement);
+  }
+});
+onUnmounted(() => {
+  stageResizeObserver?.disconnect();
+  stageResizeObserver = null;
+  if (settleRaf) cancelAnimationFrame(settleRaf);
+  settleRaf = 0;
+  settleFrames = 0;
+  window.removeEventListener('resize', updateScale);
+  window.removeEventListener('ipc:window.resized', onNativeResize as EventListener);
+  window.removeEventListener('ipc:window.summoned', refreshScaleAfterSummon as EventListener);
+  window.visualViewport?.removeEventListener('resize', updateScale);
+});
+</script>
+
+<template>
+  <div class="app-root">
+    <video
+      v-if="backgroundUrl && backgroundKind === 'video' && !backgroundVideoSuspended"
+      :key="backgroundVideoGeneration"
+      ref="backgroundVideo"
+      class="user-background-video"
+      :src="isHlsUrl(backgroundUrl) ? undefined : backgroundUrl"
+      :style="{ opacity: String(backgroundOpacity) }"
+      muted
+      loop
+      playsinline
+      preload="metadata"
+      disablepictureinpicture
+      tabindex="-1"
+      aria-hidden="true"
+      @loadedmetadata="onBackgroundVideoLoaded"
+      @canplay="onBackgroundVideoCanPlay"
+      @playing="onBackgroundVideoPlaying"
+      @pause="onBackgroundVideoPause"
+      @error="() => onBackgroundVideoError()"
+    />
+    <div
+      v-else-if="backgroundUrl"
+      class="user-background-image"
+      :style="backgroundStyle"
+      aria-hidden="true"
+    />
+    <div class="app-backdrop" aria-hidden="true" />
+    <div class="app-stage" :data-ui-visible="uiVisible" :style="scalerStyle">
+      <div v-if="!hasVisibleBackgroundMedia" class="empty-background" aria-hidden="true" />
+      <div v-if="!isStandaloneEditor" class="app-body" :class="{ 'app-body--nav-right': windowPlacement === 'left' }">
+        <NavRail />
+        <main class="app-main">
+          <!-- 顶部监控条：独立于页面滚动层，左右顶满 app-main，不受滚动条宽度影响 -->
+          <TopMonitorBar />
+          <div class="app-content">
+            <router-view v-slot="{ Component }">
+              <KeepAlive :max="2">
+                <component :is="Component" />
+              </KeepAlive>
+            </router-view>
+          </div>
+        </main>
+      </div>
+      <div v-else class="standalone-body">
+        <router-view v-slot="{ Component }">
+          <component :is="Component" />
+        </router-view>
+      </div>
+    </div>
+
+    <DebugView v-if="showDebug && !isStandaloneEditor" @close="showDebug = false" />
+  </div>
+</template>
+
+<style scoped>
+/* Native hiding/minimizing need not change document.visibilityState in WebView2.
+ * Pause decorative CSS clocks without removing animations or altering control.
+ * Resume preserves their phase; visible UI visuals and timing remain unchanged. */
+.app-stage[data-ui-visible="false"] :deep(*),
+.app-stage[data-ui-visible="false"] :deep(*::before),
+.app-stage[data-ui-visible="false"] :deep(*::after) {
+  animation-play-state: paused !important;
+}
+/* 顶层居中容器：viewport 内 grid place-items: center，整体应用壳视觉居中 */
+.app-root {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: transparent;
+  isolation: isolate;
+  overflow: hidden;
+}
+.app-stage {
+  /* width / height / zoom 由 inline style 注入；保持原视觉根职责 */
+  display: flex;
+  flex-direction: column;
+  /* 根节点透明；可辨识度由导航、卡片和控件底板分块提供。 */
+  background: transparent;
+  position: relative;
+  isolation: isolate;
+  /* 必须在全窗底板（.app-backdrop, z-index 1）之上，内容才不会被底板盖住。 */
+  z-index: 2;
+}
+/* 全窗暗色底板：有壁纸（视频/图片）时铺满整个窗口，尺寸始终等于窗口并随窗口自适应。
+   此前该底板由 .app-main 自绘（右缘止于导航栏，只有 487px 宽），在壁纸上会呈现为
+   「一块比窗口小的黑色矩形」。改由根节点整窗层承担后，底板恒等于窗口大小。
+   挂在 .app-root（position:fixed; inset:0）直下，纯 CSS 自适应，无需跟随 stage 缩放。 */
+.app-backdrop {
+  position: absolute;
+  inset: 0;
+  /* 必须与 .user-background-video 一样显式写满 100%：.app-root 是
+     display:grid + place-items:center，栅格容器会给绝对定位子项施加
+     justify-self/align-self:center，只写 inset:0 时在 Chromium 里可能收缩，
+     导致底板只覆盖左上角、右下露出透明。视频层因带 width/height:100% 不受影响。 */
+  width: 100%;
+  height: 100%;
+  z-index: 1;
+  background: color-mix(in srgb, var(--bg-solid) 62%, transparent);
+  pointer-events: none;
+}
+.empty-background {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background: rgba(0, 0, 0, 0.3);
+  pointer-events: none;
+}
+.user-background-video {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: var(--background-video-opacity, 0.64);
+  pointer-events: none;
+  background: transparent;
+}
+/* 自定义图片背景层：与视频层同为铺满 stage 的绝对定位层。此前缺少定位/尺寸规则，
+   该 div 高度为 0，图片背景完全不可见（且 empty-background 会被 hasVisibleBackgroundMedia
+   关掉，导致没有底板托底）。 */
+.user-background-image {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  width: 100%;
+  height: 100%;
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  pointer-events: none;
+}
+.app-body {
+  flex: 1 1 auto;
+  display: flex;
+  min-height: 0;
+  position: relative;
+  z-index: 1;
+}
+/* 窗口贴左侧时，侧边导航栏翻到右侧（贴近屏幕中心侧）；分隔线随之移到导航栏左缘。 */
+.app-body--nav-right {
+  flex-direction: row-reverse;
+}
+.app-body--nav-right :deep(.navrail) {
+  border-right: none;
+  border-left: 1px solid #1c2533;
+}
+.standalone-body {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  position: relative;
+  z-index: 1;
+  overflow: hidden;
+}
+.app-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden; /* 页面滚动移到 app-content，监控条不受滚动条影响 */
+  padding: 0;
+  /* 界面底板不再使用整体毛玻璃；自定义图片自身模糊由背景图片滑块控制。
+     暗色底板已整体上移到全窗层 .app-backdrop，内容区不再自绘，避免同一块
+     色板叠两层、也避免它只覆盖内容列（右缘止于导航栏）而看起来「比窗口小」。 */
+  background: transparent;
+  position: relative;
+  z-index: 1;
+}
+/* 页面唯一滚动层：监控条在其外部，因此固定在内页顶端且不被滚动条扣宽度。 */
+.app-content {
+  height: calc(100% - 52px); /* 8px 顶部留白 + 34px 监控条 + 10px 下间距 */
+  min-height: 0;
+  overflow-y: auto;
+  /* Keep the layout viewport width identical before/after a zoom-induced
+     height change. Gamepad spatial coordinates must not shift when the
+     vertical scrollbar is introduced or removed. */
+  scrollbar-gutter: stable;
+  /* Leave room for the gamepad focus ring and the final control itself. */
+  padding: 12px 12px calc(var(--gamepad-safe-bottom, 24px) + var(--gamepad-clip-bottom, 0px));
+  scroll-padding: 24px 0 var(--gamepad-safe-bottom, 24px);
+}
+</style>

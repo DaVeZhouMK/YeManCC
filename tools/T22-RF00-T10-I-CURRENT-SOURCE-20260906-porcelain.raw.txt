@@ -1,0 +1,521 @@
+ M CustomSteamLibrary/CustomSteamLibrary.exe
+ M CustomSteamLibrary/package-manifest.json
+ M CustomSteamLibrary/workspace-ui/app.js
+ M CustomSteamLibrary/workspace-ui/index.html
+D  PowerControl/fan-host-quarantine/20260829-224720-0d375ab0abb145018652b5fb91487143/ColorPicker.Models.dll
+D  PowerControl/fan-host-quarantine/20260829-224720-0d375ab0abb145018652b5fb91487143/ColorPicker.dll
+D  PowerControl/fan-host-quarantine/20260829-224720-0d375ab0abb145018652b5fb91487143/Crc32.NET.dll
+D  PowerControl/fan-host-quarantine/20260829-224720-0d375ab0abb145018652b5fb91487143/Fastenshtein.dll
+D  PowerControl/fan-host-quarantine/20260829-224720-0d375ab0abb145018652b5fb91487143/FluentResults.dll
+D  PowerControl/fan-host-quarantine/20260829-224720-0d375ab0abb145018652b5fb91487143/GameFinder.Common.dll
+D  PowerControl/fan-host-quarantine/20260829-224720-0d375ab0abb145018652b5fb91487143/GameFinder.Launcher.Heroic.dll
+D  PowerControl/fan-host-quarantine/20260829-224720-0d375ab0abb145018652b5fb91487143/GameFinder.RegistryUtils.dll
+D  PowerControl/fan-host-quarantine/20260829-224720-0d375ab0abb145018652b5fb91487143/GameFinder.StoreHandlers.EADesktop.dll
+D  PowerControl/fan-host-quarantine/20260829-224720-0d375ab0abb145018652b5fb91487143/GameFinder.StoreHandlers.EGS.dll
+D  PowerControl/fan-host-quarantine/20260829-224720-0d375ab0abb145018652b5fb91487143/GameFinder.StoreHandlers.GOG.dll
+D  PowerControl/fan-host-quarantine/20260829-224720-0d375ab0abb145018652b5fb91487143/GameFinder.StoreHandlers.Origin.dll
+D  PowerControl/fan-host-quarantine/20260829-224720-0d375ab0abb145018652b5fb91487143/GameFinder.StoreHandlers.Steam.dll
+D  PowerControl/fan-host-quarantine/20260829-224720-0d375ab0abb145018652b5fb91487143/GameFinder.StoreHandlers.Xbox.dll
+D  PowerControl/fan-host-quarantine/20260829-224720-0d375ab0abb145018652b5fb91487143/GameFinder.Wine.dll
+D  PowerControl/fan-host-quarantine/20260829-224720-0d375ab0abb145018652b5fb91487143/GameLib.Core.dll
+D  PowerControl/fan-host-quarantine/20260829-224720-0d375ab0abb145018652b5fb91487143/GameLib.Plugin.BattleNet.dll
+D  PowerControl/fan-host-quarantine/20260829-224720-0d375ab0abb145018652b5fb91487143/GameLib.Plugin.EA.dll
+D  PowerControl/fan-host-quarantine/20260829-224720-0d375ab0abb145018652b5fb91487143/GameLib.Plugin.Epic.dll
+D  PowerControl/fan-host-quarantine/20260829-224720-0d375ab0abb145018652b5fb91487143/GameLib.Plugin.Gog.dll
+D  PowerControl/fan-host-quarantine/20260829-224720-0d375ab0abb145018652b5fb91487143/GameLib.Plugin.Origin.dll
+D  PowerControl/fan-host-quarantine/20260829-224720-0d375ab0abb145018652b5fb91487143/GameLib.Plugin.RiotGames.dll
+D  PowerControl/fan-host-quarantine/20260829-224720-0d375ab0abb145018652b5fb91487143/GameLib.Plugin.Rockstar.dll
+D  PowerControl/fan-host-quarantine/20260829-224720-0d375ab0abb145018652b5fb91487143/GameLib.Plugin.Steam.dll
+D  PowerControl/fan-host-quarantine/20260829-224720-0d375ab0abb145018652b5fb91487143/GameLib.Plugin.Ubisoft.dll
+D  PowerControl/fan-host-quarantine/20260829-224720-0d375ab0abb145018652b5fb91487143/GameLib.dll
+D  PowerControl/fan-host-quarantine/20260829-224720-0d375ab0abb145018652b5fb91487143/GongSolutions.WPF.DragDrop.dll
+D  PowerControl/fan-host-quarantine/20260829-224720-0d375ab0abb145018652b5fb91487143/HelixToolkit.Core.Wpf.dll
+D  PowerControl/fan-host-quarantine/20260829-224720-0d375ab0abb145018652b5fb91487143/IGCL_Wrapper.dll
+D  PowerControl/fan-host-quarantine/20260829-224720-0d375ab0abb145018652b5fb91487143/JoyShockLibrary.dll
+D  PowerControl/fan-host-quarantine/20260829-224720-0d375ab0abb145018652b5fb91487143/LiveCharts.Wpf.dll
+D  PowerControl/fan-host-quarantine/20260829-224720-0d375ab0abb145018652b5fb91487143/LiveCharts.dll
+D  PowerControl/fan-host-quarantine/20260829-224720-0d375ab0abb145018652b5fb91487143/MathConverter.dll
+D  PowerControl/fan-host-quarantine/20260829-224720-0d375ab0abb145018652b5fb91487143/Microsoft.Expression.Effects.dll
+D  PowerControl/fan-host-quarantine/20260829-224720-0d375ab0abb145018652b5fb91487143/Microsoft.Toolkit.Uwp.Notifications.dll
+D  PowerControl/fan-host-quarantine/20260829-224720-0d375ab0abb145018652b5fb91487143/Microsoft.Xaml.Behaviors.dll
+D  PowerControl/fan-host-quarantine/20260829-224720-0d375ab0abb145018652b5fb91487143/NJsonSchema.Annotations.dll
+D  PowerControl/fan-host-quarantine/20260829-224720-0d375ab0abb145018652b5fb91487143/NexusMods.Paths.dll
+D  PowerControl/fan-host-quarantine/20260829-224720-0d375ab0abb145018652b5fb91487143/OneOf.dll
+D  PowerControl/fan-host-quarantine/20260829-224720-0d375ab0abb145018652b5fb91487143/Polly.Extensions.Http.dll
+D  PowerControl/fan-host-quarantine/20260829-224720-0d375ab0abb145018652b5fb91487143/RTSSSharedMemoryNET.dll
+D  PowerControl/fan-host-quarantine/20260829-224720-0d375ab0abb145018652b5fb91487143/SDL3-CS.dll
+D  PowerControl/fan-host-quarantine/20260829-224720-0d375ab0abb145018652b5fb91487143/SDL3.dll
+D  PowerControl/fan-host-quarantine/20260829-224720-0d375ab0abb145018652b5fb91487143/SHA3.Net.dll
+D  PowerControl/fan-host-quarantine/20260829-224720-0d375ab0abb145018652b5fb91487143/SapientiaUsb.dll
+D  PowerControl/fan-host-quarantine/20260829-224720-0d375ab0abb145018652b5fb91487143/TransparentValueObjects.Abstractions.dll
+D  PowerControl/fan-host-quarantine/20260829-224720-0d375ab0abb145018652b5fb91487143/ValveKeyValue.dll
+D  PowerControl/fan-host-quarantine/20260829-224720-0d375ab0abb145018652b5fb91487143/WindowsDisplayAPI.dll
+D  PowerControl/fan-host-quarantine/20260829-224720-0d375ab0abb145018652b5fb91487143/WpfScreenHelper.dll
+D  PowerControl/fan-host-quarantine/20260829-224720-0d375ab0abb145018652b5fb91487143/Xinput1_4.dll
+D  PowerControl/fan-host-quarantine/20260829-224720-0d375ab0abb145018652b5fb91487143/fan-host-lhm-separation-initial-success.md
+D  PowerControl/fan-host-quarantine/20260829-224720-0d375ab0abb145018652b5fb91487143/iNKORE.UI.WPF.Emojis.dll
+D  PowerControl/fan-host-quarantine/20260829-224720-0d375ab0abb145018652b5fb91487143/iNKORE.UI.WPF.Modern.dll
+D  PowerControl/fan-host-quarantine/20260829-224720-0d375ab0abb145018652b5fb91487143/iNKORE.UI.WPF.dll
+D  PowerControl/fan-host-quarantine/20260829-224720-0d375ab0abb145018652b5fb91487143/libVIIPER.dll
+ D PowerControl/fan-host/BlackSharp.Core.dll
+ D PowerControl/fan-host/GamepadMotion.dll
+ D PowerControl/fan-host/Gma.System.MouseKeyHook.dll
+ D PowerControl/fan-host/GregsStack.InputSimulatorStandard.dll
+ D PowerControl/fan-host/HandheldCompanion.deps.json
+ D PowerControl/fan-host/HandheldCompanion.dll
+ D PowerControl/fan-host/HidLibrary.dll
+ D PowerControl/fan-host/IGDB.dll
+ D PowerControl/fan-host/Interop.IWshRuntimeLibrary.dll
+ D PowerControl/fan-host/LibreHardwareMonitorLib.dll
+ D PowerControl/fan-host/Microsoft.Extensions.Configuration.Abstractions.dll
+ D PowerControl/fan-host/Microsoft.Extensions.Configuration.Binder.dll
+ D PowerControl/fan-host/Microsoft.Extensions.Configuration.FileExtensions.dll
+ D PowerControl/fan-host/Microsoft.Extensions.Configuration.Json.dll
+ D PowerControl/fan-host/Microsoft.Extensions.Configuration.dll
+ D PowerControl/fan-host/Microsoft.Extensions.DependencyInjection.Abstractions.dll
+ D PowerControl/fan-host/Microsoft.Extensions.DependencyInjection.dll
+ D PowerControl/fan-host/Microsoft.Extensions.DependencyModel.dll
+ D PowerControl/fan-host/Microsoft.Extensions.Diagnostics.Abstractions.dll
+ D PowerControl/fan-host/Microsoft.Extensions.Diagnostics.dll
+ D PowerControl/fan-host/Microsoft.Extensions.FileProviders.Abstractions.dll
+ D PowerControl/fan-host/Microsoft.Extensions.FileProviders.Physical.dll
+ D PowerControl/fan-host/Microsoft.Extensions.FileSystemGlobbing.dll
+ D PowerControl/fan-host/Microsoft.Extensions.Http.Polly.dll
+ D PowerControl/fan-host/Microsoft.Extensions.Http.dll
+ D PowerControl/fan-host/Microsoft.Extensions.Logging.Abstractions.dll
+ D PowerControl/fan-host/Microsoft.Extensions.Logging.dll
+ D PowerControl/fan-host/Microsoft.Extensions.Options.ConfigurationExtensions.dll
+ D PowerControl/fan-host/Microsoft.Extensions.Options.dll
+ D PowerControl/fan-host/Microsoft.Extensions.Primitives.dll
+ D PowerControl/fan-host/Microsoft.Win32.TaskScheduler.dll
+ D PowerControl/fan-host/Microsoft.Windows.SDK.NET.dll
+ D PowerControl/fan-host/Microsoft.WindowsAPICodePack.Core.dll
+ D PowerControl/fan-host/Microsoft.WindowsAPICodePack.ExtendedLinguisticServices.dll
+ D PowerControl/fan-host/Microsoft.WindowsAPICodePack.Sensors.dll
+ D PowerControl/fan-host/Microsoft.WindowsAPICodePack.Shell.dll
+ D PowerControl/fan-host/Microsoft.WindowsAPICodePack.ShellExtensions.dll
+ D PowerControl/fan-host/Microsoft.WindowsAPICodePack.dll
+ D PowerControl/fan-host/Mono.Posix.NETStandard.dll
+ D PowerControl/fan-host/MonoPosixHelper.dll
+ D PowerControl/fan-host/NAudio.Asio.dll
+ D PowerControl/fan-host/NAudio.Core.dll
+ D PowerControl/fan-host/NAudio.Midi.dll
+ D PowerControl/fan-host/NAudio.Vorbis.dll
+ D PowerControl/fan-host/NAudio.Wasapi.dll
+ D PowerControl/fan-host/NAudio.WinForms.dll
+ D PowerControl/fan-host/NAudio.WinMM.dll
+ D PowerControl/fan-host/NAudio.dll
+ D PowerControl/fan-host/NVorbis.dll
+ D PowerControl/fan-host/Nefarius.Drivers.HidHide.dll
+ D PowerControl/fan-host/Nefarius.Utilities.Bluetooth.dll
+ D PowerControl/fan-host/Nefarius.Utilities.DeviceManagement.dll
+ D PowerControl/fan-host/Nefarius.ViGEm.Client.dll
+ D PowerControl/fan-host/Nefarius.Vicius.Abstractions.dll
+ D PowerControl/fan-host/Newtonsoft.Json.dll
+ D PowerControl/fan-host/PInvoke.Kernel32.dll
+ D PowerControl/fan-host/PInvoke.Windows.Core.dll
+ D PowerControl/fan-host/Polly.dll
+ D PowerControl/fan-host/PrecisionTimer.NET.dll
+ D PowerControl/fan-host/RAMSPDToolkit-NDD.dll
+ D PowerControl/fan-host/Reloaded.Memory.dll
+ D PowerControl/fan-host/RestEase.dll
+ D PowerControl/fan-host/Sentry.dll
+ D PowerControl/fan-host/Serilog.Extensions.Logging.File.dll
+ D PowerControl/fan-host/Serilog.Extensions.Logging.dll
+ D PowerControl/fan-host/Serilog.Formatting.Compact.dll
+ D PowerControl/fan-host/Serilog.Settings.Configuration.dll
+ D PowerControl/fan-host/Serilog.Sinks.Async.dll
+ D PowerControl/fan-host/Serilog.Sinks.Console.dll
+ D PowerControl/fan-host/Serilog.Sinks.File.dll
+ D PowerControl/fan-host/Serilog.Sinks.RollingFile.dll
+ D PowerControl/fan-host/Serilog.dll
+ D PowerControl/fan-host/Shared.dll
+ D PowerControl/fan-host/SharpDX.Direct3D9.dll
+ D PowerControl/fan-host/SharpDX.DirectInput.dll
+ D PowerControl/fan-host/SharpDX.XInput.dll
+ D PowerControl/fan-host/SharpDX.dll
+ D PowerControl/fan-host/System.IO.Ports.dll
+ D PowerControl/fan-host/System.Management.dll
+ D PowerControl/fan-host/System.ServiceProcess.ServiceController.dll
+ D PowerControl/fan-host/UEFIVaribleDll.dll
+ D PowerControl/fan-host/WinRT.Runtime.dll
+ D PowerControl/fan-host/WindowsInput.dll
+ D PowerControl/fan-host/YamlDotNet.dll
+ M PowerControl/fan-host/YeManFanHost.authorization.md
+ M PowerControl/fan-host/YeManFanHost.deps.json
+ M PowerControl/fan-host/YeManFanHost.dll
+ M PowerControl/fan-host/YeManFanHost.exe
+ M PowerControl/fan-host/YeManFanHost.payload.json
+ M PowerControl/fan-host/YeManFanHost.runtimeconfig.json
+ D PowerControl/fan-host/controller-hidapi.net.dll
+ D PowerControl/fan-host/craftersmine.SteamGridDB.Net.dll
+ D PowerControl/fan-host/hidapi.dll
+ D PowerControl/fan-host/hidapi.net.dll
+ D PowerControl/fan-host/iNKORE.UI.WPF.Modern.Controls.dll
+ M PowerControl/fan-host/install-fan-host-payload.ps1
+ D PowerControl/fan-host/libMonoPosixHelper.dll
+ D PowerControl/fan-host/protobuf-net.Core.dll
+ D PowerControl/fan-host/protobuf-net.dll
+ D PowerControl/fan-host/ricaun.NamedPipeWrapper.Json.1.8.0.dll
+ D PowerControl/fan-host/steam-hidapi.net.dll
+ M README.md
+ M native/build_native.bat
+ M native/main.cpp
+ M package.json
+ M src/App.vue
+ M src/bridge/api.ts
+ M src/bridge/fanApi.ts
+ M src/bridge/fanHost.ts
+ M src/bridge/gameproc.ts
+ M src/bridge/ipc.ts
+ M src/bridge/performanceSchedule.ts
+ M src/bridge/powerResume.ts
+ M src/bridge/settingsRepository.ts
+ M src/bridge/yeman.ts
+ M src/components/Dropdown.vue
+ M src/components/GameCustomProfilePanel.vue
+ M src/components/NavRail.vue
+ M src/gamepad/engine.ts
+ M src/router.ts
+ M src/views/CpuView.vue
+ M src/views/FanView.vue
+ M src/views/PerformanceScheduleView.vue
+ M src/views/SettingsView.vue
+ M tools/build-fan-host-payload.ps1
+ M tools/build-workspace.ps1
+ M tools/deploy-installed.ps1
+ M tools/fan_exit_cleanup_selftest.ps1
+ M tools/fan_hc_device_closure_selftest.ps1
+ M tools/fan_hc_enable_alignment_selftest.ps1
+ M tools/fan_hc_lifecycle_deep_selftest.ps1
+ M tools/fan_hc_profile_events_full_audit.ps1
+ M tools/fan_host_lifecycle_selftest.ts
+ M tools/fan_host_parent_watchdog_selftest.ps1
+ M tools/fan_payload_acl_integration_selftest.ps1
+ M tools/fan_payload_selftest.ps1
+ M tools/fan_sleep_apply_conflict_selftest.ts
+ M tools/fan_sleep_extreme_selftest.ts
+ M tools/fan_sleep_priority_selftest.ps1
+ M tools/fan_t4_hc_parity_audit.ps1
+ M tools/game_rule_gamepad_layout_selftest.ps1
+ M tools/package-release.ps1
+ M tools/power_resume_selftest.ts
+ M tools/t0_sleep_hang_recovery_selftest.ts
+ M tools/updater_install_chain_selftest.ps1
+ M tools/updater_policy_selftest.ts
+ M tools/verify-r5v9-fan-host-payload.ps1
+?? Backups/
+?? FanLab/
+?? InputHost/
+?? PowerControl/Install-GameInputRedist.ps1
+?? PowerControl/feature-assets/
+?? PowerControl/handheldcompanion-runtime/
+?? deps/handheldcompanion-runtime/
+?? native/recovery_service.cpp
+?? src/bridge/buttonMappingMock.ts
+?? src/bridge/controllerFeedbackCapabilities.ts
+?? src/bridge/controllerShortcutRules.ts
+?? src/bridge/externalInputAdapterMock.ts
+?? src/bridge/feedbackParticipantMock.ts
+?? src/bridge/gyroCalibrationSession.ts
+?? src/bridge/gyroConfigActivation.ts
+?? src/bridge/gyroMotionMapperMock.ts
+?? src/bridge/gyroVirtualFeature.ts
+?? src/bridge/hardwareCoordinator.ts
+?? src/bridge/hcInputUtils.ts
+?? src/bridge/inputCapabilityGate.ts
+?? src/bridge/inputConfigHash.ts
+?? src/bridge/inputContracts.ts
+?? src/bridge/inputCoordinatorMock.ts
+?? src/bridge/inputDiagnostics.ts
+?? src/bridge/inputDiagnosticsUi.ts
+?? src/bridge/inputHostSupervisorMock.ts
+?? src/bridge/inputLifecycleMock.ts
+?? src/bridge/inputOwnerRuntime.ts
+?? src/bridge/inputPowerPnpMock.ts
+?? src/bridge/inputRuntimeAdmission.ts
+?? src/bridge/motionSample.ts
+?? src/bridge/personaReportMock.ts
+?? src/bridge/physicalInputOwnership.ts
+?? src/bridge/physicalVisibilityTransaction.ts
+?? src/bridge/rogGyroProtocol.ts
+?? src/bridge/rogInputAdapter.ts
+?? src/bridge/specialControllerProtocols.ts
+?? src/bridge/virtualReportAssembler.ts
+?? src/components/ControllerFeedbackCapabilitiesCard.vue
+?? src/components/ControllerShortcutsCard.vue
+?? src/components/GyroVirtualCapabilityCard.vue
+?? src/views/ButtonMappingView.vue
+?? src/views/ControllerShortcutEditorStandaloneView.vue
+?? src/views/ControllerShortcutEditorView.vue
+?? src/views/GyroMotionView.vue
+?? tools/A1-B08-cyberpunk-consumer-observation-20260903.json
+?? tools/CalibrationSafetyDelta.v1.json
+?? tools/EvidenceQualityGate.v1.json
+?? tools/GYRO-VIRTUAL-EVIDENCE-INDEX-20260903.md
+?? tools/GyroVirtual-Static-Completion-Audit-20260904.md
+?? tools/HCParityDriftLedger.v2.json
+?? tools/HCParityLedger.v1.json
+?? tools/HistoricalClaimInventory.v1.json
+?? tools/Invoke-T21T14P20T10Reaudit.ps1
+?? tools/Invoke-T22Rf00T10ImplementationCapture.ps1
+?? tools/MainlineClaimReconciliation.v1.json
+?? tools/ParameterConsumptionLedger.v1.json
+?? tools/PersonaDescriptorParity.v1.json
+?? tools/RogVisibilityTopology.v1.json
+?? tools/T10-HC-INPUTHOST-PROTOCOL-IMPLEMENTATION-EVIDENCE-20260905.md
+?? tools/T15T16EmpiricalClosureTestDesign.v1.md
+?? tools/T21-T14-RF00-P10-current-source-reaudit-20260904.md
+?? tools/T21-T14-RF00-P11-current-source-reaudit-20260904.md
+?? tools/T21-T14-RF00-P12-current-source-reaudit-20260904.md
+?? tools/T21-T14-RF00-P13-current-source-reaudit-20260904.md
+?? tools/T21-T14-RF00-P14-current-source-reaudit-20260904.md
+?? tools/T21-T14-RF00-SIDEBAR-P15-current-source-reaudit-20260905.md
+?? tools/T21-T14-RF00-SIDEBAR-P16-C14-INPUTHOST-current-source-reaudit-20260905.md
+?? tools/T21-T14-RF00-SIDEBAR-P17-C16-HOSTFRAME-current-source-reaudit-20260905.md
+?? tools/T21-T14-RF00-SIDEBAR-P19-P12-ENCODER-RENDER-SAFE-current-source-reaudit-20260905.md
+?? tools/T21-T14-RF00-T10-I-CURRENT-SOURCE-reaudit-20260905.md
+?? tools/T21-T14-RF00-T10-I-CURRENT-SOURCE-reaudit-20260906.md
+?? tools/T21-T14-RF00-current-source-reaudit-20260904.md
+?? tools/T22-BUS-P07-P01-static-evidence-20260904.raw.md
+?? tools/T22-BUS-P07-P02-static-evidence-20260904.raw.md
+?? tools/T22-BUS-P07-P03-P04-static-evidence-20260904.raw.md
+?? tools/T22-BUS-P07-P05-P06-static-evidence-20260904.raw.md
+?? tools/T22-BUS-P07-P05-supplement-static-evidence-20260904.raw.md
+?? tools/T22-BUS-P07-P07-evidence-index-20260904-v2.json
+?? tools/T22-BUS-P07-P07-evidence-index-20260904.json
+?? tools/T22-BUS-P07-current-source-line-map-20260904.md
+?? tools/T22-BUS-P07-current-source-manifest-20260904-v2.json
+?? tools/T22-BUS-P07-current-source-manifest-20260904-v3.json
+?? tools/T22-BUS-P07-current-source-manifest-20260904-v4.json
+?? tools/T22-BUS-P07-current-source-manifest-20260904-v5.json
+?? tools/T22-BUS-P07-current-source-manifest-20260904-v6.json
+?? tools/T22-BUS-P07-current-source-manifest-20260904.json
+?? tools/T22-BUS-P07-current-source-manifest.json
+?? tools/T22-BUS-P07-current-source-porcelain-20260904-v2.raw.txt
+?? tools/T22-BUS-P07-current-source-porcelain-20260904-v3.raw.txt
+?? tools/T22-BUS-P07-current-source-porcelain-20260904-v4.raw.txt
+?? tools/T22-BUS-P07-current-source-porcelain-20260904-v5.raw.txt
+?? tools/T22-BUS-P07-current-source-porcelain-20260904-v6.raw.txt
+?? tools/T22-BUS-P07-current-source-porcelain-20260904.raw.txt
+?? tools/T22-BUS-P07-current-source-porcelain.raw.txt
+?? tools/T22-BUS-P100-ROG-STATIC-MOTION-AND-MANUAL-CLOSE-EVIDENCE-20260906.md
+?? tools/T22-BUS-P101-ROG-COLLECTION-STOP-AND-STATIC-REGRESSION-20260906.md
+?? tools/T22-BUS-P102-MANUAL-YEMANCC-BACKGROUND-SAMPLER-PACKAGE-20260906.md
+?? tools/T22-BUS-P103-ROG-MANUAL-GYRO-EVIDENCE-AND-DS4-BATTERY-RULING-20260906.md
+?? tools/T22-BUS-P104-HC-PARITY-UNKNOWN-GAP-AUDIT-20260906.md
+?? tools/T22-BUS-P105-ROG-HC-SELECTOR-MATRIX-EVIDENCE-20260906.md
+?? tools/T22-BUS-P106-HC-SELECTOR-CANDIDATE-TELEMETRY-FIX-20260906.md
+?? tools/T22-BUS-P107-ROG-SELECTOR-TELEMETRY-TEST-PACKAGE-20260906.md
+?? tools/T22-BUS-P108-HC-RIGHT-STICK-PREVIEW-MISMATCH-20260906.md
+?? tools/T22-BUS-P109-HC-CHAIN-SEMANTIC-CONSUMER-AUDIT-20260906.md
+?? tools/T22-BUS-P110-HC-REAL-STICK-LANE-PROVENANCE-AND-MATRIX-AUDIT-20260906.md
+?? tools/T22-BUS-P111-HC-REAL-GYRO-TO-DS4-STICK-TEST-LANE-20260906.md
+?? tools/T22-BUS-P112-HC-MATRIX-ACTIVE-TELEMETRY-GATE-AUDIT-20260906.md
+?? tools/T22-BUS-P113-HC-MOTIONMODE-CAL-GATE-SOURCE-FIX-20260906.md
+?? tools/T22-BUS-P114-HC-TRIGGER-SELECTOR-SOURCE-FIX-20260906.md
+?? tools/T22-BUS-P115-ROG-GAMEPAD-JITTER-AND-HOST-LIFECYCLE-SOURCE-FIX-20260906.md
+?? tools/T22-BUS-P116-T0-YMCC-GAMEPAD-SUMMON-FALLBACK-20260906.md
+?? tools/T22-BUS-P117-T0-YMCC-ALL-GAMEPAD-SEMANTIC-20260906.md
+?? tools/T22-BUS-P118-T0-XINPUT-BUTTON-STATE-AND-SEMANTIC-CLOSURE-20260906.md
+?? tools/T22-BUS-P119-T0-GAMEPAD-STATE-REPLAY-FIX-20260906.md
+?? tools/T22-BUS-P12-E02-HIDMAESTRO-EMBEDDED-PROFILE-STATIC-EVIDENCE-20260905.json
+?? tools/T22-BUS-P12-E03-HIDMAESTRO-DS4-ENCODER-STATIC-EVIDENCE-20260905.json
+?? tools/T22-BUS-P120-T0-CONTROLLER-PAGE-LATE-SUBSCRIBER-FIX-20260906.md
+?? tools/T22-BUS-P121-T0-CONTROLLER-PAGE-UI-CONNECTED-RECEIPT-20260906.md
+?? tools/T22-BUS-P122-T0-NONNEUTRAL-XINPUT-ADMISSION-BARRIER-20260906.md
+?? tools/T22-BUS-P123-T0-HC-BUTTON-AXIS-ADMISSION-SPLIT-20260906.md
+?? tools/T22-BUS-P124-T0-RELEASE-BARRIER-BUTTON-AXIS-SPLIT-20260906.md
+?? tools/T22-BUS-P125-T0-HC-XINPUT14-ROUTE-20260906.md
+?? tools/T22-BUS-P126-T0-VIRTUAL-DS4-MAPPING-LIFECYCLE-20260906.md
+?? tools/T22-BUS-P127-T0-CACHE-STATE-AND-DEFAULT-OFF-20260906.md
+?? tools/T22-BUS-P128-T0-HC-EXACT-PHYSICAL-VISIBILITY-DEPLOY-20260906.md
+?? tools/T22-BUS-P129-T0-HC-XINPUT-CANONICAL-SOURCE-FIX-20260906.md
+?? tools/T22-BUS-P20-HC-RAW-MOTION-TRANSPORT-SCOPE-AUDIT-20260905.md
+?? tools/T22-BUS-P22-PHID-REACHABILITY-STATIC-AUDIT-20260905.md
+?? tools/T22-BUS-P23-T11-CALIBRATION-AUTHORITY-AUDIT-20260905.md
+?? tools/T22-BUS-P24-HC-HIDMAESTRO-YMCC-THREE-WAY-STATIC-AUDIT-20260905.md
+?? tools/T22-BUS-P25-HIDMAESTRO-CREATE-READINESS-AND-HOST-ACK-AUDIT-20260905.md
+?? tools/T22-BUS-P26-HOST-RELEASE-TERMINATE-RACE-AUDIT-20260905.md
+?? tools/T22-BUS-P54-ROG-IMU-EVIDENCE-20260905.md
+?? tools/T22-BUS-P55-LENOVO-HC-VOCABULARY-AND-PROTOCOL-PARITY-20260905.md
+?? tools/T22-BUS-P56-HC-ACTION-SEMANTIC-PARITY-20260905.md
+?? tools/T22-BUS-P57-STATIC-REGRESSION-AND-RELEASE-GATE-20260905.md
+?? tools/T22-BUS-P58-ROG-TEST-PACKAGE-20260905.md
+?? tools/T22-BUS-P59-CLEAN-LOG-CRASH-AUDIT-20260905.md
+?? tools/T22-BUS-P60-30-SECOND-PACKAGE-AND-STATIC-REAUDIT-20260905.md
+?? tools/T22-BUS-P61-GYRO-MOTION-STARTUP-CRASH-AUDIT-20260906.md
+?? tools/T22-BUS-P62-ROG-NO-CRASH-JSON-SHAPE-FIX-20260905.md
+?? tools/T22-BUS-P63-ROG-IMU-DATA-RECOVERY-20260905.md
+?? tools/T22-BUS-P64-HC-UNKNOWN-GAP-RECONCILIATION-20260905.md
+?? tools/T22-BUS-P65-HC-MOTION-API-REACHABILITY-DEVICE-MATRIX-AUDIT-20260905.md
+?? tools/T22-BUS-P65-HC-RUNTIME-DEPENDENCY-SUPPLEMENT-20260905.md
+?? tools/T22-BUS-P66-ROG-RC73XA-HC-MATRIX-AND-PS4-BATTERY-EVIDENCE-20260905.md
+?? tools/T22-BUS-P67-LIFECYCLE-THREE-WAY-RECONCILIATION-AND-PS4-BATTERY-ISSUE-20260905.md
+?? tools/T22-BUS-P68-HISTORICAL-A3-DS4-BATTERY-CONTRACT-20260905.md
+?? tools/T22-BUS-P69-CURRENT-SOURCE-STALE-IMU-ARTIFACT-RECONCILIATION-20260905.md
+?? tools/T22-BUS-P70-STATIC-REGRESSION-AND-RELEASE-BOUNDARY-RECONCILIATION-20260905.md
+?? tools/T22-BUS-P71-HIDMAESTRO-DS4-BATTERY-ROUTE-STATIC-PROBE-20260905.md
+?? tools/T22-BUS-P73-PS4-BATTERY-RECURRENCE-20260906.md
+?? tools/T22-BUS-P74-HC-MOTION-RANGE-AND-TELEMETRY-GAP-20260906.md
+?? tools/T22-BUS-P75-HC-STEERING-AXIS-AND-TELEMETRY-BOUNDARY-20260906.md
+?? tools/T22-BUS-P76-HC-DS4-BATTERY-AND-MOTION-SCAN-20260905.md
+?? tools/T22-BUS-P77-HC-MOTION-TIMING-RESUME-RECONCILIATION-20260905.md
+?? tools/T22-BUS-P78-HC-CALIBRATION-AND-SPECIAL-CONTROLLER-LIFECYCLE-20260905.md
+?? tools/T22-BUS-P79-HC-MOTION-AND-GAP-EXHAUSTION-20260905.md
+?? tools/T22-BUS-P80-FORMAL-RELEASE-VS-ROG-TEST-PACKAGE-BOUNDARY-20260905.md
+?? tools/T22-BUS-P81-HC-DS4-IDENTITY-VS-HIDMAESTRO-PROFILE-BATTERY-GAP-20260905.md
+?? tools/T22-BUS-P82-ROG-EVIDENCE-PS4-BATTERY-RAW-GAP-20260905.md
+?? tools/T22-BUS-P84-CURRENT-SOURCE-DIRECT-FIX-TRIAGE-20260905.md
+?? tools/T22-BUS-P86-ROG-RUNTIME-LOG-PS4-BATTERY-GAP-20260905.md
+?? tools/T22-BUS-P87-ROG-RAR-FUTURE-DATED-DS4-GAP-20260905.md
+?? tools/T22-BUS-P88-STATIC-PARITY-RECHECK-20260906.md
+?? tools/T22-BUS-P89-DOC-CURRENT-GATE-RECONCILIATION-20260906.md
+?? tools/T22-BUS-P90-ROG-INPUT-GAP-TEST-PACKAGE-20260906.md
+?? tools/T22-BUS-P91-PS4-5PERCENT-LOCAL-HID-SOURCE-RECONCILIATION-20260906.md
+?? tools/T22-BUS-P92-PS4-BATTERY-5PERCENT-SOURCE-CROSSCHECK-20260906.md
+?? tools/T22-BUS-P93-DS4-BATTERY-VIRTUAL-FULL-PATCH-20260906.md
+?? tools/T22-BUS-P94-ROG-CAPTURE-EXIT-AND-WINDOW-CLOSE-GAP-20260906.md
+?? tools/T22-BUS-P95-ROG-INPUT-GAP-EVIDENCE-20260906-130139.md
+?? tools/T22-BUS-P96-ROG-IMMEDIATE-EXIT-LIFECYCLE-20260906-131243.md
+?? tools/T22-BUS-P97-HC-DS4-BATTERY-NONPARITY-RETRACTION-20260906.md
+?? tools/T22-BUS-P98-RELEASE-HIDHIDE-POLICY-CONFLICT-20260906.md
+?? tools/T22-BUS-P99-CURRENT-ROG-TEST-PACKAGE-20260906.md
+?? tools/T22-C06-P09-frontend-package-hc-static-evidence-20260904.md
+?? tools/T22-RF00-P08-C05-audit-20260904.md
+?? tools/T22-RF00-P08-C05-current-source-line-map-20260904.md
+?? tools/T22-RF00-P08-C05-current-source-manifest-20260904.json
+?? tools/T22-RF00-P08-C05-current-source-porcelain-20260904.raw.txt
+?? tools/T22-RF00-P08-local-corrections-audit-20260904.md
+?? tools/T22-RF00-P09-C06-C07-current-source-manifest-20260904.json
+?? tools/T22-RF00-P09-C06-C07-current-source-porcelain-20260904.raw.txt
+?? tools/T22-RF00-P10-C06-C07-T21-current-source-line-map-20260904.md
+?? tools/T22-RF00-P10-C06-C07-T21-current-source-manifest-20260904.json
+?? tools/T22-RF00-P10-C06-C07-T21-current-source-porcelain-20260904.raw.txt
+?? tools/T22-RF00-P11-C06-C07-T21-current-source-line-map-20260904.md
+?? tools/T22-RF00-P11-C06-C07-T21-current-source-manifest-20260904.json
+?? tools/T22-RF00-P11-C06-C07-T21-current-source-porcelain-20260904.raw.txt
+?? tools/T22-RF00-P12-C06-C07-C08-T21-current-source-line-map-20260904.md
+?? tools/T22-RF00-P12-C06-C07-C08-T21-current-source-manifest-20260904.json
+?? tools/T22-RF00-P12-C06-C07-C08-T21-current-source-porcelain-20260904.raw.txt
+?? tools/T22-RF00-P13-C06-C07-C08-T21-current-source-line-map-20260904.md
+?? tools/T22-RF00-P13-C06-C07-C08-T21-current-source-manifest-20260904.json
+?? tools/T22-RF00-P13-C06-C07-C08-T21-current-source-porcelain-20260904.raw.txt
+?? tools/T22-RF00-P14-C06-C07-C08-C09-T21-current-source-line-map-20260904.md
+?? tools/T22-RF00-P14-C06-C07-C08-C09-T21-current-source-manifest-20260904.json
+?? tools/T22-RF00-P14-C06-C07-C08-C09-T21-current-source-porcelain-20260904.raw.txt
+?? tools/T22-RF00-SIDEBAR-P15-C10-C11-C12-C13-current-source-line-map-20260905.md
+?? tools/T22-RF00-SIDEBAR-P15-C10-C11-C12-C13-current-source-manifest-20260905.json
+?? tools/T22-RF00-SIDEBAR-P15-C10-C11-C12-C13-current-source-porcelain-20260905.raw.txt
+?? tools/T22-RF00-SIDEBAR-P16-C14-INPUTHOST-current-source-line-map-20260905.md
+?? tools/T22-RF00-SIDEBAR-P16-C14-INPUTHOST-current-source-manifest-20260905.json
+?? tools/T22-RF00-SIDEBAR-P16-C14-INPUTHOST-current-source-porcelain-20260905.raw.txt
+?? tools/T22-RF00-SIDEBAR-P17-C16-HOSTFRAME-RENDER-REPAIR-20260905.md
+?? tools/T22-RF00-SIDEBAR-P17-C16-HOSTFRAME-current-source-20260905-line-map.md
+?? tools/T22-RF00-SIDEBAR-P17-C16-HOSTFRAME-current-source-20260905-manifest.json
+?? tools/T22-RF00-SIDEBAR-P17-C16-HOSTFRAME-current-source-20260905-porcelain.raw.txt
+?? tools/T22-RF00-SIDEBAR-P17-C16-HOSTFRAME-current-source-20260905-raw-search.txt
+?? tools/T22-RF00-SIDEBAR-P18-P12-ENCODER-current-source-20260905-manifest.json
+?? tools/T22-RF00-SIDEBAR-P18-P12-ENCODER-current-source-20260905-porcelain.raw.txt
+?? tools/T22-RF00-SIDEBAR-P18-P12-ENCODER-current-source-20260905-raw-search.txt
+?? tools/T22-RF00-SIDEBAR-P19-P12-ENCODER-RENDER-SAFE-current-source-20260905-line-map.md
+?? tools/T22-RF00-SIDEBAR-P19-P12-ENCODER-RENDER-SAFE-current-source-20260905-manifest.json
+?? tools/T22-RF00-SIDEBAR-P19-P12-ENCODER-RENDER-SAFE-current-source-20260905-porcelain.raw.txt
+?? tools/T22-RF00-SIDEBAR-P19-P12-ENCODER-RENDER-SAFE-current-source-20260905-raw-search.txt
+?? tools/T22-RF00-T10-I-CURRENT-SOURCE-20260905-line-map.md
+?? tools/T22-RF00-T10-I-CURRENT-SOURCE-20260905-manifest.json
+?? tools/T22-RF00-T10-I-CURRENT-SOURCE-20260905-porcelain.raw.txt
+?? tools/T22-RF00-T10-I-CURRENT-SOURCE-20260905-raw-search.txt
+?? tools/T22-RF00-T10-I-CURRENT-SOURCE-20260906-line-map.md
+?? tools/T22-RF00-T10-I-CURRENT-SOURCE-20260906-manifest.json
+?? tools/T22-RF00-T10-I-CURRENT-SOURCE-20260906-porcelain.raw.txt
+?? tools/T22-RF00-T10-I-CURRENT-SOURCE-20260906-raw-search.txt
+?? tools/T22-RF00-current-source-line-map-20260904.md
+?? tools/T22-RF00-current-source-manifest-20260904.json
+?? tools/T22-RF00-current-source-porcelain-20260904.raw.txt
+?? tools/a1_external_asset_metadata_audit.ps1
+?? tools/assisted_stick_assembler_selftest.ts
+?? tools/button_mapping_mock_selftest.ts
+?? tools/button_mapping_runtime_readiness_selftest.ts
+?? tools/calibration_safety_delta_selftest.ts
+?? tools/controller_feedback_capabilities_selftest.ts
+?? tools/controller_shortcut_rules_selftest.ts
+?? tools/evidence_quality_gate_selftest.ts
+?? tools/external_input_adapter_mock_selftest.ts
+?? tools/feedback_participant_mock_selftest.ts
+?? tools/gyro_calibration_session_selftest.ts
+?? tools/gyro_config_activation_selftest.ts
+?? tools/gyro_e37_hc_parity_selftest.ts
+?? tools/gyro_motion_mapper_mock_selftest.ts
+?? tools/gyro_virtual_feature_selftest.ts
+?? tools/gyro_virtual_feature_sidecar_audit.ps1
+?? tools/gyro_virtual_mainline_status_audit.ps1
+?? tools/gyro_virtual_release_boundary_audit.ps1
+?? tools/hardware_coordinator_contract_selftest.ts
+?? tools/hc_dependency_location_audit.ps1
+?? tools/hc_input_dependency_audit.ps1
+?? tools/hc_input_isolation_audit.ps1
+?? tools/hc_input_order_audit.ps1
+?? tools/hc_isolated_dependency_probe.ps1
+?? tools/hc_manager_graph_audit.ps1
+?? tools/hc_net10_probe.ps1
+?? tools/hc_net10_probe/
+?? tools/hc_parity_drift_ledger_selftest.ts
+?? tools/hc_parity_ledger_audit.ps1
+?? tools/hc_reflection_load_probe_evidence_20260903.json
+?? tools/hidhide_physical_probe.ps1
+?? tools/hidhide_readonly_audit.ps1
+?? tools/hidhide_readonly_audit_20260903.json
+?? tools/hidhide_virtual_transaction_evidence_20260903.json
+?? tools/hidmaestro_api_metadata_audit.ps1
+?? tools/hidmaestro_api_probe/
+?? tools/hidmaestro_ds4_probe_evidence_20260903.json
+?? tools/hidmaestro_ds4_reprobe_20260903.json
+?? tools/hidmaestro_real_probe_evidence.json
+?? tools/hidmaestro_sdk_demo_reprobe_20260903.json
+?? tools/input-capability-manifest-20260903.json
+?? tools/input-route-evidence-20260903.json
+?? tools/input_capability_gate_selftest.ts
+?? tools/input_capability_manifest_selftest.ts
+?? tools/input_contracts_selftest.ts
+?? tools/input_coordinator_mock_selftest.ts
+?? tools/input_device_state_snapshot.ps1
+?? tools/input_diagnostics_selftest.ts
+?? tools/input_fan_isolation_selftest.ts
+?? tools/input_host_ds4_imu_static_selftest.ts
+?? tools/input_host_result_shape_selftest.ps1
+?? tools/input_host_supervisor_selftest.ts
+?? tools/input_lifecycle_mock_selftest.ts
+?? tools/input_owner_resident_selftest.ps1
+?? tools/input_owner_runtime_integration_selftest.ts
+?? tools/input_owner_runtime_selftest.ts
+?? tools/input_power_pnp_selftest.ts
+?? tools/input_route_evidence_selftest.ts
+?? tools/input_runtime_admission_selftest.ts
+?? tools/input_t8_host_loop_selftest.ts
+?? tools/migrate-hc-runtime-to-shared.ps1
+?? tools/motion_sample_selftest.ts
+?? tools/package-fan-coordinator-test.ps1
+?? tools/package-gyro-input-test.ps1
+?? tools/parameter_consumption_ledger_selftest.ts
+?? tools/persona_descriptor_parity_selftest.ts
+?? tools/persona_report_mock_selftest.ts
+?? tools/physical_input_ownership_selftest.ts
+?? tools/physical_visibility_transaction_selftest.ts
+?? tools/provider_capability_matrix_selftest.ts
+?? tools/record_hidhide_consumer_observation.ps1
+?? tools/recovery_service_selftest.ps1
+?? tools/rog_gyro_protocol_selftest.ts
+?? tools/rog_hidhide_contract_static_selftest.ts
+?? tools/rog_input_adapter_selftest.ts
+?? tools/rog_input_diagnostic.ps1
+?? tools/rog_visibility_topology_selftest.ts
+?? tools/rog_xbox_face_lifecycle_selftest.ps1
+?? tools/settings_cas_selftest.ts
+?? tools/special_controller_protocols_selftest.ts
+?? tools/third_party_input_isolation_readonly_audit.ps1
+?? tools/verify-fanhost-source-baseline.ps1
+?? tools/verify-hc-candidate-runtime.ps1
+?? tools/verify-hc-source-baseline.ps1
+?? tools/verify-yemancc-export.ps1
+?? tools/xinput_physical_observation_probe.ps1

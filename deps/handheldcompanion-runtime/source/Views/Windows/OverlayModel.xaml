@@ -1,0 +1,46 @@
+<common:OverlayWindow
+    x:Class="HandheldCompanion.Views.Windows.OverlayModel"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:HelixToolkit="http://helix-toolkit.org/wpf"
+    xmlns:common="clr-namespace:HandheldCompanion.Views.Classes"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    Title="Virtual Controller"
+    Closing="Window_Closing"
+    Visibility="Collapsed"
+    mc:Ignorable="d">
+
+    <!--  The HelixViewport3D supports camera manipulation, and can be used just like the Viewport3D  -->
+    <HelixToolkit:HelixViewport3D
+        Name="ModelViewPort"
+        AutomationProperties.LiveSetting="Off"
+        ClipToBounds="False"
+        Focusable="False"
+        IsHitTestVisible="False"
+        IsMoveEnabled="False"
+        IsPanEnabled="False"
+        IsRotationEnabled="False"
+        RenderOptions.EdgeMode="Aliased"
+        ShowCameraInfo="False"
+        ShowViewCube="False"
+        ZoomExtentsWhenLoaded="True">
+
+        <!--  Lighting  -->
+        <HelixToolkit:SunLight />
+        <HelixToolkit:DirectionalHeadLight Brightness="0.35" Position="-90,0,0" />
+
+        <!--  3D Content  -->
+        <ModelVisual3D x:Name="ModelVisual3D" />
+
+        <!--  Camera  -->
+        <HelixToolkit:HelixViewport3D.Camera>
+            <PerspectiveCamera
+                FieldOfView="35"
+                LookDirection="-1,0,0"
+                Position="1,0,0"
+                UpDirection="0,0,1" />
+        </HelixToolkit:HelixViewport3D.Camera>
+
+    </HelixToolkit:HelixViewport3D>
+</common:OverlayWindow>

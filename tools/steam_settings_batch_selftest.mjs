@@ -1,0 +1,26 @@
+import fs from 'node:fs';import path from 'node:path';import assert from 'node:assert/strict';import {spawnSync} from 'node:child_process';
+const root=process.cwd(),out=process.env.YMCC_STEAM_SETTINGS_OUT||path.resolve(root,'../../Build/Validation/monitor-steam-settings-20261009/batch');fs.mkdirSync(out,{recursive:true});
+const main=fs.readFileSync('native/main.cpp','utf8');
+const kick=main.slice(main.indexOf('static void steamOverlayFixKick(const char* reason) {'),main.indexOf('// SteamDeck desktop right-stick sensitivity.'));
+assert(kick.includes('steamSettingsQueue(reason)'));assert(!kick.includes('poolSubmit'));assert(!kick.includes('SetTimer'));
+const input=fs.readFileSync('tools/steam_settings_batch_selftest.cpp','utf8').replace('//__PRODUCTION_OVERLAY_KICK__',kick);
+fs.writeFileSync(path.join(out,'fixture.cpp'),input);
+const bat='@echo off\r\ncall "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Auxiliary\\Build\\vcvars64.bat" >nul\r\ncl /nologo /std:c++20 /utf-8 /EHsc /MT /O2 /I"'+root+'\\native" /I"'+root+'\\deps\\json" "'+out+'\\fixture.cpp" /Fo"'+out+'\\fixture.obj" /Fe"'+out+'\\fixture.exe"\r\nexit /b %errorlevel%\r\n';
+fs.writeFileSync(path.join(out,'compile.cmd'),bat.replaceAll('\\r\\n','\r\n').replaceAll('\\\\','\\'));
+const build=spawnSync('cmd.exe',['/d','/c',path.join(out,'compile.cmd')],{encoding:'utf8',cwd:out});fs.writeFileSync(path.join(out,'build.log'),(build.stdout||'')+(build.stderr||''));console.log(build.stdout);console.error(build.stderr);assert.equal(build.status,0);
+const run=spawnSync(path.join(out,'fixture.exe'),[],{encoding:'utf8',cwd:out});fs.writeFileSync(path.join(out,'results.log'),(run.stdout||'')+(run.stderr||''));console.log(run.stdout);console.error(run.stderr);assert.equal(run.status,0);
+const retry=main.slice(main.indexOf('static void steamDeckMouseRetry('),main.indexOf('static json steamDeckMouseGet()'));
+assert(retry.includes('steamSettingsQueue("mouse-retry")')&&!retry.includes('poolSubmit'));
+const mouse=main.slice(main.indexOf('static json steamDeckMouseSet('),main.indexOf('#include "steam_settings_runtime.h"'));
+assert(mouse.includes('steamSettingsQueue("mouse-user")')&&!mouse.includes('sdmApplyLocked();'));
+const observer=main.slice(main.indexOf('static void steamSettingsObserverStart()'),main.indexOf('static bool sofApplyValueToConfigText(const std::string& in, int target, std::string* out) {'));
+assert(observer.includes('steamSettingsQueue("steam-session")'));assert(observer.includes('g_steamClientPending.load()'));assert(!observer.includes('SetTimer'));
+console.log('PASS both existing Steam feature adapters and shared session observer use one write lane');
+
+const adapters = ['src/bridge/steamDeckMouse.ts','src/bridge/steamOverlayFix.ts'].map(file=>fs.readFileSync(file,'utf8'));
+assert(adapters.every(text=>text.includes("'steam.settings.get'")));
+assert(adapters[0].includes("'steam.settings.set'"));
+const bridge=fs.readFileSync('src/bridge/yeman.ts','utf8');
+const sleepSetter=bridge.slice(bridge.indexOf('export async function sleepGuardSetConfig('),bridge.indexOf('export interface SleepFactEvent'));
+assert(sleepSetter.includes("'steam.settings.set', {overlayOffFix:cfg.steamOverlayOffFix}"));
+console.log('PASS monitor, existing mouse and sleep overlay frontends all route through the public unified Steam entry');

@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "artifactId": "T18-ROG-VISIBILITY-TOPOLOGY-20260904",
+  "hcBaseline": "0.32.4.0/06c0b954",
+  "status": "SOURCE-CONTRACT-READY",
+  "runtimeClosure": "UNENCLOSED",
+  "scope": "ROG topology and evidence model only. No HidHide mutation, OEM report write, virtual target creation, Steam, game, or physical controller access is performed.",
+  "planes": [
+    {
+      "plane": "P-OWNER",
+      "meaning": "YMCC internal semantic action ownership",
+      "identityRequirement": "coordinator epoch and named frontend/game owner",
+      "currentStatus": "separate product concern; cannot imply external visibility",
+      "evidenceRequired": ["owner revoke", "neutral", "new epoch", "ymcc-action-count", "game-input-count"],
+      "safeStop": "owner=none"
+    },
+    {
+      "plane": "P-HID",
+      "meaning": "physical HID visibility addressed by HC-resolved physical device instance plus base container identity",
+      "identityRequirement": "DeviceManager XUSB -> PnP resolved physical instance/container; virtual target exclusion",
+    "currentStatus": "source-admitted exact selected physical identity transaction; runtime receipt pending",
+      "evidenceRequired": ["before snapshot", "allowlist diff", "physical hide diff", "cycle", "restore diff", "recovery observation"],
+      "safeStop": "p-hid-deferred"
+    },
+    {
+      "plane": "P-XINPUT",
+      "meaning": "XInput/Steam/game consumer visibility",
+      "identityRequirement": "same physical device, named external consumer, persona, and recovery scenario",
+      "currentStatus": "UNENCLOSED",
+      "evidenceRequired": ["OS observation", "Steam observation", "game observation", "recovery observation"],
+      "safeStop": "do-not-claim-isolation"
+    }
+  ],
+  "rogOemNegative": {
+    "hcReference": "Controllers/Asus/XboxAdaptiveController.cs::Disable -> Devices/ASUS/ROGAlly.cs::XBoxController(true)",
+    "report": "5A D1 0B 01 02",
+    "productDisposition": "permanently forbidden for YMCC frontend invocation, game isolation, or DS4 output management",
+    "knownNegative": "ROG observation: Steam and YMCC both lose complete controller input after OEM Disable",
+    "safeStop": "never write the Disable report"
+  },
+  "currentCandidate": {
+    "nativeInputHostStart": "Coordinator performs exact RawInput→PnP identity snapshot, HidHide base+instance hide/cycle, and journaled restore",
+    "nativeOemDisablePath": "must be absent",
+    "claimBoundary": "P-HID success cannot be used to claim P-XINPUT or P-OWNER success"
+  }
+}

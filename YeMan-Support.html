@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>野蛮系统 · 支持</title>
+<style>
+  :root{
+    --bg:#0b0f14; --bg2:#0f151c; --card:rgba(255,255,255,.04);
+    --card-hover:rgba(56,189,248,.10); --border:rgba(56,189,248,.14);
+    --accent:#38bdf8; --accent2:#7dd3fc; --text:#e6edf3; --muted:#8b98a5;
+    --ai:#a78bfa; --ai2:#c4b5fd;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    font-family:"Segoe UI","PingFang SC","Microsoft YaHei",system-ui,-apple-system,sans-serif;
+    background:
+      radial-gradient(1200px 600px at 80% -10%, rgba(56,189,248,.10), transparent 60%),
+      radial-gradient(900px 500px at -10% 110%, rgba(167,139,250,.10), transparent 55%),
+      var(--bg);
+    color:var(--text); min-height:100vh; padding:40px 20px;
+  }
+  .wrap{max-width:1040px;margin:0 auto}
+  header{margin-bottom:32px}
+  .title{font-size:30px;font-weight:800;letter-spacing:.5px;
+    background:linear-gradient(90deg,var(--accent),var(--ai2));
+    -webkit-background-clip:text;background-clip:text;color:transparent}
+  .sub{color:var(--muted);margin-top:8px;font-size:14px}
+
+  .section-h{display:flex;align-items:center;gap:10px;margin:30px 0 16px;
+    font-size:15px;font-weight:700;color:var(--accent2);text-transform:uppercase;letter-spacing:1px}
+  .section-h::before{content:"";width:4px;height:18px;border-radius:2px;
+    background:linear-gradient(var(--accent),var(--ai));display:inline-block}
+
+  /* AI 支持：醒目大卡片 */
+  .ai-card{
+    display:flex;align-items:center;gap:22px;padding:26px 28px;border-radius:18px;
+    background:linear-gradient(120deg, rgba(167,139,250,.16), rgba(56,189,248,.10));
+    border:1px solid rgba(167,139,250,.35);backdrop-filter:blur(8px);
+    transition:transform .15s ease, box-shadow .15s ease;
+  }
+  .ai-card:hover{transform:translateY(-3px);box-shadow:0 14px 40px rgba(167,139,250,.22)}
+  .ai-ico{font-size:46px;line-height:1;filter:drop-shadow(0 4px 10px rgba(167,139,250,.4))}
+  .ai-body{flex:1}
+  .ai-name{font-size:20px;font-weight:800;color:#fff}
+  .ai-desc{color:var(--muted);margin-top:6px;font-size:14px}
+  .ai-btn{
+    display:inline-flex;align-items:center;gap:8px;text-decoration:none;
+    background:linear-gradient(120deg,var(--ai),#818cf8);color:#fff;font-weight:700;
+    padding:13px 22px;border-radius:12px;font-size:15px;white-space:nowrap;
+    box-shadow:0 8px 22px rgba(129,140,248,.35);transition:transform .12s, filter .12s}
+  .ai-btn:hover{transform:translateY(-2px);filter:brightness(1.08)}
+
+  /* 软件网格 */
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px}
+  .card{
+    position:relative;padding:20px;border-radius:16px;background:var(--card);
+    border:1px solid var(--border);backdrop-filter:blur(6px);
+    transition:transform .14s ease, background .14s ease, border-color .14s ease}
+  .card:hover{transform:translateY(-3px);background:var(--card-hover);border-color:rgba(56,189,248,.4)}
+  .card-top{display:flex;align-items:center;gap:12px;margin-bottom:10px}
+  .card-ico{font-size:30px;line-height:1}
+  .card-name{font-size:17px;font-weight:700;color:#fff}
+  .card-tag{font-size:12px;color:var(--accent2);background:rgba(56,189,248,.12);
+    padding:2px 8px;border-radius:999px;border:1px solid var(--border);margin-left:auto}
+  .card-desc{color:var(--muted);font-size:13.5px;line-height:1.6;min-height:42px}
+  .card-btn{
+    display:inline-flex;align-items:center;gap:6px;margin-top:14px;text-decoration:none;
+    color:var(--accent);font-weight:600;font-size:14px;
+    border:1px solid var(--border);padding:8px 14px;border-radius:10px;
+    transition:background .12s, color .12s}
+  .card-btn:hover{background:var(--accent);color:#06121a}
+
+  :root[data-theme='red-black']{
+    --bg:#160b10; --bg2:#24131b; --card:rgba(38,13,23,.72);
+    --card-hover:rgba(255,59,92,.16); --border:rgba(255,59,92,.28);
+    --accent:#ff3b5c; --accent2:#ff9d3d; --ai:#d64cff; --ai2:#ff9dc0;
+  }
+  :root[data-theme='cyberpunk']{
+    --bg:#050505; --bg2:#08140b; --card:rgba(10,18,12,.98);
+    --card-hover:rgba(12,55,25,.98); --border:rgba(57,255,104,.72);
+    --accent:#39ff68; --accent2:#8aff9f; --ai:#39ff68; --ai2:#8aff9f;
+    --text:#55f27a; --muted:#39b85a;
+  }
+  footer{margin-top:40px;color:var(--muted);font-size:12.5px;text-align:center;line-height:1.7}
+  footer a{color:var(--accent2);text-decoration:none}
+  footer a:hover{text-decoration:underline}
+  body::before{content:"";position:fixed;inset:0;pointer-events:none;background:rgba(4,4,0,.18);z-index:-1}
+  :root[data-theme='cyberpunk'] .title,
+  :root[data-theme='cyberpunk'] .section-h,
+  :root[data-theme='cyberpunk'] .card-name,
+  :root[data-theme='cyberpunk'] .ai-name{color:var(--text)}
+  :root[data-theme='cyberpunk'] .title{background:none;-webkit-text-fill-color:var(--accent)}
+  :root[data-theme='cyberpunk'] .ai-card{background:linear-gradient(120deg,rgba(42,36,0,.98),rgba(14,14,8,.98));border-color:var(--border)}
+  :root[data-theme='cyberpunk'] .ai-btn{color:#090900;background:var(--accent)}
+  :root[data-theme='cyberpunk'] .card-btn:hover{color:#090900}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="title">🌐 野蛮系统 · 支持</div>
+    <div class="sub">遇到问题先问 AI，常用软件主页与官方下载一站直达。</div>
+  </header>
+
+  <!-- 排第一个：AI 支持 -->
+  <div class="section-h">优先 · AI 支持</div>
+  <a class="ai-card" href="https://www.doubao.com/chat/" target="_blank" rel="noopener">
+    <div class="ai-ico">🤖</div>
+    <div class="ai-body">
+      <div class="ai-name">豆包 AI 支持</div>
+      <div class="ai-desc">使用问题、配置疑问、报错排查，直接问豆包 AI 助手（7×24 在线）。</div>
+    </div>
+    <div class="ai-btn">打开豆包 →</div>
+  </a>
+
+  <!-- 系统内置软件主页 -->
+  <div class="section-h">系统内置软件 · 官方主页</div>
+  <div class="grid">
+
+    <div class="card">
+      <div class="card-top"><span class="card-ico">📊</span><span class="card-name">RTSS</span>
+        <span class="card-tag">监控锁帧</span></div>
+      <div class="card-desc">RivaTuner Statistics Server：帧率监控 OSD、锁帧、扫描线同步。</div>
+      <a class="card-btn" href="https://www.guru3d.com/download/rtss-rivatuner-statistics-server-download/" target="_blank" rel="noopener">访问主页 ↗</a>
+    </div>
+
+    <div class="card">
+      <div class="card-top"><span class="card-ico">⚡</span><span class="card-name">PawnIO</span>
+        <span class="card-tag">TDP 驱动</span></div>
+      <div class="card-desc">官方签名内核驱动，野蛮系统 TDP/功耗调度底层依赖（取代 WinRing0）。</div>
+      <a class="card-btn" href="https://pawnio.eu/" target="_blank" rel="noopener">访问主页 ↗</a>
+    </div>
+
+    <div class="card">
+      <div class="card-top"><span class="card-ico">🎮</span><span class="card-name">Steam</span>
+        <span class="card-tag">SteamOS 下载</span></div>
+      <div class="card-desc">Steam 客户端与 SteamOS（Steam Deck 镜像）官方下载地址。</div>
+      <a class="card-btn" href="https://store.steampowered.com/steamos/download?ver=steamdeck" target="_blank" rel="noopener">访问主页 ↗</a>
+    </div>
+
+    <div class="card">
+      <div class="card-top"><span class="card-ico">🎨</span><span class="card-name">CSSLoader</span>
+        <span class="card-tag">Steam 美化</span></div>
+      <div class="card-desc">为 Steam 桌面/大屏模式注入自定义 CSS 主题的皮肤引擎。</div>
+      <a class="card-btn" href="https://github.com/DeckThemes/CSSLoader-Desktop" target="_blank" rel="noopener">访问主页 ↗</a>
+    </div>
+
+    <div class="card">
+      <div class="card-top"><span class="card-ico">🌐</span><span class="card-name">网络加速</span>
+        <span class="card-tag">steamcommunity</span></div>
+      <div class="card-desc">steamcommunity / 创意工坊 等社区页面访问加速（dogfight360）。</div>
+      <a class="card-btn" href="https://www.dogfight360.com/blog/" target="_blank" rel="noopener">访问主页 ↗</a>
+    </div>
+
+    <div class="card">
+      <div class="card-top"><span class="card-ico">🔍</span><span class="card-name">Lossless Scaling</span>
+        <span class="card-tag">缩放插帧</span></div>
+      <div class="card-desc">小黄鸭：整数/非整数缩放 + 帧生成插帧，老游戏神器（Steam 商店页）。</div>
+      <a class="card-btn" href="https://store.steampowered.com/app/993090/Lossless_Scaling/" target="_blank" rel="noopener">访问主页 ↗</a>
+    </div>
+
+    <div class="card">
+      <div class="card-top"><span class="card-ico">🛠️</span><span class="card-name">游戏修改器合集</span>
+        <span class="card-tag">Cheat Manager</span></div>
+      <div class="card-desc">一站式游戏修改/训练器管理器（dyang886/Game-Cheats-Manager）。</div>
+      <a class="card-btn" href="https://github.com/dyang886/Game-Cheats-Manager" target="_blank" rel="noopener">访问主页 ↗</a>
+    </div>
+
+    <div class="card">
+      <div class="card-top"><span class="card-ico">⏩</span><span class="card-name">OpenSpeedy</span>
+        <span class="card-tag">游戏变速器</span></div>
+      <div class="card-desc">开源免费游戏变速器，Ring3 Hook 调速，单机/网盘下载加速（game1024）。</div>
+      <a class="card-btn" href="https://github.com/game1024/OpenSpeedy" target="_blank" rel="noopener">访问主页 ↗</a>
+    </div>
+
+  </div>
+
+  <footer>
+    野蛮系统控制中心 · 支持页 &nbsp;|&nbsp; 软件主页均为各项目官方源，请认准官方渠道下载以避免恶意篡改。<br/>
+    本页为本地离线页面，链接在新标签页打开。
+  </footer>
+</div>
+<script>
+(function () {
+  var storedTheme = localStorage.getItem('yeman.ui.theme') || 'blue-black';
+  var theme = storedTheme === 'cyber-red' ? 'red-black' : storedTheme === 'custom-image' ? 'blue-black' : storedTheme;
+  document.documentElement.dataset.theme = theme;
+  localStorage.removeItem('yeman.ui.theme-image');
+})();
+</script>
+</body>
+</html>

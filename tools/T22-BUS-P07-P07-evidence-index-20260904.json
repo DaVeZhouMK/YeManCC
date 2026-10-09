@@ -1,0 +1,86 @@
+{
+  "schemaVersion": "T22-P07-StaticEvidenceIndex.v1",
+  "bundleId": "T22-P01-P07-20260904-CURRENT",
+  "capturedUtc": "2026-09-04T15:06:51.8985386Z",
+  "cwd": "G:\\YeManCC-Work",
+  "sourceManifest": {
+    "absolutePath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\T22-BUS-P07-current-source-manifest.json",
+    "manifestId": "T22-P00-20260904-C01-CURRENT",
+    "sourceDigest": "C5BFCD0D8C0A498BD0CB500D3FE24BD5D60A7030C9171B7E6CEF1EE78DB8E7A7",
+    "hcHead": "06c0b9544db2b1f39abf9cd3796225ccfb096103"
+  },
+  "runtimeOperation": false,
+  "buildOrTest": false,
+  "artifacts": [
+    {
+      "absolutePath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\T22-BUS-P07-current-source-manifest.json",
+      "sha256": "E8842971A1F8D8AA0BB393A7F6BEDE8D827C70538204867F67220CD3120AB362",
+      "bytes": 7618
+    },
+    {
+      "absolutePath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\T22-BUS-P07-P01-static-evidence-20260904.raw.md",
+      "sha256": "64DF13C2D9654FDEE9EC367D1C2E1F1ADEFE0EC65F3AFF1D13A836032471D93B",
+      "bytes": 11547
+    },
+    {
+      "absolutePath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\T22-BUS-P07-P02-static-evidence-20260904.raw.md",
+      "sha256": "A8D43E66F2AD5FBD7C93E4E0E670F0FE4C1049EB5ABD946140B9B7EC9ED9D222",
+      "bytes": 11637
+    },
+    {
+      "absolutePath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\T22-BUS-P07-P03-P04-static-evidence-20260904.raw.md",
+      "sha256": "D1739D9540A8C019C57986A7BD23DA2B2D59A27ED93120529CA879451805D855",
+      "bytes": 8574
+    },
+    {
+      "absolutePath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\T22-BUS-P07-P05-P06-static-evidence-20260904.raw.md",
+      "sha256": "D615B1D5DE9D799E03D188EB0EB8F311D78683BD2D0CDF34ECD01F1677ACB8B0",
+      "bytes": 8166
+    },
+    {
+      "absolutePath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\T22-BUS-P07-current-source-line-map-20260904.md",
+      "sha256": "742ACD954AEC11E66AFB04047F6A045976D46E13A7DE2BD44B9BF1EBC7568A48",
+      "bytes": 7203
+    }
+  ],
+  "rawCommandProvenance": {
+    "P01": "T22-BUS-P07-P01-static-evidence-20260904.raw.md: all commands exitCode 0",
+    "P02": "T22-BUS-P07-P02-static-evidence-20260904.raw.md: all commands exitCode 0",
+    "P03_P04": "T22-BUS-P07-P03-P04-static-evidence-20260904.raw.md: direct-file/metadata commands exitCode 0; bounded ROG and HidHide searches exitCode 0",
+    "P05_P06": "T22-BUS-P07-P05-P06-static-evidence-20260904.raw.md: all commands exitCode 0"
+  },
+  "auditErrors": [
+    {
+      "id": "T22-P07-CAPTURE-ERR-01",
+      "whenUtc": "2026-09-04",
+      "operation": "initial unbounded rg output collection",
+      "observed": "PowerShell reported insufficient memory; subsequent null TrimEnd error",
+      "sideEffects": [
+        "no source write",
+        "no evidence artifact write",
+        "no runtime operation"
+      ],
+      "disposition": "invalid capture attempt; replaced with bounded per-file captures above"
+    }
+  ],
+  "pStatus": {
+    "P00": "CURRENT-MANIFEST-AVAILABLE / source digest + full porcelain raw verified",
+    "P01": "SOURCE-LOCATED / ACK-ABSENT / parameter-not-consumed",
+    "P02": "SOURCE-LOCATED / virtual-stick pair gate only / direct-IMU-path-unresolved",
+    "P03": "SOURCE-LOCATED / descriptor-unverified / accel-transport-absent / persona-enforcement-unresolved",
+    "P04": "SOURCE-LOCATED / native product 0x02 sink not located / dormant audit constructor + legacy P-HID helper remain",
+    "P05": "SOURCE-LOCATED / not-a-consumer-measurement",
+    "P06": "T22-C01-SOURCE-FIX-APPLIED / release-incomplete",
+    "P07": "STATIC-EVIDENCE-BUNDLE-PRESENT / provenance captured / runtime evidence absent"
+  },
+  "missingForClosure": [
+    "native/Host config transaction and exact ACK/readback",
+    "same-generation provider pairing identity/unit/matrix/sequence/epoch",
+    "HIDMaestro descriptor raw bytes and report decode/readback",
+    "persona enforcement",
+    "P-HID identity/diff/restore receipts",
+    "external consumer measurement",
+    "Coordinator lifecycle/release/recovery proof"
+  ],
+  "nextAllowed": "Continue T22 static comparison and re-open T21/T14 only from this manifest; direct source changes only when a finding meets TASK E2 T22-Cxx conditions."
+}

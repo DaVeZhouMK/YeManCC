@@ -1,0 +1,832 @@
+<script setup lang="ts">
+import { ref, onMounted, onBeforeUnmount, onActivated, onDeactivated, inject, watch, type Ref } from 'vue';
+import Toggle from '@/components/Toggle.vue';
+import { deckySidebar, deckySidebarDescription, type DeckySidebarState } from '@/bridge/deckySidebar';
+import InlineIcon from '@/components/InlineIcon.vue';
+import { dialog, shell } from '@/bridge/api';
+import { isUiVisible, onUiVisibilityChange } from '@/bridge/uiLifecycle';
+import {
+  STEAM_ADDONS,
+  type SteamAddonKey,
+  type SteamCustomAddon,
+  steamAddonExists,
+  steamAddonSet,
+  steamCustomAddonAdd,
+  steamCustomAddonRemove,
+  steamCustomAddonSet,
+  steamCustomAddons,
+  steamExeExists,
+  steamRunning,
+  steamStop,
+  launchSteam,
+} from '@/bridge/yeman';
+import {
+  type CustomSteamLibrarySummary,
+  launchCustomSteamLibrary,
+  readCustomSteamLibrarySummary,
+} from '@/bridge/customSteamLibrary';
+
+const deckyState = ref<DeckySidebarState | null>(null);
+const deckyBusy = ref(false);
+let stopDeckyState: (() => void) | null = null;
+let deckyViewEpoch = 0;
+function acceptDeckyState(state: DeckySidebarState) {
+  if (deckyState.value && state.revision < deckyState.value.revision) return;
+  deckyState.value = state;
+  if (state.enabled && (state.phase === 'failed' || state.phase === 'unavailable')) showNotice(deckySidebarDescription(state));
+}
+async function setDeckyEnabled(enabled: boolean) {
+  if (deckyBusy.value) return;
+  deckyBusy.value = true;
+  const epoch = deckyViewEpoch;
+  try { const state = await deckySidebar.setEnabled(enabled); if (epoch === deckyViewEpoch) acceptDeckyState(state); }
+  catch (error) { if (epoch === deckyViewEpoch) showNotice('YMCC 控制台设置失败：' + (error as Error).message); }
+  finally { if (epoch === deckyViewEpoch) deckyBusy.value = false; }
+}
+onMounted(() => {
+  const epoch = ++deckyViewEpoch;
+  stopDeckyState = deckySidebar.subscribe(acceptDeckyState);
+  void deckySidebar.get().then(state => { if (epoch === deckyViewEpoch) acceptDeckyState(state); }).catch(() => {});
+});
+onBeforeUnmount(() => { ++deckyViewEpoch; stopDeckyState?.(); stopDeckyState = null; });
+
+const running = ref(false);
+const addonStates: Record<string, boolean> = {};
+const states = ref({ ...addonStates });
+
+const busy = ref(false);
+const errMsg = ref('');
+const customAddons = ref<SteamCustomAddon[]>([]);
+const steamRunKnown = ref(false);
+const steamChecking = ref(false);
+let noticeTimer: ReturnType<typeof setTimeout> | null = null;
+let steamPollTimer: ReturnType<typeof setInterval> | null = null;
+let steamPollBusy = false;
+let steamPollGeneration = 0;
+let steamActive = false;
+let stopUiVisibility: (() => void) | null = null;
+const customLibrarySummary = ref<CustomSteamLibrarySummary | null>(null);
+const customLibraryBusy = ref(false);
+const customLibraryRunning = ref(false);
+
+const STEAM_POLL_INTERVAL_MS = 2000;
+const STEAM_POLL_TIMEOUT_MS = 20000;
+function showNotice(message: string) {
+  if (noticeTimer) clearTimeout(noticeTimer);
+  errMsg.value = message;
+  noticeTimer = setTimeout(() => {
+    errMsg.value = '';
+    noticeTimer = null;
+  }, 5000);
+}
+
+async function detectSteamRunning(timeoutMs = 1500): Promise<boolean | null> {
+  try {
+    return await Promise.race([
+      steamRunning(),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), timeoutMs)),
+    ]);
+  } catch {
+    return null;
+  }
+}
+
+async function refreshSteamState() {
+  const live = await detectSteamRunning();
+  if (live !== null) {
+    running.value = live;
+    steamRunKnown.value = true;
+  }
+  return live;
+}
+
+function stopSteamPolling() {
+  steamPollGeneration += 1;
+  if (steamPollTimer) {
+    clearInterval(steamPollTimer);
+    steamPollTimer = null;
+  }
+  steamPollBusy = false;
+  steamChecking.value = false;
+}
+
+function pollSteamState(
+  target: boolean,
+  onTimeout: () => void,
+  onMatched: () => void = () => {},
+) {
+  stopSteamPolling();
+  const generation = steamPollGeneration;
+  const startedAt = Date.now();
+  steamChecking.value = true;
+
+  const check = async () => {
+    if (!steamActive || !isUiVisible() || generation !== steamPollGeneration || steamPollBusy) return;
+    steamPollBusy = true;
+    try {
+      const live = await refreshSteamState();
+      if (generation !== steamPollGeneration) return;
+      if (live === target) {
+        stopSteamPolling();
+        onMatched();
+        return;
+      }
+      if (Date.now() - startedAt >= STEAM_POLL_TIMEOUT_MS) {
+        stopSteamPolling();
+        onTimeout();
+      }
+    } finally {
+      steamPollBusy = false;
+    }
+  };
+
+  // 立即检测一次，之后严格每 2 秒检测，避免点击后额外等待一轮。
+  steamPollTimer = setInterval(check, STEAM_POLL_INTERVAL_MS);
+  void check();
+}
+
+// 并行异步加载；状态检测失败时保持未确认，不把 Steam 错误显示为运行中。
+async function refresh() {
+  const [runRes, customRes, ...addonRes] = await Promise.allSettled([
+    detectSteamRunning(),
+    steamCustomAddons(),
+    ...STEAM_ADDONS.map((a) => steamAddonExists(a.key).catch(() => false)),
+  ]);
+  if (runRes.status === 'fulfilled' && runRes.value !== null) {
+    running.value = runRes.value;
+  } else {
+    // 初始状态检测失败时不假装运行中；允许用户点击启动，点击时再给临时提示。
+    running.value = false;
+  }
+  steamRunKnown.value = true;
+  if (customRes.status === 'fulfilled') customAddons.value = customRes.value;
+  const next: Record<string, boolean> = {};
+  STEAM_ADDONS.forEach((a, i) => {
+    next[a.key] = addonRes[i]?.status === 'fulfilled' ? addonRes[i].value : false;
+  });
+  states.value = next;
+}
+
+// 点击启动前只做一次真实检测；检测失败时不亮起运行状态，也不产生常驻提示。
+async function canStartSteam(): Promise<boolean> {
+  const live = await detectSteamRunning();
+  if (live === null) {
+    // 检测失败时不改变已有状态，避免把未知状态误显示为运行中或未运行。
+    steamRunKnown.value = false;
+    showNotice('Steam 运行状态验证失败，请稍后重试。');
+    return false;
+  }
+  steamRunKnown.value = true;
+  running.value = live;
+  if (live) {
+    showNotice('Steam 已经启动，无法重复启动，请先关闭 Steam。');
+    return false;
+  }
+  return true;
+}
+
+async function launch() {
+  if (busy.value || steamChecking.value) return;
+  busy.value = true;
+  try {
+    if (!(await canStartSteam())) {
+      busy.value = false;
+      return;
+    }
+    await launchSteam();
+    // 启动命令返回不等于 Steam 已运行，只有真实检测到 steam.exe 才点亮状态。
+    pollSteamState(
+      true,
+      () => {
+        busy.value = false;
+        showNotice('Steam 启动后暂未检测到运行进程，请稍后确认。');
+      },
+      () => { busy.value = false; },
+    );
+  } catch (e) {
+    showNotice('Steam 启动失败：' + (e as Error).message);
+    busy.value = false;
+  }
+}
+
+async function onAddon(key: SteamAddonKey, v: boolean) {
+  errMsg.value = '';
+  busy.value = true;
+  try {
+    if (v) {
+      const exeOk = await steamExeExists(key);
+      if (!exeOk) {
+        const cfg = STEAM_ADDONS.find((a) => a.key === key);
+        errMsg.value = '未检测到：' + (cfg?.name ?? key) + '\n请先安装对应程序。';
+        states.value = { ...states.value, [key]: false };
+        return;
+      }
+    }
+    await steamAddonSet(key, v);
+    states.value = { ...states.value, [key]: v };
+  } catch (e) {
+    states.value = { ...states.value, [key]: !v };
+    errMsg.value = '写入失败：' + (e as Error).message;
+  } finally {
+    busy.value = false;
+  }
+}
+
+async function addCustomAddon() {
+  errMsg.value = '';
+  try {
+    const picked = await dialog.openFile([
+      { name: '所有程序文件', extensions: ['*'] },
+      { name: '可执行程序', extensions: ['exe'] },
+      { name: '快捷方式', extensions: ['lnk'] },
+      { name: '脚本/批处理', extensions: ['bat', 'cmd', 'ps1'] },
+    ]);
+    if (!picked) return;
+    let added = await steamCustomAddonAdd(picked);
+    if (!added.enabled) {
+      await steamCustomAddonSet(added, true);
+      added = { ...added, enabled: true };
+    }
+    customAddons.value = [...customAddons.value.filter((a) => a.id !== added.id), added];
+  } catch (e) {
+    errMsg.value = '添加联动项失败：' + (e as Error).message;
+  }
+}
+
+async function launchCustomAddon(addon: SteamCustomAddon) {
+  errMsg.value = '';
+  try {
+    await shell.execute(addon.exe, []);
+  } catch (e) {
+    errMsg.value = '启动失败：' + (e as Error).message;
+  }
+}
+
+async function launchFixedAddon(exe: string) {
+  errMsg.value = '';
+  try {
+    await shell.execute(exe, []);
+  } catch (e) {
+    errMsg.value = '启动失败：' + (e as Error).message;
+  }
+}
+
+async function onCustomAddon(addon: SteamCustomAddon, enabled: boolean) {
+  errMsg.value = '';
+  busy.value = true;
+  try {
+    await steamCustomAddonSet(addon, enabled);
+    customAddons.value = customAddons.value.map((a) => a.id === addon.id ? { ...a, enabled } : a);
+  } catch (e) {
+    errMsg.value = '切换联动项失败：' + (e as Error).message;
+  } finally {
+    busy.value = false;
+  }
+}
+
+async function removeCustomAddon(addon: SteamCustomAddon) {
+  errMsg.value = '';
+  busy.value = true;
+  try {
+    await steamCustomAddonRemove(addon);
+    customAddons.value = customAddons.value.filter((a) => a.id !== addon.id);
+  } catch (e) {
+    errMsg.value = '删除联动项失败：' + (e as Error).message;
+  } finally {
+    busy.value = false;
+  }
+}
+
+async function closeSteam() {
+  if (busy.value || steamChecking.value) return;
+  busy.value = true;
+  try {
+    stopSteamPolling();
+    await steamStop();
+    // taskkill 返回只代表结束命令已发出，继续以真实 steam.exe 状态等待退出。
+    pollSteamState(
+      false,
+      () => {
+        busy.value = false;
+        showNotice('Steam 关闭后仍检测到运行进程，请稍后确认。');
+      },
+      () => { busy.value = false; },
+    );
+  } catch (e) {
+    showNotice('关闭 Steam 失败：' + (e as Error).message);
+    busy.value = false;
+  }
+}
+
+// 开启始终复用联动启动大屏；方向导航只移动焦点，确认才执行开关。
+async function toggleSteamPower() {
+  if (busy.value || steamChecking.value) return;
+  if (running.value) await closeSteam();
+  else await launch();
+}
+
+async function refreshCustomLibrarySummary() {
+  customLibrarySummary.value = await readCustomSteamLibrarySummary();
+}
+
+async function openCustomLibrary() {
+  if (customLibraryBusy.value) return;
+  customLibraryBusy.value = true;
+  errMsg.value = '';
+  try {
+    const result = await launchCustomSteamLibrary();
+    if (!result.ok) throw new Error(result.reason || '自定义游戏库启动失败');
+    customLibraryRunning.value = true;
+  } catch (error) {
+    showNotice(error instanceof Error ? error.message : String(error));
+  } finally {
+    customLibraryBusy.value = false;
+  }
+}
+
+function onCustomLibraryClosed() {
+  customLibraryRunning.value = false;
+  customLibraryBusy.value = false;
+  void refreshCustomLibrarySummary();
+}
+
+function onCustomLibraryConflict(event: Event) {
+  const detail = (event as CustomEvent<{ inputOwner?: string }>).detail;
+  customLibraryRunning.value = false;
+  customLibraryBusy.value = false;
+  showNotice(`自定义游戏库未接管输入（${detail?.inputOwner || 'unknown'}），已阻止主程序重复响应。`);
+}
+
+// ── 全局刷新监听（App 预加载 / 支持页刷新按钮）──
+const globalRefreshKey = inject<Ref<number>>('globalRefreshKey');
+if (globalRefreshKey) {
+  // watch 已在顶部静态导入；动态 import('vue') 会造成异步微任务延迟注册，
+  // 刷新事件可能在注册前触发而丢失（2026-08-05 修复）。
+  watch(globalRefreshKey, () => {
+    if (steamActive) void refresh();
+  });
+}
+
+onMounted(() => {
+  steamActive = true;
+  window.addEventListener('customSteamLibrary:closed', onCustomLibraryClosed);
+  window.addEventListener('customSteamLibrary:conflict', onCustomLibraryConflict);
+  stopUiVisibility = onUiVisibilityChange(({ visible }) => {
+    if (!visible) {
+      stopSteamPolling();
+    }
+  });
+  void refresh();
+  void refreshCustomLibrarySummary();
+});
+onActivated(() => {
+  steamActive = true;
+  if (!stopUiVisibility) {
+    stopUiVisibility = onUiVisibilityChange(({ visible }) => {
+      if (!visible) {
+        stopSteamPolling();
+      }
+    });
+  }
+  void refresh();
+  void refreshCustomLibrarySummary();
+});
+onDeactivated(() => {
+  steamActive = false;
+  stopSteamPolling();
+});
+onBeforeUnmount(() => {
+  window.removeEventListener('customSteamLibrary:closed', onCustomLibraryClosed);
+  window.removeEventListener('customSteamLibrary:conflict', onCustomLibraryConflict);
+  stopSteamPolling();
+  steamActive = false;
+  stopSteamPolling();
+  if (noticeTimer) clearTimeout(noticeTimer);
+  stopUiVisibility?.();
+  stopUiVisibility = null;
+});
+</script>
+
+<template>
+  <div class="page">
+    <div v-if="errMsg" class="err-bar">{{ errMsg }}</div>
+
+    <section class="card">
+      <h3 class="card-title"><InlineIcon name="steam" /> Steam 大屏</h3>
+      <div class="states-row" data-gp-row="0">
+        <button
+          type="button"
+          class="state-card steam-state-card"
+          data-gp-row="0"
+          data-gp-col="0"
+          :class="{ clickable: !busy && !steamChecking }"
+          :disabled="busy || steamChecking"
+          title="检测 Steam 运行状态"
+          @click="refreshSteamState"
+        >
+          <span class="dot" :class="{ on: running }"></span>
+          <span class="sc-body">
+            <span class="sc-title">Steam</span>
+            <span class="sc-text">{{ running ? (steamChecking ? '正在检测退出…' : '运行中') : '未启动' }}</span>
+          </span>
+        </button>
+        <button
+          type="button"
+          class="steam-power-button"
+          :class="{ close: running }"
+          data-gp-row="0"
+          data-gp-col="1"
+          :disabled="busy || steamChecking"
+          :title="running ? '关闭 Steam' : '开启 Steam 并联动启动大屏'"
+          @click="toggleSteamPower"
+        >
+          <InlineIcon :name="running ? 'close' : 'play'" />
+          {{ running ? '关闭 Steam' : '开启 Steam' }}
+        </button>
+      </div>
+      <Toggle
+        :model-value="deckyState?.enabled ?? true"
+        label="Steam大屏插件【三点键呼出】"
+        :disabled="deckyBusy || !deckyState || busy || steamChecking"
+        :gp-row="0"
+        :gp-col="2"
+        @update:model-value="setDeckyEnabled"
+      />
+    </section>
+
+    <section class="card custom-library-entry-card" aria-label="自定义游戏库">
+      <h2>Steam自定义游戏库</h2>
+      <p class="custom-library-subtitle">扫描非Steam游戏加入Steam大屏</p>
+      <div v-if="customLibrarySummary" class="custom-library-summary" aria-label="游戏库分类统计">
+        <div><strong>{{ customLibrarySummary.waiting }}</strong><span>等待加入</span></div>
+        <div><strong>{{ customLibrarySummary.joined }}</strong><span>已加入</span></div>
+        <div><strong>{{ customLibrarySummary.needs }}</strong><span>需处理</span></div>
+        <div><strong>{{ customLibrarySummary.excluded }}</strong><span>不加入</span></div>
+      </div>
+      <div v-else class="custom-library-summary custom-library-summary-empty" aria-label="游戏库分类统计读取中">
+        <div><strong>—</strong><span>等待加入</span></div>
+        <div><strong>—</strong><span>已加入</span></div>
+        <div><strong>—</strong><span>需处理</span></div>
+        <div><strong>—</strong><span>不加入</span></div>
+      </div>
+      <button class="custom-library-open-button" type="button" data-gp-row="1" data-gp-col="0" :disabled="customLibraryBusy" @click="openCustomLibrary">
+        <InlineIcon name="play" />
+        {{ customLibraryRunning ? '重新打开自定义游戏库' : '打开自定义游戏库' }}
+      </button>
+    </section>
+
+    <section class="card addon-card">
+      <h3 class="card-title addon-card-title"><InlineIcon name="link" /> 联动启动项</h3>
+      <div id="steam-addon-list" class="addon-list">
+        <div v-for="(l, index) in STEAM_ADDONS" :key="l.key" class="addon-row" :data-gp-row="2 + index">
+          <button class="addon-launch-btn" :data-gp-row="2 + index" data-gp-col="0" :disabled="busy" title="启动程序" @click="launchFixedAddon(l.exe)">
+            <InlineIcon name="play" /> 启动
+          </button>
+          <Toggle
+            v-model="states[l.key]"
+            :label="l.name"
+            color="accent"
+            :gp-row="2 + index"
+            :gp-col="1"
+            :disabled="busy"
+            @update:model-value="(v: boolean) => onAddon(l.key, v)"
+          />
+        </div>
+        <div class="custom-addon-divider">自选联动启动项</div>
+        <div v-if="customAddons.length === 0" class="empty-addon">暂无自选程序</div>
+        <div v-for="(addon, index) in customAddons" :key="addon.id" class="custom-addon-row" :data-gp-row="2 + STEAM_ADDONS.length + index">
+          <button class="addon-launch-btn" :data-gp-row="2 + STEAM_ADDONS.length + index" data-gp-col="0" :disabled="busy" title="启动程序" @click="launchCustomAddon(addon)">
+            <InlineIcon name="play" /> 启动
+          </button>
+          <Toggle
+            :model-value="addon.enabled"
+            :label="addon.name"
+            color="accent"
+            :gp-row="2 + STEAM_ADDONS.length + index"
+            :gp-col="1"
+            :disabled="busy"
+            @update:model-value="(v: boolean) => onCustomAddon(addon, v)"
+          />
+          <button
+            class="custom-addon-delete"
+            :data-gp-row="2 + STEAM_ADDONS.length + index"
+            data-gp-col="2"
+            :disabled="busy"
+            title="删除联动启动项"
+            @click="removeCustomAddon(addon)"
+          >
+            <InlineIcon name="trash" />
+          </button>
+        </div>
+        <button class="add-addon-btn" :data-gp-row="2 + STEAM_ADDONS.length + customAddons.length" data-gp-col="0" :disabled="busy" @click="addCustomAddon">
+          <span class="add-addon-plus">+</span> 添加程序
+        </button>
+      </div>
+    </section>
+
+  </div>
+</template>
+
+<style scoped>
+.page {
+  padding-bottom: 20px;
+}
+.err-bar {
+  background: rgba(229, 72, 77, 0.12);
+  border: 1px solid rgba(229, 72, 77, 0.4);
+  color: #ff9ea1;
+  border-radius: var(--radius-ctrl);
+  padding: 8px 10px;
+  font-size: 11px;
+  margin-bottom: 10px;
+  line-height: 1.4;
+}
+.states-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.states-row > * {
+  flex: 1 1 0;
+  min-width: 0;
+}
+.steam-state-card {
+  width: 100%;
+  min-height: 54px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 0;
+  background: var(--bg-input);
+  border-radius: var(--radius-ctrl);
+  padding: 10px 12px;
+  color: var(--text);
+  text-align: left;
+}
+.steam-state-card.clickable {
+  cursor: pointer;
+}
+.steam-state-card.clickable:hover {
+  background: color-mix(in srgb, var(--bg-input) 86%, var(--accent));
+}
+.steam-state-card:disabled {
+  cursor: default;
+}
+.steam-power-button {
+  min-height: 54px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid color-mix(in srgb, var(--accent) 46%, transparent);
+  border-radius: var(--radius-ctrl);
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg-input));
+  color: var(--accent);
+  padding: 10px 12px;
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.steam-power-button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 18%, var(--bg-input));
+}
+.steam-power-button.close {
+  border-color: color-mix(in srgb, var(--danger) 46%, transparent);
+  background: color-mix(in srgb, var(--danger) 8%, var(--bg-input));
+  color: var(--danger);
+}
+.steam-power-button.close:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 16%, var(--bg-input));
+}
+.steam-state-card:focus-visible,
+.steam-power-button:focus-visible {
+  box-shadow: var(--focus-ring);
+}
+.steam-power-button:disabled {
+  cursor: default;
+}
+.dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+  background: #46506280;
+  box-shadow: 0 0 6px currentColor;
+}
+.dot.on {
+  background: var(--ok);
+  color: var(--ok);
+}
+.sc-body {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.sc-title,
+.sc-text {
+  display: block;
+}
+.sc-title {
+  font-size: 12px;
+  font-weight: 600;
+}
+.sc-text {
+  font-size: 13px;
+  font-weight: 700;
+  margin-top: 2px;
+}
+.steam-state-card:disabled,
+.steam-power-button:disabled,
+.addon-launch-btn:disabled {
+  opacity: 0.58;
+}
+.addon-card-title { margin-bottom: 10px; }
+.addon-list {
+  display: grid;
+  gap: 4px;
+}
+.custom-addon-divider {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--text-dim);
+  font-size: 11px;
+  font-weight: 700;
+}
+.addon-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-height: 42px;
+  padding: 6px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg-input) 88%, transparent);
+}
+.addon-row :deep(.toggle-row) {
+  min-width: 0;
+}
+.addon-launch-btn {
+  flex: 0 0 auto;
+  border: 1px solid rgba(46, 166, 255, 0.45);
+  border-radius: var(--radius-ctrl);
+  background: rgba(46, 166, 255, 0.1);
+  color: var(--accent);
+  padding: 6px 8px;
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.addon-launch-btn:hover {
+  background: rgba(46, 166, 255, 0.18);
+}
+.custom-addon-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) 30px;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 6px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg-input) 88%, transparent);
+}
+.custom-addon-row :deep(.toggle-row) {
+  min-width: 0;
+}
+.custom-addon-row :deep(.toggle-label) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.custom-addon-delete,
+.add-addon-btn {
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: var(--radius-ctrl);
+  background: var(--bg-input);
+  color: var(--text-dim);
+  cursor: pointer;
+}
+.empty-addon {
+  padding: 10px 2px 8px;
+  color: var(--text-dim);
+  font-size: 11px;
+  text-align: center;
+}
+.custom-addon-delete {
+  width: 30px;
+  height: 28px;
+  padding: 0;
+  color: #ff9ea1;
+}
+.custom-addon-delete:hover {
+  background: rgba(229, 72, 77, 0.16);
+}
+.add-addon-btn {
+  width: 100%;
+  margin-top: 8px;
+  padding: 8px;
+  color: var(--accent);
+  border-color: rgba(46, 166, 255, 0.45);
+  font-size: 11px;
+  font-weight: 700;
+}
+.add-addon-btn:hover {
+  background: rgba(46, 166, 255, 0.12);
+}
+.add-addon-plus {
+  font-size: 16px;
+  line-height: 0;
+  vertical-align: -1px;
+}
+.custom-addon-delete:disabled,
+.add-addon-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.custom-library-entry-card {
+  padding: 12px 14px;
+}
+.custom-library-entry-card h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.25;
+}
+.custom-library-subtitle {
+  margin: 4px 0 10px;
+  color: var(--text-dim);
+  font-size: 11px;
+}
+.custom-library-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.custom-library-summary > div {
+  min-width: 0;
+  min-height: 46px;
+  padding: 8px 9px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-ctrl);
+  background: var(--bg-input);
+}
+.custom-library-summary strong {
+  display: block;
+  color: var(--accent);
+  font-size: 18px;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.custom-library-summary span {
+  display: block;
+  margin-top: 4px;
+  color: var(--text-dim);
+  font-size: 10px;
+}
+.custom-library-summary-empty {
+  opacity: 0.72;
+}
+.custom-library-open-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  width: 100%;
+  min-height: 40px;
+  border: 1px solid rgba(46, 166, 255, 0.65);
+  border-radius: var(--radius-ctrl);
+  background: linear-gradient(180deg, #2997cd, #187ca9);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+.custom-library-open-button:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+.custom-library-open-button:focus-visible {
+  box-shadow: var(--focus-ring);
+}
+.custom-library-open-button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.custom-library-path {
+  margin: 9px 0 0;
+  overflow: hidden;
+  color: var(--text-dim);
+  font-family: Consolas, monospace;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@media (max-width: 560px) {
+  .custom-library-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+</style>

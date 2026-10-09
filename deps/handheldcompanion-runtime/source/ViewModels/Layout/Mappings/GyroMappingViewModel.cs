@@ -1,0 +1,481 @@
+﻿using HandheldCompanion.Actions;
+using HandheldCompanion.Controllers;
+using HandheldCompanion.Extensions;
+using HandheldCompanion.Inputs;
+using HandheldCompanion.Managers;
+using HandheldCompanion.Utils;
+using HandheldCompanion.Views;
+using System;
+using System.Collections.Generic;
+using System.Collections.ObjectModel;
+using System.Linq;
+using System.Windows.Data;
+
+namespace HandheldCompanion.ViewModels
+{
+    public class GyroMappingViewModel : MappingViewModel
+    {
+        public override ActionType[] SupportedActionTypes =>
+        [
+            ActionType.Disabled,
+            ActionType.Joystick,
+            ActionType.Mouse,
+            ActionType.Touchpad,
+            ActionType.Inherit
+        ];
+
+        private static readonly HashSet<MouseActionsType> _unsupportedMouseActionTypes =
+        [
+            MouseActionsType.LeftButton,
+            MouseActionsType.RightButton,
+            MouseActionsType.MiddleButton,
+            MouseActionsType.ScrollUp,
+            MouseActionsType.ScrollDown
+        ];
+
+        #region Axis Action Properties
+
+        public int Axis2AxisInnerDeadzone
+        {
+            get => (Action is AxisActions axisAction) ? axisAction.AxisDeadZoneInner : 0;
+            set
+            {
+                if (Action is AxisActions axisAction && value != Axis2AxisInnerDeadzone)
+                {
+                    axisAction.AxisDeadZoneInner = value;
+                    OnPropertyChanged(nameof(Axis2AxisInnerDeadzone));
+                }
+            }
+        }
+
+        public int Axis2AxisOuterDeadzone
+        {
+            get => (Action is AxisActions axisAction) ? axisAction.AxisDeadZoneOuter : 0;
+            set
+            {
+                if (Action is AxisActions axisAction && value != Axis2AxisOuterDeadzone)
+                {
+                    axisAction.AxisDeadZoneOuter = value;
+                    OnPropertyChanged(nameof(Axis2AxisOuterDeadzone));
+                }
+            }
+        }
+
+        public int Axis2AxisAntiDeadzone
+        {
+            get => (Action is AxisActions axisAction) ? axisAction.AxisAntiDeadZone : 0;
+            set
+            {
+                if (Action is AxisActions axisAction && value != Axis2AxisAntiDeadzone)
+                {
+                    axisAction.AxisAntiDeadZone = value;
+                    OnPropertyChanged(nameof(Axis2AxisAntiDeadzone));
+                }
+            }
+        }
+
+        public int Axis2AxisOutputShapeIndex
+        {
+            get => (Action is AxisActions axisAction) ? (int)axisAction.OutputShape : 0;
+            set
+            {
+                if (Action is AxisActions axisAction && value != Axis2AxisOutputShapeIndex)
+                {
+                    axisAction.OutputShape = (OutputShape)value;
+                    OnPropertyChanged(nameof(Axis2AxisOutputShapeIndex));
+                }
+            }
+        }
+
+        #endregion
+
+        #region Mouse Action Properties
+
+        public int Axis2MousePointerSpeed
+        {
+            get => (Action is MouseActions mouseAction) ? mouseAction.Sensivity : 0;
+            set
+            {
+                if (Action is MouseActions mouseAction && value != Axis2MousePointerSpeed)
+                {
+                    mouseAction.Sensivity = value;
+                    OnPropertyChanged(nameof(Axis2MousePointerSpeed));
+                }
+            }
+        }
+
+        public int Axis2MouseDeadzone
+        {
+            get => (Action is MouseActions mouseAction) ? mouseAction.Deadzone : 0;
+            set
+            {
+                if (Action is MouseActions mouseAction && value != Axis2MouseDeadzone)
+                {
+                    mouseAction.Deadzone = value;
+                    OnPropertyChanged(nameof(Axis2MouseDeadzone));
+                }
+            }
+        }
+
+        public float Axis2MouseAcceleration
+        {
+            get => (Action is MouseActions mouseAction) ? mouseAction.Acceleration : 0;
+            set
+            {
+                if (Action is MouseActions mouseAction && value != Axis2MouseAcceleration)
+                {
+                    mouseAction.Acceleration = value;
+                    OnPropertyChanged(nameof(Axis2MouseAcceleration));
+                }
+            }
+        }
+
+        #endregion
+
+        public int MotionInputIndex
+        {
+            get => (Action is GyroActions gyroAction) ? (int)gyroAction.MotionInput : -1;
+            set
+            {
+                if (Action is GyroActions gyroAction && value != MotionInputIndex)
+                {
+                    gyroAction.MotionInput = (MotionInput)value;
+                    OnPropertyChanged(nameof(MotionInputIndex));
+                }
+            }
+        }
+
+        public int MotionModeIndex
+        {
+            get => (Action is GyroActions gyroAction) ? (int)gyroAction.MotionMode : -1;
+            set
+            {
+                if (Action is GyroActions gyroAction && value != MotionModeIndex)
+                {
+                    gyroAction.MotionMode = (MotionMode)value;
+                    OnPropertyChanged(nameof(MotionModeIndex));
+                }
+            }
+        }
+
+        public float GyroWeight
+        {
+            get => (Action is GyroActions gyroAction) ? gyroAction.gyroWeight : 0;
+            set
+            {
+                if (Action is GyroActions gyroAction && value != GyroWeight)
+                {
+                    gyroAction.gyroWeight = value;
+                    OnPropertyChanged(nameof(GyroWeight));
+                }
+            }
+        }
+
+        public int VelocityModeIndex
+        {
+            get => (Action is GyroActions gyroAction) ? (int)gyroAction.VelocityMode : 0;
+            set
+            {
+                if (Action is GyroActions gyroAction && value != VelocityModeIndex)
+                {
+                    gyroAction.VelocityMode = (GyroVelocityMode)value;
+                    OnPropertyChanged(nameof(VelocityModeIndex));
+                    OnPropertyChanged(nameof(IsVelocityModeEnabled));
+                }
+            }
+        }
+
+        public float VelocityScale
+        {
+            get => (Action is GyroActions gyroAction) ? gyroAction.VelocityScale : 1.0f;
+            set
+            {
+                if (Action is GyroActions gyroAction && value != VelocityScale)
+                {
+                    gyroAction.VelocityScale = value;
+                    OnPropertyChanged(nameof(VelocityScale));
+                }
+            }
+        }
+
+        // True when VelocityMode is enabled (used to enable/disable VelocityScale slider)
+        public bool IsVelocityModeEnabled => VelocityModeIndex == 1;
+
+        public List<MotionInputViewModel> MotionInputItems { get; private set; } = [];
+        public ObservableCollection<HotkeyViewModel> HotkeysList { get; set; } = [];
+
+        private const ButtonFlags gyroButtonFlags = ButtonFlags.HOTKEY_GYRO_ACTIVATION;
+        private Hotkey GyroHotkey = new(gyroButtonFlags) { IsInternal = true, Name = "HOTKEY_GYRO_ACTIVATION" };
+
+        public GyroMappingViewModel(AxisLayoutFlags layoutFlag) : base(layoutFlag)
+        {
+            // Enable thread-safe access to the collection
+            BindingOperations.EnableCollectionSynchronization(HotkeysList, _collectionLock);
+
+            foreach (var mode in Enum.GetValues<MotionInput>())
+            {
+                MotionInputItems.Add(new MotionInputViewModel
+                {
+                    Glyph = mode.ToGlyph(),
+                    Description = EnumUtils.GetDescriptionFromEnumValue(mode)
+                });
+            }
+
+            ManagerFactory.hotkeysManager.Updated += HotkeysManager_Updated;
+            InputsManager.StartedListening += InputsManager_StartedListening;
+            InputsManager.StoppedListening += InputsManager_StoppedListening;
+
+            // store hotkey to manager
+            lock (_collectionLock)
+                HotkeysList.Add(new HotkeyViewModel(GyroHotkey));
+            ManagerFactory.hotkeysManager.UpdateOrCreateHotkey(GyroHotkey);
+        }
+
+        private void HotkeysManager_Updated(Hotkey hotkey)
+        {
+            if (Action is not GyroActions gyroAction)
+                return;
+
+            if (hotkey.ButtonFlags != gyroButtonFlags)
+                return;
+
+            gyroAction.MotionTrigger = (ButtonState)hotkey.inputsChord.ButtonState.Clone();
+            GyroHotkey.inputsChord.ButtonState = (ButtonState)gyroAction.MotionTrigger.Clone();
+
+            // update gyro hotkey
+            GyroHotkey = hotkey;
+
+            // update hotkey UI
+            lock (_collectionLock)
+            {
+                HotkeyViewModel? foundHotkey = HotkeysList.FirstOrDefault(p => p.Hotkey.ButtonFlags == hotkey.ButtonFlags);
+                if (foundHotkey is null)
+                    HotkeysList.Add(new HotkeyViewModel(hotkey));
+                else
+                    foundHotkey.Hotkey = hotkey;
+            }
+
+            Update();
+        }
+
+        private void InputsManager_StartedListening(ButtonFlags buttonFlags, InputsChordTarget chordTarget)
+        {
+            HotkeyViewModel? hotkeyViewModel = HotkeysList.FirstOrDefault(h => h.Hotkey.ButtonFlags == buttonFlags);
+            hotkeyViewModel?.SetListening(true, chordTarget);
+        }
+
+        private void InputsManager_StoppedListening(ButtonFlags buttonFlags, InputsChord storedChord)
+        {
+            HotkeyViewModel? hotkeyViewModel = HotkeysList.FirstOrDefault(h => h.Hotkey.ButtonFlags == buttonFlags);
+            hotkeyViewModel?.SetListening(false, storedChord.chordTarget);
+        }
+
+        public override void Dispose()
+        {
+            base.Dispose();
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                ManagerFactory.hotkeysManager.Updated -= HotkeysManager_Updated;
+                InputsManager.StartedListening -= InputsManager_StartedListening;
+                InputsManager.StoppedListening -= InputsManager_StoppedListening;
+            }
+
+            base.Dispose(disposing);
+        }
+
+        protected override void ActionTypeChanged(ActionType? newActionType = null)
+        {
+            var actionType = newActionType ?? (ActionType)ActionTypeIndex;
+            if (actionType == ActionType.Disabled)
+            {
+                if (Action is not null) Delete();
+                SelectedTarget = null;
+                OnPropertyChanged(string.Empty);
+                return;
+            }
+
+            // get current controller
+            IController controller = ControllerManager.GetDefault(true);
+
+            // Build Targets
+            List<MappingTargetViewModel> targets = new List<MappingTargetViewModel>();
+
+            if (actionType == ActionType.Joystick)
+            {
+                bool preserveMissingTarget = Action is AxisActions;
+                if (!preserveMissingTarget)
+                {
+                    Action = new AxisActions()
+                    {
+                        Axis = GyroActions.DefaultAxisLayoutFlags,
+                        AxisAntiDeadZone = GyroActions.DefaultAxisAntiDeadZone,
+                        MotionTrigger = (ButtonState)GyroHotkey.inputsChord.ButtonState.Clone()
+                    };
+                }
+
+                MappingTargetViewModel? matchingTargetVm = null;
+                foreach (var axis in GetJoystickTargets(controller))
+                {
+                    var mappingTargetVm = new MappingTargetViewModel
+                    {
+                        Tag = axis,
+                        Content = controller.GetAxisName(axis)
+                    };
+                    targets.Add(mappingTargetVm);
+
+                    if (axis == ((AxisActions)Action).Axis)
+                    {
+                        matchingTargetVm = mappingTargetVm;
+                    }
+                }
+
+                if (matchingTargetVm is null && preserveMissingTarget)
+                {
+                    matchingTargetVm = CreateUnsupportedTarget(((AxisActions)Action).Axis,
+                        controller.GetAxisName(((AxisActions)Action).Axis));
+                    targets.Add(matchingTargetVm);
+                }
+
+                ReplaceTargets(targets, matchingTargetVm);
+            }
+            else if (actionType == ActionType.Touchpad)
+            {
+                bool preserveMissingTarget = Action is TouchpadActions;
+                TouchpadActions touchpadAction = Action as TouchpadActions ?? new TouchpadActions
+                {
+                    MotionTrigger = (ButtonState)GyroHotkey.inputsChord.ButtonState.Clone()
+                };
+                if (!preserveMissingTarget)
+                    Action = touchpadAction;
+
+                MappingTargetViewModel? matchingTargetVm = null;
+                foreach (AxisLayoutFlags axis in TouchpadActions.GetAxisTargets(controller))
+                {
+                    var mappingTargetVm = CreateTarget(axis, controller.GetAxisName(axis));
+                    targets.Add(mappingTargetVm);
+
+                    if (touchpadAction.TargetType == TouchpadTargetType.Axis && axis == touchpadAction.Axis)
+                        matchingTargetVm = mappingTargetVm;
+                }
+
+                if (matchingTargetVm is null && preserveMissingTarget &&
+                    touchpadAction.TargetType == TouchpadTargetType.Axis &&
+                    touchpadAction.Axis != AxisLayoutFlags.None)
+                {
+                    matchingTargetVm = CreateUnsupportedTarget(touchpadAction.Axis,
+                        controller.GetAxisName(touchpadAction.Axis));
+                    targets.Add(matchingTargetVm);
+                }
+
+                ReplaceTargets(targets, matchingTargetVm);
+            }
+            else if (actionType == ActionType.Mouse)
+            {
+                if (Action is null || Action is not MouseActions)
+                {
+                    Action = new MouseActions()
+                    {
+                        MouseType = GyroActions.DefaultMouseActionsType,
+                        Sensivity = GyroActions.DefaultSensivity,
+                        Deadzone = GyroActions.DefaultDeadzone,
+                        MotionTrigger = (ButtonState)GyroHotkey.inputsChord.ButtonState.Clone()
+                    };
+                }
+
+                MappingTargetViewModel? matchingTargetVm = null;
+                foreach (var mouseType in Enum.GetValues<MouseActionsType>().Except(_unsupportedMouseActionTypes))
+                {
+                    var mappingTargetVm = new MappingTargetViewModel
+                    {
+                        Tag = mouseType,
+                        Content = EnumUtils.GetDescriptionFromEnumValue(mouseType)
+                    };
+                    targets.Add(mappingTargetVm);
+
+                    if (mouseType == ((MouseActions)Action).MouseType)
+                    {
+                        matchingTargetVm = mappingTargetVm;
+                    }
+                }
+
+                // Update list and selected target
+                lock (_collectionLock)
+                {
+                    Targets.Clear();
+                    foreach (var t in targets)
+                        Targets.Add(t);
+                }
+                SelectedTarget = matchingTargetVm ?? Targets.First();
+            }
+            else if (actionType == ActionType.Inherit)
+            {
+                if (Action is null || Action is not InheritActions)
+                    Action = new InheritActions();
+
+                // Update list and selected target
+                Targets.Clear();
+            }
+
+            // Refresh mapping
+            OnPropertyChanged(string.Empty);
+        }
+
+        protected override void TargetTypeChanged()
+        {
+            if (Action is null || SelectedTarget is null)
+                return;
+
+            switch (Action.actionType)
+            {
+                case ActionType.Joystick:
+                    if (SelectedTarget.Tag is AxisLayoutFlags axisLayoutFlags)
+                        ((AxisActions)Action).Axis = axisLayoutFlags;
+                    break;
+
+                case ActionType.Mouse:
+                    if (SelectedTarget.Tag is MouseActionsType mouseActionsType)
+                        ((MouseActions)Action).MouseType = mouseActionsType;
+                    break;
+
+                case ActionType.Touchpad:
+                    if (SelectedTarget.Tag is not null)
+                        SetTouchpadTarget(SelectedTarget.Tag);
+                    break;
+            }
+        }
+
+        protected override void Update()
+        {
+            if (Action is null) return;
+            MainWindow.layoutPage.CurrentLayout.UpdateLayout((AxisLayoutFlags)Value, Action);
+        }
+
+        protected override void Delete()
+        {
+            Action = null;
+            MainWindow.layoutPage.CurrentLayout.RemoveLayout((AxisLayoutFlags)Value);
+        }
+
+        protected override void UpdateMapping(Layout layout)
+        {
+            if (layout.GyroLayout.TryGetValue((AxisLayoutFlags)Value, out var newAction))
+            {
+                GyroHotkey.inputsChord.ButtonState = (ButtonState)((GyroActions)newAction).MotionTrigger.Clone();
+
+                // update hotkey UI
+                HotkeyViewModel? foundHotkey = HotkeysList.FirstOrDefault(p => p.Hotkey.ButtonFlags == GyroHotkey.ButtonFlags);
+                foundHotkey?.Hotkey = GyroHotkey;
+
+                SetAction(newAction, false);
+            }
+            else
+            {
+                Reset();
+            }
+        }
+    }
+}

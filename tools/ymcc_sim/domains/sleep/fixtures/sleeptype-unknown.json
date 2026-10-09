@@ -1,0 +1,12 @@
+{
+  "name": "sleeptype-unknown",
+  "expect": {
+    "type": "UNKNOWN",
+    "confidence": "none",
+    "downgrade": false
+  },
+  "facts": {
+    "gapSeconds": 9
+  },
+  "note": "insufficient evidence must stay UNKNOWN (no guessing)"
+}

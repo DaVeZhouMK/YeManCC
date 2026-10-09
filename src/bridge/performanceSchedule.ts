@@ -1,0 +1,1188 @@
+import { fs, powerLifecycle } from './api';
+import { ensureGlobalFrameRates, frameRatePair, dedicatedFrameRatePair, dedicatedFrameRateRecord, frameRateSetting, type FrameRatePair } from './frameRateLimits';
+import { getSettingsGeneration, assertSettingsGeneration, mergeSettings, readSettingsSection, replaceSettingsSection, saveSettingsSection } from './settingsRepository';
+import { detectPolicyGame, isPolicyTargetCurrent } from './gamePolicyTarget';
+import { detectGame } from './gamedetect';
+import {
+  detectPowerMode,
+  ensureRememberedYemanSchemeActive,
+  applyCpuProfilePowerParams,
+  setCoreModeAc,
+  setCoreModeDc,
+  detectCoreArchitecture,
+  rebuildYemanScheme,
+  setTdp,
+  setRtssLimit,
+  readRtssLimit,
+} from './yeman';
+import { loadCpuProfiles } from './cpuProfiles';
+import {
+  applyFloatSettings,
+  disableFloat,
+  enableFloat,
+  getFloatInfo,
+  notifyTdpMaxChanged,
+  setFloatTarget,
+  type FloatProfile,
+  type TdpFloatStrategy,
+  cancelPendingRtssSync,
+  setFloatRtssLinked,
+} from './autofloat';
+
+export type PowerSide = 'ac' | 'dc';
+export type ScheduleMode = 'eco' | 'balanced' | 'medium' | 'performance' | 'elite' | 'extreme';
+export type AutoScheduleMode = ScheduleMode;
+export type CpuPreset = 'balanced' | 'turbo' | 'elite' | 'extreme';
+export type CoreMode = 'big' | 'only-big' | 'only-small';
+
+export const CORE_MODE_OPTIONS = [
+  { value: 'big' as CoreMode, label: '大核为主(推荐)', sub: 'Windows 混合架构' },
+  { value: 'only-big' as CoreMode, label: '仅大核', sub: 'Windows 混合架构' },
+  { value: 'only-small' as CoreMode, label: '仅小核', sub: 'Windows 混合架构' },
+];
+
+export interface ScheduleProfile {
+  cpuPreset: CpuPreset;
+  coreMode: CoreMode;
+  tdpMax: number;
+  /** Legacy migration scalar only: never bound/applied by a performance combination. */
+  fpsTarget: number;
+  cpuTarget: FloatProfile;
+  tdpStrategy: TdpFloatStrategy;
+}
+
+export interface PerformanceScheduleConfig {
+  version: 2;
+  configured: boolean;
+  enabled: boolean;
+  active: Record<PowerSide, ScheduleMode>;
+  profiles: Record<PowerSide, Record<ScheduleMode, ScheduleProfile>>;
+}
+
+export type PerformanceScheduleWarningCode = 'tdp-unsupported' | 'tdp-apply-failed';
+
+export interface PerformanceScheduleWarning {
+  code: PerformanceScheduleWarningCode;
+  side: PowerSide;
+  watts: number;
+  message: string;
+  detail: string;
+}
+
+export interface PerformanceScheduleTarget {
+  /** Automatic owners validate the shared confirmed lease, not transient foreground. */
+  policyTarget?: boolean;
+  pid: number;
+  processCreated: string;
+}
+
+const CONFIG_PATH = 'C:\\SOFT\\YeMan\\PowerControl\\performance-schedule.json';
+const configListeners = new Set<(config: PerformanceScheduleConfig) => void>();
+const warningListeners = new Set<(warning: PerformanceScheduleWarning) => void>();
+const emittedWarningKeys = new Set<string>();
+let lastWarning: PerformanceScheduleWarning | null = null;
+const AUTO_MODES: ScheduleMode[] = [
+  'eco',
+  'balanced',
+  'medium',
+  'performance',
+  'elite',
+  'extreme',
+];
+const MODE_ORDER = AUTO_MODES;
+let gamepadModeCooldownUntil = 0;
+
+function tdpErrorText(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  return String(error ?? '未知 TDP 错误');
+}
+
+function compactTdpDetail(raw: string): string {
+  const lines = raw
+    .replace(/\r/g, '')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+  return lines.slice(-5).join(' | ').slice(0, 600);
+}
+
+export function describePerformanceScheduleTdpError(
+  error: unknown,
+  side: PowerSide,
+  watts: number,
+): PerformanceScheduleWarning {
+  const raw = tdpErrorText(error);
+  const detail = compactTdpDetail(raw);
+  const desktop17 = /Desktop-17h|Zen\s*[~～-]\s*Zen2|Castle\s*Peak|Threadripper/i.test(raw);
+  const unsupported = /transport\s*=\s*unsupported|tdp_supported\s*=\s*false|TDP capability[^\n]*拒绝|capability\/transport[^\n]*拒绝|尚无已验证|未实现/i.test(raw);
+
+  if (desktop17 && (unsupported || /\brc\s*=\s*6\b/i.test(raw))) {
+    return {
+      code: 'tdp-unsupported',
+      side,
+      watts,
+      message: '当前 AMD Desktop-17h（Zen～Zen2/Threadripper）尚无已验证的 TDP 协议，已跳过 TDP；不会阻断 CPU 调度及自动/手动模式切换。',
+      detail,
+    };
+  }
+
+  return {
+    code: 'tdp-apply-failed',
+    side,
+    watts,
+    message: `TDP ${watts}W 下发失败，已跳过；CPU 调度及自动/手动模式切换会继续执行。${detail ? ` 详情：${detail}` : ''}`,
+    detail,
+  };
+}
+
+function publishPerformanceScheduleWarning(warning: PerformanceScheduleWarning): void {
+  lastWarning = warning;
+  const platformKey = warning.code === 'tdp-unsupported'
+    ? warning.code
+    : `${warning.code}:${warning.detail}`;
+  if (emittedWarningKeys.has(platformKey)) return;
+  emittedWarningKeys.add(platformKey);
+  console.warn('[performance schedule]', warning.message, warning.detail);
+  for (const listener of [...warningListeners]) listener({ ...warning });
+}
+
+export async function runOptionalPerformanceScheduleTdp(
+  side: PowerSide,
+  watts: number,
+  apply: () => Promise<void>,
+): Promise<PerformanceScheduleWarning | null> {
+  try {
+    await apply();
+    return null;
+  } catch (error) {
+    if (error instanceof SkipApplyError) throw error;
+    const warning = describePerformanceScheduleTdpError(error, side, watts);
+    publishPerformanceScheduleWarning(warning);
+    return warning;
+  }
+}
+
+export function getPerformanceScheduleWarning(): PerformanceScheduleWarning | null {
+  return lastWarning ? { ...lastWarning } : null;
+}
+
+export function onPerformanceScheduleWarning(
+  listener: (warning: PerformanceScheduleWarning) => void,
+): () => void {
+  warningListeners.add(listener);
+  if (lastWarning) listener({ ...lastWarning });
+  return () => warningListeners.delete(listener);
+}
+
+// 配置重制的六档基线：性能调度统一由 FPS、TDP、CPU 浮动值三者组成。
+// CPU 浮动值与 TDP 浮动幅度保持同档语义，避免选择档位后出现 CPU/TDP 两套方向。
+export const DEFAULT_SCHEDULE_PROFILES: Record<ScheduleMode, ScheduleProfile> = {
+  eco: {
+    cpuPreset: 'balanced',
+    coreMode: 'big',
+    tdpMax: 12,
+    fpsTarget: 30,
+    cpuTarget: 'aggressive',
+    tdpStrategy: 'aggressive',
+  },
+  balanced: {
+    cpuPreset: 'turbo',
+    coreMode: 'big',
+    tdpMax: 16,
+    fpsTarget: 45,
+    cpuTarget: 'aggressive',
+    tdpStrategy: 'aggressive',
+  },
+  medium: {
+    cpuPreset: 'turbo',
+    coreMode: 'big',
+    tdpMax: 23,
+    fpsTarget: 60,
+    cpuTarget: 'perf',
+    tdpStrategy: 'aggressive',
+  },
+  performance: {
+    cpuPreset: 'elite',
+    coreMode: 'big',
+    tdpMax: 30,
+    fpsTarget: 60,
+    cpuTarget: 'perf',
+    tdpStrategy: 'large',
+  },
+  elite: {
+    cpuPreset: 'elite',
+    coreMode: 'big',
+    tdpMax: 55,
+    fpsTarget: 60,
+    cpuTarget: 'eco',
+    tdpStrategy: 'medium',
+  },
+  extreme: {
+    cpuPreset: 'extreme',
+    coreMode: 'big',
+    tdpMax: 120,
+    fpsTarget: 120,
+    cpuTarget: 'none',
+    tdpStrategy: 'none',
+  },
+};
+
+function cloneProfiles(): Record<ScheduleMode, ScheduleProfile> {
+  return Object.fromEntries(
+    AUTO_MODES.map((mode) => [mode, { ...DEFAULT_SCHEDULE_PROFILES[mode] }]),
+  ) as Record<ScheduleMode, ScheduleProfile>;
+}
+
+export function defaultPerformanceScheduleConfig(): PerformanceScheduleConfig {
+  return {
+    version: 2,
+    configured: false,
+    enabled: false,
+    active: { ac: 'elite', dc: 'medium' },
+    profiles: {
+      ac: cloneProfiles(),
+      dc: cloneProfiles(),
+    },
+  };
+}
+
+export function resetPerformanceScheduleProfiles(config: PerformanceScheduleConfig): PerformanceScheduleConfig {
+  const defaults = defaultPerformanceScheduleConfig();
+  return {
+    ...config,
+    active: { ...defaults.active },
+    profiles: {
+      ac: cloneProfiles(),
+      dc: cloneProfiles(),
+    },
+  };
+}
+
+function isMode(value: unknown): value is ScheduleMode {
+  return AUTO_MODES.includes(value as ScheduleMode);
+}
+
+function normalizeProfile(value: unknown, fallback: ScheduleProfile): ScheduleProfile {
+  const raw = value && typeof value === 'object' ? value as Partial<ScheduleProfile> : {};
+  const cpuPreset: CpuPreset =
+    raw.cpuPreset === 'balanced' || raw.cpuPreset === 'turbo' ||
+    raw.cpuPreset === 'elite' || raw.cpuPreset === 'extreme'
+      ? raw.cpuPreset
+      : fallback.cpuPreset;
+  const coreMode: CoreMode =
+    raw.coreMode === 'big' || raw.coreMode === 'only-big' || raw.coreMode === 'only-small'
+      ? raw.coreMode
+      : fallback.coreMode;
+  const cpuTarget: FloatProfile =
+    raw.cpuTarget === 'none' || raw.cpuTarget === 'eco' || raw.cpuTarget === 'bal' ||
+    raw.cpuTarget === 'perf' || raw.cpuTarget === 'aggressive'
+      ? raw.cpuTarget
+      : fallback.cpuTarget;
+  const tdpStrategy: TdpFloatStrategy =
+    raw.tdpStrategy === 'none' || raw.tdpStrategy === 'small' || raw.tdpStrategy === 'medium' ||
+    raw.tdpStrategy === 'large' || raw.tdpStrategy === 'aggressive'
+      ? raw.tdpStrategy
+      : fallback.tdpStrategy;
+  const tdpMax = Math.max(2, Math.min(200, Math.round(Number(raw.tdpMax) || fallback.tdpMax)));
+  const fpsRaw = Math.round((Number.isFinite(Number(raw.fpsTarget)) ? Number(raw.fpsTarget) : fallback.fpsTarget) / 5) * 5;
+  // 0 = 不锁帧（真实数值 0），其余限制在 30~300
+  const fpsTarget = fpsRaw <= 0 ? 0 : Math.max(30, Math.min(300, fpsRaw));
+  return { cpuPreset, coreMode, tdpMax, fpsTarget, cpuTarget, tdpStrategy };
+}
+
+function normalizeConfig(value: unknown): PerformanceScheduleConfig {
+  const fallback = defaultPerformanceScheduleConfig();
+  const raw = value && typeof value === 'object' ? value as Partial<PerformanceScheduleConfig> : {};
+  const activeRaw = raw.active && typeof raw.active === 'object' ? raw.active : {} as Record<PowerSide, ScheduleMode>;
+  const profilesRaw = raw.profiles && typeof raw.profiles === 'object' ? raw.profiles : {} as PerformanceScheduleConfig['profiles'];
+  const next = defaultPerformanceScheduleConfig();
+  next.configured = raw.configured === true;
+  next.enabled = raw.enabled === true || (raw.enabled === undefined && raw.configured === true);
+  next.active.ac = isMode(activeRaw.ac) ? activeRaw.ac : fallback.active.ac;
+  next.active.dc = isMode(activeRaw.dc) ? activeRaw.dc : fallback.active.dc;
+  for (const side of ['ac', 'dc'] as const) {
+    for (const mode of AUTO_MODES) {
+      next.profiles[side][mode] = normalizeProfile(
+        profilesRaw[side]?.[mode],
+        fallback.profiles[side][mode],
+      );
+    }
+  }
+  return next;
+}
+
+let configCache: PerformanceScheduleConfig | null = null;
+let scheduleWriteQueue: Promise<void> = Promise.resolve();
+
+function queueScheduleWrite(config: PerformanceScheduleConfig): Promise<void> {
+  const snapshot = normalizeConfig(config);
+  const generation = getSettingsGeneration();
+  const next = scheduleWriteQueue.then(async () => {
+    await ensureGlobalFrameRates(); // freeze legacy FPS before a combination/active mode changes
+    await saveSettingsSection('performanceSchedule', snapshot as any, generation);
+    configCache = snapshot;
+    emitPerformanceSchedule(snapshot);
+  });
+  scheduleWriteQueue = next.catch(() => {});
+  return next;
+}
+
+function emitPerformanceSchedule(config: PerformanceScheduleConfig): void {
+  const snapshot = structuredClone(config);
+  for (const listener of [...configListeners]) {
+    try { listener(structuredClone(snapshot)); } catch { /* Observer failure is not a persistence failure. */ }
+  }
+  // 非浏览器上下文（测试/后台进程）下没有 window，需守卫（2026-08-05 修复）
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('performance-schedule:changed', { detail: snapshot }));
+  }
+}
+
+export function onPerformanceScheduleChanged(
+  listener: (config: PerformanceScheduleConfig) => void,
+): () => void {
+  configListeners.add(listener);
+  if (configCache) listener(structuredClone(configCache));
+  return () => configListeners.delete(listener);
+}
+
+export async function loadPerformanceSchedule(): Promise<PerformanceScheduleConfig> {
+  configCache = normalizeConfig(await readSettingsSection('performanceSchedule'));
+  return structuredClone(configCache);
+}
+
+export function snapshotPerformanceSchedule(
+  config: PerformanceScheduleConfig,
+): PerformanceScheduleConfig {
+  return normalizeConfig(config);
+}
+
+export async function savePerformanceSchedule(config: PerformanceScheduleConfig): Promise<void> {
+  await queueScheduleWrite(config);
+}
+
+async function applyCpuPresetBaseline(side: PowerSide, preset: CpuPreset): Promise<void> {
+  assertScheduleOpCurrent();
+  const cpuProfiles = await loadCpuProfiles();
+  assertScheduleOpCurrent();
+  await applyCpuProfilePowerParams(cpuProfiles.profiles[preset], side);
+}
+
+async function applyCoreModeIfHybrid(side: PowerSide, mode: CoreMode): Promise<boolean> {
+  assertScheduleOpCurrent();
+  const architecture = await detectCoreArchitecture();
+  // Unknown/uniform CPUs are read-only no-op: never write hybrid-only values
+  // merely because a powercfg subgroup happens to exist.
+  if (!architecture?.heterogeneous) return false;
+  assertScheduleOpCurrent();
+  if (side === 'ac') await setCoreModeAc(mode);
+  else await setCoreModeDc(mode);
+  return true;
+}
+
+// 全局操作串行化：所有调度入口（切档/纯手动/恢复/电源事件）共用此队列，
+// 避免并发写配置/硬件。带 generation 令牌，进入手动模式时使在途切档请求立刻短路。
+let scheduleOpQueue: Promise<void> = Promise.resolve();
+let scheduleOpGen = 0;
+let runningScheduleOpGen = 0;
+
+const POWER_TRANSITION_WRITE_BLOCKED = /hardware writes (?:are|were) blocked (?:during|before) power transition/i;
+const POWER_GATE_RETRY_DELAY_MS = 250;
+const POWER_GATE_RETRY_PROBES = 4;
+const POWER_LIFECYCLE_QUERY_TIMEOUT_MS = 500;
+
+function isPowerTransitionWriteBlocked(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error ?? '');
+  return POWER_TRANSITION_WRITE_BLOCKED.test(message);
+}
+
+async function waitForPowerWritesReady(): Promise<boolean> {
+  for (let attempt = 0; attempt < POWER_GATE_RETRY_PROBES; attempt++) {
+    const state = await powerLifecycle.get(POWER_LIFECYCLE_QUERY_TIMEOUT_MS).catch(() => null);
+    if (state?.phase === 'ready' && state.hardwareWritesAllowed) return true;
+    if (attempt + 1 < POWER_GATE_RETRY_PROBES) {
+      await new Promise<void>((resolve) => setTimeout(resolve, POWER_GATE_RETRY_DELAY_MS));
+    }
+  }
+  return false;
+}
+
+async function withScheduleOp<T>(enabled: boolean, fn: () => Promise<T>): Promise<T> {
+  // Every new scheduling request supersedes work that has not reached its
+  // next commit point. `enabled` remains in the signature for call-site
+  // compatibility; manual mode still uses the same invalidation path.
+  void enabled;
+  const gen = ++scheduleOpGen;
+  let resolveNext: (() => void) | null = null;
+  const ticket = new Promise<void>((r) => { resolveNext = r; });
+  const prev = scheduleOpQueue;
+  // 队列链始终存活：前一个操作失败（fn 抛异常）时 catch 吞掉该次失败，
+  // 保证后续操作不会被永久阻塞（修复：单次异常打挂整个调度系统 —— 2026-08-05）。
+  // fn 本身的错误仍会向调用方抛出（见下方 return await fn()），仅队列不断链。
+  scheduleOpQueue = scheduleOpQueue.catch(() => {}).then(() => ticket);
+  await prev;
+  try {
+    if (gen !== scheduleOpGen) throw new SkipApplyError();
+    runningScheduleOpGen = gen;
+    try {
+      return await fn();
+    } catch (error) {
+      // Retry only after native confirms that its sleep/resume write gate is open.
+      if (!isPowerTransitionWriteBlocked(error) || !(await waitForPowerWritesReady())) throw error;
+      if (gen !== scheduleOpGen) throw new SkipApplyError();
+      return await fn();
+    }
+  } finally {
+    if (runningScheduleOpGen === gen) runningScheduleOpGen = 0;
+    resolveNext!();
+  }
+}
+
+function assertScheduleOpCurrent(): void {
+  if (!runningScheduleOpGen || runningScheduleOpGen !== scheduleOpGen) {
+    throw new SkipApplyError();
+  }
+}
+
+export class SkipApplyError extends Error {
+  constructor() { super('outdated'); }
+}
+
+/* legacy helper retained for compatibility history
+async function ensureYemanSchemeActive(): Promise<void> {
+  return ensureRememberedYemanSchemeActive();
+  // legacy implementation retained below only as source context
+  await ensureYemanScheme();
+  if (await getActiveScheme() === PW.YEMAN) return;
+  await setActiveScheme(PW.YEMAN);
+  if (await getActiveScheme() !== PW.YEMAN) {
+    throw new Error('切换野蛮系统电源后仍未生效');
+  }
+}
+
+*/
+export async function applyPerformanceSchedule(
+  side: PowerSide,
+  mode: ScheduleMode,
+  config?: PerformanceScheduleConfig,
+): Promise<boolean> {
+  return withScheduleOp(true, async () => {
+    return applyPerformanceScheduleUnsafe(side, mode, config);
+  });
+}
+
+async function applyPerformanceScheduleUnsafe(
+  side: PowerSide,
+  mode: ScheduleMode,
+  config?: PerformanceScheduleConfig,
+): Promise<boolean> {
+  const current = config ? normalizeConfig(config) : await loadPerformanceSchedule();
+  // Automatic scheduling owns YeMan power scheme. Restore that ownership
+  // before writing CPU/TDP values so they always land on the active scheme.
+  assertScheduleOpCurrent();
+  await ensureRememberedYemanSchemeActive();
+  current.configured = true;
+  current.enabled = true;
+  assertScheduleOpCurrent();
+  current.active[side] = mode;
+  const actualSide = await detectPowerMode();
+  assertScheduleOpCurrent();
+  if (actualSide !== side) {
+    assertScheduleOpCurrent();
+    await savePerformanceSchedule(current);
+    return false;
+  }
+
+  const profile = current.profiles[side][mode];
+  const independent = (await ensureGlobalFrameRates())[side];
+  const optimizationTarget = independent.fps || independent.lastFps;
+  setFloatRtssLinked(false);
+  // CPU 控制轴互斥：cpuTarget!=='none' 时由「CPU 浮动值」接管 autofloat 的 CPU 主频降低策略；
+  // cpuTarget==='none' 时由「CPU 挡位」(cpuPreset) 直接设置硬件 CPU 档位。
+  // 两路不得叠加：cpuTarget!=='none' 不调用 runResetProfile，避免 preset 基线被压制层覆盖。
+  const cpuTarget: FloatProfile = profile.cpuTarget;
+
+  assertScheduleOpCurrent();
+  if ((await detectPowerMode()) !== side) return false;
+
+  if (getFloatInfo().enabled) {
+    // 浮动调度已运行：保留守护、daemon、HWiNFO 与 RTSS 原始快照，只增量更新当前目标。
+    // 热切档统一先下发 TDP，再重新下发 CPU：cpuTarget==='none' 时重设 cpuPreset；
+    // 否则由 autofloat 用 CPU 浮动值接管内核频率。
+    // 写硬件前二次校验电源侧：detectPowerMode 与下发之间若插拔电源，直接中止，
+    // 避免 AC 配置被写到 DC（或反之）造成电池下跑极端档（2026-08-05 修复 TOCTOU）。
+    if ((await detectPowerMode()) !== side) return false;
+    assertScheduleOpCurrent();
+    await runOptionalPerformanceScheduleTdp(side, profile.tdpMax, async () => {
+      await setTdp(side, profile.tdpMax, { apply: false, save: true });
+    });
+    assertScheduleOpCurrent();
+    await runOptionalPerformanceScheduleTdp(side, profile.tdpMax, async () => {
+      await notifyTdpMaxChanged(profile.tdpMax);
+    });
+    assertScheduleOpCurrent();
+    if (cpuTarget === 'none') await applyCpuPresetBaseline(side, profile.cpuPreset);
+    assertScheduleOpCurrent();
+    await applyFloatSettings(optimizationTarget, cpuTarget, profile.tdpStrategy);
+    assertScheduleOpCurrent();
+    await applyCoreModeIfHybrid(side, profile.coreMode);
+    assertScheduleOpCurrent();
+    await savePerformanceSchedule(current);
+    return true;
+  }
+
+  // 首次开启走完整初始化。
+  if ((await detectPowerMode()) !== side) return false;
+  // 新预设统一按 TDP 优先：先写入并应用当前侧 TDP，再套用 CPU 浮动/CPU 挡位。
+  assertScheduleOpCurrent();
+  await runOptionalPerformanceScheduleTdp(side, profile.tdpMax, async () => {
+    await setTdp(side, profile.tdpMax, { apply: true, save: true });
+  });
+  assertScheduleOpCurrent();
+  if (cpuTarget === 'none') await applyCpuPresetBaseline(side, profile.cpuPreset);
+  assertScheduleOpCurrent();
+  await enableFloat(optimizationTarget, cpuTarget, profile.tdpStrategy);
+  assertScheduleOpCurrent();
+  await applyCoreModeIfHybrid(side, profile.coreMode);
+  assertScheduleOpCurrent();
+  await savePerformanceSchedule(current);
+  return true;
+}
+
+export type PerformanceScheduleOwnership = 'none' | 'manual' | 'auto';
+
+export interface PerformanceScheduleRestoreOptions {
+  /** Only inspect/apply an active game-custom owner; never take over global manual mode. */
+  dedicatedOnly?: boolean;
+}
+
+export async function disablePerformanceSchedule(config?: PerformanceScheduleConfig): Promise<void> {
+  return withScheduleOp(false, async () => {
+    const current = config ? normalizeConfig(config) : await loadPerformanceSchedule();
+    current.configured = true;
+    current.enabled = false;
+    // 先停止现有 CPU 浮动控制；TDP/RTSS/监控资源保持交给后续 CPU 挡位逻辑接管。
+    assertScheduleOpCurrent();
+    if (getFloatInfo().enabled) await disableFloat();
+    assertScheduleOpCurrent();
+    await savePerformanceSchedule(current);
+  });
+}
+
+export async function getPerformanceScheduleOwnership(): Promise<PerformanceScheduleOwnership> {
+  const config = await loadPerformanceSchedule();
+  if (!config.configured) return 'none';
+  return config.enabled ? 'auto' : 'manual';
+}
+
+export async function restorePerformanceScheduleIfConfigured(
+  expectedSide?: PowerSide,
+  options: PerformanceScheduleRestoreOptions = {},
+): Promise<PerformanceScheduleOwnership> {
+  return withScheduleOp(true, async () => {
+    const config = await loadPerformanceSchedule();
+
+    // 系统级恢复必须独立于性能调度页是否激活：启动、唤醒、AC/DC 切换时，
+    // 当前游戏存在自定义档位则优先恢复自定义；否则才应用普通自动档位。
+    // 专属配置是独立的 owner，即使全局性能调度已经切到手动，也不能被这里
+    // 的“关闭自动优化”提前返回吞掉。
+    const game = await detectPolicyGame();
+    if (game) {
+      const custom = await loadGameCustomConfig();
+      const fromPath = game.path ? game.path.split(/[\\/]/).pop() : '';
+      const key = (fromPath || game.name || '').toLowerCase().trim();
+      const entry = key ? custom.entries[key.endsWith('.exe') ? key : `${key}.exe`] : undefined;
+      if (entry && entry.enabled !== false) {
+        // Dedicated profiles are allowed to take ownership independently of
+        // the global scheduler, so make sure writes land on the remembered
+        // YeMan scheme even when the user had left the global page in manual.
+        assertScheduleOpCurrent();
+        await ensureRememberedYemanSchemeActive();
+        assertScheduleOpCurrent();
+        const side = await detectPowerMode();
+        if (expectedSide && side !== expectedSide) throw new SkipApplyError();
+        const resolved = resolveGameCustomProfiles(entry, config);
+        const applied = await applyGameCustomProfilesUnsafe(side, resolved.ac, resolved.dc, {
+          pid: game.pid,
+          processCreated: game.processCreated,
+          policyTarget: true,
+        }, dedicatedFrameRatePair(custom.rtss[key.endsWith('.exe') ? key : `${key}.exe`], await ensureGlobalFrameRates()));
+        if (!applied) throw new SkipApplyError();
+        // “auto” 表示当前硬件已经由性能策略 owner（这里是专属 owner）接管，
+        // 调用方不应再紧接着执行普通 CPU 自动档覆盖它。
+        return 'auto';
+      }
+    }
+
+    if (!config.configured) return 'none';
+
+    if (options.dedicatedOnly) {
+      // The caller has already reconciled a manually-owned Windows scheme. If
+      // there is no dedicated entry, leave that owner untouched; the caller
+      // may continue with the normal manual CPU recovery path.
+      return 'manual';
+    }
+
+    if (!config.enabled) {
+      assertScheduleOpCurrent();
+      if (getFloatInfo().enabled) await disableFloat();
+      assertScheduleOpCurrent();
+      return 'manual';
+    }
+
+    const side = await detectPowerMode();
+    if (expectedSide && side !== expectedSide) throw new SkipApplyError();
+    const mode = config.active[side];
+    await applyPerformanceScheduleUnsafe(side, mode, config);
+    return 'auto';
+  });
+}
+
+export async function applyPerformanceScheduleForCurrentPower(): Promise<boolean> {
+  return withScheduleOp(true, async () => {
+    const config = await loadPerformanceSchedule();
+    const side = await detectPowerMode();
+    return applyPerformanceScheduleUnsafe(side, config.active[side], config);
+  });
+}
+
+// Startup needs one delayed hybrid-core refresh because a boot task/OEM policy
+// can rewrite these three power-plan values after the first normal restore.
+// This path is automatic-only and does not reapply TDP, CPU float, FPS, or
+// manual settings.
+export async function refreshPerformanceScheduleCoreMode(): Promise<boolean> {
+  return withScheduleOp(true, async () => {
+    assertScheduleOpCurrent();
+    const config = await loadPerformanceSchedule();
+    if (!config.configured || !config.enabled) return false;
+    const game = await detectPolicyGame();
+    if (game) {
+      const custom = await loadGameCustomConfig();
+      const fromPath = game.path ? game.path.split(/[\\/]/).pop() : '';
+      const key = (fromPath || game.name || '').toLowerCase().trim();
+      const entry = key ? custom.entries[key.endsWith('.exe') ? key : `${key}.exe`] : undefined;
+      if (entry && entry.enabled !== false) {
+        const side = await detectPowerMode();
+        const current = await detectPolicyGame();
+        if (!current || current.pid !== game.pid || current.processCreated !== game.processCreated) return false;
+        const resolved = resolveGameCustomProfiles(entry, config);
+        return applyCoreModeIfHybrid(side, resolved[side].coreMode);
+      }
+    }
+    const side = await detectPowerMode();
+    assertScheduleOpCurrent();
+    return applyCoreModeIfHybrid(side, config.profiles[side][config.active[side]].coreMode);
+  });
+}
+
+// 手柄 Start+上下：自动模式在当前 AC/DC 侧循环已编辑的标准档位。
+// 这里复用正常档位应用链路，确保切换会真正下发 CPU/TDP/浮动设置并落盘，
+// 不走“重制预设”或只改界面状态的旁路。
+export async function cyclePerformanceScheduleMode(direction: 1 | -1): Promise<{
+  applied: boolean;
+  side: PowerSide;
+  mode?: ScheduleMode;
+  blocked?: 'disabled' | 'custom' | 'cooldown' | 'boundary';
+}> {
+  return withScheduleOp(true, async () => {
+    const config = await loadPerformanceSchedule();
+    const side = await detectPowerMode();
+    if (!config.configured || !config.enabled) return { applied: false, side, blocked: 'disabled' };
+    const game = await detectPolicyGame();
+    if (game) {
+      const custom = await loadGameCustomConfig();
+      const fromPath = game.path ? game.path.split(/[\\/]/).pop() : '';
+      const key = (fromPath || game.name || '').toLowerCase().trim();
+      const entry = key ? custom.entries[key.endsWith('.exe') ? key : `${key}.exe`] : undefined;
+      if (entry && entry.enabled !== false) return { applied: false, side, blocked: 'custom' };
+    }
+    if (Date.now() < gamepadModeCooldownUntil) {
+      return { applied: false, side, mode: config.active[side], blocked: 'cooldown' };
+    }
+    const current = MODE_ORDER.indexOf(config.active[side]);
+    const nextIndex = Math.max(0, Math.min(MODE_ORDER.length - 1, current + direction));
+    if (nextIndex === current) {
+      return { applied: false, side, mode: config.active[side], blocked: 'boundary' };
+    }
+    const next = MODE_ORDER[nextIndex];
+    const applied = await applyPerformanceScheduleUnsafe(side, next, config);
+    if (applied) gamepadModeCooldownUntil = Date.now() + 3000;
+    return { applied, side, mode: next };
+  });
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// 自定义游戏模式：按识别到的游戏 exe 名存储一套专属 AC/DC 性能档位（覆盖自动模式）。
+// ──────────────────────────────────────────────────────────────────────────
+
+export interface GameCustomProfile {
+  displayName: string;
+  // Persisted separately from the profile definition: saved does not mean active.
+  enabled: boolean;
+  // ac/dc 保留用于兼容旧版快照；新配置只持久化挡位，应用时从自动优化 profiles 实时解析。
+  ac: ScheduleProfile;
+  dc: ScheduleProfile;
+  acMode?: ScheduleMode;
+  dcMode?: ScheduleMode;
+  // Per-game CPU policy.  These fields are appended for compatibility with
+  // existing entries and are intentionally independent from AC/DC profiles.
+  corePolicyEnabled?: boolean;
+  corePolicyMode?: 'default' | 'only-big' | 'big-small' | 'only-small' | 'small-super-small' | 'all';
+  hyperThreadPolicyEnabled?: boolean;
+  hyperThreadPolicy?: 'default' | 'on' | 'off';
+  // 2026-09-29 用户裁决：顶部专属菜单可覆盖全局手柄人格与陀螺仪开关。
+  // 'follow' = 不干预，沿用 YMCC「手柄 / 陀螺仪」页面设置；其余值优先于全局。
+  // 追加在末尾，缺失的旧条目回落 'follow'，因此旧配置文件完全兼容。
+  padPersona?: 'follow' | 'disabled' | 'steamdeck' | 'dualsense-edge' | 'elite';
+  // 2026-09-30 用户裁决：陀螺仪下拉直接用陀螺仪页的四个预设——选预设 = 启用陀螺仪
+  // 并展开该预设参数。'on' 为旧档值（下拉不再提供，仅在当前生效时如实显示）。
+  gyroOverride?: 'follow' | 'off' | 'on' | 'fps' | 'racing' | 'custom' | 'steam';
+  // Remember the original preset while gyroOverride is off; same EXE record, no sidebar store.
+  gyroPreset?: 'fps' | 'racing' | 'custom' | 'steam';
+}
+
+export interface GameCustomRtssProfile {
+  enabled: boolean;
+  acFps: number;
+  dcFps: number;
+  acCeiling?: number; dcCeiling?: number;
+  acLastFps?: number; dcLastFps?: number;
+}
+
+/**
+ * Legacy-only snapshot from the old destructive override implementation.
+ * Migrated once into the base; new game overlays never create this field.
+ */
+export interface GameInputRestoreSnapshot {
+  persona: string;
+  buttonMappingEnabled: boolean;
+  gyroEnabled: boolean;
+  motionEnabled: boolean;
+  // 2026-09-30：陀螺仪预设覆盖会改写 gyroMotion 顶层参数，恢复时整对象写回
+  // （深合并即可还原全部字段；预设覆盖不新增 schema 之外的键）。
+  gyroMotion?: Record<string, unknown>;
+}
+
+export interface GameCustomConfig {
+  version: 1;
+  entries: Record<string, GameCustomProfile>;
+  // Independent RTSS-only linkage. This never activates the full custom
+  // TDP/CPU/core/automatic-schedule profile.
+  rtss: Record<string, GameCustomRtssProfile>;
+  // 旧版覆写本机设置留下的恢复快照；新版本仅用于一次性迁移，不再创建。
+  inputRestore?: GameInputRestoreSnapshot;
+}
+
+const GAME_CUSTOM_PATH = 'C:\\SOFT\\YeMan\\PowerControl\\game-custom.json';
+const GAME_CUSTOM_BACKUP_PATH = `${GAME_CUSTOM_PATH}.bak`;
+const GAME_CUSTOM_MAX_BYTES = 4 * 1024 * 1024;
+
+function defaultGameCustomConfig(): GameCustomConfig {
+  return { version: 1, entries: {}, rtss: {} };
+}
+
+function normalizeCustomProfile(raw: unknown, fallback: ScheduleProfile): GameCustomProfile {
+  const r = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
+  const corePolicyModes = ['default', 'only-big', 'big-small', 'only-small', 'small-super-small', 'all'] as const;
+  const hyperThreadModes = ['default', 'on', 'off'] as const;
+  const corePolicyMode = corePolicyModes.includes(r.corePolicyMode as typeof corePolicyModes[number])
+    ? r.corePolicyMode as typeof corePolicyModes[number]
+    : 'default';
+  const hyperThreadPolicy = hyperThreadModes.includes(r.hyperThreadPolicy as typeof hyperThreadModes[number])
+    ? r.hyperThreadPolicy as typeof hyperThreadModes[number]
+    : 'default';
+  const padPersonas = ['follow', 'disabled', 'steamdeck', 'dualsense-edge', 'elite'] as const;
+  const gyroOverrides = ['follow', 'on', 'off', 'fps', 'racing', 'custom', 'steam'] as const;
+  const padPersona = padPersonas.includes(r.padPersona as typeof padPersonas[number])
+    ? r.padPersona as typeof padPersonas[number]
+    : 'follow';
+  const gyroOverride = gyroOverrides.includes(r.gyroOverride as typeof gyroOverrides[number])
+    ? r.gyroOverride as typeof gyroOverrides[number]
+    : 'follow';
+  return {
+    displayName: typeof r.displayName === 'string' ? r.displayName : '',
+    // Legacy entries were implicitly active; only an explicit false disables them.
+    enabled: r.enabled !== false,
+    ac: normalizeProfile(r.ac, fallback),
+    dc: normalizeProfile(r.dc, fallback),
+    acMode: isMode(r.acMode) ? r.acMode : undefined,
+    dcMode: isMode(r.dcMode) ? r.dcMode : undefined,
+    corePolicyEnabled: r.corePolicyEnabled === true,
+    corePolicyMode,
+    hyperThreadPolicyEnabled: r.hyperThreadPolicyEnabled === true,
+    hyperThreadPolicy,
+    padPersona,
+    gyroOverride,
+    gyroPreset: ['fps','racing','custom','steam'].includes(r.gyroOverride as string) ? r.gyroOverride as GameCustomProfile['gyroPreset']
+      : ['fps','racing','custom','steam'].includes(r.gyroPreset as string) ? r.gyroPreset as GameCustomProfile['gyroPreset'] : undefined,
+  };
+}
+
+function normalizeGameCustom(value: unknown): GameCustomConfig {
+  const fallback = defaultPerformanceScheduleConfig().profiles.ac.performance;
+  const raw = value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
+  const entriesRaw = raw.entries && typeof raw.entries === 'object' ? (raw.entries as Record<string, unknown>) : {};
+  const entries: Record<string, GameCustomProfile> = {};
+  for (const [key, val] of Object.entries(entriesRaw)) {
+    if (!key) continue;
+    const k = key.toLowerCase();
+    // 仅大小写不同的重复键：保留第一个（先出现的配置优先），避免静默覆盖丢数据。
+    if (!(k in entries)) entries[k] = normalizeCustomProfile(val, fallback);
+  }
+  const rtssRaw = raw.rtss && typeof raw.rtss === 'object'
+    ? (raw.rtss as Record<string, unknown>)
+    : {};
+  const rtss: Record<string, GameCustomRtssProfile> = {};
+  for (const [key, val] of Object.entries(rtssRaw)) {
+    if (!key) continue;
+    const k = key.toLowerCase();
+    if (k in rtss) continue;
+    const r = val && typeof val === 'object' ? (val as Record<string, unknown>) : {};
+    rtss[k] = {
+      ...r, // Preserve fields owned by newer RTSS/dedicated config versions.
+      enabled: r.enabled !== false,
+      acFps: frameRateSetting(Number(r.acFps) || 0).fps,
+      dcFps: frameRateSetting(Number(r.dcFps) || 0).fps,
+      acCeiling: frameRateSetting({fps:Number(r.acFps)||0,ceiling:r.acCeiling,lastFps:r.acLastFps}).ceiling,
+      dcCeiling: frameRateSetting({fps:Number(r.dcFps)||0,ceiling:r.dcCeiling,lastFps:r.dcLastFps}).ceiling,
+      acLastFps: frameRateSetting({fps:Number(r.acFps)||0,lastFps:r.acLastFps}).lastFps,
+      dcLastFps: frameRateSetting({fps:Number(r.dcFps)||0,lastFps:r.dcLastFps}).lastFps,
+    };
+  }
+  // Old dedicated snapshots migrate once into an independent RTSS map; after
+  // saving, selecting a different performance combination cannot rebind them.
+  for (const [key,entry] of Object.entries(entries)) if(!rtss[key]) {
+    rtss[key]=dedicatedFrameRateRecord({ac:frameRateSetting(entry.ac.fpsTarget),dc:frameRateSetting(entry.dc.fpsTarget)});
+  }
+  const restoreRaw = raw.inputRestore && typeof raw.inputRestore === 'object'
+    ? (raw.inputRestore as Record<string, unknown>)
+    : null;
+  const restorePersonas = ['disabled', 'dualshock4', 'xbox360', 'steamdeck', 'dualsense', 'elite', 'dualsense-edge'];
+  const inputRestore: GameInputRestoreSnapshot | undefined = restoreRaw && restorePersonas.includes(String(restoreRaw.persona))
+    ? {
+        persona: String(restoreRaw.persona),
+        buttonMappingEnabled: restoreRaw.buttonMappingEnabled === true,
+        gyroEnabled: restoreRaw.gyroEnabled === true,
+        motionEnabled: restoreRaw.motionEnabled === true,
+      }
+    : undefined;
+  return inputRestore ? { version: 1, entries, rtss, inputRestore } : { version: 1, entries, rtss };
+}
+
+let gameCustomCache: GameCustomConfig | null = null;
+
+type GameCustomConfigListener = (config: GameCustomConfig) => void;
+const gameCustomConfigListeners = new Set<GameCustomConfigListener>();
+
+function notifyGameCustomConfigChanged(config: GameCustomConfig): void {
+  for (const listener of gameCustomConfigListeners) {
+    try {
+      listener(structuredClone(config));
+    } catch {
+      // A stale UI listener must never make a successfully persisted config fail.
+    }
+  }
+}
+
+/** Subscribe to successful dedicated-profile saves within this renderer session. */
+export function onGameCustomConfigChanged(listener: GameCustomConfigListener): () => void {
+  gameCustomConfigListeners.add(listener);
+  return () => gameCustomConfigListeners.delete(listener);
+}
+
+function parseStandaloneGameCustom(raw: string): GameCustomConfig | null {
+  try {
+    const parsed = JSON.parse(raw.charCodeAt(0) === 0xFEFF ? raw.slice(1) : raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed) ||
+        !parsed.entries || typeof parsed.entries !== 'object' || Array.isArray(parsed.entries)) return null;
+    return normalizeGameCustom(parsed);
+  } catch { return null; }
+}
+async function readStandaloneGameCustom(path: string): Promise<GameCustomConfig | null> {
+  let raw: string;
+  try { raw = await fs.readTextFile(path, GAME_CUSTOM_MAX_BYTES); }
+  catch (error) {
+    if (await fs.exists(path)) throw new Error(`读取游戏配置失败：${path}；${(error as Error).message}`);
+    return null;
+  }
+  return parseStandaloneGameCustom(raw);
+}
+
+async function writeStandaloneGameCustom(config: GameCustomConfig): Promise<void> {
+  let previous: Record<string, any> = {};
+  if (await fs.exists(GAME_CUSTOM_PATH)) {
+    const raw = await fs.readTextFile(GAME_CUSTOM_PATH, GAME_CUSTOM_MAX_BYTES);
+    if (parseStandaloneGameCustom(raw)) previous = JSON.parse(raw.charCodeAt(0) === 0xFEFF ? raw.slice(1) : raw);
+  }
+  const next = { ...previous, ...config };
+  // Known maps are replacements so deletions remain durable. For retained
+  // entries only, recursively retain forward-compatible opaque fields.
+  for (const field of ['entries', 'rtss'] as const) {
+    const submitted = config[field] || {};
+    const retained: Record<string, any> = {};
+    for (const [key, value] of Object.entries(submitted)) {
+      const priorKey = Object.keys(previous[field] || {}).find(candidate => candidate.toLowerCase() === key.toLowerCase());
+      retained[key] = mergeSettings(priorKey ? previous[field][priorKey] : {}, value);
+    }
+    next[field] = retained;
+  }
+  if (!config.inputRestore) delete next.inputRestore;
+  else next.inputRestore = mergeSettings(previous.inputRestore || {}, config.inputRestore);
+  await fs.writeTextFileAtomic(GAME_CUSTOM_PATH, JSON.stringify(next, null, 2));
+}
+
+export function getGameCustomConfig(): GameCustomConfig {
+  return gameCustomCache ? structuredClone(gameCustomCache) : defaultGameCustomConfig();
+}
+
+async function loadGameCustomConfigUnlocked(): Promise<GameCustomConfig> {
+
+  const standaloneExists = await fs.exists(GAME_CUSTOM_PATH);
+  if (standaloneExists) {
+    const standalone = await readStandaloneGameCustom(GAME_CUSTOM_PATH);
+    if (standalone) {
+      gameCustomCache = standalone;
+      return structuredClone(gameCustomCache);
+    }
+
+    // A malformed main file must not fall back to the legacy unified section:
+    // doing so would resurrect entries the user deliberately removed. Prefer
+    // the last known standalone backup, otherwise expose an empty config while
+    // retaining the damaged file for diagnosis.
+    const backup = await readStandaloneGameCustom(GAME_CUSTOM_BACKUP_PATH);
+    gameCustomCache = backup ?? defaultGameCustomConfig();
+    return structuredClone(gameCustomCache);
+  }
+
+  // One-time migration only. Once the standalone document exists, it is the
+  // sole runtime source and the old unified section can never revive entries.
+  const migrated = normalizeGameCustom(await readSettingsSection('gameCustom'));
+  await writeStandaloneGameCustom(migrated);
+  await replaceSettingsSection('gameCustom', defaultGameCustomConfig() as any);
+  gameCustomCache = migrated;
+  return structuredClone(gameCustomCache);
+}
+
+let gameCustomWriteQueue: Promise<void> = Promise.resolve();
+let gameCustomLoad: Promise<GameCustomConfig> | null = null;
+
+export async function loadGameCustomConfig(): Promise<GameCustomConfig> {
+  if (!gameCustomLoad) {
+    // Cold migration/read participates in the file queue: an older load can
+    // neither overwrite a successful save nor publish a stale cached snapshot.
+    const run = gameCustomWriteQueue.then(loadGameCustomConfigUnlocked);
+    gameCustomWriteQueue = run.then(() => {}, () => {});
+    gameCustomLoad = run;
+  }
+  const task = gameCustomLoad;
+  try { return structuredClone(await task); }
+  finally { if (gameCustomLoad === task) gameCustomLoad = null; }
+}
+
+export async function saveGameCustomConfig(config: GameCustomConfig): Promise<void> {
+  await ensureGlobalFrameRates();
+  const defaultFrames = frameRatePair({});
+  const snapshot = normalizeGameCustom(config);
+  for(const key of Object.keys(config.entries))if(!config.rtss?.[key])snapshot.rtss[key]=dedicatedFrameRateRecord(defaultFrames);
+  // 队列吞错保活（一次 I/O 失败不再卡死后续写入）；但 run 本身仍向调用方抛出写入失败，
+  // 让 UI 能感知「保存失败」而非静默丢失（修复：首败后所有保存永久失效 —— 2026-08-05）。
+  const run = gameCustomWriteQueue.then(async () => {
+    // Preserve the previous standalone document before replacing it. This is
+    // deliberately independent from yeman-settings.json so deleting an entry
+    // cannot be undone by a later unified-settings merge.
+    if (await fs.exists(GAME_CUSTOM_PATH)) {
+      const previous = await fs.readTextFile(GAME_CUSTOM_PATH, GAME_CUSTOM_MAX_BYTES);
+      if (parseStandaloneGameCustom(previous)) {
+        await fs.writeTextFileAtomic(GAME_CUSTOM_BACKUP_PATH, previous);
+      } else {
+        // Never overwrite the last valid backup with corrupt main bytes.
+        await fs.writeTextFileAtomic(`${GAME_CUSTOM_PATH}.corrupt-${Date.now()}`, previous);
+      }
+    }
+    await writeStandaloneGameCustom(snapshot);
+    gameCustomCache = snapshot;
+    notifyGameCustomConfigChanged(snapshot);
+  });
+  gameCustomWriteQueue = run.catch(() => {});
+  await run;
+}
+
+/** Legacy migration clears ONLY the restore field under the existing config queue. */
+export async function clearGameInputRestoreSnapshot(expected: GameInputRestoreSnapshot): Promise<void> {
+  const run = gameCustomWriteQueue.then(async () => {
+    const current = await loadGameCustomConfigUnlocked();
+    if (JSON.stringify(current.inputRestore) !== JSON.stringify(expected)) return;
+    const next = { ...current, inputRestore: undefined };
+    await writeStandaloneGameCustom(next);
+    gameCustomCache = next;
+    notifyGameCustomConfigChanged(next);
+  });
+  gameCustomWriteQueue = run.catch(() => {});
+  await run;
+}
+
+export function getCustomProfileFor(
+  config: GameCustomConfig,
+  exeName: string,
+  side: PowerSide,
+): ScheduleProfile | null {
+  const entry = config.entries[exeName.toLowerCase()];
+  return entry && entry.enabled !== false ? entry[side] : null;
+}
+
+/**
+ * Resolve a game's dedicated AC/DC profiles from the current automatic
+ * optimization configuration. New entries store only acMode/dcMode, so an
+ * edit made on the automatic optimization page is used the next time the
+ * game profile is applied. The snapshot fields remain a compatibility
+ * fallback for entries written by older versions.
+ */
+export function resolveGameCustomProfiles(
+  entry: GameCustomProfile,
+  schedule: PerformanceScheduleConfig,
+): { ac: ScheduleProfile; dc: ScheduleProfile } {
+  return {
+    ac: entry.acMode && isMode(entry.acMode)
+      ? schedule.profiles.ac[entry.acMode]
+      : entry.ac,
+    dc: entry.dcMode && isMode(entry.dcMode)
+      ? schedule.profiles.dc[entry.dcMode]
+      : entry.dc,
+  };
+}
+
+export function getCustomRtssFor(
+  config: GameCustomConfig,
+  exeName: string,
+): GameCustomRtssProfile | null {
+  return config.rtss[exeName.toLowerCase()] ?? null;
+}
+
+async function applyGameCustomProfilesUnsafe(
+  side: PowerSide,
+  acProfile: ScheduleProfile,
+  dcProfile: ScheduleProfile,
+  expectedTarget?: PerformanceScheduleTarget,
+  frameRates?: FrameRatePair,
+): Promise<boolean> {
+  const profile = side === 'ac' ? acProfile : dcProfile;
+  const cpuTarget: FloatProfile = profile.cpuTarget;
+  const independent = (frameRates ?? await ensureGlobalFrameRates())[side];
+  const optimizationTarget = independent.fps || independent.lastFps;
+  setFloatRtssLinked(false);
+
+  const targetStillCurrent = async (): Promise<boolean> => {
+    if (!expectedTarget) return true;
+    if (expectedTarget.policyTarget) return isPolicyTargetCurrent(expectedTarget);
+    const current = await detectGame(true, expectedTarget.pid).catch(() => null);
+    return !!current && current.pid === expectedTarget.pid &&
+      current.processCreated === expectedTarget.processCreated;
+  };
+  const checkpoint = async (): Promise<boolean> => {
+    assertScheduleOpCurrent();
+    return targetStillCurrent();
+  };
+
+  if (!(await checkpoint())) return false;
+  if ((await detectPowerMode()) !== side) return false;
+
+  // 所有耗时硬件阶段前后都复核电源侧，避免插拔窗口中把旧 AC/DC 档位继续写入。
+  if ((await detectPowerMode()) !== side) return false;
+  if (getFloatInfo().enabled) {
+    if (!(await checkpoint()) || (await detectPowerMode()) !== side) return false;
+    await runOptionalPerformanceScheduleTdp(side, profile.tdpMax, async () => {
+      await setTdp(side, profile.tdpMax, { apply: false, save: true });
+    });
+    if (!(await checkpoint()) || (await detectPowerMode()) !== side) return false;
+    await runOptionalPerformanceScheduleTdp(side, profile.tdpMax, async () => {
+      await notifyTdpMaxChanged(profile.tdpMax);
+    });
+    if (!(await checkpoint())) return false;
+    if (cpuTarget === 'none') await applyCpuPresetBaseline(side, profile.cpuPreset);
+    if (!(await checkpoint())) return false;
+    await applyFloatSettings(optimizationTarget, cpuTarget, profile.tdpStrategy);
+    if (!(await checkpoint())) return false;
+    await applyCoreModeIfHybrid(side, profile.coreMode);
+    return checkpoint();
+  }
+  if (!(await checkpoint()) || (await detectPowerMode()) !== side) return false;
+  await runOptionalPerformanceScheduleTdp(side, profile.tdpMax, async () => {
+    await setTdp(side, profile.tdpMax, { apply: true, save: true });
+  });
+  if (!(await checkpoint())) return false;
+  if (cpuTarget === 'none') await applyCpuPresetBaseline(side, profile.cpuPreset);
+  if (!(await checkpoint()) || (await detectPowerMode()) !== side) return false;
+  await enableFloat(optimizationTarget, cpuTarget, profile.tdpStrategy);
+  if (!(await checkpoint())) return false;
+  await applyCoreModeIfHybrid(side, profile.coreMode);
+  return checkpoint();
+}
+
+/**
+ * Apply only the RTSS/FPS part of a game-custom profile.
+ *
+ * This deliberately does not enable the performance schedule, switch the
+ * YeMan scheme, touch TDP/CPU/core mode, or start/stop autofloat.
+ */
+let customRtssOnlyQueue: Promise<void> = Promise.resolve();
+
+export async function applyGameCustomRtssOnly(
+  acProfile: ScheduleProfile,
+  dcProfile: ScheduleProfile,
+  expectedTarget?: PerformanceScheduleTarget,
+): Promise<{ applied: boolean; side: PowerSide; fps: number }> {
+  const run = customRtssOnlyQueue.then(async () => {
+    if (expectedTarget) {
+      const current = await detectGame(true, expectedTarget.pid);
+      if (!current || current.pid !== expectedTarget.pid ||
+          String(current.processCreated) !== String(expectedTarget.processCreated)) {
+        return { applied: false, side: await detectPowerMode(), fps: 0 };
+      }
+    }
+    // RTSS-only is an explicit one-shot owner. Drop a stale debounced
+    // autofloat write before committing the requested FPS; this does not
+    // enable/disable autofloat or touch its CPU/TDP/core state.
+    cancelPendingRtssSync();
+    const side = await detectPowerMode();
+    const {effectiveFrameRates}=await import('./frameRateLimits');
+    const fps=(await effectiveFrameRates()).pair[side].fps;
+    await setRtssLimit(fps);
+    const actual = await readRtssLimit();
+    if (actual !== fps) throw new Error(`RTSS FPS 回读不一致：期望 ${fps}，实际 ${actual}`);
+    return { applied: true, side, fps };
+  });
+  customRtssOnlyQueue = run.then(() => undefined, () => undefined);
+  return run;
+}
+// 应用自定义档位：绕开自动档位选择，直接把该游戏的 AC/DC 配置下发到当前电源侧。
+export async function applyGameCustomProfiles(
+  acProfile: ScheduleProfile,
+  dcProfile: ScheduleProfile,
+  expectedTarget?: PerformanceScheduleTarget,
+  frameRates?: FrameRatePair,
+): Promise<boolean> {
+  // This is an explicit top-menu action. It is allowed in both automatic and
+  // manual global modes; manual mode only changes hardware when the user asks
+  // to apply the dedicated game profile.
+  //
+  // AC/DC broadcasts and boot/resume reconciliation can legitimately supersede
+  // one scheduling operation while this one is between hardware writes. A
+  // dedicated profile must not surface that internal cancellation as the user
+  // visible error "outdated", so retry after the newer operation drains.
+  const maxAttempts = 3;
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    try {
+      return await withScheduleOp(true, async () => {
+        assertScheduleOpCurrent();
+        await ensureRememberedYemanSchemeActive();
+        assertScheduleOpCurrent();
+        const side = await detectPowerMode();
+        return applyGameCustomProfilesUnsafe(side, acProfile, dcProfile, expectedTarget, frameRates);
+      });
+    } catch (error) {
+      if (!(error instanceof SkipApplyError) || attempt === maxAttempts - 1) throw error;
+      await new Promise<void>((resolve) => setTimeout(resolve, 120));
+    }
+  }
+  return false;
+}

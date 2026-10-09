@@ -1,0 +1,404 @@
+<Page
+    x:Class="HandheldCompanion.Views.Pages.LayoutPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:behaviors="clr-namespace:HandheldCompanion.Behaviors"
+    xmlns:controls="clr-namespace:HandheldCompanion.Controls"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:ikw="http://schemas.inkore.net/lib/ui/wpf"
+    xmlns:l="clr-namespace:HandheldCompanion.Localization"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:resx="clr-namespace:HandheldCompanion.Properties"
+    xmlns:ui="http://schemas.inkore.net/lib/ui/wpf/modern"
+    xmlns:viewmodels="clr-namespace:HandheldCompanion.ViewModels"
+    Name="Layout"
+    Title="{l:Static resx:Resources.ProfilesPage_ControllerLayout}"
+    Margin="20"
+    d:Background="White"
+    d:DataContext="{d:DesignInstance Type=viewmodels:LayoutPageViewModel}"
+    d:DesignHeight="1000"
+    d:DesignWidth="1000"
+    KeepAlive="True"
+    Loaded="Page_Loaded"
+    mc:Ignorable="d">
+
+    <Grid Name="MainGrid">
+        <Image
+            Margin="20,120,0,0"
+            HorizontalAlignment="Left"
+            VerticalAlignment="Top"
+            Opacity="0.4"
+            Source="{Binding Artwork, Mode=OneWay, UpdateSourceTrigger=PropertyChanged}"
+            Stretch="None"
+            Visibility="Visible">
+            <Image.OpacityMask>
+                <RadialGradientBrush Center="0.6,0.4" GradientOrigin="0.6,0.4" RadiusX="1" RadiusY="1.2">
+                    <GradientStop Offset="0.0" Color="{DynamicResource MaskGradientStartColor}" />
+                    <GradientStop Offset="0.4" Color="{DynamicResource MaskGradientEndColor}" />
+                </RadialGradientBrush>
+            </Image.OpacityMask>
+        </Image>
+
+        <StackPanel>
+            <!--  Current layout info header  -->
+            <ikw:SimpleStackPanel
+                Margin="0,0,0,8"
+                Orientation="Horizontal"
+                Spacing="3">
+                <TextBlock
+                    behaviors:TextBlockUpperCase.IsUpperCase="True"
+                    Style="{StaticResource CapitalAccentTextBlockStyle}"
+                    Text="{Binding LayoutName, Mode=OneWay, UpdateSourceTrigger=PropertyChanged}" />
+                <TextBlock
+                    Margin="3,-1,3,0"
+                    Style="{StaticResource BaseTextBlockStyle}"
+                    Text="•" />
+                <TextBlock
+                    Name="LayoutInfoDescription"
+                    MaxWidth="300"
+                    behaviors:TextBlockUpperCase.IsUpperCase="True"
+                    Style="{StaticResource CapitalAccentTextBlockStyle}"
+                    Text="{Binding LayoutDescription, Mode=OneWay, UpdateSourceTrigger=PropertyChanged}"
+                    TextWrapping="NoWrap" />
+            </ikw:SimpleStackPanel>
+
+            <!--  Profile picker  -->
+            <ikw:SimpleStackPanel
+                Name="LayoutPickerPanel"
+                d:Visibility="Visible"
+                Spacing="12">
+
+                <TextBlock Style="{StaticResource BaseTextBlockStyle}" Text="{l:Static resx:Resources.LayoutPage_TemplatePicker}" />
+                <ComboBox
+                    Name="cB_Layouts"
+                    HorizontalAlignment="Stretch"
+                    VerticalAlignment="Center"
+                    HorizontalContentAlignment="Left"
+                    ItemsSource="{Binding LayoutCollectionView, Mode=OneWay, UpdateSourceTrigger=PropertyChanged}"
+                    SelectionChanged="cB_Layouts_SelectionChanged">
+                    <ComboBox.GroupStyle>
+                        <GroupStyle>
+                            <GroupStyle.HeaderTemplate>
+                                <DataTemplate>
+                                    <TextBlock
+                                        Margin="16,0,0,0"
+                                        Style="{StaticResource BaseTextBlockStyle}"
+                                        Text="{Binding Name, Mode=OneWay, UpdateSourceTrigger=PropertyChanged}" />
+                                </DataTemplate>
+                            </GroupStyle.HeaderTemplate>
+                        </GroupStyle>
+                    </ComboBox.GroupStyle>
+                    <ComboBox.ItemTemplate>
+                        <DataTemplate>
+                            <Grid Width="{Binding ActualWidth, RelativeSource={RelativeSource AncestorType=ComboBox}}">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="30" />
+                                    <ColumnDefinition />
+                                </Grid.ColumnDefinitions>
+
+                                <ui:FontIcon
+                                    Height="40"
+                                    HorizontalAlignment="Left"
+                                    VerticalAlignment="Center"
+                                    FontFamily="{DynamicResource SymbolThemeFontFamily}"
+                                    Glyph="&#xE7FC;" />
+
+                                <StackPanel Grid.Column="1" Margin="0,0,50,0">
+                                    <Grid>
+                                        <TextBlock Style="{StaticResource BaseTextBlockStyle}" Text="{Binding Name, Mode=OneWay, UpdateSourceTrigger=PropertyChanged}" />
+                                        <ikw:SimpleStackPanel
+                                            HorizontalAlignment="Right"
+                                            Orientation="Horizontal"
+                                            Spacing="3">
+                                            <TextBlock
+                                                FontStyle="Italic"
+                                                Style="{StaticResource BaseTextBlockStyle}"
+                                                Text="{Binding Product, Mode=OneWay, UpdateSourceTrigger=PropertyChanged}" />
+                                            <TextBlock Style="{StaticResource BaseTextBlockStyle}" Text="{Binding Author, Mode=OneWay, UpdateSourceTrigger=PropertyChanged}" />
+                                        </ikw:SimpleStackPanel>
+                                    </Grid>
+                                    <TextBlock
+                                        Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}"
+                                        Style="{StaticResource CaptionTextBlockStyle}"
+                                        Text="{Binding Description, Mode=OneWay, UpdateSourceTrigger=PropertyChanged}"
+                                        TextWrapping="Wrap" />
+                                </StackPanel>
+                            </Grid>
+                        </DataTemplate>
+                    </ComboBox.ItemTemplate>
+
+                    <ComboBox.ItemContainerStyle>
+                        <Style BasedOn="{StaticResource {x:Type ComboBoxItem}}" TargetType="ComboBoxItem">
+                            <Setter Property="IsEnabled" Value="True" />
+                            <Setter Property="Visibility" Value="{Binding Visibility, Mode=OneWay, UpdateSourceTrigger=PropertyChanged}" />
+                            <Setter Property="Width" Value="{Binding ActualWidth, RelativeSource={RelativeSource AncestorType=ComboBox}}" />
+                        </Style>
+                    </ComboBox.ItemContainerStyle>
+                </ComboBox>
+
+                <ikw:SimpleStackPanel Orientation="Vertical" Spacing="3">
+                    <Grid>
+                        <CheckBox
+                            Name="CheckBoxDeviceLayouts"
+                            Checked="CheckBoxDeviceLayouts_Checked"
+                            Content="{l:Static resx:Resources.LayoutPage_ShowCurrentControllerTemplates}"
+                            IsChecked="True"
+                            Unchecked="CheckBoxDeviceLayouts_Checked" />
+
+                        <ikw:SimpleStackPanel
+                            HorizontalAlignment="Right"
+                            Orientation="Horizontal"
+                            Spacing="3">
+
+                            <!--  Apply template  -->
+                            <Button
+                                Name="ButtonApplyLayout"
+                                Click="ButtonApplyLayout_Click"
+                                Content="{l:Static resx:Resources.LayoutPage_ApplyTemplate}"
+                                IsEnabled="False"
+                                Style="{DynamicResource AccentButtonStyle}" />
+
+                            <!--  Layout settings  -->
+                            <Button Name="ButtonLayoutSettingsEdit" VerticalAlignment="Stretch">
+                                <ui:FontIcon FontFamily="{DynamicResource SymbolThemeFontFamily}" Glyph="&#xE713;" />
+                                <ui:FlyoutService.Flyout>
+                                    <ui:Flyout
+                                        x:Name="LayoutSettingsFlyout"
+                                        AreOpenCloseAnimationsEnabled="True"
+                                        Opening="LayoutSettingsFlyout_Opening"
+                                        Placement="Left">
+                                        <ikw:SimpleStackPanel Width="400" Spacing="8">
+                                            <TextBlock Style="{StaticResource BaseTextBlockStyle}" Text="Edit Layout Metadata" />
+
+                                            <ikw:SimpleStackPanel Spacing="3">
+                                                <TextBox
+                                                    Name="LayoutTitle"
+                                                    HorizontalAlignment="Stretch"
+                                                    ui:ControlHelper.Header="{l:Static resx:Resources.LayoutPage_LayoutTitle}"
+                                                    Text="{Binding LayoutName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                                <TextBox
+                                                    Name="LayoutDescription"
+                                                    HorizontalAlignment="Stretch"
+                                                    ui:ControlHelper.Header="{l:Static resx:Resources.LayoutPage_LayoutDesc}"
+                                                    Text="{Binding LayoutDescription, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                                <TextBox
+                                                    Name="LayoutAuthor"
+                                                    HorizontalAlignment="Stretch"
+                                                    ui:ControlHelper.Header="{l:Static resx:Resources.LayoutPage_LayoutAuthor}"
+                                                    Text="{Binding LayoutAuthor, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+
+                                                <!--  Separator  -->
+                                                <Separator
+                                                    BorderBrush="{DynamicResource SystemControlBackgroundChromeMediumBrush}"
+                                                    BorderThickness="0,1,0,0"
+                                                    Opacity="0.25" />
+
+                                                <Grid>
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="5*" />
+                                                        <ColumnDefinition Width="0.5*" />
+                                                        <ColumnDefinition Width="5*" />
+                                                    </Grid.ColumnDefinitions>
+
+                                                    <Button
+                                                        Name="LayoutSettingsConfirmButton"
+                                                        Grid.Column="0"
+                                                        HorizontalAlignment="Stretch"
+                                                        Click="LayoutSettingsConfirmButton_Click"
+                                                        Content="{l:Static resx:Resources.LayoutPage_Confirm}" />
+                                                    <Button
+                                                        Name="LayoutSettingsCancelButton"
+                                                        Grid.Column="2"
+                                                        HorizontalAlignment="Stretch"
+                                                        Click="LayoutSettingsCancelButton_Click"
+                                                        Content="{l:Static resx:Resources.LayoutPage_Cancel}" />
+                                                </Grid>
+                                            </ikw:SimpleStackPanel>
+                                        </ikw:SimpleStackPanel>
+                                    </ui:Flyout>
+                                </ui:FlyoutService.Flyout>
+                            </Button>
+
+                            <!--  Export layout  -->
+                            <Button Name="ButtonLayoutExport" VerticalAlignment="Stretch">
+                                <ui:FontIcon FontFamily="{DynamicResource SymbolThemeFontFamily}" Glyph="&#xEE71;" />
+                                <ui:FlyoutService.Flyout>
+                                    <ui:Flyout
+                                        x:Name="LayoutExportFlyout"
+                                        AreOpenCloseAnimationsEnabled="True"
+                                        Opening="ExportFlyout_Opening"
+                                        Placement="Left">
+                                        <ikw:SimpleStackPanel Width="400" Spacing="8">
+                                            <TextBlock Style="{StaticResource BaseTextBlockStyle}" Text="{l:Static resx:Resources.LayoutPage_ExportLayout}" />
+
+                                            <ikw:SimpleStackPanel Spacing="3">
+                                                <CheckBox x:Name="ExportForCurrent" Content="{l:Static resx:Resources.LayoutPage_ExportCurrentController}" />
+                                                <CheckBox
+                                                    x:Name="SaveGameInfo"
+                                                    Click="SaveGameInfo_Toggled"
+                                                    Content="{l:Static resx:Resources.LayoutPage_SaveGameInfoLayout}"
+                                                    IsChecked="True" />
+
+                                                <!--  Separator  -->
+                                                <Separator
+                                                    BorderBrush="{DynamicResource SystemControlBackgroundChromeMediumBrush}"
+                                                    BorderThickness="0,1,0,0"
+                                                    Opacity="0.25" />
+
+                                                <Grid>
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="5*" />
+                                                        <ColumnDefinition Width="0.5*" />
+                                                        <ColumnDefinition Width="5*" />
+                                                    </Grid.ColumnDefinitions>
+
+                                                    <Button
+                                                        Name="LayoutExportButton"
+                                                        Grid.Column="0"
+                                                        HorizontalAlignment="Stretch"
+                                                        Click="LayoutExportButton_Click"
+                                                        Content="{l:Static resx:Resources.LayoutPage_Confirm}" />
+                                                    <Button
+                                                        Name="LayoutExportCancelButton"
+                                                        Grid.Column="2"
+                                                        HorizontalAlignment="Stretch"
+                                                        Click="LayoutExportCancelButton_Click"
+                                                        Content="{l:Static resx:Resources.LayoutPage_Cancel}" />
+                                                </Grid>
+                                            </ikw:SimpleStackPanel>
+                                        </ikw:SimpleStackPanel>
+                                    </ui:Flyout>
+                                </ui:FlyoutService.Flyout>
+                            </Button>
+
+                            <!--  Reset layout  -->
+                            <Button
+                                Name="ButtonResetLayout"
+                                Click="ButtonResetLayout_Click"
+                                Content="{l:Static resx:Resources.LayoutPage_ResetLayout}"
+                                Style="{DynamicResource AccentButtonStyle}" />
+                        </ikw:SimpleStackPanel>
+                    </Grid>
+                </ikw:SimpleStackPanel>
+            </ikw:SimpleStackPanel>
+
+            <controls:AdaptiveNavigationView
+                x:Name="navView"
+                IsBackButtonVisible="Collapsed"
+                IsBackEnabled="False"
+                IsPaneToggleButtonVisible="False"
+                IsSettingsVisible="False"
+                IsTabStop="False"
+                ItemInvoked="navView_ItemInvoked"
+                Loaded="navView_Loaded"
+                OpenPaneLength="150"
+                PaneDisplayMode="Top"
+                SelectionFollowsFocus="Enabled"
+                ShoulderNavigationEnabled="WhenSelectionFollowsFocus"
+                TopNavItemsAlignment="Center">
+
+                <controls:AdaptiveNavigationView.Resources>
+                    <StaticResource x:Key="TopNavigationViewItemBackgroundPointerOver" ResourceKey="NavigationViewItemBackgroundPointerOver" />
+                    <StaticResource x:Key="TopNavigationViewItemBackgroundPressed" ResourceKey="NavigationViewItemBackgroundPressed" />
+                    <StaticResource x:Key="TopNavigationViewItemBackgroundSelected" ResourceKey="NavigationViewItemBackgroundSelected" />
+                    <StaticResource x:Key="TopNavigationViewItemBackgroundSelectedPointerOver" ResourceKey="NavigationViewItemBackgroundSelectedPointerOver" />
+                    <StaticResource x:Key="TopNavigationViewItemBackgroundSelectedPressed" ResourceKey="NavigationViewItemBackgroundSelectedPressed" />
+                    <StaticResource x:Key="TopNavigationViewItemForegroundPointerOver" ResourceKey="NavigationViewSelectionIndicatorForeground" />
+                    <StaticResource x:Key="TopNavigationViewItemForegroundPressed" ResourceKey="NavigationViewSelectionIndicatorForeground" />
+                    <StaticResource x:Key="TopNavigationViewItemForegroundSelectedPointerOver" ResourceKey="NavigationViewSelectionIndicatorForeground" />
+                    <SolidColorBrush x:Key="NavigationViewContentBackground" Color="Transparent" />
+                    <SolidColorBrush x:Key="NavigationViewContentGridBorderBrush" Color="Transparent" />
+                </controls:AdaptiveNavigationView.Resources>
+
+                <controls:AdaptiveNavigationView.MenuItems>
+                    <ui:NavigationViewItem IsEnabled="False">
+                        <ui:NavigationViewItem.Icon>
+                            <ui:FontIcon
+                                Name="L2"
+                                Margin="-6,-6,-6,-6"
+                                FontFamily="PromptFont"
+                                FontSize="22"
+                                Glyph="&#x21B2;" />
+                        </ui:NavigationViewItem.Icon>
+                    </ui:NavigationViewItem>
+
+                    <ui:NavigationViewItem
+                        Name="navButtons"
+                        Content="{l:Static resx:Resources.LayoutPage_Buttons}"
+                        IsEnabled="False"
+                        Tag="ButtonsPage">
+                        <ui:NavigationViewItem.Icon>
+                            <ui:FontIcon FontFamily="{StaticResource SymbolThemeFontFamily}" Glyph="&#xF093;" />
+                        </ui:NavigationViewItem.Icon>
+                    </ui:NavigationViewItem>
+
+                    <ui:NavigationViewItem
+                        Name="navDpad"
+                        Content="{l:Static resx:Resources.LayoutPage_Dpad}"
+                        IsEnabled="False"
+                        Tag="DpadPage">
+                        <ui:NavigationViewItem.Icon>
+                            <ui:FontIcon FontFamily="{StaticResource SymbolThemeFontFamily}" Glyph="&#xF10E;" />
+                        </ui:NavigationViewItem.Icon>
+                    </ui:NavigationViewItem>
+
+                    <ui:NavigationViewItem
+                        Name="navTriggers"
+                        Content="{l:Static resx:Resources.LayoutPage_Triggers}"
+                        IsEnabled="False"
+                        Tag="TriggersPage">
+                        <ui:NavigationViewItem.Icon>
+                            <ui:FontIcon FontFamily="{StaticResource SymbolThemeFontFamily}" Glyph="&#xF10A;" />
+                        </ui:NavigationViewItem.Icon>
+                    </ui:NavigationViewItem>
+
+                    <ui:NavigationViewItem
+                        Name="navJoysticks"
+                        Content="{l:Static resx:Resources.LayoutPage_Joysticks}"
+                        IsEnabled="False"
+                        Tag="JoysticksPage">
+                        <ui:NavigationViewItem.Icon>
+                            <ui:FontIcon FontFamily="{StaticResource SymbolThemeFontFamily}" Glyph="&#xF108;" />
+                        </ui:NavigationViewItem.Icon>
+                    </ui:NavigationViewItem>
+
+                    <ui:NavigationViewItem
+                        Name="navTrackpads"
+                        Content="{l:Static resx:Resources.LayoutPage_Trackpads}"
+                        IsEnabled="False"
+                        Tag="TrackpadsPage">
+                        <ui:NavigationViewItem.Icon>
+                            <ui:FontIcon FontFamily="{StaticResource SymbolThemeFontFamily}" Glyph="&#xEFA5;" />
+                        </ui:NavigationViewItem.Icon>
+                    </ui:NavigationViewItem>
+
+                    <ui:NavigationViewItem
+                        Name="navGyro"
+                        Content="{l:Static resx:Resources.LayoutPage_Gyro}"
+                        IsEnabled="False"
+                        Tag="GyroPage">
+                        <ui:NavigationViewItem.Icon>
+                            <ui:FontIcon FontFamily="{StaticResource SymbolThemeFontFamily}" Glyph="&#xE777;" />
+                        </ui:NavigationViewItem.Icon>
+                    </ui:NavigationViewItem>
+
+                    <ui:NavigationViewItem IsEnabled="False">
+                        <ui:NavigationViewItem.Icon>
+                            <ui:FontIcon
+                                Name="R2"
+                                Margin="-6,-6,-6,-6"
+                                FontFamily="PromptFont"
+                                FontSize="22"
+                                Glyph="&#x21B3;" />
+                        </ui:NavigationViewItem.Icon>
+                    </ui:NavigationViewItem>
+                </controls:AdaptiveNavigationView.MenuItems>
+
+                <ui:Frame
+                    Name="ContentFrame"
+                    Width="{Binding ActualWidth, RelativeSource={RelativeSource Mode=FindAncestor, AncestorType={x:Type FrameworkElement}}}"
+                    HorizontalAlignment="Left" />
+            </controls:AdaptiveNavigationView>
+        </StackPanel>
+    </Grid>
+</Page>

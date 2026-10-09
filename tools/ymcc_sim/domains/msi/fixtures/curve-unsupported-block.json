@@ -1,0 +1,8 @@
+{
+  "name": "curve-unsupported-block",
+  "kind": "curve",
+  "expect": { "ok": false, "reason": "block-unsupported", "duties": null, "asRpm": false },
+  "raw": [3, 40, 49, 58, 67, 75, 75, 75, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+  "readSuccess": true,
+  "note": "block index 3 is not a curve table (only block 1 CPU / block 2 GPU are defined): refuse to decode rather than guess a value"
+}

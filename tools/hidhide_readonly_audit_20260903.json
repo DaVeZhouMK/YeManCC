@@ -1,0 +1,19 @@
+{
+  "evidenceId": "A1-HIDHIDE-READONLY-20260903",
+  "status": "LOCATED",
+  "binary": "C:\\Program Files\\Nefarius Software Solutions\\HidHide\\x64\\HidHideCLI.exe",
+  "version": "1.5.230.0",
+  "readOnlyCommands": ["--version", "--cloak-state", "--inv-state", "--app-list", "--dev-list"],
+  "observed": {
+    "cloak": "off",
+    "inverseApplicationList": "off",
+    "registeredApplications": [
+      "C:\\Program Files\\Nefarius Software Solutions\\HidHide\\x64\\HidHideCLI.exe",
+      "C:\\Program Files\\Nefarius Software Solutions\\HidHide\\x64\\HidHideClient.exe",
+      "C:\\SOFT\\YeManCC-Work\\Temp\\HIDMaestro-Lab-20260822\\package\\HIDMaestroTest\\HIDMaestroTest.exe"
+    ],
+    "hiddenDeviceEntries": 4
+  },
+  "conclusion": "HidHide API/CLI is located and current configuration was read without mutation. Project-only diff, allowlist ownership, restore and failure rollback remain unverified.",
+  "mutated": false
+}

@@ -1,0 +1,15 @@
+{
+  "evidenceId": "A1-HC-REFLECTION-LOAD-20260903",
+  "status": "BLOCKED",
+  "assetId": "HC-CANDIDATE-0.32.4.0-06c0b954-20260902",
+  "runtimeRoot": "C:\\SOFT\\YeMan\\PowerControl\\handheldcompanion-runtime\\HC-CANDIDATE-0.32.4.0-06c0b954-20260902",
+  "probe": "PowerShell .NET Assembly.LoadFrom + Assembly.GetTypes; no static manager methods invoked",
+  "observed": {
+    "HandheldCompanion.dll": "assembly load succeeded; GetTypes failed due missing WpfScreenHelper, GongSolutions.WPF.DragDrop, GameLib.Core, SDL3-CS and System.IO.Ports version mismatch",
+    "GamepadMotion.dll": "Assembly.LoadFrom failed with Bad IL format (native/unmanaged or incompatible image)"
+  },
+  "conclusion": "The locked runtime is not a self-contained input-only managed assembly set. Dependency closure and GamepadMotion loading are unresolved; do not start full HC or claim isolated input Host.",
+  "systemMutation": false,
+  "physicalControllerAccess": false,
+  "fanAccess": false
+}

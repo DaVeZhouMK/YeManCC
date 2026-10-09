@@ -1,0 +1,51 @@
+{
+    "timestampUtc":  "2026-10-04T04:29:02.2926752Z",
+    "checks":  [
+                   {
+                       "passed":  true,
+                       "file":  "Invoke-ROG-CPU.ps1",
+                       "parserErrorCount":  0
+                   },
+                   {
+                       "passed":  true,
+                       "file":  "Invoke-YMCC-AuthorizedWorker.ps1",
+                       "parserErrorCount":  0
+                   },
+                   {
+                       "passed":  true,
+                       "file":  "Control-YMCC-Lifecycle.ps1",
+                       "parserErrorCount":  0
+                   },
+                   {
+                       "passed":  true,
+                       "file":  "Send-YMCC-AI-Fan-Mock.ps1",
+                       "parserErrorCount":  0
+                   },
+                   {
+                       "passed":  true,
+                       "file":  "tests\\Test-ROG-CPU-Runner.ps1",
+                       "parserErrorCount":  0
+                   },
+                   {
+                       "passed":  true,
+                       "file":  "Collect-YMCC-CPU.ps1",
+                       "parserErrorCount":  0
+                   }
+               ],
+    "scope":  "local-software-tool-validation-only",
+    "casesTotal":  6,
+    "casesFailed":  0,
+    "fullSuiteLaunchExitCode":  1,
+    "policyBypassed":  false,
+    "powershellVersion":  "5.1.26100.8875",
+    "executionPolicy":  "Restricted",
+    "realCpuSamplingPerformed":  false,
+    "casesPassed":  6,
+    "schemaVersion":  1,
+    "policyChanged":  false,
+    "rogRegressionPassed":  false,
+    "fullOfflineSuiteExecution":  "BLOCKED_BY_SCRIPT_EXECUTION_POLICY",
+    "realProductProcessesTouched":  false,
+    "realElevationPerformed":  false,
+    "realPortCallsPerformed":  false
+}

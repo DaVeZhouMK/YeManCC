@@ -1,0 +1,54 @@
+<Page
+    x:Class="HandheldCompanion.Views.Pages.LayoutItemPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:behaviors="clr-namespace:HandheldCompanion.Behaviors"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:ikw="http://schemas.inkore.net/lib/ui/wpf"
+    xmlns:l="clr-namespace:HandheldCompanion.Localization"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:resx="clr-namespace:HandheldCompanion.Properties"
+    xmlns:ui="http://schemas.inkore.net/lib/ui/wpf/modern"
+    xmlns:viewmodels="clr-namespace:HandheldCompanion.ViewModels"
+    Name="LayoutItem"
+    Title="Layout Item Settings"
+    Margin="20"
+    d:Background="White"
+    d:DataContext="{d:DesignInstance Type=viewmodels:LayoutItemPageViewModel}"
+    d:DesignHeight="1000"
+    d:DesignWidth="1000"
+    KeepAlive="True"
+    Loaded="Page_Loaded"
+    mc:Ignorable="d">
+
+    <StackPanel>
+        <ikw:SimpleStackPanel
+            Margin="0,0,0,8"
+            Orientation="Horizontal"
+            Spacing="3">
+            <TextBlock
+                behaviors:TextBlockUpperCase.IsUpperCase="True"
+                Style="{StaticResource CapitalAccentTextBlockStyle}"
+                Text="{Binding ActionType}" />
+            <TextBlock
+                behaviors:TextBlockUpperCase.IsUpperCase="True"
+                Style="{StaticResource CapitalAccentTextBlockStyle}"
+                Text="{Binding ActionTitle}" />
+            <TextBlock
+                Margin="3,-1,3,0"
+                Style="{StaticResource BaseTextBlockStyle}"
+                Text="to" />
+            <TextBlock
+                Name="ActionDescription"
+                behaviors:TextBlockUpperCase.IsUpperCase="True"
+                Style="{StaticResource CapitalAccentTextBlockStyle}"
+                Text="{Binding ActionDescription}" />
+        </ikw:SimpleStackPanel>
+
+        <ui:Frame
+            Name="ContentFrame"
+            Width="{Binding ActualWidth, RelativeSource={RelativeSource Mode=FindAncestor, AncestorType={x:Type FrameworkElement}}}"
+            HorizontalAlignment="Left" />
+    </StackPanel>
+</Page>
+

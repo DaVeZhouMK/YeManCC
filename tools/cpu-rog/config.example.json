@@ -1,0 +1,11 @@
+﻿{
+  "schemaVersion": 1,
+  "ExePath": "",
+  "ExpectedSha256": "",
+  "GraceSeconds": 30,
+  "StartWaitSeconds": 30,
+  "WarmupSeconds": 30,
+  "Seconds": 120,
+  "SampleMilliseconds": 250,
+  "InventoryMilliseconds": 1000
+}

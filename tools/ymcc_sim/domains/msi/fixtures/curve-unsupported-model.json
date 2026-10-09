@@ -1,0 +1,9 @@
+{
+  "name": "curve-unsupported-model",
+  "kind": "curve",
+  "model": "ClawX999",
+  "expect": { "ok": false, "reason": "device-not-whitelisted", "duties": null, "asRpm": false },
+  "raw": [1, 40, 49, 58, 67, 75, 75, 75, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+  "readSuccess": true,
+  "note": "model not on the deviceWhitelist: the adapter refuses before decoding anything; unknown stays Unknown / MSI_DEVICE_PENDING (never 0, never RPM)"
+}

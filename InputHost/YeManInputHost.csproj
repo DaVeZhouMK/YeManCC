@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>YeManInputHost</AssemblyName>
+    <RootNamespace>YeManInputHost</RootNamespace>
+    <PlatformTarget>x64</PlatformTarget>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="HIDMaestro.Core">
+      <!-- E3 回滚（2026-09-13 用户裁决）：回归 stock 40MB HIDMaestro.Core.dll
+           （40,755,712B / BD42A99B...）。单一引用位，不复制 DLL 进 InputHost 目录。 -->
+      <HintPath>$(MSBuildThisFileDirectory)..\deps\hidmaestro\HIDMaestro.Core.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="Nefarius.Utilities.DeviceManagement">
+      <HintPath>$(MSBuildThisFileDirectory)..\PowerControl\handheldcompanion-runtime\HC-CANDIDATE-0.32.4.0-06c0b954-20260902\Nefarius.Utilities.DeviceManagement.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="Nefarius.Drivers.HidHide">
+      <!-- 引用位=HC runtime 源目录（与 deploy-installed.ps1 的 $hcRuntimeSource
+           同一版本目录）；原引用位 C:\SOFT\YeMan\... 是已卸载的部署态路径，
+           干净态构建无法解析（2026-09-13 P0 执行实测）。 -->
+      <HintPath>$(MSBuildThisFileDirectory)..\PowerControl\handheldcompanion-runtime\HC-CANDIDATE-0.32.4.0-06c0b954-20260902\Nefarius.Drivers.HidHide.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+  </ItemGroup>
+</Project>

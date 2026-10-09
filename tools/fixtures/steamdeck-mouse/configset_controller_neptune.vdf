@@ -1,0 +1,19 @@
+"controller_config"
+{
+	"4128400"
+	{
+		"autosave"		"1"
+	}
+	"413080"
+	{
+		"autosave"		"1"
+	}
+	"baldur"
+	{
+		"template"		"CLOUD_baldur/controller_xbox360"
+	}
+	"little kitty, big city"
+	{
+		"autosave"		"1"
+	}
+}

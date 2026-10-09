@@ -1,0 +1,1485 @@
+[Master]
+Implementation=2
+FontFace=Terminal
+FontHeight=-7
+FontWeight=700
+ZoomRatio=2
+[Settings]
+Name=
+EnvVars=
+RefreshPeriod=1000
+LockUserSettings=0
+EmbeddedImage=
+PingAddr=
+[General]
+Sources=120
+Tables=0
+Layers=41
+[Source0]
+Name=CPU usage
+Units=%
+Format=
+Formula=
+Provider=HAL
+ID=CPU usage
+[Source1]
+Name=RAM usage
+Units=MB
+Format=
+Formula=
+Provider=HAL
+ID=RAM usage
+[Source2]
+Name=GPU1 usage
+Units=%
+Format=
+Formula=
+Provider=HAL
+ID=GPU1 usage
+[Source3]
+Name=Core Clocks
+Units=MHz
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=0
+ReadingType=6
+ReadingName=Core Clocks
+[Source4]
+Name=CPU Package
+Units=∞C
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=0
+ReadingType=1
+ReadingName=CPU Package
+[Source5]
+Name=CPU Package Power
+Units=W
+Format=%0.2f
+Formula=
+Provider=HwInfo
+SensorInst=0
+ReadingType=5
+ReadingName=CPU Package Power
+[Source6]
+Name=GPU Clock
+Units=MHz
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=0
+ReadingType=6
+ReadingName=GPU Clock
+[Source7]
+Name=Drive Temperature
+Units=∞C
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=0
+ReadingType=1
+ReadingName=Drive Temperature
+[Source8]
+Name=Charge Level
+Units=%
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=0
+ReadingType=8
+ReadingName=Charge Level
+[Source9]
+Name=Charge Rate
+Units=W
+Format=%0.2f
+Formula=
+Provider=HwInfo
+SensorInst=0
+ReadingType=8
+ReadingName=Charge Rate
+[Source10]
+Name=Estimated Remaining Timex2
+Units=H
+Format=%0.1f
+Formula=x/60.0
+Provider=HwInfo
+SensorInst=0
+ReadingType=8
+ReadingName=Estimated Remaining Time
+[Source11]
+Name=PL1 Power Limit
+Units=W
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=0
+ReadingType=5
+ReadingName=PL1 Power Limit
+[Source12]
+Name=PL2 Power Limit
+Units=W
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=0
+ReadingType=5
+ReadingName=PL2 Power Limit
+[Source13]
+Name=GT Cores Power
+Units=W
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=0
+ReadingType=5
+ReadingName=GT Cores Power
+[Source14]
+Name=IA Cores Power
+Units=W
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=0
+ReadingType=5
+ReadingName=IA Cores Power
+[Source15]
+Name=GPU Temperature
+Units=°„C
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=20
+ReadingType=1
+ReadingName=GPU Temperature
+[Source16]
+Name=GPU Power
+Units=W
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=20
+ReadingType=5
+ReadingName=GPU Power
+[Source17]
+Name=GPU Clock2
+Units=MHz
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=20
+ReadingType=6
+ReadingName=GPU Clock
+[Source18]
+Name=GPU Memory Allocated
+Units=MB
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=20
+ReadingType=8
+ReadingName=GPU Memory Allocated
+[Source19]
+Name=Uncore Ratio
+Units=x
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=0
+ReadingType=8
+ReadingName=Uncore Ratio
+[Source20]
+Name=GT Cores Power
+Units=W
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=0
+ReadingType=5
+ReadingName=GT Cores Power
+[Source21]
+Name=GPU Clock
+Units=MHz
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=0
+ReadingType=6
+ReadingName=GPU Clock
+[Source22]
+Name=Core 0 T0 Effective Clock
+Units=MHz
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=0
+ReadingType=6
+ReadingName=Core 0 T0 Effective Clock
+[Source23]
+Name=Core 0 Clock
+Units=MHz
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=0
+ReadingType=6
+ReadingName=Core 0 Clock
+[Source24]
+Name=Core Clocks
+Units=MHz
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=0
+ReadingType=6
+ReadingName=Core Clocks
+[Source25]
+Name=GPU D3D Usage
+Units=%
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=0
+ReadingType=7
+ReadingName=GPU D3D Usage
+[Source26]
+Name=Core 0 Clock
+Units=MHz
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=0
+ReadingType=6
+ReadingName=Core 0 Clock
+[Source27]
+Name=GPU D3D Memory Dynamic
+Units=MB
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=0
+ReadingType=8
+ReadingName=GPU D3D Memory Dynamic
+[Source28]
+Name=CPU Package Power (SMU)
+Units=W
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=0
+ReadingType=5
+ReadingName=CPU Package Power (SMU)
+[Source29]
+Name=GPU D3D Usage 1+2
+Units=%
+Format=
+Formula=x + "GPU2 usage" + "GPU1 usage"
+Provider=HwInfo
+SensorInst=0
+ReadingType=7
+ReadingName=GPU D3D Usage
+[Source30]
+Name=CPU Core
+Units=°„C
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=0
+ReadingType=1
+ReadingName=CPU Core
+[Source31]
+Name=CPU SOC
+Units=°„C
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=0
+ReadingType=1
+ReadingName=CPU SOC
+[Source32]
+Name=Core 4 Clock (perf #6/)
+Units=MHz
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=0
+ReadingType=6
+ReadingName=Core 4 Clock (perf #6/)
+[Source33]
+Name=Core 5 Clock (perf #1/)
+Units=MHz
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=0
+ReadingType=6
+ReadingName=Core 5 Clock (perf #1/)
+[Source34]
+Name=Throttle Reason - Power
+Units=Yes/No
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=0
+ReadingType=8
+ReadingName=Throttle Reason - Power
+[Source35]
+Name=Throttle Reason - Thermal
+Units=Yes/No
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=0
+ReadingType=8
+ReadingName=Throttle Reason - Thermal
+[Source36]
+Name=Throttle Reason - Current
+Units=Yes/No
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=0
+ReadingType=8
+ReadingName=Throttle Reason - Current
+[Source37]
+Name=GPU1 voltage
+Units=mV
+Format=
+Formula=
+Provider=HAL
+ID=GPU1 voltage
+[Source38]
+Name=Total CPU Utility
+Units=%
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=0
+ReadingType=7
+ReadingName=Total CPU Utility
+[Source39]
+Name=GPU D3D Usage
+Units=%
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=0
+ReadingType=7
+ReadingName=GPU D3D Usage
+[Source40]
+Name=Core+SoC+SR Power (SVI3 TFN)
+Units=W
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=0
+ReadingType=5
+ReadingName=Core+SoC+SR Power (SVI3 TFN)
+[Source41]
+Name=GPU Core Voltage (VDDCR_GFX)
+Units=V
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=0
+ReadingType=2
+ReadingName=GPU Core Voltage (VDDCR_GFX)
+[Source42]
+Name=GPU Clock (Effective)
+Units=MHz
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=0
+ReadingType=6
+ReadingName=GPU Clock (Effective)
+[Source43]
+Name=GPU ASIC Power
+Units=W
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=0
+ReadingType=5
+ReadingName=GPU ASIC Power
+[Source44]
+Name=Physical Memory Used
+Units=MB
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=0
+ReadingType=8
+ReadingName=Physical Memory Used
+[Source45]
+Name=GPU SoC Power (VDDCR_SOC)
+Units=W
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=0
+ReadingType=5
+ReadingName=GPU SoC Power (VDDCR_SOC)
+[Source46]
+Name=GPU Memory Usage
+Units=MB
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=0
+ReadingType=8
+ReadingName=GPU Memory Usage
+[Source47]
+Name=RAM usage percent
+Units=%
+Format=
+Formula=
+Provider=HAL
+ID=RAM usage percent
+[Source48]
+Name=RAM usage percent
+Units=%
+Format=
+Formula=
+Provider=HAL
+ID=RAM usage percent
+[Source49]
+Name=GPU SoC Clock
+Units=MHz
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=0
+ReadingType=6
+ReadingName=GPU SoC Clock
+[Source50]
+Name=CPU (Tctl/Tdie)
+Units=°„C
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=0
+ReadingType=1
+ReadingName=CPU (Tctl/Tdie)
+[Source51]
+Name=GPU Memory Usage
+Units=MB
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=0
+ReadingType=8
+ReadingName=GPU Memory Usage
+[Source52]
+Name=Core 7 Clock (perf #7/)
+Units=MHz
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=0
+ReadingType=6
+ReadingName=Core 7 Clock (perf #7/)
+[Source53]
+Name=Estimated Remaining Time
+Units=mins
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=0
+ReadingType=8
+ReadingName=Estimated Remaining Time
+[Source54]
+Name=Total Errors
+Units=
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=0
+ReadingType=8
+ReadingName=Total Errors
+[Source55]
+Name=Current DL ratex2
+Units=MB/s
+Format=
+Formula=x/1000
+Provider=HwInfo
+SensorInst=0
+ReadingType=8
+ReadingName=Current DL rate
+[Source56]
+Name=Current UP ratex2
+Units=MB/s
+Format=
+Formula=x/1000
+Provider=HwInfo
+SensorInst=0
+ReadingType=8
+ReadingName=Current UP rate
+[Source57]
+Name=Core 0 Clock (perf #1/)
+Units=MHz
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=0
+ReadingType=6
+ReadingName=Core 0 Clock (perf #1/)
+[Source58]
+Name=Core 0 Clock (perf #2/)
+Units=MHz
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=0
+ReadingType=6
+ReadingName=Core 0 Clock (perf #2/)
+[Source59]
+Name=Core 0 Clock (perf #3/)
+Units=MHz
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=0
+ReadingType=6
+ReadingName=Core 0 Clock (perf #3/)
+[Source60]
+Name=Core 0 Clock (perf #4/)
+Units=MHz
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=0
+ReadingType=6
+ReadingName=Core 0 Clock (perf #4/)
+[Source61]
+Name=Core 0 Clock (perf #5/)
+Units=MHz
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=0
+ReadingType=6
+ReadingName=Core 0 Clock (perf #5/)
+[Source62]
+Name=Core 0 Clock (perf #6/)
+Units=MHz
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=0
+ReadingType=6
+ReadingName=Core 0 Clock (perf #6/)
+[Source63]
+Name=Core 0 Clock (perf #7/)
+Units=MHz
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=0
+ReadingType=6
+ReadingName=Core 0 Clock (perf #7/)
+[Source64]
+Name=Core 0 Clock (perf #8/)
+Units=MHz
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=0
+ReadingType=6
+ReadingName=Core 0 Clock (perf #8/)
+[Source65]
+Name=Core 0 Clock (perf #9/)
+Units=MHz
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=0
+ReadingType=6
+ReadingName=Core 0 Clock (perf #9/)
+[Source66]
+Name=Core 0 Clock (perf #10/)
+Units=MHz
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=0
+ReadingType=6
+ReadingName=Core 0 Clock (perf #10/)
+[Source67]
+Name=Core 0 Clock (perf #11/)
+Units=MHz
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=0
+ReadingType=6
+ReadingName=Core 0 Clock (perf #11/)
+[Source68]
+Name=Core 0 Clock (perf #12/)
+Units=MHz
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=0
+ReadingType=6
+ReadingName=Core 0 Clock (perf #12/)
+[Source69]
+Name=Core 0 Clock (perf #13/)
+Units=MHz
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=0
+ReadingType=6
+ReadingName=Core 0 Clock (perf #13/)
+[Source70]
+Name=Core 0 Clock (perf #14/)
+Units=MHz
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=0
+ReadingType=6
+ReadingName=Core 0 Clock (perf #14/)
+[Source71]
+Name=Core 0 Clock (perf #15/)
+Units=MHz
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=0
+ReadingType=6
+ReadingName=Core 0 Clock (perf #15/)
+[Source72]
+Name=Core 0 Clock (perf #16/)
+Units=MHz
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=0
+ReadingType=6
+ReadingName=Core 0 Clock (perf #16/)
+[Source73]
+Name=Core 0 Clock (perf #3/4)
+Units=MHz
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=0
+ReadingType=6
+ReadingName=Core 0 Clock (perf #3/4)
+[Source74]
+Name=Core 0 Clock (perf #1/2)
+Units=MHz
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=0
+ReadingType=6
+ReadingName=Core 0 Clock (perf #1/2)
+[Source75]
+Name=Core 0 Clock (perf #5/6)
+Units=MHz
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=0
+ReadingType=6
+ReadingName=Core 0 Clock (perf #5/6)
+[Source76]
+Name=Core 0 Clock (perf #7/8)
+Units=MHz
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=0
+ReadingType=6
+ReadingName=Core 0 Clock (perf #7/8)
+[Source77]
+Name=Remaining Capacity
+Units=Wh
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=0
+ReadingType=8
+ReadingName=Remaining Capacity
+[Source78]
+Name=GPU Memory Usagex2
+Units=G
+Format=%0.1f
+Formula=x/1000
+Provider=HwInfo
+SensorInst=0
+ReadingType=8
+ReadingName=GPU Memory Usage
+[Source79]
+Name=RAM usage percent
+Units=%
+Format=
+Formula=
+Provider=HAL
+ID=RAM usage percent
+[Source80]
+Name=GPU1 power
+Units=W
+Format=
+Formula=
+Provider=HAL
+ID=GPU1 power
+[Source81]
+Name=GPU D3D Memory Dedicatedx2
+Units=GB
+Format=%0.1f
+Formula=x/1000 + "GPU2 total memory"
+Provider=HwInfo
+SensorInst=0
+ReadingType=8
+ReadingName=GPU D3D Memory Dedicated
+[Source82]
+Name=GPU D3D Memory Dynamic
+Units=MB
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=0
+ReadingType=8
+ReadingName=GPU D3D Memory Dynamic
+[Source83]
+Name=RAM usage
+Units=GB
+Format=%0.1f
+Formula=x/1000
+Provider=HAL
+ID=RAM usage
+[Source84]
+Name=CPU Package
+Units=°„C
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=0
+ReadingType=1
+ReadingName=CPU Package
+[Source85]
+Name=GPU1 memory clock
+Units=MHz
+Format=
+Formula=x+x+x+x+x+x+x+x
+Provider=HAL
+ID=GPU1 memory clock
+[Source86]
+Name=Memory Clock
+Units=MHz
+Format=
+Formula=x+x+x+x+x+x+x+x
+Provider=HwInfo
+SensorInst=0
+ReadingType=6
+ReadingName=Memory Clock
+[Source87]
+Name=Memory Clock Ratio
+Units=x
+Format=
+Formula=x+x+x+x+x+x+x+x
+Provider=HwInfo
+SensorInst=0
+ReadingType=8
+ReadingName=Memory Clock Ratio
+[Source88]
+Name=Memory Clock x 1
+Units=MHz
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=0
+ReadingType=6
+ReadingName=Memory Clock
+[Source89]
+Name=GPU D3D Memory Dedicated
+Units=GB
+Format=%0.1f
+Formula=x/1000 + "GPU2 total memory G"
+Provider=HwInfo
+SensorInst=0
+ReadingType=8
+ReadingName=GPU D3D Memory Dedicated
+[Source90]
+Name=GPU D3D Memory Dynamic
+Units=MB
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=0
+ReadingType=8
+ReadingName=GPU D3D Memory Dynamic
+[Source91]
+Name=GPU1 memory usage percent
+Units=%
+Format=
+Formula=x + "GPU2 memory usage percent G"
+Provider=HAL
+ID=GPU1 memory usage percent
+[Source92]
+Name=CPU Package Power G2
+Units=W
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=0
+ReadingType=5
+ReadingName=CPU Package Power
+[Source93]
+Name=GPU Clock XG
+Units=GHz
+Format=%0.1f
+Formula=x/1000
+Provider=HwInfo
+SensorInst=0
+ReadingType=6
+ReadingName=GPU Clock
+[Source94]
+Name=CPU (Tctl/Tdie)
+Units=°„C
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=0
+ReadingType=1
+ReadingName=CPU (Tctl/Tdie)
+[Source95]
+Name=Core 0 Ratio
+Units=MHz
+Format=
+Formula=x * 100
+Provider=HwInfo
+SensorInst=0
+ReadingType=8
+ReadingName=Core 0 Ratio
+[Source96]
+Name=CPU usage max
+Units=%
+Format=
+Formula=
+Provider=HAL
+ID=CPU usage max
+[Source97]
+Name=GPU2 usage
+Units=%
+Format=
+Formula=
+Provider=HAL
+ID=GPU2 usage
+[Source98]
+Name=GPU2 power
+Units=W
+Format=
+Formula=
+Provider=HAL
+ID=GPU2 power
+[Source99]
+Name=GPU2 memory usage percent G
+Units=%
+Format=
+Formula=
+Provider=HAL
+ID=GPU2 memory usage percent
+[Source100]
+Name=GPU2 total memory G
+Units=G
+Format=%0.1f
+Formula=X/1000
+Provider=HAL
+ID=GPU2 total memory
+[Source101]
+Name=GPU1 usage
+Units=%
+Format=
+Formula=
+Provider=HAL
+ID=GPU1 usage
+[Source102]
+Name=GPU1 clock G
+Units=MHz
+Format=
+Formula=
+Provider=HAL
+ID=GPU1 clock
+[Source103]
+Name=GPU2 clock
+Units=MHz
+Format=
+Formula=
+Provider=HAL
+ID=GPU2 clock
+[Source104]
+Name=Steam Deck CPU
+Units=MHz
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=0
+ReadingType=6
+ReadingName=Core 0 Clock
+[Source105]
+Name=GPU1 memory usage
+Units=GB
+Format=%0.1f
+Formula=X/1000
+Provider=HAL
+ID=GPU1 memory usage
+[Source106]
+Name=GPU1 memory usage percent
+Units=%
+Format=
+Formula=
+Provider=HAL
+ID=GPU1 memory usage percent
+[Source107]
+Name=GPU Clock
+Units=Mhz
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=0
+ReadingType=6
+ReadingName=GPU Clock
+[Source108]
+Name=GPU D3D Usage
+Units=%
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=0
+ReadingType=7
+ReadingName=GPU D3D Usage
+[Source109]
+Name=CPU TEMP
+Units=°Ê
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=0
+ReadingType=1
+ReadingName=CPU (Tctl/Tdie)
+[Source110]
+Name=Zen5 Core 0 Clock (perf #1)
+Units=MHz
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=0
+ReadingType=6
+ReadingName=Zen5 Core 0 Clock (perf #1)
+[Source111]
+Name=Zen5 Core 1 Clock (perf #2)
+Units=MHz
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=0
+ReadingType=6
+ReadingName=Zen5 Core 1 Clock (perf #2)
+[Source112]
+Name=Zen5 Core 2 Clock (perf #1)
+Units=MHz
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=0
+ReadingType=6
+ReadingName=Zen5 Core 2 Clock (perf #1)
+[Source113]
+Name=Zen5c Core 3 Clock (perf #3)
+Units=MHz
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=0
+ReadingType=6
+ReadingName=Zen5c Core 3 Clock (perf #3)
+[Source114]
+Name=Zen5c Core 4 Clock (perf #3)
+Units=MHz
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=0
+ReadingType=6
+ReadingName=Zen5c Core 4 Clock (perf #3)
+[Source115]
+Name=Zen5c Core 5 Clock (perf #3)
+Units=MHz
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=0
+ReadingType=6
+ReadingName=Zen5c Core 5 Clock (perf #3)
+[Source116]
+Name=Zen5c Core 6 Clock (perf #3)
+Units=MHz
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=0
+ReadingType=6
+ReadingName=Zen5c Core 6 Clock (perf #3)
+[Source117]
+Name=Zen5c Core 7 Clock (perf #3)
+Units=MHz
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=0
+ReadingType=6
+ReadingName=Zen5c Core 7 Clock (perf #3)
+[Source118]
+Name=FPS2
+Units=FPS
+Format=
+Formula=
+Provider=HwInfo
+SensorInst=0
+ReadingType=8
+ReadingName=Framerate Presented (avg)
+[Source119]
+Name=FPS
+Units=FPS
+Format=
+Formula=max("Framerate", "FPS2")
+Provider=HwInfo
+SensorInst=0
+ReadingType=8
+ReadingName=FPS
+[Layer0]
+Name=
+Text=
+PositionX=0
+PositionY=-6
+ExtentX=-18
+ExtentY=-1
+ExtentOrigin=0
+Alignment=15
+Size=15
+BgndColor=42000000
+[Layer1]
+Name=
+Text=
+PositionX=0
+PositionY=-7
+ExtentX=-18
+ExtentY=-1
+ExtentOrigin=0
+Alignment=15
+Size=15
+BgndColor=42000000
+[Layer2]
+Name=
+Text=
+PositionX=0
+PositionY=-3
+ExtentX=-18
+ExtentY=-1
+ExtentOrigin=0
+Alignment=15
+Size=15
+BgndColor=42000000
+[Layer3]
+Name=
+Text=
+PositionX=0
+PositionY=-4
+ExtentX=-18
+ExtentY=-1
+ExtentOrigin=0
+Alignment=15
+Size=15
+BgndColor=42000000
+[Layer4]
+Name=
+Text=
+PositionX=0
+PositionY=-5
+ExtentX=-18
+ExtentY=-1
+ExtentOrigin=0
+Alignment=15
+Size=15
+BgndColor=42000000
+[Layer5]
+Name=
+Text=
+PositionX=0
+PositionY=-2
+ExtentX=-18
+ExtentY=-1
+ExtentOrigin=0
+Alignment=15
+Size=15
+BgndColor=42000000
+[Layer6]
+Name=
+Text=
+PositionX=0
+PositionY=-9
+ExtentX=-18
+ExtentY=-7
+ExtentOrigin=0
+Alignment=15
+Size=15
+BgndColor=42000000
+[Layer7]
+Name=Intel GPU
+Text=GPU
+PositionX=-1
+PositionY=-4
+ExtentX=-4
+ExtentY=-1
+ExtentOrigin=1
+FixedAlignment=1
+TextColor=0000A349
+[Layer8]
+Name=CPU Clock
+Text=MHz
+PositionX=-10
+PositionY=-3
+ExtentX=-3
+ExtentY=-1
+ExtentOrigin=5
+TextColor=00FFFFFF
+RefreshPeriod=1000
+[Layer9]
+Name=CPU Pkg Power
+Text=%CPU Package Power%W
+PositionX=-7
+PositionY=-9
+ExtentX=-10
+ExtentY=-2
+ExtentOrigin=7
+Size=180
+TextColor=00FFFFFF
+RefreshPeriod=500
+[Layer10]
+Name=GPU API
+Text=<APP>
+PositionX=-1
+PositionY=-13
+ExtentX=-6
+ExtentY=-1
+ExtentOrigin=3
+FixedAlignment=1
+TextColor=0029D100
+[Layer11]
+Name=Battery Life
+Text=BATT
+PositionX=2
+PositionY=56
+ExtentX=-5
+ExtentY=-1
+ExtentOrigin=1
+FixedAlignment=1
+TextColor=00FF8282
+[Layer12]
+Name=CPU
+Text=CPU
+PositionX=-1
+PositionY=-3
+ExtentX=-4
+ExtentY=-1
+ExtentOrigin=1
+FixedAlignment=1
+TextColor=00149DFE
+[Layer13]
+Name=Framerate
+Text=FPS
+PositionX=-1
+PositionY=-11
+ExtentX=-4
+ExtentY=-2
+ExtentOrigin=7
+Size=180
+TextColor=00FF5050
+RefreshPeriod=1000
+[Layer14]
+Name=CPU Pkg Power
+Text=<G=Frametime,0,0,0,0,100,0>
+PositionX=-1
+PositionY=-13
+ExtentX=-12
+ExtentY=-2
+ExtentOrigin=1
+Size=80
+TextColor=0050E650
+RefreshPeriod=1000
+[Layer15]
+Name=Battery %
+Text=%Frametime%Ms
+PositionX=-13
+PositionY=-14
+ExtentX=-2
+ExtentY=-1
+ExtentOrigin=8
+Size=80
+TextColor=00FFFFFF
+RefreshPeriod=1000
+[Layer16]
+Name=CPU Usage
+Text=%CPU usage max%%
+PositionX=-13
+PositionY=-3
+ExtentX=-4
+ExtentY=-1
+ExtentOrigin=5
+TextColor=00FFFFFF
+RefreshPeriod=1000
+[Layer17]
+Name=CPU Clock
+Text=%GPU Clock%
+PositionX=-4
+PositionY=-4
+ExtentX=-6
+ExtentY=-1
+ExtentOrigin=5
+TextColor=00FFFFFF
+RefreshPeriod=1000
+[Layer18]
+Name=Battery Charge Rate
+Text=%Charge Rate%W
+PositionX=-7
+PositionY=-7
+ExtentX=-6
+ExtentY=-1
+ExtentOrigin=4
+FixedAlignment=1
+TextColor=00FFFFFF
+RefreshPeriod=1000
+[Layer19]
+Name=Framerate
+Text=TDP
+PositionX=-1
+PositionY=-9
+ExtentX=-4
+ExtentY=-2
+ExtentOrigin=7
+Size=180
+TextColor=FA8200
+RefreshPeriod=1000
+[Layer20]
+Name=Battery Life
+Text=RAM
+PositionX=-1
+PositionY=-5
+ExtentX=-4
+ExtentY=-1
+ExtentOrigin=1
+FixedAlignment=1
+TextColor=0000C4D6
+[Layer21]
+Name=CPU Clock
+Text=%RAM usage percent%%
+PositionX=-13
+PositionY=-5
+ExtentX=-4
+ExtentY=-1
+ExtentOrigin=5
+TextColor=FF0000,90,100(RAM usage percent,0)
+RefreshPeriod=1000
+[Layer22]
+Name=Battery Charge Rate
+Text=%Core 0 Ratio%
+PositionX=-5
+PositionY=-3
+ExtentX=-5
+ExtentY=-1
+ExtentOrigin=2
+TextColor=00FFFFFF
+RefreshPeriod=1000
+[Layer23]
+Name=CPU Pkg Power
+Text=%GPU%
+PositionX=-1
+PositionY=-15
+ExtentX=-16
+ExtentY=-1
+ExtentOrigin=3
+TextColor=00FFFFFF
+RefreshPeriod=1000
+[Layer24]
+Name=CPU Clock
+Text=MHz
+PositionX=-10
+PositionY=-4
+ExtentX=-3
+ExtentY=-1
+ExtentOrigin=5
+FixedAlignment=1
+TextColor=00FFFFFF
+RefreshPeriod=1000
+[Layer25]
+Name=CPU Usage
+Text=%GPU D3D Usage%%
+PositionX=-13
+PositionY=-4
+ExtentX=-4
+ExtentY=-1
+ExtentOrigin=5
+TextColor=00FFFFFF
+RefreshPeriod=1000
+[Layer26]
+Name=CPU Clock
+Text=%Charge Level%%
+PositionX=-13
+PositionY=-7
+ExtentX=-4
+ExtentY=-1
+ExtentOrigin=5
+TextColor=FF0000,0,15(Charge Level,0)
+RefreshPeriod=1000
+[Layer27]
+Name=
+Text=
+PositionX=0
+PositionY=-8
+ExtentX=-18
+ExtentY=-1
+ExtentOrigin=0
+Alignment=15
+Size=15
+BgndColor=42000000
+[Layer28]
+Name=Battery Life
+Text=VRAM
+PositionX=3
+PositionY=48
+ExtentX=-4
+ExtentY=-1
+ExtentOrigin=1
+FixedAlignment=1
+TextColor=D1E000
+[Layer29]
+Name=CPU Clock
+Text=%GPU1 memory usage percent%%
+PositionX=-13
+PositionY=-6
+ExtentX=-4
+ExtentY=-1
+ExtentOrigin=5
+TextColor=FF0000,95,100(GPU1 memory usage percent,0)
+RefreshPeriod=1000
+[Layer30]
+Name=CPU Clock
+Text=%RAM usage%
+PositionX=-5
+PositionY=-5
+ExtentX=-5
+ExtentY=-1
+ExtentOrigin=5
+TextColor=00FFFFFF
+RefreshPeriod=1000
+[Layer31]
+Name=CPU Clock
+Text=GB
+PositionX=-10
+PositionY=-5
+ExtentX=-2
+ExtentY=-1
+ExtentOrigin=3
+FixedAlignment=1
+TextColor=00FFFFFF
+RefreshPeriod=1000
+[Layer32]
+Name=CPU Clock
+Text=%GPU1 memory usage%
+PositionX=-5
+PositionY=-6
+ExtentX=-5
+ExtentY=-1
+ExtentOrigin=5
+TextColor=00FFFFFF
+RefreshPeriod=1000
+[Layer33]
+Name=CPU Clock
+Text=GB
+PositionX=-10
+PositionY=-6
+ExtentX=-3
+ExtentY=-1
+ExtentOrigin=3
+FixedAlignment=1
+TextColor=00FFFFFF
+RefreshPeriod=1000
+[Layer34]
+Name=GPU-X
+Text=%GPU1 power%
+PositionX=-8
+PositionY=-15
+ExtentX=-9
+ExtentY=-1
+ExtentOrigin=5
+TextColor=1000000,-1,50,CDFFFFFF,50,999(GPU1 power,0)
+RefreshPeriod=60000
+[Layer35]
+Name=TEMP
+Text=%CPU Package%C
+PositionX=-11
+PositionY=-11
+ExtentX=-6
+ExtentY=-1
+ExtentOrigin=5
+TextColor=FFFFFF,-1,0,1FFFFFF,0,999(CPU TEMP,0)
+RefreshPeriod=1000
+[Layer36]
+Name=TEMP
+Text=%CPU TEMP%C
+PositionX=-11
+PositionY=-11
+ExtentX=-6
+ExtentY=-1
+ExtentOrigin=5
+TextColor=FFFFFF,0,85,FF0000,85.01,999(CPU TEMP,0)
+RefreshPeriod=1000
+[Layer37]
+Name=O
+Text=O
+PositionX=-14
+PositionY=-11
+ExtentX=-4
+ExtentY=-1
+ExtentOrigin=2
+Size=30
+TextColor=FFFFFF,0,85,FF0000,85.01,999(CPU TEMP,0)
+MarginTop=1
+MarginRight=3
+[Layer38]
+Name=Framerate
+Text=%FPS%
+PositionX=-6
+PositionY=-11
+ExtentX=-9
+ExtentY=-2
+ExtentOrigin=4
+Size=220
+TextColor=FFFFFF
+RefreshPeriod=1000
+[Layer39]
+Name=Estimated Remaining Time
+Text=%Estimated Remaining Timex2%  H
+PositionX=-12
+PositionY=-12
+ExtentX=-5
+ExtentY=-1
+ExtentOrigin=5
+TextColor=00FFFFFF
+RefreshPeriod=1000
+[Layer40]
+Name=Battery Charge Rate
+Text=%Zen5 Core 0 Clock (perf #1)%
+PositionX=-5
+PositionY=-3
+ExtentX=-5
+ExtentY=-1
+ExtentOrigin=2
+TextColor=00FFFFFF
+RefreshPeriod=1000

@@ -1,0 +1,10 @@
+{
+  "name": "curve-cross-session",
+  "kind": "curve",
+  "expect": { "ok": false, "reason": "cross-session", "duties": null, "asRpm": false },
+  "raw": [1, 40, 49, 58, 67, 75, 75, 75, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+  "readSuccess": true,
+  "session": "session-B",
+  "capturedSession": "session-A",
+  "note": "a read result that arrives for a different session/generation must be discarded (late completion), even though the bytes decode fine"
+}

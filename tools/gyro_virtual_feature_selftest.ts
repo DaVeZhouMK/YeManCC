@@ -1,0 +1,13 @@
+import { GYRO_MOTION_ASSET_FOLDER, VIRTUAL_GAMEPAD_ASSET_FOLDER, evaluateGyroVirtualFeatureDirectories, getGyroVirtualFeatureAssetsRoot, setGyroVirtualFeatureAssetsRoot } from '../src/bridge/gyroVirtualFeature';
+if (VIRTUAL_GAMEPAD_ASSET_FOLDER !== 'virtual-gamepad' || GYRO_MOTION_ASSET_FOLDER !== 'gyro-motion') throw new Error('test asset folder names changed');
+setGyroVirtualFeatureAssetsRoot('D:/Test/PowerControl/');
+if (getGyroVirtualFeatureAssetsRoot() !== 'D:\\Test\\PowerControl\\feature-assets') throw new Error('feature asset root mismatch');
+const none = evaluateGyroVirtualFeatureDirectories({});
+if (none.virtualGamepad || none.gyroMotion) throw new Error('missing directories must report assets unavailable (not hide routes)');
+const virtualOnly = evaluateGyroVirtualFeatureDirectories({ virtualGamepad: true });
+if (!virtualOnly.virtualGamepad || virtualOnly.gyroMotion) throw new Error('virtual-gamepad directory mapping is incorrect');
+const gyroOnly = evaluateGyroVirtualFeatureDirectories({ gyroMotion: true });
+if (gyroOnly.virtualGamepad || !gyroOnly.gyroMotion) throw new Error('gyro-motion directory mapping is incorrect');
+const both = evaluateGyroVirtualFeatureDirectories({ virtualGamepad: true, gyroMotion: true });
+if (!both.virtualGamepad || !both.gyroMotion) throw new Error('both asset diagnostics must report present');
+console.log('gyro virtual feature selftest: PASS');
