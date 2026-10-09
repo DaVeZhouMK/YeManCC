@@ -63,6 +63,7 @@ const bgEnabled = ref(false);
 const bgBusy = ref(false);
 const bgKind = ref<'image' | 'video'>('image');
 const videoBatteryPause = ref(getUiSetting('videoBatteryPause'));
+const windowPlacement = ref(getUiSetting('windowPlacement'));
 const bgOpacity = ref(Math.round(getBackgroundOpacity() * 100));
 const bgOpacityMax = Math.round(BACKGROUND_OPACITY_MAX * 100);
 const bgOpacityMin = Math.round(BACKGROUND_OPACITY_MIN * 100);
@@ -209,6 +210,11 @@ function onThemeChange(value: string | number): void {
   const next = value as ThemeName;
   theme.value = next;
   setTheme(next);
+}
+function onWindowPlacementChange(value: string | number): void {
+  const next = String(value) as 'left' | 'right' | 'center';
+  windowPlacement.value = next;
+  void setUiSettings({ windowPlacement: next });
 }
 
 // ── 识别软件关闭野蛮系统前端：总开关 + 可编辑进程名列表 ──
@@ -624,6 +630,7 @@ onMounted(async () => {
   await ensureUpdateManager();
   await loadUiSettings();
   videoBatteryPause.value = getUiSetting('videoBatteryPause');
+  windowPlacement.value = getUiSetting('windowPlacement');
   bgOpacity.value = Math.round(getBackgroundOpacity() * 100);
   bgBlur.value = getBackgroundBlur();
   dynamicEnabled.value = getDynamicBackgroundConfig().enabled;
@@ -664,6 +671,22 @@ onBeforeUnmount(() => {
         @update:model-value="onThemeChange"
       />
       <p class="muted body">当前颜色：{{ theme === 'blue-black' ? '蓝黑' : theme === 'red-black' ? '红黑' : '赛博朋克' }}</p>
+    </section>
+
+    <section class="card">
+      <h3 class="card-title"><InlineIcon name="monitor" /> 窗口呼出位置</h3>
+      <SegButton
+        :model-value="windowPlacement"
+        :options="[
+          { value: 'left', label: '左侧' },
+          { value: 'right', label: '右侧' },
+          { value: 'center', label: '居中' },
+        ]"
+        color="accent"
+        full
+        @update:model-value="onWindowPlacementChange"
+      />
+      <p class="muted body">主窗口启动与托盘呼出时对齐到的屏幕位置，默认右侧。</p>
     </section>
 
     <section class="card background-settings-card">

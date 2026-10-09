@@ -342,6 +342,8 @@ export const windowApi = {
   maximize: () => invoke<boolean>('window.maximize'),
   show: () => invoke<boolean>('window.show'),
   getState: () => invoke<{ visible: boolean; minimized: boolean }>('window.getState'),
+  /** 主窗口客户区尺寸（GetClientRect.right/bottom，即 w/h）。 */
+  size: () => invoke<{ w: number; h: number }>('window.size'),
   /** 主窗口左上角屏幕坐标（GetWindowRect.left/top）。 */
   position: () => invoke<{ x: number; y: number }>('window.position'),
   /** 将主窗口移动到屏幕坐标 (x, y)，不改尺寸与 Z 序。 */
