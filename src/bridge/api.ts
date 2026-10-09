@@ -342,6 +342,12 @@ export const windowApi = {
   maximize: () => invoke<boolean>('window.maximize'),
   show: () => invoke<boolean>('window.show'),
   getState: () => invoke<{ visible: boolean; minimized: boolean }>('window.getState'),
+  /** 主窗口左上角屏幕坐标（GetWindowRect.left/top）。 */
+  position: () => invoke<{ x: number; y: number }>('window.position'),
+  /** 将主窗口移动到屏幕坐标 (x, y)，不改尺寸与 Z 序。 */
+  setPosition: (x: number, y: number) => invoke<boolean>('window.setPosition', { x, y }),
+  /** 将主窗口在当前显示器工作区内居中。 */
+  center: () => invoke<boolean>('window.center'),
   setTitle: (title: string) => invoke<boolean>('window.setTitle', { title }),
   /** Create a real top-level child window owned by the YMCC shell. */
   createChild: (options: { title: string; width: number; height: number; url: string }) =>

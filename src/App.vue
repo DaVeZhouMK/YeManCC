@@ -1335,6 +1335,8 @@ onMounted(async () => {
     window.dispatchEvent(new CustomEvent('app-startup-ready'));
     return;
   }
+  // 主窗口呼出时居中到当前显示器工作区（掌机默认；后续可在设置页扩展为记忆上次位置/指定角）。
+  windowApi.center().catch(() => {});
   try {
     aiFanMockActive = parseAiFanMockSession(await app.aiFanMockSession()) !== null;
   } catch (error) {
@@ -1423,6 +1425,8 @@ onMounted(async () => {
   window.addEventListener('ipc:window.shown', onBackgroundWindowShown as EventListener);
   window.addEventListener('ipc:window.maximized', onBackgroundWindowShown as EventListener);
   window.addEventListener('ipc:window.summoned', onBackgroundWindowShown as EventListener);
+  // 唤起（托盘呼出）时同样将主窗口居中到当前显示器。
+  window.addEventListener('ipc:window.summoned', () => { windowApi.center().catch(() => {}); });
   document.addEventListener('visibilitychange', onBackgroundVisibilityChange);
   const initialWindowState = await windowApi.getState().catch(() => null);
   if (initialWindowState) {
