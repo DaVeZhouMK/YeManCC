@@ -1,7 +1,7 @@
 ﻿{
-    "version":  "0.0.33",
-    "notes":  "主线功能与升级器规则更新；PowerControl\\\\fan-host-v2 载荷（含 HC 运行时与身份记录）随包分发，启动前做身份校验；CustomSteamLibrary 继续位于 YeManCC\\\\CustomSteamLibrary。",
-    "sha256":  "74D3F567D86FA7048BA6A37A921A3D1C6023B8EFFE8BAB0F81E3EE29D07DED4D",
-    "publishedAt":  "2026-10-08",
+    "version":  "0.0.34",
+    "notes":  "0.0.34 群友测试版：YMCC 控制台侧栏、风扇恢复与安装修复、独立帧率与 Steam 设置、屏幕触控板及窗口布局更新；完整包含依赖与源码附件。",
+    "sha256":  "864AF10CE0986859322BCCE50AF704BFAB73BD99F1333A5CAD22781B776A46EA",
+    "publishedAt":  "2026-10-09",
     "package":  "Packages/YeManCC.zip"
 }
