@@ -86,7 +86,8 @@ async function fixture(options = {}) {
     ...(options.mouseAvailable === false ? {reason:'desktop-autosave-not-selected'} : {}) };
   let mouseGets = 0, mouseSets = [];
   const mouseBridge = load('src/bridge/steamDeckMouse.ts', { './ipc': { async invoke(command,args) {
-    if(command==='steamDeckMouse.get'){mouseGets++;return structuredClone(mouseState);}
+    if(command==='steam.settings.get' && args.scope==='mouse'){mouseGets++;return structuredClone(mouseState);}
+    args={...args,percent:args.mousePercent};
     mouseSets.push(args.percent);
     if(options.mouseDelay)await new Promise(resolve=>setTimeout(resolve,options.mouseDelay));
     if(options.mouseFail)return {ok:false,reason:'write-failed'};

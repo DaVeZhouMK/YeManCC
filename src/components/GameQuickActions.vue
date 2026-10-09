@@ -8,7 +8,7 @@ import { focusGamepadElement, getGamepadPopupPlacement } from '@/gamepad/focus';
 import { detectGame, detectedGameName, type DetectedGame } from '@/bridge/gamedetect';
 import { GameTrainerCancelledError, openOrSearchGameTrainer } from '@/bridge/gameTrainer';
 import {
-  oneClickFrameGen,
+  getLosslessGameState, setLosslessScalingEnabled,
   oneClickOptiScaler,
   type OptiBackend,
   type OptiAction,
@@ -391,8 +391,9 @@ async function runLosslessScaling(): Promise<void> {
   status('正在启动 Lossless Scaling…');
   try {
     const target = await ensureTarget();
-    const result = await oneClickFrameGen(target.path);
-    status(result.alreadyHadProfile ? '已启动 Lossless Scaling' : '已写入预设并启动 Lossless Scaling');
+    const state = await getLosslessGameState(target.path);
+    const result = await setLosslessScalingEnabled(target.path, state.enabled !== true);
+    status(result.notice);
   } catch (error) {
     status('', `Lossless Scaling 启动失败：${(error as Error).message}`);
   } finally {
@@ -627,7 +628,7 @@ onBeforeUnmount(() => {
         <AppIcon name="bolt" /><span><strong>FSR4.1/Xess-OPT自动导入</strong><small>FSR4 / XeSS 自动套用 · OPT 客户端</small></span>
       </button>
       <button type="button" class="quick-action" data-gp-game-row="actions-1" data-gp-row="1" data-gp-col="1" :disabled="disabledForAction || !targetGame" @click="runLosslessScaling">
-        <AppIcon name="rocket" /><span><strong>Lossless Scaling</strong><small>小黄鸭一键插帧</small></span>
+        <AppIcon name="rocket" /><span><strong>Lossless Scaling</strong><small>LosslessScaling 插帧一键插帧</small></span>
       </button>
       <button type="button" class="quick-action" data-gp-game-row="actions-2" data-gp-row="2" data-gp-col="0" :disabled="disabledForAction || !targetGame" @click="runTrainer">
         <AppIcon :name="trainerBusy ? 'close' : 'play'" /><span><strong>游戏修改器</strong><small>{{ trainerBusy ? '处理中…点击终止' : '识别后打开' }}</small></span>

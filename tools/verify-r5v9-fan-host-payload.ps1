@@ -34,13 +34,13 @@ $ErrorActionPreference = 'Stop'
 #     dll EBD12A24... / manifest 430455DE... / exe 77CBA5DF... (apphost unchanged)
 # Recompute-and-refill after any change, never hand-edit.
 $expected = [ordered]@{
-  'YeManFanHost.exe' = '77CBA5DF8EE517C7660F6C8183E71DBBDE137D7F1C5B96327EECC5D869D9426C'
-  'YeManFanHost.dll' = '6312F07AFBF8E80C3E5CA3BA9F885878C232823AEB85D44E2EB0CF9B763B2FF6'
+  'YeManFanHost.exe' = 'E33CB1604B5DC98AC265A51E1DC867DF4E742F6966ADE9F3E6DA48DFF4890BAA'
+  'YeManFanHost.dll' = 'CC5E5B3FEB877E2B822B91B38BF7220918B8E4E633E558BD6E015A9DC310E1AB'
 }
 # Keep this file pure ASCII: PS 5.1 misdecodes non-ASCII scripts without BOM
 # and drops the next statement (verified 2026-09-11); additionally the
 # build-workspace pre-gate auto-verifies this chain.
-$expectedManifestSha256 = '368d9a9a43be3662098f3ef506ab82981ad444480e50f7886fde5b57b5911c56'
+$expectedManifestSha256 = '6da78d971f7112dc1b07fa041eb80ee240198919ad3ea5f10fe760bdb9fee1ac'
 $payloadInput = if ([string]::IsNullOrWhiteSpace($PayloadRoot)) {
   Join-Path (Split-Path -Parent $PSScriptRoot) 'PowerControl\fan-host'
 } else { $PayloadRoot }
@@ -95,8 +95,8 @@ if (Compare-Object $physicalNames $manifestNames) {
 $auth = Get-Content -LiteralPath (Join-Path $payloadFull 'YeManFanHost.authorization.md') -Raw -Encoding UTF8
 foreach ($marker in @(
   'implementationState: hc-candidate-0.32.4.0-fan-host-cp07-acceptance-binding-ui-free-single-owner-recovery',
-  'approvedHostExeSha256: 77CBA5DF8EE517C7660F6C8183E71DBBDE137D7F1C5B96327EECC5D869D9426C',
-  'approvedHostDllSha256: 6312F07AFBF8E80C3E5CA3BA9F885878C232823AEB85D44E2EB0CF9B763B2FF6',
+  'approvedHostExeSha256: E33CB1604B5DC98AC265A51E1DC867DF4E742F6966ADE9F3E6DA48DFF4890BAA',
+  'approvedHostDllSha256: CC5E5B3FEB877E2B822B91B38BF7220918B8E4E633E558BD6E015A9DC310E1AB',
   'approvedHcSha256: 0C5132A9D13AEBFC5ADD2AA7C9AC54E8DAAA8EBC816A0C68D099BB9685DC2E49',
   'rebaselineBasis: 2026-09-23 FAN-204 s31 addendum ruling - /api/resume accept separated from the background rebuild (resumeAccepted/resumePhase/generation/retryAfterMs, bounded 15 s state observation, no permanent 409, no second lifecycle owner)',
   'fan926Rebaseline: 2026-09-26 operator FAN-926 ruling - CP-07 (parent-exit acceptance binds the accepting host instance and the real recovery cycle BEFORE the acknowledgement'

@@ -6,16 +6,26 @@ import { detectPowerModeReliable } from './yeman';
 import { isUiVisible, onUiVisibilityChange } from './uiLifecycle';
 
 export type PowerSourceMode = 'ac' | 'dc';
+let sourceVersion = 0;
 const sourceMode = ref<PowerSourceMode | null>(null);
 export const powerSourceMode = readonly(sourceMode);
 
 export function rememberPowerSourceMode(mode: PowerSourceMode): void {
+  ++sourceVersion;
   sourceMode.value = mode;
 }
 
 interface PowerSourceSnapshot {
   known: boolean;
   acLine: number;
+}
+
+/** One foreground/mirror-open read; native plug/unplug notifications always win. */
+export async function refreshPowerSourceSnapshot(): Promise<void> {
+  const version = sourceVersion;
+  const result = await invoke<PowerSourceSnapshot>('power.sourceSnapshot', {}, { timeoutMs: 2000 }).catch(() => null);
+  if (version !== sourceVersion || !result?.known) return;
+  if (result.acLine === 0 || result.acLine === 1) rememberPowerSourceMode(result.acLine === 1 ? 'ac' : 'dc');
 }
 
 /** App owns one binding. Every display consumes powerSourceMode; pages do not query. */

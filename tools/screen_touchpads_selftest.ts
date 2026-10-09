@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { SCREEN_TOUCHPAD_DEFAULT, LEFT_TOUCHPAD_MODES, RIGHT_TOUCHPAD_MODES, validateScreenTouchpadPatch, SCREEN_TOUCHPAD_LAYOUTS, SINGLE_TOUCHPAD_MODES, screenTouchpadDefaults, screenTouchpadProfile } from '../src/bridge/screenTouchpads';
+import { SCREEN_TOUCHPAD_DEFAULT, STANDALONE_SPECIAL_MODES, LEFT_TOUCHPAD_MODES, RIGHT_TOUCHPAD_MODES, validateScreenTouchpadPatch, SCREEN_TOUCHPAD_LAYOUTS, SINGLE_TOUCHPAD_MODES, screenTouchpadDefaults, screenTouchpadProfile } from '../src/bridge/screenTouchpads';
 assert.equal(SCREEN_TOUCHPAD_DEFAULT.enabled, false);
 assert.equal(SCREEN_TOUCHPAD_DEFAULT.layout, 'off');
 for(const {value} of SCREEN_TOUCHPAD_LAYOUTS)assert.ok(validateScreenTouchpadPatch({layout:value}));
@@ -47,3 +47,10 @@ const custom=screenTouchpadDefaults('steamdeck');custom.layout='off';custom.enab
 assert.equal(screenTouchpadDefaults('steamdeck').layout,'dual','Mutating a config must not mutate the preset');
 assert.equal(screenTouchpadProfile('dualshock4'),'dualsense-edge');
 assert.equal(screenTouchpadProfile('xbox360'),'elite');
+
+assert.deepEqual(STANDALONE_SPECIAL_MODES.map(mode=>mode.label),['关闭','开启Steam全部','开启PS5全部']);
+assert.equal(SCREEN_TOUCHPAD_DEFAULT.standaloneSpecialMode,'off');
+for(const {value} of STANDALONE_SPECIAL_MODES)assert.ok(validateScreenTouchpadPatch({standaloneSpecialMode:value}));
+for(const value of ['elite','dualsense-edge','all',3,null,true])assert.equal(validateScreenTouchpadPatch({standaloneSpecialMode:value} as any),false);
+for(const profile of ['disabled','steamdeck','dualsense-edge','elite'] as const)assert.equal(screenTouchpadDefaults(profile).standaloneSpecialMode,'off');
+console.log('STANDALONE_SPECIAL_FRONTEND_OK: exact three options, default off, strict validation');

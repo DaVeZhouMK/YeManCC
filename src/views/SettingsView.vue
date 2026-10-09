@@ -9,6 +9,7 @@ import { APP_VERSION } from '@/version';
 import InlineIcon from '@/components/InlineIcon.vue';
 import { getTheme, setTheme, type ThemeName } from '@/bridge/theme';
 import {
+  DEFAULT_BACKGROUND_VIDEO_PATH,
   BACKGROUND_OPACITY_MAX,
   BACKGROUND_OPACITY_MIN,
   BACKGROUND_BLUR_MAX,
@@ -708,6 +709,7 @@ onBeforeUnmount(() => {
           <span>清除背景</span>
         </button>
       </div>
+      <p class="muted body background-default-path">默认 MP4：{{ DEFAULT_BACKGROUND_VIDEO_PATH }}</p>
       <div class="bg-opacity-row" :class="{ disabled: !backgroundControlEnabled }">
         <label for="bg-opacity">图片可见度</label>
         <input
@@ -976,6 +978,9 @@ onBeforeUnmount(() => {
 }
 .background-actions {
   margin-top: 2px;
+}
+.background-default-path {
+  overflow-wrap: anywhere;
 }
 .bg-icon-btn {
   min-height: 34px;

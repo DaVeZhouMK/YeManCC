@@ -2,7 +2,7 @@
 import { ref, computed, nextTick, onMounted, onUnmounted, onActivated, onDeactivated } from 'vue';
 import { focusGamepadElement, getGamepadPopupPlacement } from '@/gamepad/focus';
 import {
-  oneClickFrameGen,
+  getLosslessGameState, setLosslessScalingEnabled,
   oneClickOptiScaler,
   dirnameOf,
   LS_PRIMARY,
@@ -560,11 +560,9 @@ async function onLaunchLs() {
   }
   busy.value = true;
   try {
-    const ls = await oneClickFrameGen(game.value.path);
-    const src = ls.source === 'primary' ? '主程序' : 'Steam 版';
-    const action = ls.alreadyHadProfile ? '直接' : '写入配置并';
-    statusMsg.value =
-      action + '最小化启动 Lossless Scaling（' + src + '）';
+    const state = await getLosslessGameState(game.value.path);
+    const result = await setLosslessScalingEnabled(game.value.path, state.enabled !== true);
+    statusMsg.value = result.notice;
   } catch (e) {
     errMsg.value = '插帧失败：' + (e as Error).message;
   } finally {
@@ -1129,7 +1127,7 @@ onUnmounted(() => {
         <button class="quick-btn" :disabled="busy" @click="onLaunchLs">
           <InlineIcon name="rocket" />
           <span class="quick-btn-copy">
-            <span class="quick-main">小黄鸭一键插帧</span>
+            <span class="quick-main">LosslessScaling 插帧一键插帧</span>
             <span class="quick-sub">写入 LS 插帧预设并启动</span>
           </span>
         </button>

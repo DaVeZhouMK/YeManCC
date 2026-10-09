@@ -1,6 +1,7 @@
 import { invoke, isNativeRuntime } from './ipc';
 
 export type ScreenTouchpadLayout = 'off' | 'dual' | 'single';
+export type StandaloneSpecialMode = 'off' | 'steamdeck' | 'ps5';
 export type ScreenSummonPosition = 'off' | 'left' | 'right';
 export type SingleTouchpadMode = 'dualsense' | 'wasd' | 'arrows' | 'mouse';
 export type LeftTouchpadMode = 'steamdeck' | 'dualsense' | 'wasd' | 'arrows' | 'mouse' | 'off';
@@ -15,6 +16,7 @@ export interface ScreenTouchpadConfig {
   mouseSensitivity: number;
   scale: number;
   summonPosition: ScreenSummonPosition;
+  standaloneSpecialMode: StandaloneSpecialMode; // Dedicated-key pair in the disabled profile only.
   specialMask: number;
   rearMask: number;
   // Legacy fields remain in the wire contract for old saved profiles.
@@ -44,10 +46,13 @@ export interface ScreenTouchpadState extends ScreenTouchpadConfig {
   error?: number; reason?: string;
 }
 export const SCREEN_TOUCHPAD_DEFAULT: ScreenTouchpadConfig = {
-  summonPosition: 'off', specialMask: 0, rearMask: 0,
+  summonPosition: 'off', standaloneSpecialMode: 'off', specialMask: 0, rearMask: 0,
   summonEnabled: false, specialEnabled: false, rearEnabled: false,
   enabled: false, layout: 'off', singleMode: 'mouse', leftMode: 'steamdeck', rightMode: 'steamdeck', transparency: 80, mouseSensitivity: 100, scale: 100,
 };
+export const STANDALONE_SPECIAL_MODES = [
+  { value: 'off', label: '关闭' }, { value: 'steamdeck', label: '开启Steam全部' }, { value: 'ps5', label: '开启PS5全部' },
+] as const;
 export const SCREEN_SUMMON_POSITIONS = [
   { value: 'off', label: '关闭' }, { value: 'left', label: '左侧呼出' }, { value: 'right', label: '右侧呼出' },
 ] as const;
@@ -81,6 +86,7 @@ export function validateScreenTouchpadPatch(patch: Partial<ScreenTouchpadConfig>
       case 'singleMode': return SINGLE_TOUCHPAD_MODES.some(v => v.value === value);
       case 'enabled': case 'summonEnabled': case 'specialEnabled': case 'rearEnabled': return typeof value === 'boolean';
       case 'summonPosition': return value === 'off' || value === 'left' || value === 'right';
+      case 'standaloneSpecialMode': return STANDALONE_SPECIAL_MODES.some(mode => mode.value === value);
       case 'specialMask': return Number.isInteger(value) && Number(value) >= 0 && Number(value) <= 3;
       case 'rearMask': return Number.isInteger(value) && Number(value) >= 0 && Number(value) <= 15;
       case 'leftMode': return LEFT_TOUCHPAD_MODES.some(v => v.value === value);

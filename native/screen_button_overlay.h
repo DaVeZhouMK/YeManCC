@@ -44,7 +44,11 @@ inline std::array<RECT,7> buttonRects(const RECT& monitor,int scale,const RECT* 
 inline bool buttonPermitted(const Config& cfg,int index) {
     if(index==0)return effectiveSummonPosition(cfg)!=SummonPosition::Off;
     const int profile=activeProfile.load();
-    if(!controlTargetEnabled.load() || profile!=appliedProfile.load() || profile==0)return false;
+    if(profile!=appliedProfile.load())return false;
+    // Disabled output has its own explicit, mutually exclusive dedicated pair.
+    // "All" is Steam+QAM or PS+Mute; the separate rear-key settings are unchanged.
+    if(profile==0)return (index==1 || index==2) && standaloneSpecialProfile(cfg)!=0;
+    if(!controlTargetEnabled.load())return false;
     if(index<3) {const unsigned mask=effectiveSpecialMask(cfg);return (mask&(1u<<(index-1)))!=0 && (profile!=3 && !ps4Target.load() || index==1);}
     const unsigned mask=effectiveRearMask(cfg);const unsigned bit=1u<<(index-3);return (mask&bit)!=0 && (profile==1 || (profile==2 && controlEdgeEnabled.load()));
 }
@@ -54,7 +58,7 @@ inline void buttonsRelease() {
 }
 inline unsigned buttonSnapshot() {
     const unsigned bits=screenButtonMask.load(std::memory_order_relaxed);if(!bits)return 0;
-    if(!controlTargetEnabled.load(std::memory_order_acquire) || activeProfile.load()!=appliedProfile.load())return 0;
+    if(!controlTargetEnabled.load(std::memory_order_acquire) || activeProfile.load()==0 || activeProfile.load()!=appliedProfile.load())return 0;
     return bits;
 }
 inline bool buttonEvent(int index,UINT32 id,int phase,float x,float y,int width,int height,bool canceled=false) {
@@ -132,7 +136,8 @@ inline bool renderButton(int index,int transparency) {
     if(!bitmap || !memory || !bits){if(bitmap)DeleteObject(bitmap);if(memory)DeleteDC(memory);if(screen)ReleaseDC(nullptr,screen);windowError=ERROR_NOT_ENOUGH_MEMORY;return false;}
     const auto prior=SelectObject(memory,bitmap);auto* pixels=(DWORD*)bits;
     std::fill(pixels,pixels+(size_t)width*height,0u);
-    const int profile=appliedProfile.load(),opacity=outlineAlpha(transparency);
+    const int applied=appliedProfile.load();
+    const int profile=applied==0?standaloneSpecialProfile(getConfig()):applied,opacity=outlineAlpha(transparency);
     // Only artwork scales down: every HWND/hit target and anchor stays unchanged.
     // Common Y/Steam are font-rendered; QAM is an analytic vector-circle trio.
     const bool textIcon=index==0 || (profile==1 && (index==1 || index>=3));
@@ -338,6 +343,28 @@ inline Json buttonCoreCases() {
     controlEdgeEnabled.store(true);check("PS5-Edge-all-four-Fn-back-buttons",buttonPermitted(cfg,3) && buttonPermitted(cfg,4) && buttonPermitted(cfg,5) && buttonPermitted(cfg,6));
     activeProfile.store(0);appliedProfile.store(0);controlTargetEnabled.store(false);
     check("disabled-persona-common-summon-only",buttonPermitted(cfg,0) && !buttonPermitted(cfg,1));
+    Config standalone=profileDefault(0),parsedStandalone;
+    check("standalone-special-old-config-defaults-off",standalone.standaloneSpecialMode==StandaloneSpecialMode::Off);
+    check("standalone-special-rejects-unknown-or-nonstring-mode",!parseConfig({{"standaloneSpecialMode","elite"}},standalone,parsedStandalone) &&
+        !parseConfig({{"standaloneSpecialMode",3}},standalone,parsedStandalone) && !parseConfig({{"standaloneSpecialMode",nullptr}},standalone,parsedStandalone));
+    for(auto mode:{StandaloneSpecialMode::SteamDeck,StandaloneSpecialMode::PS5}) {
+        standalone.standaloneSpecialMode=mode;
+        {std::lock_guard<std::mutex> lock(mutex);core.config=standalone;}
+        check(mode==StandaloneSpecialMode::SteamDeck?"disabled-Steam-all-special-pair-permitted":"disabled-PS5-all-special-pair-permitted",
+            buttonPermitted(standalone,1) && buttonPermitted(standalone,2) && !buttonPermitted(standalone,3) && !buttonPermitted(standalone,6));
+        check(mode==StandaloneSpecialMode::SteamDeck?"disabled-Steam-special-mode-roundtrip":"disabled-PS5-special-mode-roundtrip",
+            parseConfig(configJson(standalone),profileDefault(0),parsedStandalone) && parsedStandalone.standaloneSpecialMode==mode);
+        buttonEvent(1,81,0,30,20,100,54);buttonEvent(2,82,0,30,20,100,54);
+        check(mode==StandaloneSpecialMode::SteamDeck?"disabled-Steam-special-does-not-enable-output":"disabled-PS5-special-does-not-enable-output",
+            screenButtonMask.load()==3 && buttonSnapshot()==0 && activeProfile.load()==0 && !controlTargetEnabled.load());
+        buttonsRelease();check("standalone-special-release-clears-held-bits",screenButtonMask.load()==0);
+        ProfileBank bank;bank.slots[0]=standalone;const ProfileBank restored(bank.json());
+        check("standalone-special-stored-in-disabled-slot-only",restored.json()==bank.json() && restored.slots[1].standaloneSpecialMode==StandaloneSpecialMode::Off &&
+            restored.slots[2].standaloneSpecialMode==StandaloneSpecialMode::Off);
+    }
+    standalone.standaloneSpecialMode=StandaloneSpecialMode::Off;
+    check("standalone-special-off-hides-both-pairs",!buttonPermitted(standalone,1) && !buttonPermitted(standalone,2));
+    {std::lock_guard<std::mutex> lock(mutex);core.config=cfg;}
     buttonEvent(0,66,0,30,20,54,54);check("Y-release-produces-one-summon",buttonEvent(0,66,2,30,20,54,54) && !buttonEvent(0,66,2,30,20,54,54));
     buttonEvent(0,67,0,30,20,54,54);check("Y-canceled-gesture-does-not-summon",!buttonEvent(0,67,2,30,20,54,54,true));
     check("rounded-hit-area-rejects-corners",!buttonHit(0,0,100,54) && buttonHit(50,27,100,54));

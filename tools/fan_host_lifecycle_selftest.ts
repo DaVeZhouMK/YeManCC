@@ -337,12 +337,17 @@ async function main(): Promise<void> {
     'frozen HC Batch 03 device matrix must remain 70 mapped fan classes plus 10 unsupported classes');
   const routeMentionsClass = (name: string) =>
     routeRegistrySource.includes(`"${name}"`) ||
-    routeRegistrySource.includes(`.Devices.${name}"]`);
+    routeRegistrySource.includes(`.Devices.${name}"]`) ||
+    // FAN-942 R2 corrected Apex's actual namespace; the frozen matrix uses its leaf name.
+    (name === 'OneXPlayerApex' && routeRegistrySource.includes('routes["HandheldCompanion.Devices.OneXPlayer.OneXPlayerApex"]'));
   const absentMappedClasses = mappedMatrixClasses.filter((name) => !routeMentionsClass(name));
   const includedUnsupportedClasses = unsupportedMatrixClasses.filter((name) => routeMentionsClass(name));
   assert(routeRegistryStart >= 0 && routeRegistryEnd > routeRegistryStart &&
     absentMappedClasses.length === 0 && includedUnsupportedClasses.length === 0,
   `Host route registry drifted from HC Batch 03 matrix; missing=${absentMappedClasses.join(',')}; unsupported=${includedUnsupportedClasses.join(',')}`);
+  assert(routeRegistrySource.includes('routes["HandheldCompanion.Devices.OneXPlayer.OneXPlayerApex"]') &&
+    !routeRegistrySource.includes('routes["HandheldCompanion.Devices.OneXPlayerApex"]'),
+  'Apex must use the exact HC OneXPlayer namespace, never the historical root namespace');
   assert(routeRegistrySource.includes('routes["HandheldCompanion.Devices.GPDWin4"] = new FanRoute') &&
     routeRegistrySource.includes('FanRestoreStrategy.GpdWin4HcRelease') &&
     !/GPDWin4_20(?:23|24).*GpdWin4HcRelease/.test(routeRegistrySource),

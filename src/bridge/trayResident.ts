@@ -48,7 +48,9 @@ export function setTrayResident(v: boolean): Promise<void> {
     await saveSettingsSection('tray', { resident: v }, generation);
     try {
       const applied = await tray.setResident(v);
-      if (!applied) throw new Error('任务栏设置未被系统接受');
+      // Native returns the effective resident state, not a success flag.
+      // false is a successful disable; only a different state is rejected.
+      if (applied !== v) throw new Error('任务栏设置未被系统接受');
     } catch (error) {
       // UI may roll back only after the preference rollback is durable too.
       try { await saveSettingsSection('tray', { resident: previous }, generation); }

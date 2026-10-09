@@ -22,7 +22,7 @@ const ControllerShortcutEditorStandaloneView = () => import('./views/ControllerS
 
 // 侧边栏 = LR 切页共用这一份顺序（2026-09-27 用户要求重排）：
 //   手动模式：性能调度 → TDP功耗 → CPU调度 → 风扇 → 控制器 → 陀螺仪 →
-//             Steam大屏 → 开机启动 → 睡眠优化 → 监控/锁帧 → 设置 → 快捷应用
+//             Steam大屏 → 开机启动 → 睡眠优化 → 监控 → 设置 → 快捷应用
 //   自动模式（quickMode）：隐藏 TDP/CPU，其余顺序不变。
 export const ROUTES = [
   { path: '/schedule', name: 'schedule', title: '性能调度', icon: 'gauge', component: PerformanceScheduleView },
@@ -34,7 +34,7 @@ export const ROUTES = [
   { path: '/steam', name: 'steam', title: 'Steam大屏', icon: 'steam', component: SteamView },
   { path: '/power', name: 'power', title: '开机启动', icon: 'startup', component: PowerView },
   { path: '/sleep', name: 'sleep', title: '睡眠优化', icon: 'sleep', component: SleepGuardView },
-  { path: '/rtss', name: 'rtss', title: '监控/锁帧', icon: 'rtss', component: RtssView },
+  { path: '/rtss', name: 'rtss', title: '监控', icon: 'rtss', component: RtssView },
   { path: '/settings', name: 'settings', title: '设置', icon: 'settings', component: SettingsView },
   // 快捷应用置于「设置」下方（用户要求的导航排序）
   { path: '/quick', name: 'quick', title: '快捷应用', icon: 'quick', component: QuickAppView },

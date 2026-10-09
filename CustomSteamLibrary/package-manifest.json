@@ -73,10 +73,10 @@
     "legacyPaths":  [
                         "D:\\YeMan\\Steam大屏"
                     ],
-    "generatedAt":  "2026-10-08T16:40:28.2676326+08:00",
+    "generatedAt":  "2026-10-09T22:36:52.5707075+08:00",
     "sourceBuild":  {
-                        "host":  "dedcaac1f1e9ad0cf06260198ab819400dbbfb7fef57f02f60b542f507477932",
-                        "worker":  "a2a9a7785493ef4f5a49a4a4e334852be1616a6c2867f144a4171de7f06a037c",
+                        "host":  "ccada6a19eaed5e94c00f49d8c6bdee489e084d1e9b66eec2ee149b81f07b976",
+                        "worker":  "b173c492b542ea9ce6840b233cb24e52e37a18a4f64cf816923dc749cb8b2e48",
                         "hostSources":  [
                                             {
                                                 "path":  "CustomSteamLibrary/assets/custom-steam-library.ico",
@@ -198,12 +198,12 @@
                       {
                           "path":  "CustomSteamLibrary.exe",
                           "bytes":  1476608,
-                          "sha256":  "dedcaac1f1e9ad0cf06260198ab819400dbbfb7fef57f02f60b542f507477932"
+                          "sha256":  "ccada6a19eaed5e94c00f49d8c6bdee489e084d1e9b66eec2ee149b81f07b976"
                       },
                       {
                           "path":  "SteamArtworkLab.exe",
                           "bytes":  2857472,
-                          "sha256":  "a2a9a7785493ef4f5a49a4a4e334852be1616a6c2867f144a4171de7f06a037c"
+                          "sha256":  "b173c492b542ea9ce6840b233cb24e52e37a18a4f64cf816923dc749cb8b2e48"
                       },
                       {
                           "path":  "run-workspace.bat",

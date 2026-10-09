@@ -207,6 +207,7 @@ function Assert-PublishPreGate([string]$ProjectRoot) {
     " hostDll=" + $hostDllGate +
     " marker(" + ($ps1Markers -join ',') + ")<->ts(" + $tsMarkerPattern + ")")
 }
+& (Join-Path $PSScriptRoot 'sync-fan-host-installer-asset.ps1') -ProjectRoot $ProjectRoot
 Assert-PublishPreGate $ProjectRoot
 & (Join-Path $PSScriptRoot 'verify-input-host-dependencies.ps1') -ProjectRoot $ProjectRoot
 & (Join-Path $PSScriptRoot 'verify-source-release-inputs.ps1') -ProjectRoot $ProjectRoot
@@ -233,6 +234,9 @@ try {
   & node (Join-Path $ProjectRoot 'scripts\write-version.mjs')
   if ($LASTEXITCODE -ne 0) { throw "Version generation failed: exit=$LASTEXITCODE" }
 
+  # YMCC Decky sidebar: build the additive passive payload from the authoritative mainline sources.
+  & node (Join-Path $ProjectRoot 'tools\build-decky-sidebar-plugin.mjs')
+  if ($LASTEXITCODE -ne 0) { throw "Decky sidebar payload build failed: exit=$LASTEXITCODE" }
   & pnpm exec vue-tsc --noEmit
   if ($LASTEXITCODE -ne 0) { throw "Type check failed: exit=$LASTEXITCODE" }
 

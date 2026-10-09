@@ -2010,6 +2010,10 @@ internal sealed class HostState
     public string? PowerOperationStatus { get; set; }
     public string? PowerOperationOutcome { get; set; }
     public int PowerOperationAttempt { get; set; }
+    // FAN-943: these are effective software capability evidence, not physical control proof.
+    public bool? FanCapabilitySupported { get; set; }
+    public bool? FanControlCapabilityDeclared { get; set; }
+    public string FanCapabilityEvidence { get; set; } = "not-observed";
     public bool HardwareCapable { get; set; }
     public bool HardwareWriteAuthorizationGranted { get; set; }
     public bool HardwareWritesEnabled { get; set; }
@@ -2098,10 +2102,12 @@ internal sealed class HostState
     public bool OemPhysicalOwnershipConfirmed { get; set; }
     public bool CloseCalled { get; set; }
     public bool UnknownState { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
     public FanLease? Lease { get; set; }
     // Safe telemetry identity for the active lease. The reusable token itself
     // is intentionally removed from Snapshot(); generation is non-secret and
     // lets the UI detect a stale remote owner without exposing credentials.
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
     public long? LeaseGeneration { get; set; }
     public string HostMode { get; set; } = "safe-no-hardware";
     public string ProtocolVersion { get; set; } = "2";
@@ -2914,6 +2920,43 @@ internal sealed partial class RealHcBackend : IDisposable
     public long ExternalProfileSessionGeneration => externalProfileQueue.CurrentGeneration;
     public bool OperationTimedOut => operationTimedOut;
     public bool CanWrite => options.AllowHardwareWrites && IsAuthorized();
+    private FanCapabilityDecision? fanCapabilityDecision;
+    public bool? FanCapabilitySupported => fanCapabilityDecision?.Supported;
+    public bool? FanControlCapabilityDeclared => fanCapabilityDecision?.Declared;
+    public string FanCapabilityEvidence => fanCapabilityDecision?.Evidence ?? "not-observed";
+
+    private FanCapabilityDecision ObserveFanCapability()
+    {
+        bool? declared = null;
+        if (device is not null && GetMember(device, "Capabilities") is Enum capabilities)
+            declared = capabilities.HasFlag((Enum)Enum.Parse(capabilities.GetType(), "FanControl"));
+        HcEcFanContract? contract = null;
+        if (declared is not null && device is not null && FanCapabilityPolicy.NeedsEcContract(FactoryType)
+            && device.GetType().FullName == FactoryType && Route?.Kind == FanRouteKind.GenericDuty
+            && Route.Precondition == FanRoutePrecondition.OpenLibHandleOpen)
+        {
+            var ec = GetMember(device, "ECDetails");
+            int ReadEc(string name) => ec is null ? -1 : Convert.ToInt32(GetMember(ec, name) ?? -1);
+            contract = new(FactoryType!, GetMember(device, "UseOpenLib") as bool? == true,
+                ReadEc("AddressFanControl"), ReadEc("AddressFanDuty"), ReadEc("AddressStatusCommandPort"),
+                ReadEc("AddressDataPort"), ReadEc("FanValueMin"), ReadEc("FanValueMax"),
+                device.GetType().GetMethod("SetFanControl", [typeof(bool), typeof(int)])?.DeclaringType?.FullName,
+                device.GetType().GetMethod("SetFanDuty", [typeof(double)])?.DeclaringType?.FullName);
+        }
+        // Complete only the pinned G1's all-zero constructor data. Metadata/memory
+        // only: callbacks, Open(), authorization and hardware writes are unchanged.
+        if (device is not null && contract is not null
+            && G1FanContractAdapter.TryComplete(device, declared, contract, out var completed))
+        {
+            contract = completed;
+            Diagnostic?.Invoke("hc.g1-ec-contract.completed", new
+            {
+                factoryType = FactoryType, upstreamCommit = G1FanContractAdapter.UpstreamCommit,
+                contract, scope = "in-memory-constructor-data-only", physicalVerified = false
+            });
+        }
+        return fanCapabilityDecision = FanCapabilityPolicy.Evaluate(Route is not null, declared, contract, FactoryType);
+    }
     public string? FactoryType => device?.GetType().FullName;
     public Dictionary<string, string>? DeviceIdentity { get; private set; }
     public HardwareVersionEvidence? EcEvidence { get; private set; }
@@ -3065,12 +3108,12 @@ internal sealed partial class RealHcBackend : IDisposable
         // could be used after Open(), but performs no WMI/HID/EC read during
         // handshake and never treats a raw EC register as a revision.
         (EcEvidence, ControllerFirmwareEvidence) = DescribeVersionEvidence(factoryType);
-        var supported = route is not null;
-        var reason = route is null
-            ? "HC factory 类型不在 YeMan 风扇设备矩阵内"
-            : (CanWrite
-                ? $"HC fan route {route.Kind} 通过，真实写入已获显式授权"
-                : $"HC fan route {route.Kind} 已识别；当前仅握手/未授权写入");
+        var support = ObserveFanCapability();
+        var supported = support.Supported;
+        var reason = !supported
+            ? support.Reason
+            : $"HC fan route {route!.Kind} 已识别；{support.Reason}；" +
+              (CanWrite ? "真实写入已获显式授权" : "当前仅握手/未授权写入");
         if (HcCoreWarning is not null) reason += $"；{HcCoreWarning}";
         return new RealHandshakeResult(supported, factoryType, route?.Kind.ToString(), DeviceIdentity, EcEvidence, ControllerFirmwareEvidence, reason, true, supported && IsAuthorized());
     }
@@ -6769,7 +6812,7 @@ internal sealed partial class RealHcBackend : IDisposable
         {
             // HC-SLIM-01 R4 §4 H1：无论 Close 是否在 CloseHcDevice 处抛出，都在同一串行
             // 边界内归还 backend provider 自有 ACPI 句柄（睡眠/显式关闭/进程退出共用此边界）。
-            // MUTATION-B: ReleaseBackendAsusAcpiOwnedHandle("close") intentionally removed.
+            ReleaseBackendAsusAcpiOwnedHandle("close");
             SetHcPhase(null);
         }
         }
@@ -7186,9 +7229,13 @@ internal sealed partial class RealHcBackend : IDisposable
             "GPDWinMax2Intel", "GPDWinMax2_2022_6800U", "GPDWinMax2_2023_7640U",
             "GPDWinMax2_2023_7840U", "GPDWinMax2_2024_8640U", "GPDWinMax2_2024_8840U", "GPDWinMax2_2024_HX370",
             "GamingZone",
-            "OneXPlayer2", "OneXPlayer2Pro", "OneXPlayerApex", "OneXPlayerG1AMD", "OneXPlayerG1Intel",
+            "OneXPlayer2", "OneXPlayer2Pro", "OneXPlayerG1AMD", "OneXPlayerG1Intel",
             "OneXPlayerMiniAMD", "OneXPlayerMiniIntel", "OneXPlayerMiniPro", "OneXPlayerOneXFly", "OneXPlayerOneXFlyF1Pro",
             "OneXPlayerX1AMD", "OneXPlayerX1Intel", "OneXPlayerX1Mini", "OneXPlayerX1Pro", "SuiPlay0X1");
+
+        // FAN-942 R2: pinned HC uses this nested namespace for Apex, unlike X1.
+        routes["HandheldCompanion.Devices.OneXPlayer.OneXPlayerApex"] =
+            routes["HandheldCompanion.Devices.OneXPlayerX1AMD"];
 
         // These subclasses bypass ECDetails.AddressFanControl and use their
         // inherited ACPI_FanMode_Address (0=automatic, 1=manual) via HC's
@@ -7716,14 +7763,8 @@ internal sealed partial class RealHcBackend : IDisposable
         if (!CanWrite) throw new FanApiException(403, "REAL_WRITE_AUTH_REQUIRED", "真实风扇写入需要独立授权文件与确认口令");
         if (!hcCoreInitialized) throw new FanApiException(409, "HC_NOT_INITIALIZED", "HC 核心初始化尚未完成");
         if (FactoryType is null || Route is null) throw new FanApiException(409, "FAN_UNSUPPORTED", "风扇不支持");
-        var capabilities = GetMember(device!, "Capabilities");
-        if (capabilities is not null)
-        {
-            var fanFlag = Enum.Parse(capabilities.GetType(), "FanControl");
-            var hasFanControl = capabilities.GetType().GetMethod("HasFlag")?.Invoke(capabilities, [fanFlag]) as bool?;
-            if (hasFanControl == false)
-                throw new FanApiException(409, "FAN_UNSUPPORTED", "HC 当前设备未声明 FanControl 能力");
-        }
+        var support = ObserveFanCapability();
+        if (!support.Supported) throw new FanApiException(409, "FAN_UNSUPPORTED", support.Reason);
     }
 
     /**
@@ -10904,6 +10945,9 @@ internal sealed class FanHostEngine : IDisposable
             fanRoute = state.FanRoute,
             fanRouteCount = RealHcBackend.KnownFanRouteCount,
             fanRouteWriteReady = state.FanRouteWriteReady,
+            fanCapabilitySupported = realBackend?.FanCapabilitySupported,
+            fanControlCapabilityDeclared = realBackend?.FanControlCapabilityDeclared,
+            fanCapabilityEvidence = realBackend?.FanCapabilityEvidence ?? "not-observed",
             routeKind = route?.Kind.ToString(),
             routeDescription = route?.Description,
             restoreStrategy = route?.RestoreStrategy.ToString(),
@@ -10939,6 +10983,14 @@ internal sealed class FanHostEngine : IDisposable
             activeCurve = state.ActiveCurve?.Select(node => new { node.TempC, node.DutyPercent }).ToArray(),
             lastError = state.LastError,
             recoveryReadbackRequired = state.RecoveryReadbackRequired,
+            // FAN-943: retain the actual power receipt/phase in failure evidence.
+            // Ready/Open is not proof of a matching resume generation.
+            resumePhase = DeriveResumePhase(state),
+            resumePhaseGeneration = state.PowerOperationGeneration,
+            controlAccepting = IsControlAccepting(state),
+            powerOperationGeneration = state.PowerOperationGeneration,
+            powerOperationAttempt = state.PowerOperationAttempt,
+            powerOperationStatus = state.PowerOperationStatus,
             // FAN-925 T0-X：故障周期账目（剩余预算 / 已用尝试 / 自动更换次数 / 终态）
             // 必须与"状态变化原因"一起导出，不能被旧 Ready 掩盖。
             recoveryCycle = recoveryCycle is null ? null : new
@@ -11271,8 +11323,19 @@ internal sealed class FanHostEngine : IDisposable
      * 收据）的**唯一实现**。两个快照入口——公开 `Snapshot()`（API/调用方）与 gate 内
      * `SnapshotUnlocked()`（内部判定）——必须一致，否则 API 看到的阶段与内部判定会漂移。
      */
+    internal static void ApplyCapabilitySnapshot(HostState snapshot, bool? supported, bool? declared, string evidence)
+    {
+        snapshot.FanCapabilitySupported = supported;
+        snapshot.FanControlCapabilityDeclared = declared;
+        snapshot.FanCapabilityEvidence = evidence;
+    }
+
     private void ApplyDerivedSnapshotFields(HostState snapshot)
     {
+        ApplyCapabilitySnapshot(snapshot,
+            options.MockZeroHardwareEvidence && options.MockHandshake ? true : realBackend?.FanCapabilitySupported,
+            realBackend?.FanControlCapabilityDeclared,
+            options.MockZeroHardwareEvidence ? "mock-software-contract-zero-hardware" : realBackend?.FanCapabilityEvidence ?? "not-observed");
         snapshot.ResumePhase = DeriveResumePhase(snapshot);
         snapshot.ResumePhaseGeneration = snapshot.PowerOperationGeneration;
         snapshot.ResumeRetryAfterMs = HostState.ResumePollRetryAfterMs;
@@ -16271,6 +16334,8 @@ internal sealed class FanHostEngine : IDisposable
     /** 控制可发送性：未过渡（Resuming/Suspending）、未故障/未知、无待清理、未关闭。 */
     internal static bool IsControlAccepting(HostState snapshot) =>
         !snapshot.UnknownState && !snapshot.HcCloseCleanupPending && !snapshot.CloseCalled &&
+        snapshot.PowerState is not ("Suspending" or "Suspended" or "Resuming") &&
+        snapshot.PowerOperationStatus is not ("pending" or "executing" or "failed" or "superseded") &&
         snapshot.State is "Ready" or "AwaitingControl";
     private static long MonoMs() => Environment.TickCount64;
     private static string ExceptionText(Exception ex) => string.Join(" -> ", Unwrap(ex).Select(e => e.GetType().Name + ": " + e.Message));
@@ -20877,6 +20942,36 @@ internal static class FanHostSelfTest
                 !FanHostEngine.IsControlAccepting(PhaseProbe("Ready", "On", false, false)) ||
                 !FanHostEngine.IsControlAccepting(PhaseProbe("AwaitingControl", "On", false, false)))
                 throw new InvalidOperationException("Q1: 控制可发送性派生不符合契约");
+            foreach (var operation in new[] { "pending", "executing", "failed", "superseded" })
+            {
+                if (FanHostEngine.IsControlAccepting(PhaseProbe("Ready", "On", false, false, operation)))
+                    throw new InvalidOperationException("FAN-943: Ready cannot override a blocking operation " + operation);
+                checks.Add("fan943-control-denied-operation-" + operation);
+            }
+            foreach (var power in new[] { "Suspending", "Suspended", "Resuming" })
+            {
+                if (FanHostEngine.IsControlAccepting(PhaseProbe("Ready", power, false, false)))
+                    throw new InvalidOperationException("FAN-943: Ready cannot override power boundary " + power);
+                checks.Add("fan943-control-denied-power-" + power);
+            }
+            foreach (var supported in new bool?[] { true, false, null })
+            {
+                var capabilityProbe = PhaseProbe("Ready", "Unknown", false, false);
+                FanHostEngine.ApplyCapabilitySnapshot(capabilityProbe, supported, false, "fan943-no-io-contract");
+                var exported = ToJson(capabilityProbe);
+                if (capabilityProbe.FanCapabilitySupported != supported || capabilityProbe.FanControlCapabilityDeclared != false ||
+                    (supported is null ? exported.TryGetProperty("fanCapabilitySupported", out _) :
+                        !exported.TryGetProperty("fanCapabilitySupported", out var supportedField) || supportedField.GetBoolean() != supported) ||
+                    !exported.TryGetProperty("fanControlCapabilityDeclared", out var declaredField) || declaredField.GetBoolean() ||
+                    !exported.TryGetProperty("fanCapabilityEvidence", out var evidenceField) || evidenceField.GetString() != "fan943-no-io-contract")
+                    throw new InvalidOperationException("FAN-943: effective capability must be exported in the ACTUAL HostState schema");
+                checks.Add("fan943-state-capability-export-" + (supported?.ToString() ?? "null"));
+            }
+            var noLeaseProbe = ToJson(PhaseProbe("Ready", "Unknown", false, false));
+            if (!noLeaseProbe.TryGetProperty("lease", out var nullLease) || nullLease.ValueKind != JsonValueKind.Null ||
+                !noLeaseProbe.TryGetProperty("leaseGeneration", out var nullLeaseGeneration) || nullLeaseGeneration.ValueKind != JsonValueKind.Null)
+                throw new InvalidOperationException("FAN-943: explicit null lease evidence must survive the production null-omitting serializer");
+            checks.Add("fan943-null-lease-state-schema-retained");
             checks.Add("q1-resume-phase-derivation");
 
             // Q2：partial/unknown 写入收据**不得**读成"完全成功"（enable/restore 同一映射）。
@@ -22291,7 +22386,27 @@ internal static class FanHostSelfTest
             !RealHcBackend.IsAclWriteUnsafeForSelfTest(FileSystemRights.FullControl))
             throw new InvalidOperationException("Fan Host ACL write detection must distinguish RX from write rights");
         checks.Add("acl-rx-is-not-write");
+        checks.AddRange(FanCapabilityPolicy.RunSelfTest());
+        checks.AddRange(G1FanContractAdapter.RunSelfTest());
         var routeRegistry = RealHcBackend.FanRoutesForSelfTest;
+        var familyFactories = new[] { "AOKZOEA1", "AOKZOEA1Pro", "AOKZOEA1X", "AOKZOEA2",
+            "OneXPlayer2", "OneXPlayer2Pro", "OneXPlayerG1AMD", "OneXPlayerG1Intel", "OneXPlayerMiniAMD", "OneXPlayerMiniIntel",
+            "OneXPlayerMiniPro", "OneXPlayerOneXFly", "OneXPlayerOneXFlyF1Pro", "OneXPlayerX1AMD", "OneXPlayerX1Intel",
+            "OneXPlayerX1Mini", "OneXPlayerX1Pro", "OneXPlayer.OneXPlayerApex" };
+        foreach (var factory in familyFactories)
+        {
+            var route = routeRegistry["HandheldCompanion.Devices." + factory];
+            if (route.Kind != FanRouteKind.GenericDuty || route.Precondition != FanRoutePrecondition.OpenLibHandleOpen)
+                throw new InvalidOperationException("FAN-942 family route contract mismatch: " + factory);
+        }
+        if (routeRegistry.ContainsKey("HandheldCompanion.Devices.OneXPlayerApex"))
+            throw new InvalidOperationException("FAN-942 obsolete Apex namespace must not be registered");
+        checks.Add("fan942-family-real-factory-routes-18");
+        foreach (var factory in new[] { "AOKZOEA1", "AOKZOEA1Pro", "AOKZOEA1X", "AOKZOEA2", "OneXPlayerMiniAMD",
+            "OneXPlayerMiniIntel", "OneXPlayerMiniPro", "OneXPlayerOneXFly", "OneXPlayerOneXFlyF1Pro" })
+            if (routeRegistry["HandheldCompanion.Devices." + factory].RestoreStrategy != FanRestoreStrategy.OneXAcpiFanMode)
+                throw new InvalidOperationException("FAN-942 existing ACPI mode writer must remain selected: " + factory);
+        checks.Add("fan942-aokzoe-mini-fly-restore-routes-unchanged");
         var routesNotWriteReady = RealHcBackend.FanRoutesForSelfTest
             .Where(pair => !pair.Value.WriteReadyByDefault || !pair.Value.HcCallbackReady)
             .Select(pair => pair.Key)

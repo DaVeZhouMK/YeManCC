@@ -25,8 +25,7 @@ if %errorlevel%==0 (
 
 endlocal
 
-:: 关闭Xbox APP
-taskkill /F /IM XboxPcApp.exe >nul 2>&1
+:: Steam 启动与 Windows 全屏主页独立；不强制终止 Xbox
 
 :: 联动启动：依次读取 YeManSteam 文件夹内的全部 .txt（内容为 exe 路径）并直接启动
 :: 已在运行的进程自动跳过，避免重复开启（按 exe 文件名匹配进程）
@@ -68,8 +67,6 @@ powershell -NoProfile -Command ^
 
 powershell -NoProfile -Command ^
   "Get-Process Steam++.Accelerator -ErrorAction Stop | ForEach-Object { $_.ProcessorAffinity = 0xA0 }"
-
-    taskkill /F /IM XboxPcApp.exe >nul 2>&1
     exit /b 0
 )
 
@@ -84,8 +81,7 @@ timeout /t 2 /nobreak >nul
 tasklist /FI "IMAGENAME eq Steam.exe" | find /I "Steam.exe" >nul
 if %errorlevel%==0 (
     echo 【Steam已成功启动】
-    echo 【关闭Xbox应用】
-    taskkill /F /IM XboxPcApp.exe >nul 2>&1
+    echo 【保留现有Xbox主页】
     exit /b 0
 )
 

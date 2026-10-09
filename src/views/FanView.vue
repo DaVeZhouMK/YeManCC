@@ -3,6 +3,7 @@ import { computed, nextTick, onActivated, onDeactivated, onMounted, onUnmounted,
 import Dropdown from '@/components/Dropdown.vue';
 import Toggle from '@/components/Toggle.vue';
 import { topMonitorData } from '@/bridge/topmon';
+import { onFanMirrorDisplay, registerFanMirrorUiBlocker, notifyFanMirrorUiGate } from '@/bridge/deckyFanDisplay';
 import {
   getFanFeatureSettings,
   getFanPresetCurve,
@@ -1148,6 +1149,24 @@ onUnmounted(() => {
   stopBusyTicker();
   fanSuspendBoundary = false;
 });
+// YMCC Decky sidebar: observation-only additions; original business functions remain unchanged.
+const fanMirrorBlocked = () => busy.value || connecting.value || closing.value ||
+  controlCommitTask !== null || curveApplyPromise !== null || graphDragArmed.value !== null || draggingNode.value !== null;
+const stopFanMirrorBlocker = registerFanMirrorUiBlocker(fanMirrorBlocked);
+watch(() => [fanMirrorBlocked(), statusMessage.value, controlActive.value, hostState.value], notifyFanMirrorUiGate);
+const stopFanMirrorDisplay = onFanMirrorDisplay((value) => {
+  selectedPreset.value = value.preset;
+  nodes.value = getFanPresetCurve(value.preset);
+  controlActive.value = value.active;
+  recovering.value = value.pending;
+  controlReady.value = fanHostLifecycle.controlReady;
+  supported.value = fanHostLifecycle.controlReady || supported.value;
+  hostState.value = fanHostLifecycle.state;
+  statusMessage.value = value.notice;
+  if (value.active) { setFanNavigationDuty(expectedDuty.value); startTelemetry(); }
+  else { setFanNavigationDuty(0); stopTelemetry(); }
+});
+onUnmounted(() => { stopFanMirrorBlocker(); stopFanMirrorDisplay(); });
 </script>
 
 <template>

@@ -3,6 +3,8 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import AppIcon from '@/components/AppIcon.vue';
 import { focusGamepadElement } from '@/gamepad/focus';
 import Dropdown from '@/components/Dropdown.vue';
+import FrameRatePair from '@/components/FrameRatePair.vue';
+import {loadGlobalFrameRates,frameRatePair,dedicatedFrameRatePair,dedicatedFrameRateRecord,applyIndependentFrameRates,onFrameRatesChanged,type FrameRateSide,type FrameRateSetting} from '@/bridge/frameRateLimits';
 import {
   FLOAT_PROFILES,
   getTdpTarget,
@@ -119,6 +121,8 @@ function isGyroOverride(value: unknown): value is GyroOverride {
 }
 
 const config = ref<GameCustomConfig>({ version: 1, entries: {}, rtss: {} });
+const globalFrames=ref(frameRatePair({}));
+const dedicatedFrames=computed(()=>dedicatedFrameRatePair(config.value.rtss[key.value],globalFrames.value));
 const schedule = ref<PerformanceScheduleConfig | null>(null);
 const detectedPowerSide = ref<PowerSide>('ac');
 const powerSide = computed<PowerSide>(() => powerSourceMode.value ?? detectedPowerSide.value);
@@ -141,6 +145,7 @@ const corePolicyApplied = ref(false);
 const padPersona = ref<PadPersonaOverride>('follow');
 const gyroOverride = ref<GyroOverride>('follow');
 let stopScheduleListener: (() => void) | null = null;
+let stopFrameRateListener: (() => void) | null = null;
 let stopPowerSideListener: (() => void) | null = null;
 let stopPowerSideSettledListener: (() => void) | null = null;
 let loadRevision = 0;
@@ -198,14 +203,11 @@ function modeOptionsFor(side: PowerSide) {
 function modeDetail(side: PowerSide, mode: ScheduleMode): string {
   const profile = schedule.value?.profiles?.[side]?.[mode];
   if (!profile) return '未配置';
-  const fps = profile.fpsTarget > 0 ? `${profile.fpsTarget} FPS` : '不锁帧';
-  const cpu = profile.fpsTarget > 0 && profile.cpuTarget !== 'none'
+  const cpu = profile.cpuTarget !== 'none'
     ? `CPU浮动值 ${CPU_FLOAT_LABEL[profile.cpuTarget]}`
     : `CPU挡位 ${CPU_PRESET_LABEL[profile.cpuPreset]}`;
-  const floating = profile.fpsTarget > 0
-    ? ` · 浮动执行${getTdpTarget(profile.tdpMax, profile.tdpStrategy)}W`
-    : '';
-  return `${fps} · ${profile.tdpMax}W · ${cpu}${floating}`;
+  const floating = ` · 浮动执行${getTdpTarget(profile.tdpMax, profile.tdpStrategy)}W`;
+  return `${profile.tdpMax}W · ${cpu}${floating}`;
 }
 
 function announce(messageText = '', errorText = ''): void {
@@ -245,6 +247,8 @@ function makeEntry(
     hyperThreadPolicy,
     padPersona: isPadPersonaOverride(current?.padPersona) ? current.padPersona : 'follow',
     gyroOverride: isGyroOverride(current?.gyroOverride) ? current.gyroOverride : 'follow',
+    gyroPreset: ['fps','racing','custom','steam'].includes(current?.gyroOverride || '') ? current!.gyroOverride as GameCustomProfile['gyroPreset']
+      : current?.gyroPreset,
   };
 }
 
@@ -287,6 +291,24 @@ async function applyCurrentCorePolicy(
 // A1/A3：气泡内下拉共用同一保存流程——写盘后立即下发。
 // enabled 字段由档位派生写盘，保持与老配置字段兼容。
 // 功能位始终可操作：尚未创建专属条目时，改动任一下拉即自动创建条目。
+async function saveDedicatedFrameRate(side:FrameRateSide,value:FrameRateSetting):Promise<void> {
+  const target=props.game,currentSchedule=schedule.value,exe=key.value;
+  if(busy.value || !target || !exe || !currentSchedule)return;
+  ++loadRevision;busy.value=true;error.value='';
+  const release=tryAcquireQuickAction('top-custom-frame-rate');
+  if(!release){busy.value=false;announce('','已有其它快捷操作正在执行，请稍候');return;}
+  try{
+    const latest=await loadGameCustomConfig();const global=await loadGlobalFrameRates();
+    const values=dedicatedFrameRatePair(latest.rtss[exe],global);values[side]={...value};
+    const current=latest.entries[exe] ?? makeEntry(undefined,currentSchedule,selectedModes.value);
+    const next={...latest,entries:{...latest.entries,[exe]:current},rtss:{...latest.rtss,[exe]:{...latest.rtss[exe],...dedicatedFrameRateRecord(values)}}};
+    await saveGameCustomConfig(next);config.value=await loadGameCustomConfig();
+    await applyIndependentFrameRates(()=>props.game?.pid===target.pid && props.game?.processCreated===target.processCreated);
+    announce('已保存独立帧率，不改变专属性能组合。');emit('changed');
+  }catch(e){config.value=await loadGameCustomConfig().catch(()=>({...config.value}));announce('','帧率保存失败：'+(e as Error).message);}
+  finally{busy.value=false;release();}
+}
+
 async function saveGameCustomPatch(patch: Partial<GameCustomProfile>, successMessage: string): Promise<void> {
   const currentSchedule = schedule.value;
   if (busy.value || !props.game || !key.value || !currentSchedule) return;
@@ -301,6 +323,7 @@ async function saveGameCustomPatch(patch: Partial<GameCustomProfile>, successMes
     ...makeEntry(previous, currentSchedule, selectedModes.value),
     ...patch,
   };
+  if (['fps','racing','custom','steam'].includes(patch.gyroOverride || '')) nextEntry.gyroPreset=patch.gyroOverride as GameCustomProfile['gyroPreset'];
   if ('corePolicyMode' in patch) nextEntry.corePolicyEnabled = nextEntry.corePolicyMode !== 'default';
   if ('hyperThreadPolicy' in patch) nextEntry.hyperThreadPolicyEnabled = nextEntry.hyperThreadPolicy !== 'default';
   const next: GameCustomConfig = {
@@ -383,10 +406,11 @@ function selectGyroOverride(value: string | number): void {
 async function load(): Promise<void> {
   if (!props.open) return;
   const revision = ++loadRevision;
-  const [loaded, loadedSchedule] = await Promise.all([loadGameCustomConfig(), loadPerformanceSchedule()]);
+  const [loaded, loadedSchedule, frames] = await Promise.all([loadGameCustomConfig(), loadPerformanceSchedule(), loadGlobalFrameRates()]);
   if (revision !== loadRevision || busy.value || !props.open) return;
   config.value = loaded;
   schedule.value = loadedSchedule;
+  globalFrames.value=frames;
   syncSelectedModes();
   syncCorePolicyFromEntry();
   if (!entry.value) lastAppliedIdentity.value = '';
@@ -415,7 +439,8 @@ async function createConfiguration(): Promise<void> {
   try {
     // 点击整个气泡即完成“添加”：初始使用自动优化当前 AC/DC 挡位，
     // 随后页面立即进入可删除、可切换挡位的已配置状态。
-    const currentSchedule = await loadPerformanceSchedule();
+    globalFrames.value=await loadGlobalFrameRates();
+  const currentSchedule = await loadPerformanceSchedule();
     schedule.value = currentSchedule;
     const modes: Record<PowerSide, ScheduleMode> = {
       ac: currentSchedule.active.ac,
@@ -427,7 +452,7 @@ async function createConfiguration(): Promise<void> {
       entries: { ...config.value.entries, [key.value]: nextEntry },
     };
     await saveGameCustomConfig(next);
-    config.value = next;
+    config.value = await loadGameCustomConfig();
     selectedModes.value = modes;
     syncCorePolicyFromEntry();
     lastAppliedIdentity.value = '';
@@ -551,7 +576,8 @@ async function selectMode(side: PowerSide, rawMode: string | number): Promise<vo
   busy.value = true;
   try {
     // 重新读取当前自动优化配置，确保这里使用的是自动优化页刚保存的最新组合。
-    const currentSchedule = await loadPerformanceSchedule();
+    globalFrames.value=await loadGlobalFrameRates();
+  const currentSchedule = await loadPerformanceSchedule();
     schedule.value = currentSchedule;
     const modes: Record<PowerSide, ScheduleMode> = {
       ...selectedModes.value,
@@ -564,7 +590,7 @@ async function selectMode(side: PowerSide, rawMode: string | number): Promise<vo
       entries: { ...config.value.entries, [key.value]: nextEntry },
     };
     await saveGameCustomConfig(next);
-    config.value = next;
+    config.value = await loadGameCustomConfig();
     selectedModes.value = modes;
     syncCorePolicyFromEntry();
     lastAppliedIdentity.value = '';
@@ -575,7 +601,7 @@ async function selectMode(side: PowerSide, rawMode: string | number): Promise<vo
       applied = await applyGameCustomProfiles(profiles.ac, profiles.dc, {
         pid: props.game.pid,
         processCreated: props.game.processCreated,
-      });
+      }, dedicatedFrameRatePair(config.value.rtss[key.value],globalFrames.value));
     }
     await applyCurrentCorePolicy(props.game, nextEntry);
     const suffix = nextEntry.enabled === false
@@ -609,9 +635,10 @@ async function toggleCustomEnabled(): Promise<void> {
   };
   busy.value = true;
   try {
-    const currentSchedule = await loadPerformanceSchedule();
+    globalFrames.value=await loadGlobalFrameRates();
+  const currentSchedule = await loadPerformanceSchedule();
     await saveGameCustomConfig(next);
-    config.value = next;
+    config.value = await loadGameCustomConfig();
     lastAppliedIdentity.value = '';
     syncCorePolicyFromEntry();
 
@@ -620,14 +647,16 @@ async function toggleCustomEnabled(): Promise<void> {
       const applied = await applyGameCustomProfiles(profiles.ac, profiles.dc, {
         pid: props.game.pid,
         processCreated: props.game.processCreated,
-      });
+      }, dedicatedFrameRatePair(config.value.rtss[key.value],globalFrames.value));
       if (!applied) throw new Error('锁定游戏已变化，专属配置未应用');
       lastAppliedIdentity.value = `${props.game.pid}:${props.game.processCreated}:${key.value}`;
       await applyCurrentCorePolicy(props.game, nextEntry);
+      await applyIndependentFrameRates();
       announce('已启用并应用专属配置');
     } else {
       // 关闭后只恢复当前电源侧的普通自动档位；手动全局模式不主动改硬件。
       if (currentSchedule.enabled) await applyPerformanceScheduleForCurrentPower();
+      await applyIndependentFrameRates();
       announce('已关闭专属配置，已恢复普通自动调度');
     }
     emit('changed');
@@ -674,6 +703,7 @@ watch(() => gameAvailable.value, (available) => {
 
 onMounted(() => {
   window.addEventListener('game-quick-custom-back', onGamepadCustomBack);
+  stopFrameRateListener = onFrameRatesChanged((pair) => { globalFrames.value = pair; });
   const syncPowerSide = ({ ac }: { ac: boolean }): void => {
     // sourceChanged is immediate; acChanged is the final debounced confirmation.
     // Listening to both keeps the card responsive without losing the settled
@@ -691,6 +721,8 @@ onMounted(() => {
 
 onUnmounted(() => {
   window.removeEventListener('game-quick-custom-back', onGamepadCustomBack);
+  stopFrameRateListener?.();
+  stopFrameRateListener = null;
   stopScheduleListener?.();
   stopScheduleListener = null;
   stopPowerSideListener?.();
@@ -758,8 +790,13 @@ onUnmounted(() => {
         </div>
       </div>
 
+      <div class="game-setting-bubble dedicated-frame-limits" data-gp-group="custom-frame-limits">
+        <div class="game-setting-title"><strong>游戏专属帧率上限</strong></div>
+        <FrameRatePair :values="dedicatedFrames" :disabled="busy || !game || !schedule" label-prefix="专用" @commit="saveDedicatedFrameRate"/>
+      </div>
+
       <div class="game-setting-bubble" data-gp-group="custom-core-policy">
-        <div class="game-setting-title"><strong>核心线程控制</strong></div>
+
         <div class="game-setting-fields">
           <div
             class="game-setting-field"
@@ -995,6 +1032,8 @@ onUnmounted(() => {
   border-radius: 9px;
   background: var(--bg-input);
 }
+.dedicated-frame-limits { display: block; }
+.dedicated-frame-limits > .game-setting-title { margin-bottom: 12px; }
 .game-setting-title { flex: 0 0 auto; min-width: 0; }
 .game-setting-title strong { font-size: 12px; }
 .game-setting-fields {

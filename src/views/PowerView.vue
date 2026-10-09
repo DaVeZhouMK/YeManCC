@@ -14,7 +14,7 @@ import {
   joySet,
   searchState,
   openSearchFolder,
-  readGamingHomeStartup,
+  readGamingHomeConfiguration,
   writeGamingHomeStartup,
   BOOT_CONTROL_CENTER_TASK,
   readBootMirrorState,
@@ -32,6 +32,7 @@ import { readSettingsSection, saveSettingsSection } from '@/bridge/settingsRepos
 import { readTrayResident, setTrayResident } from '@/bridge/trayResident';
 import { deleteAllYemanTasks, restoreAllYemanTasks } from '@/bridge/yeman';
 import InlineIcon from '@/components/InlineIcon.vue';
+import type { GamingHomeState } from '@/bridge/gamingHomePolicy';
 
 const BOOT_TASK = BOOT_CONTROL_CENTER_TASK;
 const BOOT_CFG = 'C:\\SOFT\\YeMan\\PowerControl\\boot_config.json';
@@ -74,7 +75,7 @@ function onStartupGyro(raw: string | number): void {
 const fanControlOnBoot = ref(false);
 const rtssBootOn = ref(false);
 
-const tasks = reactive({ desktopMode: false, xboxMode: false, energyStar: false, cleanMem: false });
+const tasks = reactive({ desktopMode: false, energyStar: false, cleanMem: false });
 type TaskKey = keyof typeof tasks;
 const audioOpt = ref(false);
 const steamCommunityBoot = ref(false);
@@ -91,8 +92,9 @@ const taskToolsMsg = ref('');
 const trayResident = ref(false);
 const hardwareGpuSchedule = ref(false);
 
-// 开机启动Xbox全屏游戏模式（注册表 StartupToGamingHome）：不能单独打开，必须依靠 Xbox全屏游戏模式
+// Persistent system state is independent of Steam, tray and legacy task existence.
 const startupGamingHome = ref(false);
+const handheldConfigured = ref(false);
 const steamEarlyStart = ref(false);
 
 async function safeExists(name: string): Promise<boolean> {
@@ -119,72 +121,26 @@ async function readBootState(): Promise<boolean> {
   return actual;
 }
 
-const xboxSuiteEnabled = computed(() =>
-  steamEarlyStart.value &&
-  tasks.xboxMode &&
-  startupGamingHome.value &&
-  trayResident.value
-);
-
-async function refreshXboxSuiteState(): Promise<void> {
-  const [earlyStartRes, xboxRes, gamingHomeRes, trayRes] = await Promise.allSettled([
-    steamMasterOn(),
-    safeExists('Xbox大屏游戏模式'),
-    readGamingHomeStartup(),
-    readTrayResident(),
-  ]);
-  if (earlyStartRes.status === 'fulfilled') steamEarlyStart.value = earlyStartRes.value;
-  if (xboxRes.status === 'fulfilled') tasks.xboxMode = xboxRes.value;
-  if (gamingHomeRes.status === 'fulfilled') startupGamingHome.value = gamingHomeRes.value;
-  if (trayRes.status === 'fulfilled') trayResident.value = trayRes.value;
-  // 注册表联动和任务栏常驻都不能脱离 Xbox 任务单独存在；发现旧状态时清理掉。
-  if (!tasks.xboxMode) {
-    if (startupGamingHome.value) {
-      startupGamingHome.value = false;
-      await writeGamingHomeStartup(false).catch(() => {});
-    }
-    if (trayResident.value) {
-      await setTrayResident(false).then(() => {
-        trayResident.value = false;
-      }).catch(() => {});
-    }
-  }
+const xboxSuiteEnabled = computed(() => handheldConfigured.value && startupGamingHome.value);
+function applyGamingHomeState(state: GamingHomeState): void {
+  handheldConfigured.value = state?.deviceForm === 46;
+  startupGamingHome.value = state?.startupEnabled === true;
 }
-
+async function refreshXboxSuiteState(): Promise<void> {
+  // Observe only. Task absence, a failed query or a page visit must NEVER disable startup.
+  applyGamingHomeState(await readGamingHomeConfiguration());
+}
 async function onXboxSuiteToggle(enabled: boolean): Promise<void> {
+  if (busy.value) return;
   errMsg.value = '';
   busy.value = true;
   try {
-    if (enabled) {
-      // 按依赖顺序开启：Steam 文件 → Xbox 任务 → 任务栏入口 → Xbox APP 启动联动。
-      await steamMasterSet(true);
-      await toggleTask('Xbox大屏游戏模式', true);
-      if (!(await safeExists('Xbox大屏游戏模式'))) {
-        throw new Error('Xbox大屏游戏模式任务未能启用');
-      }
-      await setTrayResident(true);
-      const gamingHomeOk = await writeGamingHomeStartup(true);
-      if (!gamingHomeOk) throw new Error('Xbox APP 启动联动写入失败');
-    } else {
-      // 关闭时显式销毁四项，避免任务栏或注册表残留造成“总开关已关但仍联动”。
-      // 每一步都继续执行，最后统一检查，避免某一项失败导致其余项目仍保持开启。
-      const closeResults = await Promise.allSettled([
-        writeGamingHomeStartup(false),
-        toggleTask('Xbox大屏游戏模式', false),
-        steamMasterSet(false),
-        setTrayResident(false),
-      ]);
-      const failed = closeResults.find((result) => result.status === 'rejected');
-      if (failed?.status === 'rejected') throw failed.reason;
-      if (await readGamingHomeStartup()) throw new Error('Xbox APP 启动联动仍处于开启状态');
-    }
+    if (!await writeGamingHomeStartup(enabled)) throw new Error('全屏启动配置写入失败');
     await refreshXboxSuiteState();
-    if (enabled && !xboxSuiteEnabled.value) {
-      throw new Error('部分 Steam / Xbox 联动未能确认开启');
-    }
+    if (enabled !== xboxSuiteEnabled.value) throw new Error('全屏启动配置回读不一致');
   } catch (e) {
     await refreshXboxSuiteState().catch(() => {});
-    errMsg.value = 'Steam大屏Xbox游戏模式设置失败：' + (e as Error).message;
+    errMsg.value = '全屏游戏模式设置失败：' + (e as Error).message;
   } finally {
     busy.value = false;
   }
@@ -196,10 +152,10 @@ async function refresh() {
   // 清理旧版本遗留的 AMD395 任务，避免它继续在开机时执行。
   await toggleTask('Bug修复-AMD-395', false).catch(() => {});
   // 并行异步加载（不串行等待，不阻塞渲染）
-  const [dmRes, steamEarlyStartRes, xbRes, esRes, cmRes, fxRes, steamCommunityRes, joyRes, searchRes, bootRes, rtssBootRes, fanBootRes] = await Promise.allSettled([
+  const [dmRes, steamEarlyStartRes, gamingRes, esRes, cmRes, fxRes, steamCommunityRes, joyRes, searchRes, bootRes, rtssBootRes, fanBootRes] = await Promise.allSettled([
     safeExists('桌面模式-开机设置为桌面模式'),
     steamMasterOn(),
-    safeExists('Xbox大屏游戏模式'),
+    readGamingHomeConfiguration(),
     safeExists('节能-能源之星'),
     safeExists('内存-开机自动内存清理并关闭'),
     fxExists(),
@@ -212,7 +168,8 @@ async function refresh() {
   ]);
   if (dmRes.status === 'fulfilled') tasks.desktopMode = dmRes.value;
   if (steamEarlyStartRes.status === 'fulfilled') steamEarlyStart.value = steamEarlyStartRes.value;
-  if (xbRes.status === 'fulfilled') tasks.xboxMode = xbRes.value;
+  if (gamingRes.status === 'fulfilled') applyGamingHomeState(gamingRes.value);
+  else errMsg.value = '读取全屏启动配置失败：' + String(gamingRes.reason);
   if (esRes.status === 'fulfilled') tasks.energyStar = esRes.value;
   if (cmRes.status === 'fulfilled') tasks.cleanMem = cmRes.value;
   if (fxRes.status === 'fulfilled') audioOpt.value = fxRes.value;
@@ -224,19 +181,7 @@ async function refresh() {
   if (fanBootRes.status === 'fulfilled') fanControlOnBoot.value = fanBootRes.value.fanControl === true;
   trayResident.value = await readTrayResident().catch(() => false);
   hardwareGpuSchedule.value = await readHardwareGpuSchedule().catch(() => false);
-  // Xbox 未开启时，注册表启动联动和任务栏常驻都强制关闭，不能留下独立状态。
-  startupGamingHome.value = await readGamingHomeStartup().catch(() => false);
-  if (!tasks.xboxMode) {
-    if (startupGamingHome.value) {
-      startupGamingHome.value = false;
-      await writeGamingHomeStartup(false).catch(() => {});
-    }
-    if (trayResident.value) {
-      await setTrayResident(false).then(() => {
-        trayResident.value = false;
-      }).catch(() => {});
-    }
-  }
+  // Refresh never writes gaming configuration or changes taskbar residency.
 }
 
 async function onBootToggle(v: boolean) {
@@ -285,71 +230,20 @@ async function toggleTaskSafe(name: string, on: boolean, key: TaskKey) {
   }
 }
 
-// Xbox 全屏游戏模式：仅管理任务计划与联动（开机 Xbox 大屏 / 任务栏常驻 / 开机启动联动）。
-// ⚠️ 后台全屏检测线程已废弃（2026-08-02）：开启不再起 1.5s 轮询线程，开关仅保留上述联动。
-async function onXbox(v: boolean) {
-  errMsg.value = '';
-  busy.value = true;
-  try {
-    await toggleTask('Xbox大屏游戏模式', v);
-    tasks.xboxMode = await safeExists('Xbox大屏游戏模式');
-    if (tasks.xboxMode) {
-      // Xbox 游戏模式开启时必须有任务栏入口，自动联动开启任务栏常驻。
-      if (!trayResident.value) {
-        await setTrayResident(true);
-        trayResident.value = true;
-      }
-    } else {
-      // Xbox 游戏模式关闭时，任务栏常驻也必须同步关闭，避免留下独立入口。
-      await setTrayResident(false);
-      trayResident.value = false;
-      // 关闭 Xbox 全屏游戏模式时，联动关闭「开机启动Xbox全屏游戏模式」。
-      if (startupGamingHome.value) {
-        startupGamingHome.value = false;
-        await writeGamingHomeStartup(false).catch(() => {});
-      }
-    }
-  } catch (e) {
-    tasks.xboxMode = await safeExists('Xbox大屏游戏模式').catch(() => !v);
-    errMsg.value = 'Xbox 全屏游戏模式设置失败：' + (e as Error).message + '（需管理员权限）';
-  } finally {
-    busy.value = false;
-  }
-}
-
-// 开机启动Xbox全屏游戏模式：只能依靠 Xbox 全屏游戏模式打开，不能单独打开；可单独关闭
-async function onStartupGamingHome(v: boolean) {
-  errMsg.value = '';
-  if (v && !tasks.xboxMode) {
-    // 不能单独打开：必须依赖 Xbox 全屏游戏模式
-    startupGamingHome.value = false;
-    errMsg.value = '请先开启「Xbox全屏游戏模式」，才能打开「开机启动Xbox全屏游戏模式」。';
-    return;
-  }
-  try {
-    const ok = await writeGamingHomeStartup(v);
-    if (!ok) throw new Error('注册表写入失败');
-    startupGamingHome.value = v;
-  } catch (e) {
-    // 写失败：回读注册表真实值（v-model 可能已先更新 UI，需覆盖回滚）
-    startupGamingHome.value = await readGamingHomeStartup().catch(() => false);
-    errMsg.value = '开机启动Xbox全屏游戏模式设置失败：' + (e as Error).message;
-  }
-}
-
 // 任务栏常驻：开→任务栏按钮(移除托盘)；关→仅托盘（默认）
 async function onTrayResident(v: boolean) {
+  if (busy.value) return;
   errMsg.value = '';
+  busy.value = true;
   const prev = trayResident.value;
   trayResident.value = v; // 乐观更新
   try {
     await setTrayResident(v);
-    if (!v && tasks.xboxMode) {
-      errMsg.value = '关闭任务栏常驻后，无法在 Xbox 全屏游戏模式呼出野蛮系统控制中心。';
-    }
   } catch (e) {
     trayResident.value = await readTrayResident().catch(() => prev); // Do not claim rollback unless it persisted.
     errMsg.value = '任务栏常驻设置失败：' + (e as Error).message;
+  } finally {
+    busy.value = false;
   }
 }
 
@@ -521,20 +415,22 @@ onActivated(() => {
     <div v-if="taskToolsMsg" class="info-bar">{{ taskToolsMsg }}</div>
 
     <section class="card">
-      <h3 class="card-title steam-xbox-title"><InlineIcon name="rocket" /> Steam大屏Xbox游戏模式</h3>
+      <h3 class="card-title steam-xbox-title"><InlineIcon name="rocket" /> Xbox全屏游戏模式</h3>
+      <p class="steam-xbox-subtitle">基于Xbox全屏兼容Steam大屏启动</p>
       <Toggle
         :model-value="xboxSuiteEnabled"
-        label="总开关"
-        description="开启或关闭下面四项 Steam / Xbox 联动"
+        label="开机进入Xbox全屏游戏模式"
         color="accent"
         :disabled="busy"
         @update:model-value="onXboxSuiteToggle"
       />
-      <Toggle v-model="steamEarlyStart" label="Steam高级开机启动(earlystart)" description="写入用户目录.earlystart" color="accent" :disabled="busy" @update:model-value="onSteamEarlyStart" />
-      <Toggle v-model="tasks.xboxMode" label="Xbox全屏游戏模式" description="大屏游戏任务与界面联动；开启后自动联动任务栏常驻" color="accent" :disabled="busy" @update:model-value="onXbox" />
-      <Toggle v-model="startupGamingHome" label="开机启动Xbox全屏游戏模式" description="必须能正常启动XboxAPP也是联动" color="accent" :disabled="busy || !tasks.xboxMode" @update:model-value="onStartupGamingHome" />
-      <Toggle v-model="trayResident" label="任务栏常驻" description="Xbox全屏游戏模式的联动入口" color="accent" :disabled="busy || !tasks.xboxMode" @update:model-value="onTrayResident" />
-      <WarnBar v-if="tasks.xboxMode && !trayResident" text="如关闭任务栏常驻无法在Xbox全屏中弹出野蛮系统控制台" />
+      <Toggle :model-value="trayResident" label="任务栏常驻" description="独立控制全屏模式中的 YMCC 任务栏入口" color="accent" :disabled="busy" @update:model-value="onTrayResident" />
+      <WarnBar v-if="startupGamingHome && !trayResident" text="任务栏常驻关闭时，全屏模式中的 YMCC 入口可能不可用；不影响系统全屏自启动配置" />
+    </section>
+
+    <section class="card">
+      <h3 class="card-title"><InlineIcon name="steam" /> Steam大屏开机启动</h3>
+      <Toggle v-model="steamEarlyStart" label="Steam高级开机启动(earlystart)" description="开启的是Steam大屏页面的联动模式" color="accent" :disabled="busy" @update:model-value="onSteamEarlyStart" />
     </section>
 
     <section class="card">
@@ -602,6 +498,13 @@ onActivated(() => {
 .steam-xbox-title {
   font-size: 16px;
   font-weight: 700;
+}
+.steam-xbox-subtitle {
+  margin: 0 0 8px;
+  color: var(--text-dim);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.5;
 }
 .page {
   padding-bottom: 20px;

@@ -1,0 +1,15 @@
+import { task } from './fixtures/decky_task_paths.mjs';
+// Scope contract for the loader-only cleanup; complements actual pinned-binary tests.
+import assert from 'node:assert/strict';import fs from 'node:fs';import path from 'node:path';
+const root=path.resolve(import.meta.dirname,'..');const temp=fs.readFileSync(path.join(root,'native/decky_sidebar_temp.h'),'utf8');const runtime=fs.readFileSync(path.join(root,'native/decky_sidebar_runtime.h'),'utf8');
+const cases=[];const check=(name,action)=>{action();cases.push(name);};
+check('only the stored own run is deletable; no arbitrary cleanup target input',()=>{assert.ok(temp.includes('cleanupAfterJobEmpty(bool noActiveProcesses)'));assert.ok(temp.includes('target.parent_path()!=base'));assert.ok(temp.includes('base.filename()!=L"runtime-temp"'));assert.ok(temp.includes('name.size()!=43'));});
+check('entry traversal rejects reparse points and holds ancestors without delete sharing',()=>{assert.ok(temp.includes('FILE_FLAG_OPEN_REPARSE_POINT'));assert.ok(temp.includes('FILE_ATTRIBUTE_REPARSE_POINT'));assert.ok(temp.includes('FILE_SHARE_READ|FILE_SHARE_WRITE'));assert.ok(!temp.replace(/\/\/[^\n]*/g,'').includes('FILE_SHARE_DELETE'));});
+check('cleanup is gated on no active owned Job processes, and follows handle close',()=>{const body=runtime.slice(runtime.indexOf('auto closeOwned='),runtime.indexOf('auto takeContext='));assert.ok(body.includes('JobObjectBasicAccountingInformation'));assert.ok(body.includes('if(!info.ActiveProcesses){empty=true'));assert.ok(body.indexOf('CloseHandle(process)')<body.indexOf('cleanupAfterJobEmpty'));assert.ok(body.indexOf('CloseHandle(job)')<body.indexOf('cleanupAfterJobEmpty'));assert.ok(body.includes('empty&&!cleaned'));});
+check('filesystem work and cleanup wait attempts are bounded, with fail-closed retention',()=>{assert.ok(temp.includes('depth>32'));assert.ok(temp.includes('entries>4096'));assert.ok(runtime.includes('retry<20'));assert.ok(runtime.includes('if(!cleaned)temporary.abandon()'));});
+check('only dedicated loader environment gets temporary directory, no business setting write',()=>{assert.ok(runtime.includes('vars[L"TEMP"] = temporary;vars[L"TMP"] = temporary'));assert.ok(runtime.includes('temporary.prepare(config_.home)'));for(const name of ['ymSettings','saveSettings','setTdp','fanHost','GameCustom'])assert.ok(!temp.includes(name));});
+check('readonly aliases are retained without changing outside inode metadata',()=>{assert.ok(!temp.includes('SetFileAttributesW'));assert.ok(temp.includes('FILE_ATTRIBUTE_READONLY){good=false;break;}'));});
+const record={project:'YMCC Decky 侧边栏',checks:cases.length,cases,sourceContractOnly:true,symlinkBehaviorRuntimeTest:'symbolic link skipped; actual NTFS junction and hard-link tests provided separately',originalBusinessModelChanged:false};
+fs.writeFileSync(path.resolve(task,'validation/OFFLINE08-TEMP-SOURCE-CONTRACT.json'),JSON.stringify(record,null,2));console.log(`Loader temp scope contracts passed: ${cases.length}`);
+
+

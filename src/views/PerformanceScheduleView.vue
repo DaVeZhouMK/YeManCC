@@ -6,18 +6,18 @@ import { focusGamepadElement, getGamepadPopupPlacement, scrollElementIntoSafeAre
 import AppIcon from '@/components/AppIcon.vue';
 import Dropdown from '@/components/Dropdown.vue';
 import Slider from '@/components/Slider.vue';
+import RtssFrameLimit from '@/components/RtssFrameLimit.vue';
+import FrameRatePair from '@/components/FrameRatePair.vue';
 import {
   readPowerParams,
   ensureRememberedYemanSchemeActive,
   rebuildYemanScheme,
   TDP_CEILINGS,
   TDP_MIN,
-  FPS_CEILINGS,
   type PowerParams,
 } from '@/bridge/yeman';
 import {
   FLOAT_PROFILES,
-  FPS_TARGET_MIN,
   getFloatInfo,
   onFloatUpdate,
   TDP_FLOAT_EXECUTION_LABELS,
@@ -71,9 +71,8 @@ const powerSide = computed<PowerSide>(() => powerSourceMode.value ??
   (topMonitorData.value?.ac === 0 ? 'dc' : 'ac'));
 const editing = ref<ScheduleMode | null>(null);
 const editingDraft = ref<ScheduleProfile | null>(null);
-// 编辑面板独立的 TDP / FPS 上限（与草稿值解耦，避免下拉选不上去）
+// 编辑面板独立的 TDP 上限；帧率不属于性能组合草稿。
 const editingTdpCeiling = ref(TDP_CEILINGS[TDP_CEILINGS.length - 1]);
-const editingFpsCeiling = ref(200); // FPS_CEILINGS 最后一个值（由 yeman.ts 单一数据源导入）
 const coreArchitecture = ref<CoreArchitectureInfo | null>(null);
 const isHeterogeneousCpu = computed(() => coreArchitecture.value?.heterogeneous === true);
 const busy = ref(false);
@@ -252,9 +251,9 @@ const editorGridKeys = computed(() => {
   if (!draft) return [] as string[];
   const keys: string[] = [];
   if (isHeterogeneousCpu.value) keys.push('coreMode');
-  if (draft.fpsTarget > 0) keys.push('cpuTarget');
-  if (draft.cpuTarget === 'none' || draft.fpsTarget === 0) keys.push('cpuPreset');
-  if (draft.fpsTarget > 0) keys.push('tdpStrategy');
+  keys.push('cpuTarget');
+  if (draft.cpuTarget === 'none') keys.push('cpuPreset');
+  keys.push('tdpStrategy');
   return keys;
 });
 function editorGridPosition(key: string): { row: number; col: number } | undefined {
@@ -264,8 +263,7 @@ function editorGridPosition(key: string): { row: number; col: number } | undefin
 }
 const editorGridRowCount = computed(() => Math.ceil(editorGridKeys.value.length / 2));
 const editorTdpRow = computed(() => 1 + editorGridRowCount.value);
-const editorFpsRow = computed(() => editorTdpRow.value + 1);
-const editorActionsRow = computed(() => editorFpsRow.value + 1);
+const editorActionsRow = computed(() => editorTdpRow.value + 1);
 const STRATEGY_LABEL: Record<TdpFloatStrategy, string> = {
   none: '无下降',
   aggressive: '激进浮动',
@@ -298,7 +296,7 @@ const executionPowerText = computed(() => {
   return applied > 0 ? `${Math.round(applied)}W` : '--';
 });
 const targetFpsText = computed(() =>
-  activeProfile.value.fpsTarget > 0 ? String(activeProfile.value.fpsTarget) : '不锁帧'
+  floatInfo.value.target > 0 ? String(floatInfo.value.target) : '—'
 );
 const latestMonitor = computed(() => {
   const points = monitorHistory.value;
@@ -348,7 +346,7 @@ function sampleMonitor(): void {
     ts: Date.now(),
     fps: Math.max(0, Number(status?.fps) || 0),
     fps1: Math.max(0, Number(status?.fps1) || 0),
-    targetFps: Math.max(0, Number(info.target) || activeProfile.value.fpsTarget),
+    targetFps: Math.max(0, Number(info.target) || 0),
     thermalThrottleFound: topMon.value?.thermalThrottleFound === true,
     thermalThrottleMax: Math.max(0, Number(topMon.value?.thermalThrottleMax) || 0),
     virtualMemoryCommittedFound: topMon.value?.virtualMemoryCommittedFound === true,
@@ -363,16 +361,14 @@ function sampleMonitor(): void {
   monitorHistory.value = [...monitorHistory.value.slice(-(MONITOR_MAX_POINTS - 1)), point];
 }
 
-// 编辑面板：TDP / 帧数目标上限下拉（与监控锁帧 / TDP 功耗页共用 FPS_CEILINGS 单一数据源：0=不锁帧，上限 300）。
+// 编辑面板仅编辑 TDP 上限；AC/DC 帧率由各电源区域内的独立 RTSS 控件管理。
 const tdpCeilingOpts = TDP_CEILINGS.map((v) => ({ value: v, label: `${v} W` }));
-const fpsCeilingOpts = FPS_CEILINGS.map((v) => ({ value: v, label: v === 0 ? '不锁帧' : `${v} FPS` }));
 function smallestCeiling(list: number[], val: number): number {
   for (const c of list) if (c >= val) return c;
   return list[list.length - 1];
 }
 // 上限：由编辑面板下拉独立维护（与草稿值解耦），仅当滑块值超出时才自动抬升
 const tdpCeiling = computed(() => editingTdpCeiling.value);
-const fpsCeiling = computed(() => editingFpsCeiling.value);
 // 改上限：下拉存储新上限；若 TDP 当前值超出则钳制到新上限
 function onTdpCeilingChange(v: number | string) {
   const next = Number(v);
@@ -382,21 +378,6 @@ function onTdpCeilingChange(v: number | string) {
     updateEditing('tdpMax', Math.max(TDP_MIN, next));
   }
 }
-function onFpsCeilingChange(v: number | string) {
-  const next = Number(v);
-  if (!editingDraft.value) return;
-  editingFpsCeiling.value = next;
-  if (next === 0) {
-    updateEditing('fpsTarget', 0);
-    return;
-  }
-  // 从「不锁帧(0)」切回具体档位，或当前值超出新上限时，把目标帧数提升到该档位
-  const current = editingDraft.value.fpsTarget;
-  if (current === 0 || current > next) {
-    updateEditing('fpsTarget', Math.max(FPS_TARGET_MIN, next));
-  }
-}
-
 watch([statusMsg, errMsg], ([status, error]) => {
   if (statusHideTimer !== null) {
     clearTimeout(statusHideTimer);
@@ -430,14 +411,7 @@ watch(() => editingDraft.value?.tdpMax, (val) => {
     editingTdpCeiling.value = smallestCeiling(TDP_CEILINGS, val);
   }
 });
-watch(() => editingDraft.value?.fpsTarget, (val) => {
-  if (val === undefined || val === null) return;
-  if (val === 0) {
-    editingFpsCeiling.value = 0;
-  } else if (val > editingFpsCeiling.value) {
-    editingFpsCeiling.value = smallestCeiling(FPS_CEILINGS, val);
-  }
-});
+
 
 function modeProfile(side: PowerSide, mode: ScheduleMode): ScheduleProfile {
   return config.value.profiles[side][mode];
@@ -445,8 +419,8 @@ function modeProfile(side: PowerSide, mode: ScheduleMode): ScheduleProfile {
 
 // 摘要反映当前真正生效的 CPU 控制项：cpuTarget≠无压制 → CPU 浮动值；否则 → CPU 挡位。
 function cpuControlLabel(p: ScheduleProfile): string {
-  // 不锁帧时没有 FPS 目标，CPU 浮动不参与执行，实际控制项回到固定 CPU 挡位。
-  if (p.fpsTarget > 0 && p.cpuTarget && p.cpuTarget !== 'none') {
+  // CPU 浮动只由组合自己的策略决定，独立锁帧关闭不改变该策略。
+  if (p.cpuTarget && p.cpuTarget !== 'none') {
     const t = CPU_FLOAT_OPTS.value.find((o) => o.value === p.cpuTarget);
     return `CPU浮动值 ${t ? t.label : p.cpuTarget}`;
   }
@@ -456,9 +430,8 @@ function cpuControlLabel(p: ScheduleProfile): string {
 
 function modeDetail(side: PowerSide, mode: ScheduleMode): string {
   const p = modeProfile(side, mode);
-  const fps = p.fpsTarget > 0 ? `${p.fpsTarget} FPS` : '不锁帧';
-  const floating = p.fpsTarget > 0 ? ` · 浮动执行${getTdpTarget(p.tdpMax, p.tdpStrategy)}W` : '';
-  return `${fps} · ${p.tdpMax}W · ${cpuControlLabel(p)}${floating}`;
+  const floating = ` · 浮动执行${getTdpTarget(p.tdpMax, p.tdpStrategy)}W`;
+  return `${p.tdpMax}W · ${cpuControlLabel(p)}${floating}`;
 }
 
 function cloneProfile(side: PowerSide, mode: ScheduleMode): ScheduleProfile {
@@ -473,7 +446,6 @@ function loadEditingDraft() {
   editingDraft.value = cloneProfile(selectedSide.value, editing.value);
   // 初始化上限下拉：取当前值最近的上限档位
   editingTdpCeiling.value = smallestCeiling(TDP_CEILINGS, editingDraft.value.tdpMax);
-  editingFpsCeiling.value = smallestCeiling(FPS_CEILINGS, editingDraft.value.fpsTarget);
 }
 
 function openEditor(side: PowerSide = powerSide.value, mode: ScheduleMode = config.value.active[side]) {
@@ -975,39 +947,51 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <!-- 自动优化：仅自动模式（config.enabled）显示；手动模式隐藏，手动模式由 TDP 功耗 / CPU 调度页面直接控制 -->
-    <div v-if="config.enabled" class="schedule-card card">
-      <div class="section-head">
-        <div class="section-title" :class="{ unavailable: performanceControlsLocked }">{{ automaticOptimizationTitle }}</div>
-        <div class="current-badge" :class="powerSide">当前 {{ powerSide.toUpperCase() }}</div>
-      </div>
+    <!-- 帧率与档位共用 AC/DC 卡片；手动模式隐藏性能档位，但保留独立锁帧。 -->
+    <RtssFrameLimit v-slot="{ pair: framePair, busy: frameBusy, error: frameError, commit: commitFrame }">
+      <div class="schedule-card card">
+        <div class="section-head">
+          <div class="section-title" :class="{ unavailable: !config.enabled || performanceControlsLocked }">{{ config.enabled ? automaticOptimizationTitle : '自动优化' }}</div>
+          <div class="current-badge" :class="powerSide">{{ config.enabled ? '当前 ' + powerSide.toUpperCase() : '手动模式' }}</div>
+        </div>
 
-      <div class="power-mode-list">
-        <div
-          v-for="side in POWER_SIDES"
-          :key="side"
-          class="power-mode-row"
-          :class="[{ current: powerSide === side }, side]"
-        >
-          <AppIcon :name="side === 'ac' ? 'plug' : 'battery'" class="side-icon" :aria-label="side === 'ac' ? '交流电' : '电池'" />
-          <div class="side-name">
-            <strong>{{ side.toUpperCase() }}</strong>
-            <small>{{ side === 'ac' ? '交流电' : '电池' }}</small>
-          </div>
-          <div class="mode-picker">
-            <Dropdown
-              :model-value="config.active[side]"
-              :options="modeOptionsFor(side)"
-              :disabled="busy || performanceControlsLocked"
-              :color="side === 'dc' ? 'dc' : 'accent'"
-              :aria-label="`${side.toUpperCase()} 性能档位`"
-              @update:model-value="selectMode(side, $event)"
+        <div class="power-mode-list">
+          <div
+            v-for="side in POWER_SIDES"
+            :key="side"
+            class="power-mode-row"
+            :class="[{ current: powerSide === side, 'frames-only': !config.enabled }, side]"
+          >
+            <AppIcon :name="side === 'ac' ? 'plug' : 'battery'" class="side-icon" :aria-label="side === 'ac' ? '交流电' : '电池'" />
+            <div class="side-name">
+              <strong>{{ side.toUpperCase() }}</strong>
+              <small>{{ side === 'ac' ? '交流电' : '电池' }}</small>
+            </div>
+            <div v-if="config.enabled" class="mode-picker">
+              <Dropdown
+                :model-value="config.active[side]"
+                :options="modeOptionsFor(side)"
+                :disabled="busy || performanceControlsLocked"
+                :color="side === 'dc' ? 'dc' : 'accent'"
+                :aria-label="`${side.toUpperCase()} 性能档位`"
+                @update:model-value="selectMode(side, $event)"
+              />
+              <small>{{ modeDetail(side, config.active[side]) }}</small>
+            </div>
+            <FrameRatePair
+              class="mode-frame-controls"
+              :data-gp-group="'schedule-frame-' + side"
+              :values="framePair"
+              :side="side"
+              hide-side-label
+              :disabled="frameBusy"
+              @commit="commitFrame"
             />
-            <small>{{ modeDetail(side, config.active[side]) }}</small>
           </div>
         </div>
+        <p v-if="frameError" class="schedule-frame-error" role="status">{{ frameError }}</p>
       </div>
-    </div>
+    </RtssFrameLimit>
 
     <div class="schedule-tools card">
       <div class="tool-actions" data-gp-group="schedule-tools">
@@ -1073,7 +1057,7 @@ onUnmounted(() => {
             @update:model-value="updateEditing('coreMode', $event as CoreMode)"
           />
         </label>
-        <label v-if="editingDraft.fpsTarget > 0">
+        <label>
           <span>CPU 浮动值</span>
           <Dropdown
             :model-value="editingDraft.cpuTarget"
@@ -1086,7 +1070,7 @@ onUnmounted(() => {
             @update:model-value="updateEditing('cpuTarget', $event as FloatProfile)"
           />
         </label>
-        <label v-if="editingDraft.cpuTarget === 'none' || editingDraft.fpsTarget === 0">
+        <label v-if="editingDraft.cpuTarget === 'none'">
           <span>CPU挡位【可去手动模式编辑】</span>
           <Dropdown
             :model-value="editingDraft.cpuPreset"
@@ -1100,7 +1084,7 @@ onUnmounted(() => {
             @update:model-value="updateEditing('cpuPreset', $event as CpuPreset)"
           />
         </label>
-        <label v-if="editingDraft.fpsTarget > 0">
+        <label>
           <span>TDP 浮动幅度【执行瓦数】</span>
           <Dropdown
             :model-value="editingDraft.tdpStrategy"
@@ -1141,34 +1125,6 @@ onUnmounted(() => {
             gp-col="1"
             aria-label="TDP 最大值上限"
             @update:model-value="onTdpCeilingChange"
-          />
-        </div>
-        <div class="editor-combo">
-          <Slider
-            :model-value="editingDraft.fpsTarget"
-            :min="FPS_TARGET_MIN"
-            :max="fpsCeiling > 0 ? fpsCeiling : FPS_TARGET_MIN"
-            :step="5"
-            label="帧数目标"
-            :unit="editingDraft.fpsTarget === 0 ? undefined : 'FPS'"
-            :value-text="editingDraft.fpsTarget === 0 ? '不锁帧' : undefined"
-            :color="sideColor"
-            :disabled="busy || performanceControlsLocked || editingDraft.fpsTarget === 0"
-            :gp-row="editorFpsRow"
-            gp-col="0"
-            @update:model-value="updateEditing('fpsTarget', $event)"
-          />
-          <Dropdown
-            class="editor-ceiling"
-            :model-value="fpsCeiling"
-            :options="fpsCeilingOpts"
-            :color="sideColor"
-            :disabled="busy || performanceControlsLocked"
-            width="104px"
-            :gp-row="editorFpsRow"
-            gp-col="1"
-            aria-label="帧数目标上限"
-            @update:model-value="onFpsCeilingChange"
           />
         </div>
       </template>
@@ -1384,10 +1340,24 @@ button:disabled { opacity: .42; cursor: default; }
   grid-template-columns: 22px 52px minmax(0, 1fr);
   align-items: center;
   gap: 10px;
-  padding: 10px 11px;
+  padding: 12px 11px;
   border-radius: 9px;
   background: var(--bg-input);
   border: 1px solid rgba(255,255,255,.055);
+}
+.mode-frame-controls {
+  grid-column: 2 / -1;
+  min-width: 0;
+  padding-top: 2px;
+}
+.power-mode-row.frames-only .mode-frame-controls {
+  grid-column: 3;
+  grid-row: 1;
+}
+.schedule-frame-error {
+  color: var(--danger);
+  font-size: 12px;
+  margin: 8px 0 0;
 }
 .side-icon {
   width: 14px;

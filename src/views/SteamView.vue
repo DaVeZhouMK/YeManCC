@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, onActivated, onDeactivated, inject, watch, type Ref } from 'vue';
 import Toggle from '@/components/Toggle.vue';
+import { deckySidebar, deckySidebarDescription, type DeckySidebarState } from '@/bridge/deckySidebar';
 import InlineIcon from '@/components/InlineIcon.vue';
 import { dialog, shell } from '@/bridge/api';
 import { isUiVisible, onUiVisibilityChange } from '@/bridge/uiLifecycle';
@@ -24,6 +25,30 @@ import {
   launchCustomSteamLibrary,
   readCustomSteamLibrarySummary,
 } from '@/bridge/customSteamLibrary';
+
+const deckyState = ref<DeckySidebarState | null>(null);
+const deckyBusy = ref(false);
+let stopDeckyState: (() => void) | null = null;
+let deckyViewEpoch = 0;
+function acceptDeckyState(state: DeckySidebarState) {
+  if (deckyState.value && state.revision < deckyState.value.revision) return;
+  deckyState.value = state;
+  if (state.enabled && (state.phase === 'failed' || state.phase === 'unavailable')) showNotice(deckySidebarDescription(state));
+}
+async function setDeckyEnabled(enabled: boolean) {
+  if (deckyBusy.value) return;
+  deckyBusy.value = true;
+  const epoch = deckyViewEpoch;
+  try { const state = await deckySidebar.setEnabled(enabled); if (epoch === deckyViewEpoch) acceptDeckyState(state); }
+  catch (error) { if (epoch === deckyViewEpoch) showNotice('YMCC 控制台设置失败：' + (error as Error).message); }
+  finally { if (epoch === deckyViewEpoch) deckyBusy.value = false; }
+}
+onMounted(() => {
+  const epoch = ++deckyViewEpoch;
+  stopDeckyState = deckySidebar.subscribe(acceptDeckyState);
+  void deckySidebar.get().then(state => { if (epoch === deckyViewEpoch) acceptDeckyState(state); }).catch(() => {});
+});
+onBeforeUnmount(() => { ++deckyViewEpoch; stopDeckyState?.(); stopDeckyState = null; });
 
 const running = ref(false);
 const addonStates: Record<string, boolean> = {};
@@ -419,6 +444,14 @@ onBeforeUnmount(() => {
           {{ running ? '关闭 Steam' : '开启 Steam' }}
         </button>
       </div>
+      <Toggle
+        :model-value="deckyState?.enabled ?? true"
+        label="Steam大屏插件【三点键呼出】"
+        :disabled="deckyBusy || !deckyState || busy || steamChecking"
+        :gp-row="0"
+        :gp-col="2"
+        @update:model-value="setDeckyEnabled"
+      />
     </section>
 
     <section class="card custom-library-entry-card" aria-label="自定义游戏库">

@@ -9,5 +9,5 @@ export interface SteamOverlayFixState {
   reason?: string;
 }
 export function steamOverlayFixGet(): Promise<SteamOverlayFixState> {
-  return invoke<SteamOverlayFixState>('steamOverlayFix.get');
+  return invoke<SteamOverlayFixState>('steam.settings.get',{scope:'overlay'});
 }

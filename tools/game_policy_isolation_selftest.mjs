@@ -94,6 +94,8 @@ async function fixture(options = {}) {
   input.subscribeGameInputOverrideState(state => { locked = state; });
   const runtime = load('src/bridge/gamePolicyRuntime.ts', {
     './gamePolicyTarget': target, './performanceSchedule': perf, '@/scheduler': scheduler,
+    './powerSource': {powerSourceMode:vue.ref('ac')}, './yeman':{detectPowerMode:async()=> 'ac'}, './autofloat':{setFloatRtssLinked(){}},
+    './frameRateLimits':{loadGlobalFrameRates:async()=>({ac:{fps:60,lastFps:60,ceiling:60},dc:{fps:30,lastFps:30,ceiling:30}}),onFrameRatesChanged:()=>()=>{},dedicatedFrameRatePair:(_,global)=>global,applyIndependentFrameRates:async()=>true},
     './api': { powerLifecycle: { get: async () => ({ phase: 'ready', hardwareWritesAllowed: true }) } },
     './quickActionLock': { isQuickActionBusy: () => false },
     './gameCorePolicy': {

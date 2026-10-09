@@ -320,6 +320,21 @@ function Assert-HcSlimStagedPolicy([string]$PowerControlRoot) {
 
 function Test-IsExcludedPowerControlPath([string]$Relative, [bool]$IsDirectory) {
   $r = $Relative.Replace('/', '\')
+  # YMCC Decky sidebar: exact immutable payload allowlist, before generic dist/JSON exclusions.
+  # Never ship runtime settings/logs/temp, arbitrary plugins or added DLLs from this home.
+  if ($r -match '^decky(?:\\|$)') {
+    if ($IsDirectory) {
+      return $r -notin @('decky', 'decky\plugins', 'decky\plugins\ymcc-sidebar', 'decky\plugins\ymcc-sidebar\dist')
+    }
+    return $r -notin @(
+      'decky\PluginLoader_noconsole.exe',
+      'decky\LICENSE.decky-loader',
+      'decky\plugins\ymcc-sidebar\dist\index.js',
+      'decky\plugins\ymcc-sidebar\package.json',
+      'decky\plugins\ymcc-sidebar\plugin.json',
+      'decky\plugins\ymcc-sidebar\LICENSE.decky-api'
+    )
+  }
   if ($r -match '^fan-host(?:-v2|-quarantine|\\|$)') { return $true }
   if ($r -match '^gamepad-prerequisites(?:\\|$)') { return $true }
   # HC-SLIM-01 R3 §4.1（2026-10-06）：HC 交付树内两个松散 XInput 包装 DLL 是
@@ -511,6 +526,9 @@ foreach ($path in $requiredBuild) {
 }
 # Freshness gate: never package an artifact older than its source (see
 # Assert-ExportIsFresh for the QPC/0910-17 stale-build regression this prevents).
+# Verify compiled passive JS/source/license identity and the locked Windows loader before export.
+& node (Join-Path $ProjectRoot 'tools\build-decky-sidebar-plugin.mjs') --check
+if ($LASTEXITCODE -ne 0) { throw "Decky sidebar payload freshness rejected: exit=$LASTEXITCODE" }
 Assert-ExportIsFresh $ProjectRoot $WorkspaceRoot | Out-Null
 
 # ================================================================
@@ -744,14 +762,23 @@ foreach ($file in Get-ChildItem -LiteralPath $StagingRoot -Recurse -Force -File)
   $isFanHostManagedDocument = $relative -match '^PowerControl\\fan-host(?:-v2|-quarantine)?\\.+\.md$'
   $isCustomSteamLibraryManagedDocument = $relative -match '^(?:CustomSteamLibrary|YeManCC\\CustomSteamLibrary)\\(CUSTOM-STEAM-LIBRARY-INTEGRATION-CONTRACT|CUSTOM-STEAM-LIBRARY-UPGRADE-CONTRACT|SEPARATION-TASK-CUSTOM-STEAM-LIBRARY)\.md$'
   $isHcRuntimeDocument = $relative -match '^PowerControl\\handheldcompanion-runtime\\.+\.md$'
-  if (
+  # MAINLINE15 PACKAGE-RULES（2026-10-09）：decky 家目录在拷贝车道已由
+  # Test-IsExcludedPowerControlPath 定为"精确白名单"，dist\index.js 是 Decky
+  # Loader 的插件入口（必发资产，契约见 tools/decky_sidebar_packaging_selftest.mjs）。
+  # 该白名单先于通用 dist 排除，此处终检复用同一函数同步豁免，
+  # 避免同一条打包策略在拷贝与终检两处口径打架。
+  $isDeckyShippedPayload = $false
+  if ($relative -match '^PowerControl\\(decky\\.+)$') {
+    $isDeckyShippedPayload = -not (Test-IsExcludedPowerControlPath $Matches[1] $false)
+  }
+  if (-not $isDeckyShippedPayload -and (
     $relative -match '(^|\\)(\.git|node_modules|build|dist|testrun|outputs|__pycache__|\.workbuddy)(\\|$)' -or
     $relative -match '\.(bak(?:_|$)|obj$|pdb$|ilk$|log$|pid$|hb$|py$|spec$|ts$|vue$|cpp$)' -or
     ($relative -match '\.md$' -and -not $isFanHostManagedDocument -and -not $isCustomSteamLibraryManagedDocument -and -not $isHcRuntimeDocument) -or
     $relative -match '(^|\\)(yeman-settings\.json(?:\.bak)?|startup_trace\.txt|hwinfo-ok|fps-monitor\.(hb|pid|log))$' -or
     $relative -match '^PowerControl\\(TPD|intel|ryzenadj|tools)(\\|$)' -or
     $relative -match '^PowerControl\\Sleep\\(Enable\.txt|Escalation\.txt|sleepguard\.json|target\.txt|睡眠击杀名单\.txt)$'
-  ) { $forbidden += $relative }
+  )) { $forbidden += $relative }
 }
 if ($forbidden.Count -gt 0) { throw "Forbidden files entered Release staging: $($forbidden -join ', ')" }
 

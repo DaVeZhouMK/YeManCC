@@ -12,6 +12,9 @@
 #include <vector>
 #include <string>
 #include <stdexcept>
+#include <thread>
+#include <chrono>
+#include "steam_monitor_settings.h"
 #include "json.hpp"
 #include "steamdeck_mouse_vdf.h"
 using json = nlohmann::json;
@@ -26,7 +29,7 @@ constexpr int kSteamOverlayFixRetryMs = 30000;
 static int g_hwnd = 1;
 static struct { bool isolated = false; } g_aiFanMockSession;
 static std::map<std::wstring,std::string> disk;
-static json receipts, inputConfig;
+static json receipts, inputConfig, extraPrefs;
 static bool running = true, timer = false, copyOk = true, writeOk = true, settingsOk = true;
 static bool registryAccount = true;
 static DWORD activeAccount = 42, mockSteamPid = 1234;
@@ -34,6 +37,7 @@ static std::atomic<bool> g_sdmEventPending{false};
 static struct {
  int windows = 0; std::function<void(bool)> changed; std::function<bool()> needsRetry;
  void beginWindow() { ++windows; }
+ int steamPresence(){return running?1:0;}
  bool start(std::function<void(bool)> c, std::function<bool()> n) { changed=std::move(c); needsRetry=std::move(n); changed(true); return true; }
 } g_steamSettingsObserver;
 static int writes = 0, backups = 0, events = 0;
@@ -44,15 +48,17 @@ static bool sofRegDWORD(int, const wchar_t*, const wchar_t* name, DWORD* out) {
  if(std::wstring(name)==L"pid"){*out=mockSteamPid;return true;}
  if(!registryAccount){*out=0;return false;}*out=activeAccount;return true;
 }
-static bool sofFindLocalConfig(std::wstring* path,std::string* account) { if(account)*account=std::to_string(activeAccount);if(path)*path=L"S:\\Steam\\localconfig.vdf";return activeAccount!=0; }
+static bool sofFindLocalConfig(std::wstring* path,std::string* account) { if(account)*account=std::to_string(activeAccount?activeAccount:42);if(path)*path=L"S:\\Steam\\localconfig.vdf";return true; }
 static bool sofSteamRunning() { return running; }
 static int SetTimer(int,int,int,void*) { timer=true;return 1; }
 static int KillTimer(int,int) { timer=false;return 1; }
 static std::string sgReadFile(const std::wstring& path) { return disk[path]; }
 static bool CopyFileW(const wchar_t* source,const wchar_t* target,int) { backups++;if(copyOk)disk[target]=disk[source];return copyOk; }
 static bool sgWriteFileAtomic(const std::wstring& path,const std::string& text) { writes++;if(writeOk)disk[path]=text;return writeOk; }
-static json ymSettingsSection(const char* section) { return std::string(section)=="input"?inputConfig:receipts; }
-static bool ymSettingsWriteSection(const char*,const json& j) { if(!settingsOk)return false;receipts=j;return true; }
+static json ymSettingsSection(const char* section) { const std::string key=section;return key=="input"?inputConfig:key=="steamDeckMouse"?receipts:extraPrefs.value(key,json::object()); }
+static bool ymSettingsWriteSection(const char* section,const json& j) { if(!settingsOk)return false;if(std::string(section)=="steamDeckMouse")receipts=j;else extraPrefs[section]=j;return true; }
+static bool ymSettingsPatchSection(const char* section,const json& j){auto value=ymSettingsSection(section);value.update(j);return ymSettingsWriteSection(section,value);}
+static void appendNativeLifecycleLog(const char*,const json&){}
 static void ipc_emit(const std::string&,const json&) { events++; }
 static int gameInputOwnerSession() { return 0; }
 namespace ymcc { static json effectiveGameInput(const json& j,int) { return j; } }
@@ -64,14 +70,27 @@ static bool livePersist = true, poolOk = true, failFinish = false, poolHold = fa
 static std::vector<std::function<void()>> heldJobs;
 static std::function<void()> overlayHook, transportHook;
 static void Sleep(unsigned) {}
-static bool poolSubmit(std::function<void()> job) { if(!poolOk)return false;if(poolHold)heldJobs.push_back(std::move(job));else job();return true; }
+static bool fixtureCapturing=false,fixtureDraining=false;
+static void fixtureDrain(){
+ if(poolHold||fixtureDraining)return;fixtureDraining=true;
+ while(!heldJobs.empty()){auto job=std::move(heldJobs.front());heldJobs.erase(heldJobs.begin());job();}
+ fixtureDraining=false;
+}
+static bool poolSubmit(std::function<void()> job) {if(!poolOk)return false;heldJobs.push_back(std::move(job));if(!fixtureCapturing)fixtureDrain();return true;}
+
 static json mockSteamLiveTransport(const json& request) {
  const DWORD account=request.value("account",0u);
  ++liveRequests;
- if(request["operation"]=="overlay.set")++overlayRequests;
+ if(request["operation"]=="overlay.set" || request["operation"]=="settings.set")++overlayRequests;
  if(liveMode=="setter-transport-uncertain"&&request["operation"]=="mouse.set")return {{"ok",false},{"reason","live-transport-uncertain"},{"mutated",true}};
  if(liveMode!="ok"&&liveMode!="setter-transport-uncertain")return {{"ok",false},{"reason",liveMode},{"mutated",liveMode=="live-transport-uncertain"}};
  if(account!=activeAccount)return {{"ok",false},{"reason","steam-account-changed"},{"mutated",false}};
+ if(request["operation"]=="settings.set"){
+   if(overlayHook){auto hook=std::move(overlayHook);overlayHook={};hook();}
+   overlayRuntime=request["values"].value("enable_overlay",true)?1:0;++liveMutations;
+   if(livePersist){overlayFile=overlayRuntime;disk[L"S:\\Steam\\localconfig.vdf"]=ymcc::steamsettings::patch(disk[L"S:\\Steam\\localconfig.vdf"],json::object(),overlayRuntime);}
+   return {{"ok",true},{"values",request["values"]}};
+ }
  if(request["operation"]=="overlay.set") {
    if(overlayHook){auto hook=std::move(overlayHook);overlayHook={};hook();}
    overlayRuntime=request.value("enabled",true)?1:0; ++liveMutations;
@@ -103,13 +122,23 @@ static std::mutex g_sofMx;
 static std::atomic<bool> g_sofPending{false}, g_sofEnabled{true};
 static std::atomic<int> g_sofDesired{-1};
 static void sofLog(const char*,const char*,int,bool) {}
-static int sofCurrentValue(const std::string&, bool* = nullptr) { return overlayFile; }
+static int sofCurrentValue(const std::string& text, bool* = nullptr) {const auto roots=ymcc::steamdeck::Vdf(text).parse();const auto& sys=ymcc::steamsettings::system(roots);const auto scalar=ymcc::steamdeck::scalar(sys.children,"EnableGameOverlay");overlayFile=scalar.empty()?1:std::stoi(scalar);return overlayFile; }
 static bool sofApplyNowLocked(const char*,int desired) { overlayFile=desired;g_sofPending.store(false);return true; }
 static void steamOverlayFixKick(const char*);
+static void steamSettingsQueue(const char*);
+static json steamDeckMouseSet(const json&);
+static json queuedMouseReply;
 //__PRODUCTION_OVERLAY_RUNTIME__
 
 // Runtime is extracted verbatim from native/main.cpp by the test runner.
 //__PRODUCTION_RUNTIME__
+#include "steam_settings_runtime.h"
+static void steamOverlayFixKick(const char* reason){fixtureCapturing=true;fixtureOverlayEnqueue(reason);fixtureCapturing=false;fixtureDrain();}
+static json steamDeckMouseSet(const json& args){fixtureCapturing=true;auto result=fixtureMouseEnqueue(args);fixtureCapturing=false;fixtureDrain();if(!poolHold && result.value("ok",false)){auto state=steamDeckMouseGet();if(state.contains("error")&&!state["error"].get<std::string>().empty())state["ok"]=false;return state;}return result;}
+static std::atomic<bool> g_deckySteamRestartRequired{false};
+static struct {void observeSteam(int,bool=false){}} g_deckySidebarRuntime;
+//__PRODUCTION_OBSERVER__
+
 static const std::wstring path=L"S:\\Steam\\steamapps\\common\\Steam Controller Configs\\42\\config\\413080\\controller_neptune.vdf";
 static const std::wstring selection=L"S:\\Steam\\steamapps\\common\\Steam Controller Configs\\42\\config\\configset_controller_neptune.vdf";
 static std::string fixture=R"VDF("controller_mappings" {
@@ -123,11 +152,11 @@ static std::string fixture=R"VDF("controller_mappings" {
 static void expect(bool condition,const char* label) { if(!condition)throw std::runtime_error(label);std::cout<<"PASS "<<label<<"\n"; }
 static void reset() {
  disk.clear();disk[path]=fixture;disk[selection]="\"controller_config\" { \"413080\" { \"autosave\" \"1\" } }";
- receipts=json::object();inputConfig={{"outputTarget",{{"buttonMappingEnabled",true},{"persona","steamdeck"}}}};
- activeAccount=42;mockSteamPid=1234;g_sdmEventPending.store(false);g_steamSettingsObserver.windows=0;g_steamSettingsObserver.changed={};g_steamSettingsObserver.needsRetry={};g_sofRequestSerial.store(0);g_sdmRequestSerial.store(0);g_sdmRefreshRequested.store(false);g_sdmRetryQueued.store(false);registryAccount=true;running=true;timer=false;copyOk=true;writeOk=true;settingsOk=true;g_aiFanMockSession.isolated=false;
+ receipts=json::object();extraPrefs=json::object();g_steamSettingsQueued=false;g_steamSettingsSerial=0;g_steamClientPending=false;g_steamOverlayPinnedSerial=0;g_steamOverlayAccount.clear();g_steamOverlayPath.clear();fixtureCapturing=fixtureDraining=false;inputConfig={{"outputTarget",{{"buttonMappingEnabled",true},{"persona","steamdeck"}}}};
+ activeAccount=42;mockSteamPid=1234;g_sdmEventPending.store(false);g_steamSettingsObserver.windows=0;g_steamSettingsObserver.changed={};g_steamSettingsObserver.needsRetry={};g_sofRequestSerial.store(0);g_sdmRequestSerial.store(0);g_sdmRefreshRequested.store(false);g_sdmRetryQueued.store(false);g_sdmApplyRequested.store(false);registryAccount=true;running=true;timer=false;copyOk=true;writeOk=true;settingsOk=true;g_aiFanMockSession.isolated=false;
  mockSteamRoot=L"S:\\Steam";
  writes=0;backups=0;events=0;liveRequests=0;liveMutations=0;overlayRequests=0;liveMode="live-debug-unavailable";livePersist=true;poolOk=true;overlayRuntime=0;overlayFile=0;g_sofPending.store(false);g_sofDesired.store(-1);g_sofEnabled.store(true);g_sofQueued.store(false);g_sofReceipt={{"via","none"}};g_sdmReceiptError.clear();failFinish=false;poolHold=false;heldJobs.clear();overlayHook={};transportHook={};
- disk[L"S:\\Steam\\localconfig.vdf"]="overlay";
+ disk[L"S:\\Steam\\localconfig.vdf"]=R"VDF("UserLocalConfigStore" { "system" { "EnableGameOverlay" "0" } })VDF";
 }
 static bool rejects(const std::string& text) { try { ymcc::steamdeck::desktopLayout(text);return false; } catch (...) { return true; } }
 static std::string readEvidence(const char* path) {
@@ -250,7 +279,7 @@ int main(int argc,char** argv) { try {
  g_steamSettingsObserver.changed(true);g_steamSettingsObserver.changed(false);
  expect(overlayRequests==1&&g_sofRequestSerial.load()==1,"later session and retry events cannot reapply the manual overlay setting");
  reset();steamSettingsObserverStart();steamOverlayFixKick("setting");liveMode="ok";mockSteamPid=4321;g_steamSettingsObserver.changed(true);
- expect(overlayRequests==1&&steamOverlayFixGet()["via"]=="deferred"&&g_sofRequestSerial.load()==1,"a failed explicit action keeps its receipt but never auto-retries on session change");
+ expect(overlayRequests==2&&steamOverlayFixGet()["via"]=="live"&&g_sofRequestSerial.load()==1,"only previously explicit deferred overlay intent is retried by unified Steam session event");
  reset();liveMode="ok";overlayHook=[] {mockSteamPid=4321;steamOverlayFixKick("setting");};steamOverlayFixKick("initial");
  expect(steamOverlayFixGet()["via"]=="live"&&!g_sofQueued.load(),"same-target user submission during IO gets a followup, not dropped");
  reset();receipts={{"account",42},{"path",W2U(path)},{"pending",false},{"error","steam-account-changed"}};

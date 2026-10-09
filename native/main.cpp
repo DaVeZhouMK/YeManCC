@@ -22,6 +22,7 @@
 #endif
 #define _WIN32_WINNT 0x0A00
 
+#include "fan_resume_evidence.h"
 #include <windows.h>
 #include <mmsystem.h>
 #include <hidsdi.h>
@@ -41,8 +42,13 @@
 #include "gamepad_driver_setup.h"
 #include "virtual_output_status.h"
 #include "steamdeck_mouse_vdf.h"
+#include "steam_monitor_settings.h"
 #include "steam_live_cdp.h"
 #include "steam_session_observer.h"
+#include "decky_sidebar_runtime.h"
+#include "decky_sidebar_setup.h"
+#include "decky_sidebar_broker.h"
+#include "decky_sidebar_bootstrap.h"
 #include "ai_fan_session.h"
 #include "update_download_resume.h"
 #include "ai_fan_close_evidence.h"
@@ -892,6 +898,15 @@ static std::vector<DWORD> g_acSwitchTicks;          // 5 秒滑动窗口内的�
 // 必须前置声明（`--exit-fence-selftest` 与生产实现共用）。
 // 修复开关打开/关闭对应写入 localconfig.vdf 的值（2026-09-28 本机实测："0"=关 / "1"=开 / 缺键=默认开）。
 static ymcc::steamsession::Observer g_steamSettingsObserver;
+#define WM_DECKY_MIRROR_EVENT (WM_USER + 30)
+static std::mutex g_deckyEventMutex;
+static std::deque<json> g_deckyEvents;
+static bool g_deckyEventPosted = false;
+static ymcc::deckymirror::CancelSignal g_deckyBootstrapCancel;
+static ymcc::deckymirror::ContextHandleSlot g_deckyContextProcess;
+static ymcc::deckymirror::Broker g_deckyMirrorBroker;
+static ymcc::deckysidebar::Runtime g_deckySidebarRuntime;
+static std::atomic<bool> g_deckySteamRestartRequired{false};
 static constexpr bool kSteamOverlayFixDefaultEnabled = false;
 static constexpr const char* kSteamOverlayFixValueOff = "0";
 static constexpr const char* kSteamOverlayFixValueOn = "1";
@@ -5169,6 +5184,7 @@ static DWORD WINAPI exitCleanupThreadProc(LPVOID param) {
     // 批136：原在此处的 `fanLeaseKeepaliveShutdown()` + `fanHostCleanupForAppExit()` +
     // `fan-exit-handoff-result` 已按裁决令第④项前移到退出链最前（见本函数开头）。
     sgStopWorkThread(1000);
+    g_deckySidebarRuntime.shutdown();
     g_steamSettingsObserver.stop();
     poolStop(1000);
     for (auto& [id, w] : g_watchers) {
@@ -5736,6 +5752,15 @@ static bool focusKnownOverlayName(const std::wstring& name) {
     return false;
 }
 
+// Monitoring helpers are never controller return-focus targets. HWiNFO can
+// keep a hidden root-owner main window even in SensorsOnly/minimized mode;
+// restoring that snapshot would expose the blank main window on double-B.
+static bool focusBackgroundMonitorName(const std::wstring& name) {
+    return _wcsicmp(name.c_str(), L"hwinfo") == 0 ||
+           _wcsicmp(name.c_str(), L"hwinfo32") == 0 ||
+           _wcsicmp(name.c_str(), L"hwinfo64") == 0;
+}
+
 static std::wstring focusWindowProcessName(HWND hwnd) {
     DWORD pid = 0;
     GetWindowThreadProcessId(hwnd, &pid);
@@ -5748,11 +5773,16 @@ static bool focusIsKnownOverlayWindow(HWND hwnd) {
     return focusKnownOverlayName(focusWindowProcessName(hwnd));
 }
 
+static bool focusIsBackgroundMonitorWindow(HWND hwnd) {
+    return hwnd && IsWindow(hwnd) && focusBackgroundMonitorName(focusWindowProcessName(hwnd));
+}
+
 static FocusTargetSnapshot focusCaptureTarget(HWND hwnd) {
     FocusTargetSnapshot target;
     if (!hwnd || !IsWindow(hwnd) || hwnd == g_hwnd) return target;
     HWND root = GetAncestor(hwnd, GA_ROOTOWNER);
     if (root && IsWindow(root) && root != g_hwnd) hwnd = root;
+    if (focusIsBackgroundMonitorWindow(hwnd)) return target;
     DWORD pid = 0;
     GetWindowThreadProcessId(hwnd, &pid);
     if (!pid || pid == GetCurrentProcessId()) return target;
@@ -5785,6 +5815,7 @@ static bool isUsableFocusWindow(HWND hwnd, DWORD expectedPid, bool allowIconic =
     DWORD pid = 0;
     GetWindowThreadProcessId(hwnd, &pid);
     if (!pid || (expectedPid && pid != expectedPid)) return false;
+    if (focusIsBackgroundMonitorWindow(hwnd)) return false;
     LONG_PTR ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
     if (ex & WS_EX_TOOLWINDOW) return false;
     BOOL cloaked = FALSE;
@@ -5799,6 +5830,7 @@ static bool focusIsRestorableExactWindow(HWND hwnd, DWORD expectedPid) {
     DWORD pid = 0;
     GetWindowThreadProcessId(hwnd, &pid);
     if (!pid || pid != expectedPid) return false;
+    if (focusIsBackgroundMonitorWindow(hwnd)) return false;
     if (GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_TOOLWINDOW) return false;
     BOOL cloaked = FALSE;
     if (SUCCEEDED(DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, &cloaked, sizeof(cloaked))) && cloaked)
@@ -5891,6 +5923,10 @@ static DWORD focusFindProcessByPath(const std::wstring& wantedPath) {
 
 static bool focusResolveTarget(FocusTargetSnapshot& target) {
     if (!target.valid || !target.pid) return false;
+    // Check saved identity as well as the live HWND: a stale snapshot must not
+    // reacquire HWiNFO via the PID/path replacement branches or remembered game.
+    if (focusBackgroundMonitorName(sgBaseName(target.path)) ||
+        focusIsBackgroundMonitorWindow(target.hwnd)) return false;
     if (focusGameControlBlocked() || focusPidIsManuallyPaused(target.pid)) return false;
     if (focusIsRestorableExactWindow(target.hwnd, target.pid) &&
         focusTargetIdentityMatches(target, target.pid)) return true;
@@ -6116,7 +6152,7 @@ static bool refocusPreviousWindow() {
     // 回焦只使用呼出时保存的窗口快照，绝不在返回桌面/关闭窗口时重新扫描并猜游戏。
     const bool allowFallback = false;
     HWND target = resolvePreviousFocusWindow(allowFallback);
-    if (!target) return false;
+    if (!target || focusIsBackgroundMonitorWindow(target)) return false;
     if (!IsWindowVisible(target)) ShowWindowAsync(target, SW_SHOW);
     if (IsIconic(target)) ShowWindowAsync(target, SW_RESTORE);
     DWORD targetPid = 0;
@@ -23353,15 +23389,18 @@ static bool sofRegDWORD(HKEY root, const wchar_t* sub, const wchar_t* val, DWORD
 }
 
 static bool sofSteamRunning() {
-    bool running = false;
+    bool running = true; // Unknown process observation must never authorize a file write.
     HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
     if (snap != INVALID_HANDLE_VALUE) {
         PROCESSENTRY32W pe{sizeof(pe)};
         if (Process32FirstW(snap, &pe)) {
+            running = false;
             do {
                 if (sgBaseName(pe.szExeFile) == L"steam") { running = true; break; }
             } while (Process32NextW(snap, &pe));
+            if (!running && GetLastError() != ERROR_NO_MORE_FILES) running = true;
         }
+        else if (GetLastError() == ERROR_NO_MORE_FILES) running = false;
         CloseHandle(snap);
     }
     return running;
@@ -23495,7 +23534,7 @@ static json steamLiveRequest(DWORD account, json request) {
     request["account"] = account;
     auto result = ymcc::steamlive::run(root, request);
     const auto operation = request.value("operation", std::string());
-    const bool setter = operation == "mouse.set" || operation == "overlay.set";
+    const bool setter = operation == "mouse.set" || operation == "overlay.set" || operation == "settings.set";
     const auto failure = result.value("reason", std::string());
     if (!setter && !result.value("ok", false) && (failure == "live-transport-uncertain" || failure == "live-transport-failed" ||
         failure == "live-timeout" || failure == "live-discovery-timeout" || failure == "live-readback-failed")) {
@@ -23515,6 +23554,7 @@ static json steamLiveRequest(DWORD account, json request) {
     return result;
 }
 static bool steamLiveCanDefer(const json& result) { return ymcc::steamlive::canDefer(result); }
+static void steamSettingsQueue(const char* reason);
 static std::atomic<bool> g_sofQueued{false};
 static std::atomic<unsigned long long> g_sofRequestSerial{0};
 static json g_sofReceipt = {{"via", "none"}}; // g_sofMx protects receipt
@@ -23570,31 +23610,10 @@ static void sofAttemptLocked(const char* reason, int desired) {
 // Explicit user changes only enqueue. CDP/file waits never stall the message pump.
 static void steamOverlayFixKick(const char* reason) {
     if (g_aiFanMockSession.isolated) return;
-    // User-action-only: do not open a Steam observer/detection window.
     ++g_sofRequestSerial;
     g_sofDesired.store(g_sofEnabled.load(std::memory_order_acquire) ? 0 : 1, std::memory_order_release);
     g_sofPending.store(true, std::memory_order_release);
-    if (g_sofQueued.exchange(true, std::memory_order_acq_rel)) return;
-    if (!poolSubmit([reasonText = std::string(reason ? reason : "unknown")] {
-        unsigned long long attemptedSerial = 0;
-        int attempted = -1;
-        {
-            std::lock_guard<std::mutex> lock(g_sofMx);
-            attemptedSerial = g_sofRequestSerial.load();
-            attempted = g_sofDesired.load(std::memory_order_acquire);
-            try { sofAttemptLocked(reasonText.c_str(), attempted); }
-            catch (...) {
-                g_sofPending.store(false); g_sofReceipt = {{"via", "error"}, {"reason", "live-api-error"}};
-            }
-            g_sofQueued.store(false, std::memory_order_release);
-            ipc_emit("steamOverlayFix.updated", steamOverlayFixStateLocked());
-        }
-        // User changes arriving during IO must not be lost, even if the target value is unchanged.
-        if (attemptedSerial != g_sofRequestSerial.load() || attempted != g_sofDesired.load(std::memory_order_acquire))
-            steamOverlayFixKick("setting-followup");
-    })) {
-        g_sofQueued.store(false, std::memory_order_release);
-    }
+    steamSettingsQueue(reason);
 }
 
 // SteamDeck desktop right-stick sensitivity. Only an explicitly selected
@@ -23818,27 +23837,14 @@ static void sdmApplyLocked() {
         sdmFinishLocked(saved, "");
     } catch (const std::exception& e) { sdmFinishLocked(saved, e.what()); }
 }
-static std::atomic<bool> g_sdmRetryQueued{false}, g_sdmRefreshRequested{false};
+static std::atomic<bool> g_sdmRetryQueued{false}, g_sdmRefreshRequested{false}, g_sdmApplyRequested{false};
 static std::atomic<unsigned long long> g_sdmRequestSerial{0};
 static void steamDeckMouseRetry(bool refresh = false) {
     if (g_aiFanMockSession.isolated) return;
     if (refresh) g_sdmRefreshRequested.store(true);
     ++g_sdmRequestSerial;
-    if (g_sdmRetryQueued.exchange(true)) return;
-    if (!poolSubmit([] {
-        unsigned long long attemptedSerial = 0;
-        {
-            std::lock_guard<std::mutex> lock(g_sdmMx);
-            attemptedSerial = g_sdmRequestSerial.load();
-            const bool refresh = g_sdmRefreshRequested.exchange(false);
-            try {
-                sdmApplyLocked();
-                if (refresh) ipc_emit("steamDeckMouse.updated", sdmStateLocked(true));
-            } catch (...) { g_sdmEventPending.store(false); }
-            g_sdmRetryQueued.store(false);
-        }
-        if (attemptedSerial != g_sdmRequestSerial.load()) steamDeckMouseRetry();
-    })) g_sdmRetryQueued.store(false);
+    g_sdmApplyRequested.store(true,std::memory_order_release);
+    steamSettingsQueue("mouse-retry");
 }
 static json steamDeckMouseGet() {
     std::lock_guard<std::mutex> lock(g_sdmMx);
@@ -23867,20 +23873,140 @@ static json steamDeckMouseSet(const json& args) {
     g_sdmReceiptError.clear();
     g_sdmEventPending.store(true);
     g_steamSettingsObserver.beginWindow();
-    sdmApplyLocked();
+    g_sdmApplyRequested.store(true,std::memory_order_release);
+    steamSettingsQueue("mouse-user");
     auto state = sdmStateLocked();
     if (state.contains("error") && !state["error"].get<std::string>().empty()) state["ok"] = false;
     return state;
 }
 
+#include "steam_settings_runtime.h"
+
+// Marshal only our bounded event queue onto the main WebView UI lane.
+// Worker callbacks never call COM or iterate the legacy child-view map.
+static bool deckySidebarPost(const std::string& event, const json& data) {
+    std::lock_guard lock(g_deckyEventMutex);
+    if (g_deckyEvents.size() >= 32) {
+        if (event == "deckySidebar.mirrorRequest") return false;
+        const auto old = std::find_if(g_deckyEvents.begin(), g_deckyEvents.end(), [](const json& packet) {
+            return packet.value("event", std::string{}) == "deckySidebar.mirrorRequest";
+        });
+        if (old != g_deckyEvents.end()) g_deckyEvents.erase(old); else g_deckyEvents.pop_front();
+    }
+    g_deckyEvents.push_back({{"event", event}, {"data", data}});
+    if (!g_deckyEventPosted) {
+        g_deckyEventPosted = true;
+        if (!g_hwnd || !PostMessageW(g_hwnd, WM_DECKY_MIRROR_EVENT, 0, 0)) {
+            g_deckyEventPosted = false; g_deckyEvents.clear(); return false;
+        }
+    }
+    return true;
+}
+static std::string deckySidebarInjectBinding() {
+    wchar_t root[32768]{}; DWORD bytes = sizeof(root);
+    if (RegGetValueW(HKEY_CURRENT_USER, L"Software\\Valve\\Steam", L"SteamPath", RRF_RT_REG_SZ, nullptr, root, &bytes) != ERROR_SUCCESS)
+        return "mirror-bootstrap-steam-unavailable";
+    const auto bootstrap = g_deckyMirrorBroker.bootstrap();
+    if (bootstrap.empty()) return "mirror-broker-not-active";
+    HANDLE context=nullptr;
+    const auto result = ymcc::deckymirror::injectBootstrap(root, bootstrap, g_deckyBootstrapCancel.current(), &context);
+    g_deckyContextProcess.replace(context);
+    return result.value("ok", false) ? std::string{} : result.value("reason", std::string("mirror-bootstrap-failed"));
+}
+static std::string deckySidebarStartMirror() {
+    if (!g_deckyMirrorBroker.start({
+        [](const std::string& connection, const json& request) {
+            const auto status = g_deckyMirrorBroker.status();
+            if (status.value("connection", std::string{}) != connection) return;
+            if (!deckySidebarPost("deckySidebar.mirrorRequest", {{"connection", connection}, {"runId", status["runId"]}, {"revision", status["revision"]}, {"request", request}}) && request.contains("id"))
+                g_deckyMirrorBroker.reply(connection, {{"type", "reply"}, {"runId", status["runId"]}, {"id", request["id"]}, {"ok", false}, {"error", "镜像请求队列已满"}});
+        },
+        [](const std::string& connection, const std::string& runId, bool connected) {
+            const auto status = g_deckyMirrorBroker.status();
+            deckySidebarPost("deckySidebar.mirrorPeer", {{"connection", connection}, {"runId", runId}, {"connected", connected}, {"revision", status["revision"]}});
+        }})) return "mirror-broker-start-failed";
+    const auto error = deckySidebarInjectBinding();
+    if (!error.empty()) g_deckyMirrorBroker.stop();
+    return error;
+}
+
+// YMCC Decky sidebar: additive mirror loader only; existing business owners are untouched.
+static json deckySidebarStateJson(const ymcc::deckysidebar::State& state) {
+    return {{"enabled", state.enabled}, {"steamKnown", state.steamKnown}, {"steamRunning", state.steamRunning},
+        {"pid", state.pid}, {"revision", state.revision}, {"phase", state.phase}, {"reason", state.reason}, {"error", state.error},
+        {"bindingRetry",state.bindingRetry},{"bindingAttempts",state.bindingAttempts}};
+}
+static std::string deckySidebarPortPreflight() {
+    const auto port = [](DWORD value) { return static_cast<unsigned short>(((value & 0xff) << 8) | ((value >> 8) & 0xff)); };
+    for (ULONG family : {static_cast<ULONG>(AF_INET), static_cast<ULONG>(AF_INET6)}) {
+        DWORD bytes = 0;
+        const auto initial = GetExtendedTcpTable(nullptr, &bytes, FALSE, family, TCP_TABLE_OWNER_PID_LISTENER, 0);
+        if (initial != ERROR_INSUFFICIENT_BUFFER && initial != NO_ERROR) return "port-state-unknown";
+        if (!bytes || bytes > 16 * 1024 * 1024) return "port-state-unknown";
+        std::vector<unsigned char> data(bytes);
+        if (GetExtendedTcpTable(data.data(), &bytes, FALSE, family, TCP_TABLE_OWNER_PID_LISTENER, 0) != NO_ERROR) return "port-state-unknown";
+        if (family == AF_INET) {
+            const auto table = reinterpret_cast<const MIB_TCPTABLE_OWNER_PID*>(data.data());
+            for (DWORD i = 0; i < table->dwNumEntries; ++i) if (port(table->table[i].dwLocalPort) == 1337) return "port-1337-in-use";
+        } else {
+            const auto table = reinterpret_cast<const MIB_TCP6TABLE_OWNER_PID*>(data.data());
+            for (DWORD i = 0; i < table->dwNumEntries; ++i) if (port(table->table[i].dwLocalPort) == 1337) return "port-1337-in-use";
+        }
+    }
+    return {};
+}
+static json deckySidebarEnvironment(bool prepare) {
+    wchar_t steamRoot[32768]{}; DWORD bytes=sizeof(steamRoot);
+    if(RegGetValueW(HKEY_CURRENT_USER,L"Software\\Valve\\Steam",L"SteamPath",RRF_RT_REG_SZ,nullptr,steamRoot,&bytes)!=ERROR_SUCCESS)steamRoot[0]=0;
+    const auto digest=[](const std::wstring& path) { auto value=sha256File(path);
+        std::transform(value.begin(),value.end(),value.begin(),[](unsigned char c){return static_cast<char>(std::tolower(c));});return value; };
+    const fspath::path home=POWER_CONTROL_DIR+L"\\decky";
+    auto result=prepare?ymcc::deckysetup::prepare(steamRoot,home,digest,g_steamSettingsObserver.steamPresence()!=0)
+                       :ymcc::deckysetup::inspect(steamRoot,home,digest);
+    if(result.value("createdSteamDebugMarker",false)&&g_steamSettingsObserver.steamPresence()!=0)g_deckySteamRestartRequired.store(true);
+    if(g_deckySteamRestartRequired.load()){result["ready"]=false;result["reason"]="steam-restart-required";}
+    return result;
+}
+static std::string deckySidebarPreflight(const std::wstring&) {
+    const auto environment=deckySidebarEnvironment(true);
+    if(!environment.value("ready",false))return environment.value("reason",std::string("environment-check-failed"));
+    return deckySidebarPortPreflight();
+}
+static void deckySidebarInitialize() {
+    if (g_aiFanMockSession.isolated) return; // Never activate in the existing mock/device isolation mode.
+    const std::wstring root = POWER_CONTROL_DIR + L"\\decky";
+    g_deckySidebarRuntime.initialize({root + L"\\PluginLoader_noconsole.exe", root,
+        [root] { return deckySidebarPreflight(root); },
+        [](const ymcc::deckysidebar::State& state) {
+            if (state.phase != "starting" && state.phase != "loader-started") g_deckyMirrorBroker.stop();
+            deckySidebarPost("deckySidebar.updated", deckySidebarStateJson(state));
+        }, [] { g_deckyMirrorBroker.stop(); return deckySidebarStartMirror(); },
+        [] { g_deckyBootstrapCancel.renew(); }, [] { g_deckyBootstrapCancel.cancel(); },
+        [] { return deckySidebarStartMirror(); }, [] { return g_deckyContextProcess.take(); }});
+    try {
+        const auto extensions = ymSettingsSection("extensions");
+        const auto sidebar = extensions.value("deckySidebar", json::object());
+        if (sidebar.value("enabled", true)) g_deckySidebarRuntime.setEnabled(true);
+    } catch (...) {} // Invalid preference is not consent to launch.
+}
+
 static void steamSettingsObserverStart() {
     if (g_aiFanMockSession.isolated) return;
     // Preserve retry demand even if the initial worker admission is rejected.
-    try { g_sdmEventPending.store(ymSettingsSection("steamDeckMouse").value("pending", false)); }
+    try { g_steamClientPending.store(ymSettingsSection("steamMonitor").value("pending", false));g_sdmEventPending.store(ymSettingsSection("steamDeckMouse").value("pending", false)); }
     catch (...) { g_sdmEventPending.store(false); }
     const bool ok = g_steamSettingsObserver.start([](bool sessionChanged) {
-        if (sessionChanged || g_sdmEventPending.load()) steamDeckMouseRetry(sessionChanged);
-    }, [] { return g_sdmEventPending.load(); });
+        if (sessionChanged || g_sdmEventPending.load() || g_steamClientPending.load()) {
+            if(sessionChanged)g_sdmRefreshRequested.store(true);
+            steamSettingsQueue("steam-session");
+        }
+        if (sessionChanged) {
+            const int presence=g_steamSettingsObserver.steamPresence();
+            if(presence==0)g_deckySteamRestartRequired.store(false);
+            g_deckySidebarRuntime.observeSteam(presence, true);
+        }
+    }, [] { return g_sdmEventPending.load() || g_steamClientPending.load(); });
+    g_deckySidebarRuntime.observeSteam(g_steamSettingsObserver.steamPresence());
     if (!ok) { // One-shot fallback only; a failed observer must not add polling.
         steamDeckMouseRetry();
     }
@@ -44622,7 +44748,7 @@ static bool ipc_cmd_async(const std::string& cmd) {
     // working-set queries. It is latency-sensitive for summon, but it is also
     // never safe to run on the WebView2 owner thread. Keep it off the UI even
     // when a legacy YEMAN_ASYNC=0/1 setting is present.
-    if (cmd == "steamDeckMouse.get" || cmd == "steamDeckMouse.set" || cmd == "steamOverlayFix.get") return true;
+    if (cmd == "steamDeckMouse.get" || cmd == "steamDeckMouse.set" || cmd == "steamOverlayFix.get" || cmd == "steam.settings.get" || cmd == "steam.settings.set") return true;
     // Shell icon IO and wake-password power/settings writes stay off the UI thread.
     if (cmd == "fs.getFileIcon" || cmd == "power.wakePassword.set") return true;
     if (cmd == "game.detect" || cmd == "rtss.reloadProfiles" ||
@@ -46234,6 +46360,37 @@ static void reg_fs() {
         return sgWriteFileAtomic(wp, content);
     });
     // Frontend must discover the same effective root before any shared-settings I/O.
+    ipc_on("deckySidebar.mirrorAttach", [](const json&) -> json {
+        auto peer=g_deckyMirrorBroker.status(); peer["owner"]="YMCC-native"; peer["pid"]=GetCurrentProcessId(); return peer; // Metadata only. Does not enable or start anything.
+    });
+    ipc_on("deckySidebar.mirrorReply", [](const json& args) -> json {
+        if (args.size() != 2 || !args.contains("connection") || !args["connection"].is_string() ||
+            !args.contains("message") || !args["message"].is_object()) return false;
+        return g_deckyMirrorBroker.reply(args["connection"].get<std::string>(), args["message"]);
+    });
+    ipc_on("deckySidebar.environment", [](const json& args) -> json {
+        if(!args.empty())throw std::runtime_error("Invalid environment query");
+        return deckySidebarEnvironment(false);
+    });
+    ipc_on("deckySidebar.get", [](const json&) -> json {
+        return deckySidebarStateJson(g_deckySidebarRuntime.snapshot());
+    });
+    ipc_on("deckySidebar.setEnabled", [](const json& args) -> json {
+        if (g_aiFanMockSession.isolated) throw std::runtime_error("Sidebars are disabled in isolated device mock mode");
+        if (!args.contains("enabled") || !args["enabled"].is_boolean() || args.size() != 1)
+            throw std::runtime_error("Invalid sidebar preference");
+        const bool desired = args["enabled"].get<bool>();
+        if(desired) { const auto prepared=deckySidebarEnvironment(true);
+            if(!prepared.value("ready",false)&&prepared.value("reason",std::string{})!="steam-restart-required")
+                throw std::runtime_error(prepared.value("reason",std::string("environment-check-failed")));
+        }
+        auto extensions = ymSettingsSection("extensions");
+        extensions["deckySidebar"] = {{"enabled", desired}};
+        if (!ymSettingsWriteSection("extensions", extensions)) throw std::runtime_error("Sidebar preference save failed");
+        g_deckySidebarRuntime.observeSteam(g_steamSettingsObserver.steamPresence());
+        g_deckySidebarRuntime.setEnabled(desired);
+        return deckySidebarStateJson(g_deckySidebarRuntime.snapshot());
+    });
     ipc_on("settings.location", [](const json&) -> json {
         return {{"directory", W2U(POWER_CONTROL_DIR)}, {"file", W2U(YM_SETTINGS_FILE)},
             {"backup", W2U(YM_SETTINGS_BACKUP_FILE)}};
@@ -46764,11 +46921,36 @@ static std::wstring background_config_path() {
     return background_assets_dir() + L"\\background.json";
 }
 
+// Optional factory background. Reading it never imports files or writes settings.
+static const std::wstring DEFAULT_BACKGROUND_VIDEO_DIR = L"C:\\SOFT\\YeMan\\Demo\\MP4";
+static const wchar_t* DEFAULT_BACKGROUND_VIDEO_HOST = L"default-background.localhost";
+
+static json default_background_state() {
+    const auto path = DEFAULT_BACKGROUND_VIDEO_DIR + L"\\SteamDeck.mp4";
+    const json disabled{{"enabled", false}, {"kind", "image"}, {"url", ""}};
+    std::error_code ec;
+    if (!fspath::is_regular_file(path, ec) || ec) return disabled;
+    const auto size = fspath::file_size(path, ec);
+    if (ec || size == 0 || size > 2ULL * 1024ULL * 1024ULL * 1024ULL) return disabled;
+    std::ifstream sig(path, std::ios::binary);
+    unsigned char header[16] = {};
+    sig.read(reinterpret_cast<char*>(header), sizeof(header));
+    if (sig.gcount() < 12 || header[4] != 'f' || header[5] != 't' ||
+        header[6] != 'y' || header[7] != 'p') return disabled;
+    return {
+        {"enabled", true}, {"kind", "video"}, {"file", W2U(path)},
+        {"url", "https://default-background.localhost/SteamDeck.mp4?v=" + std::to_string(size)}
+    };
+}
+
 static json background_state() {
     json cfg = ymSettingsSection("background").value("asset", json::object());
+    // Explicit clear must survive refresh/restart without re-enabling the factory MP4.
+    if (cfg.is_object() && cfg.value("disabled", false))
+        return {{"enabled", false}, {"kind", "image"}, {"url", ""}};
     if (!cfg.is_object() || cfg.empty()) {
         std::ifstream f(background_config_path(), std::ios::binary);
-        if (!f) return {{"enabled", false}, {"kind", "image"}, {"url", ""}};
+        if (!f) return default_background_state();
         try { f >> cfg; } catch (...) { return {{"enabled", false}, {"kind", "image"}, {"url", ""}}; }
     }
     auto file = cfg.value("file", std::string{});
@@ -46877,7 +47059,7 @@ static void reg_background() {
     });
     ipc_on("background.clear", [](const json&) -> json {
         std::lock_guard<std::mutex> lock(g_backgroundMtx);
-        if (!ymSettingsPatchSection("background", json{{"asset", json::object()}}))
+        if (!ymSettingsPatchSection("background", json{{"asset", json{{"disabled", true}}}}))
             throw std::runtime_error("Failed to clear background config");
         auto dir = background_assets_dir();
         DeleteFileW((dir + L"\\background.jpg").c_str());
@@ -47904,6 +48086,8 @@ static void reg_shell_app() {
 #endif
     });
     ipc_on("steamOverlayFix.get", [](const json&) -> json { return steamOverlayFixGet(); });
+    ipc_on("steam.settings.get", [](const json& a) -> json { return steamSettingsGet(a); });
+    ipc_on("steam.settings.set", [](const json& a) -> json { return steamSettingsSet(a); });
     ipc_on("screenTouchpads.get", [](const json& args) -> json {
         const int profile=args.contains("persona") && args["persona"].is_string()
             ? ymcc::screenpads::profileIndex(args["persona"].get<std::string>()) : ymcc::screenpads::activeProfile.load();
@@ -50703,54 +50887,9 @@ static void fanHostScheduleEmergencySuspend(const char* reason,
 // !hcCloseCleanupPending 才算恢复完成。旧宿主（同步等待实现）的 {ok,state} 终态形状继续
 // 兼容判读；409 带原因码属于"处理中"（可判定），只有显式 superseded/expired 才是终态。
 // 返回 false 表示响应缺失/不可解析（不得据此判成任何成功）。
-struct FanResumeHostReply {
-    bool parsed = false;
-    bool noop = false;
-    bool accepted = false;
-    bool ready = false;
-    bool unknown = false;
-    bool faultLocked = false;
-    bool cleanupPending = false;
-    std::string stateName;
-    std::string phase;
-    std::string opStatus;
-    std::string opOutcome;
-    std::string errorCode;
-    long long retryAfterMs = 0;
-    long long attempt = 0;
-};
-
+using FanResumeHostReply = ymcc::fan_session::ResumeReply;
 static bool fanResumeParseReply(const std::string& body, FanResumeHostReply* out) {
-    if (!out) return false;
-    *out = FanResumeHostReply{};
-    if (body.empty()) return false;
-    try {
-        const auto root = json::parse(body);
-        if (!root.is_object()) return false;
-        const auto state = root.contains("state") && root["state"].is_object() ? root["state"] : root;
-        out->parsed = true;
-        out->noop = root.value("resumeNoop", false);
-        out->accepted = root.value("resumeAccepted", false);
-        out->retryAfterMs = root.value("retryAfterMs", 0LL);
-        out->attempt = root.value("attempt", 0LL);
-        out->phase = root.value("resumePhase", std::string{});
-        if (root.contains("error")) {
-            const auto& err = root["error"];
-            out->errorCode = err.is_object()
-                ? err.value("code", std::string{})
-                : (err.is_string() ? err.get<std::string>() : std::string{});
-        }
-        out->stateName = state.value("state", std::string{});
-        out->opStatus = state.value("powerOperationStatus", std::string{});
-        out->opOutcome = state.value("powerOperationOutcome", std::string{});
-        out->unknown = state.value("unknownState", false);
-        out->cleanupPending = state.value("hcCloseCleanupPending", false);
-        out->faultLocked = out->stateName == "FaultLocked" || out->stateName == "ListenerFaultLocked";
-        out->ready = out->stateName == "Ready" && !out->unknown && !out->faultLocked && !out->cleanupPending;
-        return true;
-    } catch (...) {
-        return false;
-    }
+    return ymcc::fan_session::parseResumeReply(body, out);
 }
 
 // 观察窗（补充裁决拍板：最多 15 s，同一 generation）。观察阶段**只读**状态。
@@ -50761,19 +50900,9 @@ static constexpr int kFanResumeObserveIntervalMaxMs = 1000;
 static constexpr int kFanResumeUnreachableProbeLimit = 5;
 static constexpr int kFanResumeObserveLogLimit = 16;
 
-enum class FanResumeVerdict { Pending, Recovered, NoWork, Failed, Superseded };
-
-static FanResumeVerdict fanResumeClassify(const FanResumeHostReply& reply) {
-    if (!reply.parsed) return FanResumeVerdict::Pending;
-    if (reply.unknown || reply.faultLocked) return FanResumeVerdict::Failed;
-    if (reply.ready) return FanResumeVerdict::Recovered;
-    if (reply.opStatus == "failed") return FanResumeVerdict::Failed;
-    if (reply.opStatus == "superseded") return FanResumeVerdict::Superseded;
-    // 空恢复（无可重建曲线）：宿主明确"等待用户接管"——这是合法 no-op，不是恢复完成。
-    if (reply.stateName == "AwaitingControl" &&
-        (reply.opOutcome == "await-user" || reply.opStatus == "completed"))
-        return FanResumeVerdict::NoWork;
-    return FanResumeVerdict::Pending;
+using FanResumeVerdict = ymcc::fan_session::ResumeVerdict;
+static FanResumeVerdict fanResumeClassify(const FanResumeHostReply& reply, unsigned long long generation) {
+    return ymcc::fan_session::classifyResumeReply(reply, generation);
 }
 
 static void fanHostEmergencyResume(unsigned long long generation) {
@@ -50871,7 +51000,11 @@ static void fanHostEmergencyResume(unsigned long long generation) {
                 return;
             }
             // 合法 no-op（宿主明确回答"无可恢复"）：单独记录，终止本次序列，不重试。
-            if (ok && reply.noop) {
+            if (ok && reply.noop && reply.parsed) {
+                if (reply.unknown || reply.faultLocked || reply.cleanupPending || !reply.errorCode.empty()) {
+                    finish("exhausted", "host-noop-with-blocking-evidence", true);
+                    return;
+                }
                 finish("noop", "host-explicit-noop", false);
                 return;
             }
@@ -50879,7 +51012,7 @@ static void fanHostEmergencyResume(unsigned long long generation) {
             // （同步完成的空恢复 await-user / 重建已先完成 / 故障），必须立即如实结算，
             // 不得再进观察窗（否则会拿"宿主已无事可做"去撞 15 s 超时）。
             if (ok && reply.accepted) {
-                const auto acceptedVerdict = fanResumeClassify(reply);
+                const auto acceptedVerdict = fanResumeClassify(reply, generation);
                 if (acceptedVerdict == FanResumeVerdict::Recovered) {
                     finish("recovered", "accepted-ready", false);
                     return;
@@ -50902,7 +51035,7 @@ static void fanHostEmergencyResume(unsigned long long generation) {
             // 兼容旧宿主（同步等待实现）：终态快照可直接判定；未 Ready 也转入观察
             // （旧宿主可能刚完成重建，状态即将可读；不得把 200 直接当成功）。
             if (ok && parsed) {
-                const auto verdict = fanResumeClassify(reply);
+                const auto verdict = fanResumeClassify(reply, generation);
                 if (verdict == FanResumeVerdict::Recovered) {
                     finish("recovered", "legacy-host-terminal-ready", false);
                     return;
@@ -50926,6 +51059,11 @@ static void fanHostEmergencyResume(unsigned long long generation) {
             if (!ok && status == 409 &&
                 (reply.errorCode == "HC_RESUME_SUPERSEDED" || reply.errorCode == "HC_RESUME_RESULT_EXPIRED")) {
                 finish("superseded", reply.errorCode.c_str(), false);
+                return;
+            }
+            // FAN-943: an explicit rejection is not an accepted recovery worker.
+            if (ymcc::fan_session::isTerminalResumeRejection(status, reply)) {
+                finish("exhausted", reply.errorCode.empty() ? "host-authorization-denied" : reply.errorCode.c_str(), true);
                 return;
             }
             // 传输失败 / 5xx / 无响应 ⇒ 有界重试（≤3 次，退避 0/250/500）。
@@ -50965,7 +51103,12 @@ static void fanHostEmergencyResume(unsigned long long generation) {
             const bool ok = fanHostEmergencyGetState(&body, &status);
             ++probeCount;
             FanResumeHostReply probe;
-            const bool parsed = ok && fanResumeParseReply(body, &probe);
+            const bool responseParsed = fanResumeParseReply(body, &probe);
+            const bool parsed = ok && responseParsed;
+            if (ymcc::fan_session::isTerminalResumeRejection(status, probe)) {
+                finish("exhausted", probe.errorCode.empty() ? "host-observation-authorization-denied" : probe.errorCode.c_str(), true);
+                return;
+            }
             if (!parsed) {
                 if (++unreachableProbes >= kFanResumeUnreachableProbeLimit) {
                     finish("exhausted", "host-unreachable", true);
@@ -50977,7 +51120,7 @@ static void fanHostEmergencyResume(unsigned long long generation) {
                 const std::string prevPhase = last.phase.empty() ? last.stateName : last.phase;
                 const std::string prevState = last.stateName;
                 last = probe;
-                const auto verdict = fanResumeClassify(probe);
+                const auto verdict = fanResumeClassify(probe, generation);
                 if (verdict == FanResumeVerdict::Recovered) {
                     finish("recovered", "observed-ready", false);
                     return;
@@ -56585,7 +56728,7 @@ static void reg_updater() {
              // host 二进制 / …）后必须实算重填，禁止手改哈希；build-workspace.ps1
              // Assert-PublishPreGate 会自动对拍，不一致即 halt 并打印实算值，
              // 更新安装 ps1 侧（Assert-FanHostV2Payload）同用此常量。
-             f << "$expectedFanHostV2ManifestSha256 = '368d9a9a43be3662098f3ef506ab82981ad444480e50f7886fde5b57b5911c56'\n";
+             f << "$expectedFanHostV2ManifestSha256 = '6da78d971f7112dc1b07fa041eb80ee240198919ad3ea5f10fe760bdb9fee1ac'\n";
              f << "$expectedFanHostV2ManifestFileCount = 9\n";
              f << "$expectedFanHostV2LhmSha256 = 'F7ED30F07EA636C0DDCC5764C15C0A25AE8A0ACA02DED77E4AF24439955487CF'\n";
              f << "function Write-Utf8Atomic([string]$path, [string]$text) {\n";
@@ -58697,6 +58840,10 @@ static bool configureUserAssetsHost(ICoreWebView2* view) {
     ComPtr<ICoreWebView2_3> userAssetsView;
     if (FAILED(view->QueryInterface(IID_PPV_ARGS(&userAssetsView)))) return false;
     auto userAssets = background_assets_dir();
+    // Optional demo folder may be absent; never let its mapping block the app.
+    userAssetsView->SetVirtualHostNameToFolderMapping(
+        DEFAULT_BACKGROUND_VIDEO_HOST, DEFAULT_BACKGROUND_VIDEO_DIR.c_str(),
+        COREWEBVIEW2_HOST_RESOURCE_ACCESS_KIND_ALLOW);
     return SUCCEEDED(userAssetsView->SetVirtualHostNameToFolderMapping(
         L"user-assets.localhost", userAssets.c_str(),
         COREWEBVIEW2_HOST_RESOURCE_ACCESS_KIND_ALLOW));
@@ -60906,6 +61053,12 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         if (FAILED(hr)) g_recoveryProbeSerial.store(0, std::memory_order_release);
         return 0;
     }
+    case WM_DECKY_MIRROR_EVENT: {
+        std::deque<json> packets;
+        { std::lock_guard lock(g_deckyEventMutex); packets.swap(g_deckyEvents); g_deckyEventPosted = false; }
+        for (const auto& packet : packets) { try { ipc_post_json(0, packet); } catch (...) {} }
+        return 0;
+    }
     case WM_WEBVIEW_PROCESS_FAILED: {
         auto* info = reinterpret_cast<WebViewFailureInfo*>(l);
         if (!info) return 0;
@@ -60990,6 +61143,8 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     case WM_POWER_RESUME_COMMIT:
         if (g_powerLifecycle.load(std::memory_order_acquire) == PowerLifecycle::Ready) {
             stopPowerResumeWatchdog();
+            // YMCC Decky: one transport rebind per committed generation; no restart/polling.
+            g_deckySidebarRuntime.requestBindingRefresh(currentPowerGeneration());
             ipc_emit("power.resumed", {
                 {"generation", currentPowerGeneration()},
                 {"inputReady", g_inputReady.load(std::memory_order_acquire)},
@@ -61106,6 +61261,7 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         return 0;
     case WM_DESTROY:
             ymcc::screenpads::shutdown();
+            g_deckySidebarRuntime.shutdown();
             g_steamSettingsObserver.stop();
             rogEnsureXboxFaceEnabled("destroy");
             inputCaptureStop();
@@ -67885,6 +68041,7 @@ int WINAPI wWinMain(HINSTANCE hi, HINSTANCE, LPWSTR, int ns) {
         const int profile=ymcc::screenpads::activeProfile.load();
         ymcc::screenpads::initialize(hi,g_hwnd,bank.slots[profile],profile);
     }
+    deckySidebarInitialize();
     steamSettingsObserverStart(); // Shared events; mouse only resumes an explicit pending request.
     domainLogsLoadConfig();
     {
@@ -68034,6 +68191,7 @@ int WINAPI wWinMain(HINSTANCE hi, HINSTANCE, LPWSTR, int ns) {
     shutdownSplashGraphics();
     joinStartupResumeThread(1000);
     sgStopWorkThread(1000);
+    g_deckySidebarRuntime.shutdown();
     g_steamSettingsObserver.stop();
     poolStop(1000);
     g_summonQuit = true;

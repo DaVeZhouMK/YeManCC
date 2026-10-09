@@ -23,6 +23,7 @@ inline constexpr UINT kSummonMessage = WM_APP + 173;
 inline constexpr ULONG_PTR kInjectedTag = 0x594d5450;
 enum class Mode { Deck, DualSense, Wasd, Arrows, Mouse, Off };
 enum class SummonPosition { Off, Left, Right };
+enum class StandaloneSpecialMode { Off, SteamDeck, PS5 };
 enum class Layout { Dual, Single };
 inline bool nativePad(Mode m) {return m==Mode::Deck || m==Mode::DualSense;}
 inline const char* modeName(Mode m) {
@@ -35,12 +36,26 @@ inline bool parseMode(const std::string& s, bool left, Mode& m) {
     else if (left && s == "arrows") m=Mode::Arrows; else return false;
     return true;
 }
-struct Config { bool enabled=false; Mode left=Mode::Deck, right=Mode::Deck; int transparency=80; int mouseSensitivity=100; int scale=100; Layout layout=Layout::Dual; Mode single=Mode::Mouse; SummonPosition summonPosition=SummonPosition::Off; unsigned specialMask=0,rearMask=0; bool summonEnabled=false,specialEnabled=false,rearEnabled=false; };
+struct Config { bool enabled=false; Mode left=Mode::Deck, right=Mode::Deck; int transparency=80; int mouseSensitivity=100; int scale=100; Layout layout=Layout::Dual; Mode single=Mode::Mouse; SummonPosition summonPosition=SummonPosition::Off; StandaloneSpecialMode standaloneSpecialMode=StandaloneSpecialMode::Off; unsigned specialMask=0,rearMask=0; bool summonEnabled=false,specialEnabled=false,rearEnabled=false; };
 inline const char* summonPositionName(SummonPosition p) {return p==SummonPosition::Left?"left":p==SummonPosition::Right?"right":"off";}
 inline bool parseSummonPosition(const std::string& s,SummonPosition& p) {if(s=="off")p=SummonPosition::Off;else if(s=="left")p=SummonPosition::Left;else if(s=="right")p=SummonPosition::Right;else return false;return true;}
 inline SummonPosition effectiveSummonPosition(const Config& c) {return c.summonPosition!=SummonPosition::Off?c.summonPosition:c.summonEnabled?SummonPosition::Right:SummonPosition::Off;}
 inline unsigned effectiveSpecialMask(const Config& c) {return c.specialMask?c.specialMask:(c.specialEnabled?3u:0u);}
 inline unsigned effectiveRearMask(const Config& c) {return c.rearMask?c.rearMask:(c.rearEnabled?15u:0u);}
+inline const char* standaloneSpecialName(StandaloneSpecialMode mode) {
+    return mode==StandaloneSpecialMode::SteamDeck?"steamdeck":mode==StandaloneSpecialMode::PS5?"ps5":"off";
+}
+inline bool parseStandaloneSpecial(const std::string& value,StandaloneSpecialMode& mode) {
+    if(value=="off")mode=StandaloneSpecialMode::Off;
+    else if(value=="steamdeck")mode=StandaloneSpecialMode::SteamDeck;
+    else if(value=="ps5")mode=StandaloneSpecialMode::PS5;
+    else return false;return true;
+}
+// This chooses artwork/visible dedicated keys only. It never changes the virtual
+// output persona, availability flags, profile bank or BUS report admission.
+inline int standaloneSpecialProfile(const Config& cfg) {
+    return cfg.standaloneSpecialMode==StandaloneSpecialMode::SteamDeck?1:cfg.standaloneSpecialMode==StandaloneSpecialMode::PS5?2:0;
+}
 inline void buttonsRelease();
 inline void buttonsRefresh(const Config&,const RECT&,const RECT&);
 inline void buttonsInitialize();
@@ -50,7 +65,7 @@ inline bool buttonsVisible();
 inline unsigned buttonSnapshot();
 inline Json configJson(const Config& c) {
     const auto summon=effectiveSummonPosition(c);const unsigned special=effectiveSpecialMask(c),rear=effectiveRearMask(c);
-    return {{"summonPosition",summonPositionName(summon)},{"specialMask",special},{"rearMask",rear},
+    return {{"summonPosition",summonPositionName(summon)},{"standaloneSpecialMode",standaloneSpecialName(c.standaloneSpecialMode)},{"specialMask",special},{"rearMask",rear},
         {"summonEnabled",summon!=SummonPosition::Off},{"specialEnabled",special!=0},{"rearEnabled",rear!=0},
         {"enabled",c.enabled},{"leftMode",modeName(c.left)},{"rightMode",modeName(c.right)},
         {"transparency",c.transparency},{"mouseSensitivity",c.mouseSensitivity},{"scale",c.scale},
@@ -68,6 +83,8 @@ inline bool parseConfig(const Json& j, const Config& old, Config& c) {
             else {legacyRear=true;next.rearEnabled=value;}
         } else if(key=="summonPosition") {
             if(!v.is_string() || !parseSummonPosition(v.get<std::string>(),next.summonPosition))return false;hasSummon=true;
+        } else if(key=="standaloneSpecialMode") {
+            if(!v.is_string() || !parseStandaloneSpecial(v.get<std::string>(),next.standaloneSpecialMode))return false;
         } else if(key=="specialMask") {
             if(!v.is_number_integer())return false;const auto n=v.get<long long>();if(n<0||n>3)return false;next.specialMask=(unsigned)n;hasSpecial=true;
         } else if(key=="rearMask") {
@@ -270,6 +287,7 @@ inline unsigned long long eventCount=0, injectedCount=0, repaintCount=0;
 inline DWORD inputError=0,windowError=0;
 inline bool initialized=false; // HWND owner thread only.
 inline Json* testTrace=nullptr; // Only the self-test sets this; no production trace allocations.
+#include "screen_touchpad_cursor.h"
 inline Config getConfig() {std::lock_guard<std::mutex> l(mutex);return core.config;}
 inline void output(const Action& a) {
     // Called only on the HWND owner thread. Diff edges, never repeat held keys.
@@ -297,7 +315,7 @@ inline void output(const Action& a) {
     }
 }
 inline void release() {
-    buttonsRelease();
+    buttonsRelease();cursorStop();
     bool changed=sentKeys!=0 || sentClick;Action a;
     {std::lock_guard<std::mutex> l(mutex);changed=changed || core.pads[0].down || core.pads[1].down || core.clicks[0].active || core.clicks[1].active;a=core.cancel();}
     output(a);if(changed) for(HWND h:windows) if(h) InvalidateRect(h,nullptr,FALSE);
@@ -314,6 +332,7 @@ inline Contact normalizeContact(Contact c,LONG width,LONG height,int half=-1) {
     return c;
 }
 inline Snapshot snapshot() {
+    cursorRequestSync(); // UI-only visuals, using the existing BUS cadence.
     if(!enabled.load(std::memory_order_relaxed) || !nativeMode.load(std::memory_order_relaxed) ||
         (!available.load(std::memory_order_acquire) && !psAvailable.load(std::memory_order_acquire)) || activeProfile.load()!=appliedProfile.load()) return {};
     std::lock_guard<std::mutex> l(mutex);Snapshot s=core.snapshot(GetTickCount64());
@@ -402,6 +421,7 @@ inline LRESULT CALLBACK windowProc(HWND h,UINT m,WPARAM w,LPARAM lp) {
     const int surface=(int)GetWindowLongPtrW(h,GWLP_USERDATA);
     int side=surface;
     switch(m) {
+    case kCursorSyncMessage:cursorSyncPending.store(false,std::memory_order_release);cursorSync();return 0;
     case WM_MOUSEACTIVATE:return MA_NOACTIVATE;
     case WM_POINTERACTIVATE:return PA_NOACTIVATE;
     case WM_ERASEBKGND:return 1;
@@ -428,13 +448,13 @@ inline LRESULT CALLBACK windowProc(HWND h,UINT m,WPARAM w,LPARAM lp) {
         if(pi.pointerFlags&POINTER_FLAG_CANCELED) {
             Action a;{std::lock_guard<std::mutex> l(mutex);
                 if(core.pads[side].down && core.pads[side].id==id) {core.pads[side]={};core.clicks[side]={};}a=core.current();}
-            output(a);InvalidateRect(h,nullptr,FALSE);return 0;
+            output(a);cursorContactChanged(h);InvalidateRect(h,nullptr,FALSE);return 0;
         }
         POINT point=pi.ptPixelLocation;ScreenToClient(h,&point);
         Action a;{std::lock_guard<std::mutex> l(mutex);
             a=core.event(side,id,m==WM_POINTERDOWN?0:m==WM_POINTERUP?2:1,(float)point.x,(float)point.y,
                 (int)sizes[side].cx,(int)sizes[side].cy,GetTickCount64());}
-        ++eventCount;output(a);
+        ++eventCount;output(a);cursorContactChanged(h,m==WM_POINTERUP);
         if(testTrace) testTrace->push_back({{"message",m},{"side",side},{"id",id},{"flags",pi.pointerFlags},
             {"mode",modeName(core.mode(side))},{"x",point.x},{"y",point.y},{"down",core.pads[side].down},{"keys",sentKeys},{"tick",GetTickCount64()},{"snapshot",snapshotJson(snapshot())}});
         if(m!=WM_POINTERUPDATE) InvalidateRect(h,nullptr,FALSE);
@@ -446,9 +466,12 @@ inline LRESULT CALLBACK windowProc(HWND h,UINT m,WPARAM w,LPARAM lp) {
             for(int i=0;i<2;i++)if(core.pads[i].down && core.pads[i].id==id){side=i;break;}}
         if(testTrace) testTrace->push_back({{"message",m},{"side",side},{"id",GET_POINTERID_WPARAM(w)},
             {"oldId",core.pads[side].id},{"oldDown",core.pads[side].down}});
-        Action a;{std::lock_guard<std::mutex> l(mutex);
-            if(core.pads[side].down && core.pads[side].id==GET_POINTERID_WPARAM(w)) {core.pads[side]={};core.clicks[side]={};}
-            a=core.current();}output(a);InvalidateRect(h,nullptr,FALSE);return 0;
+        Action a;bool lostActive=false;{std::lock_guard<std::mutex> l(mutex);
+            if(core.pads[side].down && core.pads[side].id==GET_POINTERID_WPARAM(w)) {core.pads[side]={};core.clicks[side]={};lostActive=true;}
+            a=core.current();}output(a);
+        // Windows can notify capture loss after a normal UP. That stale edge
+        // must not erase the passive cursor retained between swipes.
+        if(lostActive)cursorContactChanged(h);InvalidateRect(h,nullptr,FALSE);return 0;
     }
     case WM_CANCELMODE:if(testTrace)testTrace->push_back({{"message",m},{"tick",GetTickCount64()},{"cancel",true}});release();return 0;
     }
@@ -502,7 +525,7 @@ inline void configure(const Config& cfg,int profile=-1) {
     const int configuredProfile=profile<0?activeProfile.load():profile;
     // Geometry changes release contacts before resizing, preventing stale coordinates/held keys.
     // Transparency-only drags still preserve active fingers.
-    Config old=getConfig();const bool reset=configuredProfile!=appliedProfile.load() || old.enabled!=cfg.enabled || old.left!=cfg.left || old.right!=cfg.right || old.scale!=cfg.scale || old.layout!=cfg.layout || old.single!=cfg.single || old.summonPosition!=cfg.summonPosition || old.specialMask!=cfg.specialMask || old.rearMask!=cfg.rearMask || old.summonEnabled!=cfg.summonEnabled || old.specialEnabled!=cfg.specialEnabled || old.rearEnabled!=cfg.rearEnabled;
+    Config old=getConfig();const bool reset=configuredProfile!=appliedProfile.load() || old.enabled!=cfg.enabled || old.left!=cfg.left || old.right!=cfg.right || old.scale!=cfg.scale || old.layout!=cfg.layout || old.single!=cfg.single || old.summonPosition!=cfg.summonPosition || old.specialMask!=cfg.specialMask || old.rearMask!=cfg.rearMask || old.standaloneSpecialMode!=cfg.standaloneSpecialMode || old.summonEnabled!=cfg.summonEnabled || old.specialEnabled!=cfg.specialEnabled || old.rearEnabled!=cfg.rearEnabled;
     if(reset) release();
     {std::lock_guard<std::mutex> l(mutex);core.config=cfg;}
     appliedProfile.store(configuredProfile);
@@ -522,12 +545,14 @@ inline void initialize(HINSTANCE hi,HWND parent,const Config& cfg,int profile=-1
     buttonsInitialize();
     configure(cfg,profile);
 }
-inline void shutdown() {buttonsShutdown();controlTargetEnabled.store(false);controlEdgeEnabled.store(false);initialized=false;release();enabled.store(false);nativeMode.store(false);available.store(false);psAvailable.store(false);for(HWND& h:outlines){if(h)DestroyWindow(h);h=nullptr;}outlineUploads={};for(HWND& h:windows){if(h)DestroyWindow(h);h=nullptr;}owner=nullptr;}
+inline void shutdown() {cursorShutdown();buttonsShutdown();controlTargetEnabled.store(false);controlEdgeEnabled.store(false);initialized=false;release();enabled.store(false);nativeMode.store(false);available.store(false);psAvailable.store(false);for(HWND& h:outlines){if(h)DestroyWindow(h);h=nullptr;}outlineUploads={};for(HWND& h:windows){if(h)DestroyWindow(h);h=nullptr;}owner=nullptr;}
 inline Json state() {
     Json j=configJson(getConfig());j["ok"]=!windowError && !inputError;j["available"]=true;
     j["persona"]=profileName(appliedProfile.load());j["steamDeckAvailable"]=available.load();j["ps5Available"]=psAvailable.load() && !ps4Target.load();j["ps4Available"]=psAvailable.load() && ps4Target.load();
     j["visible"]=(windows[0] && IsWindowVisible(windows[0])) || (windows[1] && IsWindowVisible(windows[1])) || buttonsVisible();
     j["events"]=eventCount;j["injectedInputs"]=injectedCount;j["repaints"]=repaintCount;
+    j["cursorPolicyVersion"]=2;j["cursorHandoffGraceMs"]=kCursorHandoffMs;j["cursorRetainedPollMs"]=kCursorRetainedPollMs;j["cursorRetainedAfterUp"]=cursorRetained.load();j["cursorFallbackShows"]=cursorShows;j["cursorFallbackHides"]=cursorHides;j["cursorFallbackHandoffs"]=cursorHandoffs;
+    j["cursorFallbackVisible"]=cursorVisible;j["cursorFallbackSyncs"]=cursorSyncs;j["cursorFallbackUploads"]=cursorUploads;j["cursorFallbackError"]=cursorError;
     j["error"]=inputError?inputError:windowError;j["reason"]="";return j;
 }
 inline Json profileState(const Config& cfg,int profile) {

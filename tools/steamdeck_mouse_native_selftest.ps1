@@ -3,13 +3,13 @@ $ErrorActionPreference='Stop'
 $root=Split-Path $PSScriptRoot
 $main=[IO.File]::ReadAllText((Join-Path $root 'native\main.cpp'))
 $start=$main.IndexOf('// SteamDeck desktop right-stick sensitivity.')
-$end=$main.IndexOf('static bool sofApplyValueToConfigText(const std::string& in, int target, std::string* out) {',$start)
+$end=$main.IndexOf('#include "steam_settings_runtime.h"',$start)
 if($start -lt 0 -or $end -lt $start){throw 'Production SteamDeck mouse runtime block not found'}
-$fixture=[IO.File]::ReadAllText((Join-Path $PSScriptRoot 'steamdeck_mouse_native_fixture.cpp')).Replace('//__PRODUCTION_RUNTIME__',$main.Substring($start,$end-$start))
+$fixture=[IO.File]::ReadAllText((Join-Path $PSScriptRoot 'steamdeck_mouse_native_fixture.cpp')).Replace('//__PRODUCTION_RUNTIME__',$main.Substring($start,$end-$start).Replace('static json steamDeckMouseSet(', 'static json fixtureMouseEnqueue('))
 $overlayStart=$main.IndexOf('static std::atomic<bool> g_sofQueued{false};')
 $overlayEnd=$main.IndexOf('// SteamDeck desktop right-stick sensitivity.',$overlayStart)
 if($overlayStart -lt 0 -or $overlayEnd -lt $overlayStart){throw 'Production Steam overlay runtime block not found'}
-$fixture=$fixture.Replace('//__PRODUCTION_OVERLAY_RUNTIME__',$main.Substring($overlayStart,$overlayEnd-$overlayStart))
+$fixture=$fixture.Replace('//__PRODUCTION_OVERLAY_RUNTIME__',$main.Substring($overlayStart,$overlayEnd-$overlayStart).Replace('static void steamOverlayFixKick(', 'static void fixtureOverlayEnqueue('))
 $liveStart=$main.IndexOf('static json steamLiveRequest(DWORD account, json request) {')
 $liveEnd=$main.IndexOf('static std::atomic<bool> g_sofQueued{false};',$liveStart)
 if($liveStart -lt 0 -or $liveEnd -lt $liveStart){throw 'Production Steam live preflight block not found'}
@@ -19,6 +19,10 @@ $policyStart=$transport.IndexOf('inline bool canDefer(')
 $policyEnd=$transport.LastIndexOf('}')
 if($policyStart -lt 0 -or $policyEnd -lt $policyStart){throw 'Production Steam live deferral policy not found'}
 $fixture=$fixture.Replace('//__PRODUCTION_DEFER_POLICY__',$transport.Substring($policyStart,$policyEnd-$policyStart))
+$observerStart=$main.IndexOf('static void steamSettingsObserverStart() {')
+$observerEnd=$main.IndexOf('static bool sofApplyValueToConfigText(const std::string& in, int target, std::string* out) {',$observerStart)
+$fixture=$fixture.Replace('//__PRODUCTION_OBSERVER__',$main.Substring($observerStart,$observerEnd-$observerStart))
+
 New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
 $source=Join-Path $OutputDirectory 'native-selftest.cpp'
 [IO.File]::WriteAllText($source,$fixture,[Text.UTF8Encoding]::new($false))

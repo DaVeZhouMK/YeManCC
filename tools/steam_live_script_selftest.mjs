@@ -14,7 +14,7 @@ function fixture(options = {}) {
     SetControllerSourceMode(app,msg) { stats.edits++; assert.equal(app,413080);assert.equal(msg.source_binding_key,12);assert.equal(msg.new_setting.key,30);assert.equal(msg.modeid,group.modeid);group.settings[0].int_value=options.clamp?10:msg.new_setting.int_value;this.m_nEditNumber++;if(options.concurrent)this.m_nEditNumber++;this.m_updatingEditingConfigurationPromise=options.timeout?new Promise(()=>{}):Promise.resolve(); },
     SaveEditingConfiguration(app,publish,callback) { stats.saves++;assert.equal(app,413080);assert.equal(publish,false);this.m_nLastSavedEditNumber=this.m_nEditNumber;this.EditingConfigurationAppId=-1;callback(); }
   };
-  const settings = { clientSettings:{enable_overlay:false},m_CMInterface:{steamid:{GetAccountID:()=>account}},GetClientSetting(key) {assert.equal(key,'enable_overlay');return [this.clientSettings.enable_overlay,async value=>{stats.overlayWrites++;this.clientSettings.enable_overlay=value;}];} };
+  const settings = { clientSettings:{enable_overlay:false,overlay_fps_counter_corner:0,overlay_fps_counter_detail_level:1,overlay_fps_counter_scale_factor:1,overlay_fps_counter_saturation_factor:1,overlay_fps_counter_bgopacity:1},m_CMInterface:{steamid:{GetAccountID:()=>account}},GetClientSetting(key) {assert(key in this.clientSettings);return [this.clientSettings[key],async value=>{stats.overlayWrites++;this.clientSettings[key]=value;}];} };
   const window = {controllerConfiguratorStore:s,ControllerStore:{GetControllers:()=>('controllers' in options)?options.controllers:[{eControllerType:type,nControllerIndex:index}],GetControllerTypeString:value=>value===type?'controller_neptune':'controller_generic'},settingsStore:settings};
   const fn=vm.runInNewContext(source,{window,SteamClient:{Settings:{SetSetting(){}}},performance,setTimeout:(cb,n)=>setTimeout(cb,Math.min(n,20)),clearTimeout,console});
   const request = {operation:'mouse.set',controllerType:'controller_neptune',path:layoutPath,account,baseline:145,percent:137};
@@ -49,5 +49,20 @@ await test('machine-specific paths/account/controller index/type/modeid never ha
 });
 await test('SteamDeck request never changes generic controller even when its percentage matches',async()=>{
   const f=fixture({controllers:[{eControllerType:30,nControllerIndex:0}]});const r=await f.fn(f.request);assert.equal(r.reason,'live-controller-not-connected');assert.equal(f.stats.edits,0);assert.equal(f.stats.saves,0);
+});
+await test('unified client batch applies monitor and overlay together through Steam wrappers',async()=>{
+  const f=fixture();const values={enable_overlay:true,overlay_fps_counter_corner:5,overlay_fps_counter_detail_level:4,overlay_fps_counter_scale_factor:1.4,overlay_fps_counter_saturation_factor:0,overlay_fps_counter_bgopacity:.7};
+  const result=await f.fn({operation:'settings.set',account:42,values});assert(result.ok);assert.deepEqual(JSON.parse(JSON.stringify(result.values)),values);assert.equal(f.stats.overlayWrites,6);assert.equal(f.stats.edits,0);
+  const read=await f.fn({operation:'settings.get',account:42,keys:Object.keys(values)});assert(read.ok);assert.deepEqual(JSON.parse(JSON.stringify(read.values)),values);
+});
+await test('unified settings preflights every field before mutating any field',async()=>{
+  for(const invalid of [{bad_key:1},{overlay_fps_counter_corner:7},{overlay_fps_counter_scale_factor:1.5},{overlay_fps_counter_bgopacity:-.1},{overlay_fps_counter_saturation_factor:.35},{enable_overlay:1},{overlay_fps_counter_detail_level:0}]){
+    const f=fixture();const result=await f.fn({operation:'settings.set',account:42,values:{enable_overlay:true,...invalid}});assert(!result.ok);assert.equal(f.stats.overlayWrites,0);assert(!result.mutated);
+  }
+});
+await test('unified settings read/noop/account drift never mutate Steam',async()=>{
+  const f=fixture();assert((await f.fn({operation:'settings.get',account:42,keys:['overlay_fps_counter_corner']})).ok);
+  assert((await f.fn({operation:'settings.set',account:42,values:{enable_overlay:false}})).ok);assert.equal(f.stats.overlayWrites,0);
+  assert.equal((await f.fn({operation:'settings.set',account:43,values:{enable_overlay:true}})).reason,'steam-account-changed');assert.equal(f.stats.overlayWrites,0);
 });
 console.log(JSON.stringify({suite:'Steam live production JS mocked',passed:results.length,cases:results,hardwareOperations:0},null,2));

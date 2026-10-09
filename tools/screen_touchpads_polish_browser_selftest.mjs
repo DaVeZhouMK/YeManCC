@@ -26,8 +26,8 @@ const mocks={
  ps5Available:persona==='dualsense-edge'&&['dualsense-edge','dualsense'].includes(f.currentPersona)&&f.targetEnabled,
  ps4Available:persona==='dualsense-edge'&&f.currentPersona==='dualshock4'&&f.targetEnabled};}
  export async function invoke(type,args){const f=window.__fixture;
- if(type==='steamDeckMouse.get')return structuredClone(f.steam);
- if(type==='steamDeckMouse.set'){f.savedSteam.push(args.percent);f.steam={...f.steam,percent:args.percent,appliedLive:true};return structuredClone(f.steam)}
+ if(type==='steam.settings.get'&&args.scope==='mouse')return structuredClone(f.steam);
+ if(type==='steam.settings.set'&&Number.isInteger(args.mousePercent)){f.savedSteam.push(args.mousePercent);f.steam={...f.steam,percent:args.mousePercent,appliedLive:true};return structuredClone(f.steam)}
  if(type==='screenTouchpads.get')return padState(args.persona);
  if(type==='screenTouchpads.set'){f.savedPads.push(structuredClone(args));Object.assign(f.padProfiles[args.persona],args.config);if(args.config.layout!==undefined)f.padProfiles[args.persona].enabled=args.config.layout!=='off';return padState(args.persona)}
  throw new Error('Unexpected production IPC: '+type);}`,
@@ -69,7 +69,7 @@ try{browser=await chromium.launch({headless:true,executablePath:process.env.YMCC
   cases.push({name:persona+'-new-special-buttons-default-all-on',ok:true});
  }
  await switchPersona('disabled');assert.equal(await controlValue('专用按键组合'),'关闭');
- assert.equal(await page.locator('button[aria-label="专用按键组合"]').isDisabled(),true);
+ assert.equal(await page.locator('button[aria-label="专用按键组合"]').isDisabled(),false);
  assert.equal(await page.evaluate(()=>window.__fixture.savedPads.length),0);
  cases.push({name:'default-special-buttons-render-without-persisting-or-enabling-disabled-profile',ok:true});
  // All remaining old-profile regressions deliberately start with saved opt-outs.
@@ -193,7 +193,29 @@ try{browser=await chromium.launch({headless:true,executablePath:process.env.YMCC
  const summonHandler=nativeMain.match(/case ymcc::screenpads::kSummonMessage:([\s\S]*?)case ymcc::screenpads::kRefreshMessage:/)?.[1];
  assert.ok(summonHandler,'Screen-button owner route must exist');assert.match(summonHandler,/nativeYmccShortcutEmit\("window\.summon",\s*0\);/);
  assert.match(fs.readFileSync(path.join(root,'native/screen_button_overlay.h'),'utf8'),/PostMessageW\(parent,kSummonMessage,0,0\)/);cases.push({name:'Y-uses-default-summon-route-without-forced-Windows-maximize',ok:true});
- await switchPersona('disabled',true);assert.equal(await page.locator('button[aria-label="专用按键组合"]').isDisabled(),true);assert.equal(await page.locator('button[aria-label="背部按键组合"]').isDisabled(),true);assert.equal(await page.locator('button[aria-label="YMCC呼出位置"]').isDisabled(),false);cases.push({name:'dropdown-capability-gates-match-persona',ok:true});
+ await switchPersona('disabled',false);
+ assert.equal(await page.locator('button[aria-label="专用按键组合"]').isDisabled(),false);
+ assert.equal(await page.locator('button[aria-label="背部按键组合"]').isDisabled(),true);
+ assert.equal(await page.locator('button[aria-label="YMCC呼出位置"]').isDisabled(),false);
+ cases.push({name:'disabled-output-special-dropdown-remains-actionable-with-rear-gate-unchanged',ok:true});
+ await page.locator('button[aria-label="专用按键组合"]').click();
+ assert.deepEqual((await page.locator('.dd-menu:visible').last().getByRole('option').allTextContents()).map(s=>s.trim()),['关闭','开启Steam全部','开启PS5全部']);
+ await page.keyboard.press('Escape');cases.push({name:'disabled-output-has-exactly-three-requested-special-choices',ok:true});
+ const otherProfilesBefore=await page.evaluate(()=>JSON.stringify([window.__fixture.padProfiles.steamdeck,window.__fixture.padProfiles['dualsense-edge'],window.__fixture.padProfiles.elite]));
+ for(const [option,mode] of [['开启Steam全部','steamdeck'],['开启PS5全部','ps5'],['关闭','off']]){
+  await chooseControl('专用按键组合',option);assert.equal(await controlValue('专用按键组合'),option);
+  const stored=await page.evaluate(()=>({disabled:window.__fixture.padProfiles.disabled,targetEnabled:window.__fixture.targetEnabled,persona:window.__fixture.currentPersona,lastSave:window.__fixture.savedPads.at(-1)}));
+  assert.equal(stored.disabled.standaloneSpecialMode,mode);assert.equal(stored.targetEnabled,false);assert.equal(stored.persona,'disabled');
+  assert.deepEqual(stored.lastSave,{persona:'disabled',config:{standaloneSpecialMode:mode}});
+  cases.push({name:'disabled-output-special-selection-'+mode+'-saves-only-overlay-preset',ok:true});
+ }
+ assert.equal(await page.evaluate(()=>JSON.stringify([window.__fixture.padProfiles.steamdeck,window.__fixture.padProfiles['dualsense-edge'],window.__fixture.padProfiles.elite])),otherProfilesBefore);
+ cases.push({name:'disabled-special-dropdown-never-overwrites-Steam-PS-Xbox-profiles',ok:true});
+ await chooseControl('专用按键组合','开启Steam全部');await switchPersona('elite',true);await switchPersona('disabled',false);
+ assert.equal(await controlValue('专用按键组合'),'开启Steam全部');cases.push({name:'disabled-special-preset-restores-after-persona-switch',ok:true});
+ await page.locator('button[aria-label="专用按键组合"]').click();await page.waitForFunction(()=>Number(getComputedStyle(document.querySelector('.dd-menu')).opacity)===1);
+ await page.screenshot({path:path.join(out,'disabled-special-three-options.png'),animations:'disabled'});await page.keyboard.press('Escape');
+ await chooseControl('专用按键组合','关闭');
  await switchPersona('steamdeck',true);await page.locator('button[aria-label="专用按键组合"]').focus();await action('confirm');assert.equal(await page.locator('.dd-menu:visible').last().getByRole('option',{name:'只开启 Steam',exact:true}).count(),1);await page.keyboard.press('Escape');cases.push({name:'gamepad-opens-special-dropdown',ok:true});
  await page.locator('button[aria-label="背部按键组合"]').focus();await action('confirm');assert.equal(await page.locator('.dd-menu:visible').last().getByRole('option',{name:'L5+R5',exact:true}).count(),1);await page.keyboard.press('Escape');cases.push({name:'gamepad-opens-rear-dropdown',ok:true});
  await setLayout('关闭');await chooseControl('YMCC呼出位置','关闭');await chooseControl('专用按键组合','关闭');await chooseControl('背部按键组合','全关闭');assert.equal(await scale.count(),0);assert.equal(await page.locator('input[aria-label="触摸板显示透明度"]').count(),0);cases.push({name:'all-dropdown-overlays-off-hide-shared-sliders',ok:true});

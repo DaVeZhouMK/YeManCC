@@ -823,7 +823,7 @@ $pipe.Close()
   return { ok, safeFallback, reason: ok ? undefined : 'operation_failed', msgs: resps };
 }
 
-export async function applyGameSpeed(
+async function applyGameSpeedInternal(
   pid: number,
   factor: number,
   target?: SpeedTargetIdentity,
@@ -857,7 +857,7 @@ export async function applyGameSpeed(
   return enqueueSpeedOperation(() => speedOp(valveTarget.pid, { kind: 'apply', factor }, valveTarget, request));
 }
 
-export async function clearGameSpeed(
+async function clearGameSpeedInternal(
   pid: number,
   source: SpeedOperationSource = 'unknown',
 ): Promise<SpeedResult> {
@@ -888,4 +888,15 @@ export async function clearGameSpeed(
     `pid=${clearTarget.pid} processCreated=${clearTarget.processCreated} action=clear`,
   );
   return enqueueSpeedOperation(() => speedOp(clearTarget.pid, { kind: 'clear' }, clearTarget, request));
+}
+
+// Event-driven mirror refresh; uses the same session, never polls or persists.
+const speedStateListeners = new Set<() => void>();
+export function onGameSpeedStateChanged(listener: () => void): () => void { speedStateListeners.add(listener); return () => { speedStateListeners.delete(listener); }; }
+function notifySpeedStateChanged() { for (const listener of speedStateListeners) { try { listener(); } catch {} } }
+export async function applyGameSpeed(pid: number, factor: number, target?: SpeedTargetIdentity, source: SpeedOperationSource = 'user-factor'): Promise<SpeedResult> {
+  try { return await applyGameSpeedInternal(pid, factor, target, source); } finally { notifySpeedStateChanged(); }
+}
+export async function clearGameSpeed(pid: number, source: SpeedOperationSource = 'unknown'): Promise<SpeedResult> {
+  try { return await clearGameSpeedInternal(pid, source); } finally { notifySpeedStateChanged(); }
 }

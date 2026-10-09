@@ -23,7 +23,7 @@ const styles = [];
 const mocks = {
   '@/bridge/quickapp': `
     export const LS_PRIMARY='C:/fixture/LS.exe',OPTISCALER_CLIENT_DIR='C:/fixture/OPT',OPTISCALER_CLIENT_EXE='OPT.exe',OPTISCALER_CLIENT_URL='about:blank';
-    export const oneClickFrameGen=async()=>{},oneClickOptiScaler=async()=>{},dirnameOf=p=>p.slice(0,p.lastIndexOf('/')),
+    export const getLosslessGameState=async()=>({enabled:false}),setLosslessScalingEnabled=async()=>({notice:'fixture'}),oneClickOptiScaler=async()=>{},dirnameOf=p=>p.slice(0,p.lastIndexOf('/')),
       optiscalerAnalyze=async()=>({}),optiConsoleInstalled=async()=>false,openOptiConsole=async()=>{};
   `,
   '@/bridge/gamedetect': `import {ref} from 'vue';export const detectedGameName=ref('');export async function detectGame(){return null};export async function refreshGameStatus(){return null};export function subscribeGameStatus(cb){cb(null);return ()=>{}}`,

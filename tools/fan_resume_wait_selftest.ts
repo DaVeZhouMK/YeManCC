@@ -8,7 +8,7 @@
  * 全部走**生产**代码路径（FanHostLifecycle 的真实入队/等待/准入逻辑），只用夹具替换
  * adapter/launcher 与受控时钟（`resumeWaitDeadlineMs`）。不碰用户运行实例、不产生硬件写入。
  */
-import { FanHostLifecycle, type FanHostLauncher, type FanHostProcess } from '../src/bridge/fanHost';
+import { FanHostLifecycle, unsupportedFanControlError, type FanHostLauncher, type FanHostProcess } from '../src/bridge/fanHost';
 import { FanApiError, type FanApiAdapter, type FanHandshake, type FanLease, type FanNode, type FanState } from '../src/bridge/fanApi';
 import { readFileSync } from 'node:fs';
 
@@ -876,6 +876,32 @@ async function main(): Promise<void> {
     assert(writeHandlerBody.includes('appendFanLifecycleLog(event.c_str()'),
       'E1: 白名单事件必须写入已纳入导出的 fan-lifecycle.log');
   }
+
+  // FAN-942: current typed rejection and old Host context both stop immediately, while manual retry remains usable.
+  for (const typed of [true, false]) {
+    const adapter = new FakeAdapter();
+    const lifecycle = newLifecycle(adapter, 5000);
+    await armWake(lifecycle, adapter);
+    const rejected = () => ({ ...adapter.craft('AwaitingControl', false), openCalled: false, openEventsCalled: false,
+      hardwareWritesEnabled: false, lastError: 'FanApiException: HC 当前设备未声明 FanControl 能力',
+      ...(typed ? { fanCapabilitySupported: false } : {}) });
+    adapter.stateScript = [rejected, rejected, rejected];
+    const started = performance.now();
+    await lifecycle.resume().then(() => { throw new Error('FAN-942: unsupported resume accepted'); }, error => {
+      assert(error instanceof FanApiError && error.errorCode === 'FAN_UNSUPPORTED', `FAN-942: preserve definite capability error (${String(error)})`);
+    });
+    assert(performance.now() - started < 1500, 'FAN-942: definite rejection must not spend 15s waiting');
+    assert(!adapter.calls.includes('enable'), 'FAN-942: unsupported state never writes');
+    adapter.stateScript = [() => adapter.craft('Ready', true)];
+    const retryGate = await lifecycle.start(); // The UI's explicit manual-enable entry rearms the session.
+    assert(retryGate.allowed, 'FAN-942: manual start remains callable after capability rejection');
+    await lifecycle.apply(CURVE);
+    assert(adapter.calls.includes('enable'), 'FAN-942: corrected current capability permits next manual request');
+    await lifecycle.close();
+  }
+  assert(unsupportedFanControlError({ state: 'AwaitingControl', openCalled: false, openEventsCalled: false,
+    fanCapabilitySupported: true, lastError: 'HC 当前设备未声明 FanControl 能力' } as FanState) === null,
+    'FAN-942: explicit current support outranks stale historical error text');
 
   console.log('fan resume wait selftest: PASS (W1 bounded wait + next adjustment, W2 pre-queue cancel, W3 dedupe/deadline, W4 non-retryable/stale/lease, G7-A slow wake ~10.2s, G7-B no-wake/terminal/null/401/unknown, G7-C in-flight power entry + same-generation resumed, G7-D one absolute deadline + queue release, G8-A late heartbeat, E1 limited-liability evidence)');
 }

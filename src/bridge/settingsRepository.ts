@@ -79,6 +79,7 @@ export type SettingsSection =
   | 'performanceSchedule'
   | 'gameCustom'
   | 'tdp'
+  | 'rtss'
   | 'cpu'
   | 'sleep'
   | 'quickApps'
@@ -168,6 +169,7 @@ export interface UnifiedSettings extends JsonObject {
   performanceSchedule: JsonObject;
   gameCustom: JsonObject;
   tdp: JsonObject;
+  rtss: JsonObject;
   cpu: JsonObject;
   sleep: JsonObject;
   quickApps: JsonObject;
@@ -228,6 +230,12 @@ const DEFAULTS: UnifiedSettings = {
     profiles: {},
   },
   gameCustom: { version: 1, entries: {} },
+  rtss: {
+    frameRates: {
+      ac: { fps: 120, ceiling: 120, lastFps: 120 },
+      dc: { fps: 60, ceiling: 60, lastFps: 60 },
+    },
+  },
   tdp: {
     tdpMax: 120,
     fpsLimit: 120,
@@ -358,9 +366,23 @@ function mergeSettingsSnapshots<T>(base: T, patch: any): T {
   return out as T;
 }
 
+/** Explicit old FPS values need migration; injected defaults are not user intent. */
+function hasLegacyFrameRates(source: JsonObject): boolean {
+  if (isObject(source.tdp) && typeof source.tdp.fpsLimit === 'number' && Number.isFinite(source.tdp.fpsLimit)) return true;
+  const profiles = isObject(source.performanceSchedule) && isObject(source.performanceSchedule.profiles)
+    ? source.performanceSchedule.profiles : {};
+  return Object.values(profiles).some((side) => isObject(side) && Object.values(side).some((profile) =>
+    isObject(profile) && typeof profile.fpsTarget === 'number' && Number.isFinite(profile.fpsTarget)));
+}
+
 export function normalizeSettings(raw: unknown): UnifiedSettings {
   const source = isObject(raw) ? raw : {};
   const merged = mergeSettings(DEFAULTS, source) as UnifiedSettings;
+  const savedFrames = isObject(source.rtss) && isObject(source.rtss.frameRates) ? source.rtss.frameRates : null;
+  if (!savedFrames && hasLegacyFrameRates(source)) {
+    // Do not let new AC/DC defaults hide a user's older scalar/profile FPS.
+    delete merged.rtss.frameRates;
+  }
   const startup = isObject(merged.startupDesired) ? merged.startupDesired : {};
   merged.startupDesired = { ...startup, ...normalizeInputStartupPreferences(startup) };
   merged.schemaVersion = Number.isFinite(Number(merged.schemaVersion))
@@ -604,6 +626,9 @@ async function migrateLegacySettings(dir = settingsDir): Promise<UnifiedSettings
   const control = await readLegacyJson('control-config.json', dir);
   const legacyTdp = await readLegacyNumber('tdp.txt', dir);
   const legacyFps = await readLegacyNumber('FPS-ac.txt', dir);
+  if (hasLegacyFrameRates({ tdp: control, performanceSchedule: schedule }) || legacyFps !== null) {
+    delete next.rtss.frameRates;
+  }
   const float = await readLegacyJson('autofloat.json', dir);
   const tdpApply = await readLegacyJson('tdp-auto-apply.json', dir);
   const cpuProfiles = await readLegacyJson('cpu_profiles.json', dir);

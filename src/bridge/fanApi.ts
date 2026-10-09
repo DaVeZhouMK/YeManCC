@@ -57,6 +57,9 @@ export interface FanResumeRequest {
   reason?: string;
 }
 export interface FanState {
+  fanCapabilitySupported?: boolean | null;
+  fanControlCapabilityDeclared?: boolean | null;
+  fanCapabilityEvidence?: string;
   state: string;
   powerState?: string;
   /** Protocol-2 Hosts attest the full HC lifecycle in each state snapshot. */
@@ -150,6 +153,9 @@ function summarizeFanState(value: unknown): Record<string, unknown> | undefined 
     'oemPhysicalOwnershipConfirmed', 'oemRestoreEvidence', 'oemOwnershipStatus', 'unknownState',
     'factoryType', 'deviceClass', 'fanRoute', 'fanRouteCount',
     'fanRouteWriteReady', 'openCalled', 'openEventsCalled',
+    'fanCapabilitySupported', 'fanControlCapabilityDeclared', 'fanCapabilityEvidence',
+    'resumePhase', 'resumePhaseGeneration', 'controlAccepting', 'retryAfterMs',
+    'powerOperationGeneration', 'powerOperationAttempt', 'powerOperationStatus',
     'hcManagerFactoryStarted', 'hcManagerFactoryIsolated', 'hcOpenEventsInvoked',
     'hcManagerStatuses',
     'hcEventMode', 'leaseGeneration', 'lastTemperatureC', 'currentDutyPercent',

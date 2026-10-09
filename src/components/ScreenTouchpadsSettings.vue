@@ -4,7 +4,7 @@ import Dropdown from '@/components/Dropdown.vue';
 import Slider from '@/components/Slider.vue';
 import { on } from '@/bridge/ipc';
 import { LEFT_TOUCHPAD_MODES, RIGHT_TOUCHPAD_MODES, SINGLE_TOUCHPAD_MODES, SCREEN_TOUCHPAD_LAYOUTS,
-  SCREEN_SUMMON_POSITIONS, screenTouchpadsGet, screenTouchpadsSet, screenTouchpadProfile, screenTouchpadDefaults,
+  SCREEN_SUMMON_POSITIONS, STANDALONE_SPECIAL_MODES, screenTouchpadsGet, screenTouchpadsSet, screenTouchpadProfile, screenTouchpadDefaults,
   type ScreenTouchpadConfig, type ScreenTouchpadState } from '@/bridge/screenTouchpads';
 
 const props = withDefaults(defineProps<{ disabled?: boolean; persona?: string; steamDeckEnabled?: boolean; ps5Enabled?: boolean }>(),
@@ -35,8 +35,8 @@ const rightModes = computed(() => RIGHT_TOUCHPAD_MODES.filter(mode =>
 const singleModes = computed(() => SINGLE_TOUCHPAD_MODES.filter(mode => mode.value !== 'dualsense' || profile === 'dualsense-edge')
   .map(mode => ({ ...mode, label: psLabel(mode.label), disabled: mode.value === 'dualsense' && !psAllowed.value })));
 const rearSupported = profile === 'steamdeck' || props.persona === 'dualsense-edge';
-const specialSupported = profile !== 'disabled';
-const specialOptions = computed(() => profile === 'steamdeck'
+const standaloneSpecial = profile === 'disabled';
+const specialOptions = computed(() => standaloneSpecial ? STANDALONE_SPECIAL_MODES : profile === 'steamdeck'
   ? [{ value: 0, label: '关闭' }, { value: 1, label: '只开启 Steam' }, { value: 2, label: '只开启三点' }, { value: 3, label: '都开启' }]
   : isPs4.value
     ? [{ value: 0, label: '关闭' }, { value: 1, label: '都开启', sub: 'PS 按键' }]
@@ -44,13 +44,14 @@ const specialOptions = computed(() => profile === 'steamdeck'
     ? [{ value: 0, label: '关闭' }, { value: 1, label: '只开启 PS' }, { value: 2, label: '只开启静音' }, { value: 3, label: '都开启' }]
     : profile === 'elite' ? [{ value: 0, label: '关闭' }, { value: 1, label: '都开启', sub: 'Xbox 按键' }] : [{ value: 0, label: '关闭' }]);
 // Old Xbox toggle configurations used mask 3, but Xbox only exposes Guide.
-const specialSelection = computed(() => profile === 'elite' || isPs4.value ? state.value.specialMask & 1 : state.value.specialMask);
+const specialSelection = computed(() => standaloneSpecial ? state.value.standaloneSpecialMode ?? 'off'
+  : profile === 'elite' || isPs4.value ? state.value.specialMask & 1 : state.value.specialMask);
 const rearOptions = computed(() => profile === 'steamdeck'
   ? [{ value: 10, label: 'L5+R5' }, { value: 5, label: 'L4+R4' }, { value: 15, label: '全开启' }, { value: 0, label: '全关闭' }]
   : profile === 'dualsense-edge'
     ? [{ value: 5, label: 'LFN+RFN' }, { value: 10, label: 'LB+RB' }, { value: 15, label: '全开启' }, { value: 0, label: '全关闭' }]
     : [{ value: 0, label: '全关闭' }]);
-const overlaysEnabled = computed(() => state.value.layout !== 'off' || state.value.summonPosition !== 'off' || state.value.specialMask !== 0 || state.value.rearMask !== 0 || state.value.summonEnabled || state.value.specialEnabled || state.value.rearEnabled);
+const overlaysEnabled = computed(() => (standaloneSpecial && state.value.standaloneSpecialMode !== undefined && state.value.standaloneSpecialMode !== 'off') || state.value.layout !== 'off' || state.value.summonPosition !== 'off' || state.value.specialMask !== 0 || state.value.rearMask !== 0 || state.value.summonEnabled || state.value.specialEnabled || state.value.rearEnabled);
 const mouseEnabled = computed(() => state.value.layout === 'single' ? state.value.singleMode === 'mouse' : state.value.leftMode === 'mouse' || state.value.rightMode === 'mouse');
 // Keep actionable errors; omit the normal-operation explanatory text.
 const status = computed(() => error.value || (state.value.error
@@ -85,6 +86,13 @@ function change(patch: Partial<ScreenTouchpadConfig>, delayed = false): void {
   if (debounce !== undefined) clearTimeout(debounce);
   if (delayed) debounce = setTimeout(() => { debounce = undefined; void flush(); }, 180);
   else { debounce = undefined; void flush(); }
+}
+function changeSpecial(value: string | number): void {
+  if (standaloneSpecial) {
+    // Persist only the disabled overlay slot; never mutate outputTarget or a PS/Deck slot.
+    if (STANDALONE_SPECIAL_MODES.some(mode => mode.value === value))
+      change({ standaloneSpecialMode: value as ScreenTouchpadConfig['standaloneSpecialMode'] });
+  } else change({ specialMask: Number(value), specialEnabled: Number(value) !== 0 });
 }
 function changeLayout(layout: ScreenTouchpadConfig['layout']): void {
   const patch: Partial<ScreenTouchpadConfig> = { layout, enabled: layout !== 'off' };
@@ -142,8 +150,8 @@ onBeforeUnmount(() => {
           aria-label="YMCC呼出位置" @update:model-value="change({ summonPosition: $event as ScreenTouchpadConfig['summonPosition'], summonEnabled: $event !== 'off' })" />
       </div>
       <div class="screen-control-select"><label>专用按键</label>
-        <Dropdown :model-value="specialSelection" :options="specialOptions" :disabled="locked || !specialSupported"
-          aria-label="专用按键组合" @update:model-value="change({ specialMask: Number($event), specialEnabled: Number($event) !== 0 })" />
+        <Dropdown :model-value="specialSelection" :options="specialOptions" :disabled="locked"
+          aria-label="专用按键组合" @update:model-value="changeSpecial($event)" />
       </div>
       <div class="screen-control-select"><label>背部按键</label>
         <Dropdown :model-value="state.rearMask" :options="rearOptions" :disabled="locked || !rearSupported"

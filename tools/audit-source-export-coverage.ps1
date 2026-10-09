@@ -91,6 +91,13 @@ $rules = @(
   [pscustomobject]@{ match='^InputHost/';         kind='build-input'; dest='PowerControl/feature-assets/virtual-gamepad/YeManInputHost.*'; code='' },
   [pscustomobject]@{ match='^GamepadPrerequisites/';kind='build-input'; dest='PowerControl/redist/HIDMaestroSetup.*'; code='' },
   [pscustomobject]@{ match='^FanLab/LightSetter/';kind='build-input'; dest='PowerControl/light-setter/**'; code='' },
+  # decky 侧边栏插件源树（2026-10-09）：tools/build-decky-sidebar-plugin.mjs 以
+  # decky-plugin/src/index.tsx 为入口打包，并从 decky-plugin/ 取 package.json、
+  # plugin.json、LICENSE.decky-api，产出必发载荷
+  # PowerControl/decky/plugins/ymcc-sidebar/**（见 package-release.ps1 精确白名单与
+  # tools/decky_sidebar_packaging_selftest.mjs 契约）。与 src/、InputHost/、
+  # FanLab/LightSetter/ 同属"编译/构建产物进包"车道。
+  [pscustomobject]@{ match='^decky-plugin/';      kind='build-input'; dest='PowerControl/decky/plugins/ymcc-sidebar/**'; code='' },
   [pscustomobject]@{ match='^FanLab/real-host/';  kind='payload-source'; dest='PowerControl/fan-host-v2/** (verified source: PowerControl/fan-host)'; code='' },
   [pscustomobject]@{ match='^FanLab/';            kind='excluded'; dest='-'; code='E-FANLAB-LAB' },
   [pscustomobject]@{ match='^PowerControl/\.gitignore$'; kind='excluded'; dest='-'; code='E-ROOT-CONFIG' },

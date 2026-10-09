@@ -1,3 +1,4 @@
+import { FRAME_RATE_CEILINGS } from './frameRateModel';
 // yeman.ts — 语义化后端桥层（强强壳 shell.run / fs 封装）
 //
 // 所有 powercfg GUID、任务计划名、bat/vbs/ps1 路径、厂商识别逻辑都收在这里，
@@ -11,6 +12,7 @@ import { rtssIniValue, setRtssIniValue } from './rtssOverlay';
 import { getSettingsGeneration, assertSettingsGeneration, readSettingsSection, saveSettingsSection, setSettingsDirectory } from './settingsRepository';
 import { runTdpHardwareWrite } from './tdpCircuitBreaker';
 import { OEM_EMPTY_SNAPSHOT, normalizeOemKeysSnapshot, type OemKeysSnapshot } from './controllerShortcutRules';
+import { readGamingHomeState, setGamingHomeStartup, type GamingHomeState, type GamingHomeRegistryPort } from './gamingHomePolicy';
 
 // ── 可配置根目录（自测时可指向临时目录） ──
 let PC_DIR = 'C:\\SOFT\\YeMan\\PowerControl';
@@ -55,7 +57,8 @@ export interface TaskDef {
 export const TASKS: TaskDef[] = [
   { name: 'Steamcommunity_302', trigger: '开机', asset: 'C:\\SOFT\\steamcommunity\\steamcommunity_302.cli.exe', xml: 'Steamcommunity_302.xml', taskPath: 'Steamcommunity_302' },
   { name: BOOT_RTSS_TASK, trigger: '开机', asset: 'YeManRTSS.bat', xml: '监控-开机启动监控锁帧软件RTSS.xml' },
-  { name: 'Xbox大屏游戏模式', trigger: '开机', asset: 'YeManSteam.bat', xml: 'Xbox大屏游戏模式.xml' },
+  // Legacy task remains query/delete-only; persistent registry settings need no boot task.
+  { name: 'Xbox大屏游戏模式', trigger: '旧版兼容', asset: '(旧版任务，仅清理，不再创建)' },
   { name: '桌面模式-开机设置为桌面模式', trigger: '开机', asset: '(内置)', xml: '桌面模式-开机设置为桌面模式.xml' },
   { name: '节能-能源之星', trigger: '开机', asset: 'EnergyStar.vbs', xml: '节能-能源之星.xml' },
   { name: '内存-开机自动内存清理并关闭', trigger: '开机', asset: 'MG-AUTO\\清理内存.bat', xml: '内存-开机自动内存清理并关闭.xml' },
@@ -94,12 +97,13 @@ export async function readTdp(_mode: 'ac' | 'dc'): Promise<number | null> {
   const cfg = await readControlConfig();
   return cfg.tdpMax == null ? null : clampTdp(cfg.tdpMax);
 }
-export async function saveFps(_mode: 'ac' | 'dc', fps: number): Promise<void> {
-  await mutateControlConfig({ fpsLimit: Math.max(0, Math.round(fps)) });
+export async function saveFps(mode: 'ac' | 'dc', fps: number): Promise<void> {
+  const { saveGlobalFrameRate } = await import('./frameRateLimits');
+  await saveGlobalFrameRate(mode, fps);
 }
-export async function readFps(_mode: 'ac' | 'dc'): Promise<number | null> {
-  const cfg = await readControlConfig();
-  return cfg.fpsLimit == null ? null : Math.max(0, Math.round(cfg.fpsLimit));
+export async function readFps(mode: 'ac' | 'dc'): Promise<number | null> {
+  const { loadGlobalFrameRates } = await import('./frameRateLimits');
+  return (await loadGlobalFrameRates())[mode].fps;
 }
 // 电源记忆已并入统一配置。保留这个兼容入口是为了不改变页面调用方，
 // 但不再生成 Power.txt，避免升级后重新出现旧配置文件。
@@ -383,29 +387,60 @@ export async function toggleTask(name: string, on: boolean): Promise<boolean> {
   }
 }
 
-// ── Xbox 全屏游戏模式「开机启动」：注册表 HKCU\Software\Microsoft\Windows\CurrentVersion\GamingConfiguration\StartupToGamingHome ──
-// 1 = 开机进入 Xbox 全屏游戏模式；0 = 正常启动。必须在 Xbox APP 可正常启动的前提下才生效。
-const GAMING_CFG_KEY = 'Software\\Microsoft\\Windows\\CurrentVersion\\GamingConfiguration';
-const GAMING_HOME_VALUE = 'StartupToGamingHome';
+// ── Windows 全屏启动：只在用户操作时应用 DeviceForm=46 / StartupToGamingHome=1 ──
+let gamingBackupSequence = 0;
+async function gamingBackupPath(extension: string): Promise<string> {
+  const directory = join(PC_DIR, 'gaming-home-backups');
+  if (!await fs.exists(directory) && !await fs.mkdir(directory)) {
+    throw new Error('无法创建全屏启动备份目录，停止修改。');
+  }
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  return join(directory, stamp + '-' + (++gamingBackupSequence) + extension);
+}
+const gamingHomeRegistry: GamingHomeRegistryPort = {
+  read: (root, key, name) => registry.read(root, key, name),
+  write: (root, key, name, value) => registry.write(root, key, name, value),
+  // Delete only the selected VALUE when rolling back an originally absent value.
+  remove: (root, key, name) => invoke<boolean>('registry.delete', { root, path: key, name }),
+  saveBackup: async (state) => {
+    await fs.writeTextFileAtomic(await gamingBackupPath('.json'), JSON.stringify({
+      schema: 1, accountScope: 'HKCU of the Windows account running YMCC',
+      createdAt: new Date().toISOString(), before: state,
+    }, null, 2));
+  },
+};
+export function readGamingHomeConfiguration(): Promise<GamingHomeState> {
+  return readGamingHomeState(gamingHomeRegistry);
+}
 export async function readGamingHomeStartup(): Promise<boolean> {
-  try {
-    const v = await registry.read('HKCU', GAMING_CFG_KEY, GAMING_HOME_VALUE);
-    return v === 1 || v === true;
-  } catch {
-    return false;
+  return (await readGamingHomeConfiguration()).startupEnabled;
+}
+async function retireLegacyGamingTask(): Promise<void> {
+  for (const task of taskPathCandidates('Xbox大屏游戏模式')) {
+    if (!await taskDefinedAtPath(task)) continue;
+    const backup = await shell.run('schtasks', ['/Query', '/TN', task, '/XML']);
+    if (backup.exitCode !== 0 || !backup.stdout.trim()) {
+      throw new Error('新配置已保存，但旧 physpanel 任务备份失败，未删除该任务。');
+    }
+    await fs.writeTextFileAtomic(await gamingBackupPath('.task.xml'), backup.stdout);
+  }
+  if (!await deleteTask('Xbox大屏游戏模式')) {
+    throw new Error('新配置已保存，但旧 physpanel 任务清理失败，请检查管理员权限。');
   }
 }
-export async function writeGamingHomeStartup(on: boolean): Promise<boolean> {
-  try {
-    const ok = await registry.write('HKCU', GAMING_CFG_KEY, GAMING_HOME_VALUE, on ? 1 : 0);
-    return ok === true;
-  } catch {
-    return false;
-  }
+let gamingHomeWriteTail: Promise<void> = Promise.resolve();
+export function writeGamingHomeStartup(on: boolean): Promise<boolean> {
+  // Serialize explicit writes. Reads, mounts and activation never enqueue a write.
+  const action = gamingHomeWriteTail.then(async () => {
+    await setGamingHomeStartup(gamingHomeRegistry, on);
+    await retireLegacyGamingTask();
+    return true;
+  });
+  gamingHomeWriteTail = action.then(() => {}, () => {});
+  return action;
 }
 
-// 批量删除「\\野蛮优化整合系统」任务目录中的全部计划任务。
-// 使用任务计划原生目录查询，不依赖前端已知任务列表，确保补充任务也会一并删除。
+// 批量删除任务目录中的全部计划任务；不修改独立的 Windows 全屏启动配置。
 export async function deleteAllYemanTasks(): Promise<void> {
   const taskPathPrefix = `\\${TASK_FOLDER}\\`;
   const command = `$p='${taskPathPrefix.replace(/'/g, "''")}'; Get-ScheduledTask -TaskPath $p -ErrorAction SilentlyContinue | Unregister-ScheduledTask -Confirm:$false`;
@@ -1786,7 +1821,7 @@ export function freqToMaxState(freqMhz: number): number {
   return Math.max(1, Math.min(100, Math.round(freqMhz / 50)));
 }
 // FPS 上限档位：0 = 不锁帧（真实数值 0，RTSS Limit=0），其余 30~300（300 2026-08-04 起开放）。
-export const FPS_CEILINGS = [0, 30, 60, 90, 120, 200, 300];
+export const FPS_CEILINGS = FRAME_RATE_CEILINGS;
 export const FPS_MIN = 20;
 export const FPS_MAX_DEFAULT = 300;
 
@@ -1838,8 +1873,9 @@ async function reloadRtssProfiles(dir: string): Promise<void> {
   }
 }
 
-export function setRtssLimit(fps: number): Promise<void> {
+export function setRtssLimit(fps: number, isCurrent: () => boolean = () => true): Promise<void> {
   const run = rtssConfigWriteQueue.then(async () => {
+    if (!isCurrent()) return;
     const dir = await resolveRtssDir();
     const global = `${dir}\\Profiles\\Global`;
     if (!(await fs.exists(global))) throw new Error('RTSS Global 配置不存在');
@@ -1860,7 +1896,8 @@ export function setRtssLimit(fps: number): Promise<void> {
     // lacks it, insert it at the top rather than silently reporting success.
     outLines.unshift(`Limit=${v}`);
   }
-  await fs.writeTextFileAtomic(global, outLines.join('\r\n'));
+  if (!isCurrent()) return;
+    await fs.writeTextFileAtomic(global, outLines.join('\r\n'));
   // 重载配置：外部改完文件后只 LoadProfile(重新载入磁盘) + UpdateProfiles(套用到运行中的游戏)。
   // ⚠ 不要 SaveProfile —— 它会把 RTSS 内存里的旧状态写回磁盘，覆盖刚改的内容甚至写坏（损坏根因）。
   // ⚠ 不能用 rundll32：RTSS SDK 的 LoadProfile 是 void(LPCSTR)，与 rundll32
@@ -2136,7 +2173,12 @@ export async function sleepGuardSet(on: boolean): Promise<void> {
   await invoke('sleepGuard.set', { on });
 }
 export async function sleepGuardSetConfig(cfg: Partial<SleepGuardStatus>): Promise<void> {
-  await invoke('sleepGuard.setConfig', cfg);
+  if (Object.keys(cfg).length === 1 && typeof cfg.steamOverlayOffFix === 'boolean') {
+    const receipt = await invoke<{ok:boolean;reason?:string}>('steam.settings.set', {overlayOffFix:cfg.steamOverlayOffFix});
+    if (!receipt.ok) throw new Error(receipt.reason || 'Steam 联动参数保存失败');
+    return;
+  }
+  await invoke('sleepGuard.setConfig', cfg); // non-Steam sleep settings keep their original route
 }
 export interface SleepFactEvent {
   time: string;

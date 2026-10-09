@@ -98,6 +98,37 @@ function Set-Pin([string]$Text, [string]$Pattern, [string]$NewValue, [int]$Expec
   return [ordered]@{ Text = $result; Olds = $olds; Lines = $lines; Count = $matches.Count }
 }
 
+# New update layouts bind the incoming runtime manifest instead of a fixed HC hash.
+# Preserve that validation verbatim; unknown/partial layouts still stop the rebaseline.
+function Set-NativeHcPin([string]$Text, [string]$HcHash) {
+  $legacy = '\(\[string\]\$hc\[0\]\.sha256\) -ine ''([0-9A-Fa-f]{64})'''
+  if ([regex]::Matches($Text, $legacy).Count -gt 0) {
+    $plan = Set-Pin $Text $legacy $HcHash 1 'native.main.hcPin'
+    $plan.NewAudit = $HcHash
+    return $plan
+  }
+  $guards = @(
+    '(Get-FileHash -LiteralPath $runtimeManifestPath -Algorithm SHA256).Hash -ine ([string]$binding.runtimeManifestSha256)',
+    '(Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash -ine ([string]$entry.sha256)',
+    '$hc.Count -ne 1 -or ([string]$hc[0].sha256) -notmatch ''^[0-9A-Fa-f]{64}$'''
+  )
+  $start = $Text.IndexOf('function Assert-FanHostV2Payload', [StringComparison]::Ordinal)
+  $end = if ($start -ge 0) { $Text.IndexOf('function Normalize-ManifestRelativePath', $start, [StringComparison]::Ordinal) } else { -1 }
+  if ($start -lt 0 -or $end -le $start) { throw 'rebaseline native HC validation boundary not found' }
+  $runtimeStart = $Text.IndexOf('$runtimeManifestPath = Join-Path $fanHostRuntimeSource', $start, [StringComparison]::Ordinal)
+  if ($runtimeStart -lt $start -or $runtimeStart -ge $end) { throw 'rebaseline native HC runtime boundary not found' }
+  $validation = $Text.Substring($runtimeStart, $end - $runtimeStart)
+  foreach ($guard in $guards) {
+    if ([regex]::Matches($validation, [regex]::Escape($guard)).Count -ne 1) {
+      throw 'rebaseline native HC identity: expected unique incoming-manifest/hash guards'
+    }
+  }
+  $index = $Text.IndexOf($guards[2], [StringComparison]::Ordinal)
+  return [ordered]@{ Text = $Text; Olds = @('incoming-runtime-manifest');
+    Lines = @(($Text.Substring(0, $index) -split "`n").Count); Count = 1;
+    NewAudit = 'incoming-runtime-manifest (unchanged)' }
+}
+
 function Write-Utf8Atomic([string]$Path, [byte[]]$Bytes) {
   $tmp = Join-Path (Split-Path -Parent $Path) ('.rebaseline-' + [guid]::NewGuid().ToString('N') + '.tmp')
   try {
@@ -293,7 +324,7 @@ $nativePlan = Set-Pin $pre.nativeText '\$expectedFanHostV2ManifestSha256\s*=\s*'
 $nativeText2 = $nativePlan.Text
 $nativeCount = Set-Pin $nativeText2 '\$expectedFanHostV2ManifestFileCount\s*=\s*(\d+)' ([string]$newFileCount) 1 'native.main.fileCount'
 $nativeText2 = $nativeCount.Text
-$nativeHc = Set-Pin $nativeText2 '\(\[string\]\$hc\[0\]\.sha256\) -ine ''([0-9A-Fa-f]{64})''' $hcUpper 1 'native.main.hcPin'
+$nativeHc = Set-NativeHcPin $nativeText2 $hcUpper
 $nativeText2 = $nativeHc.Text
 $newNativeBytes = Get-TextBytes $nativeText2 $pre.nativeHasBom
 
@@ -305,6 +336,8 @@ $verifyDllMarker = Set-Pin $verifyText2 'approvedHostDllSha256:\s*([0-9A-Fa-f]{6
 $verifyText2 = $verifyDllMarker.Text
 $verifyExe = Set-Pin $verifyText2 "'YeManFanHost\.exe'\s*=\s*'([0-9A-Fa-f]{64})'" $newExe.ToUpperInvariant() 1 'verify.exe'
 $verifyText2 = $verifyExe.Text
+$verifyExeMarker = Set-Pin $verifyText2 'approvedHostExeSha256:\s*([0-9A-Fa-f]{64})' $newExe.ToUpperInvariant() 1 'verify.exeMarker'
+$verifyText2 = $verifyExeMarker.Text
 $verifyHcMarker = Set-Pin $verifyText2 'approvedHcSha256:\s*([0-9A-Fa-f]{64})' $hcUpper 1 'verify.hcMarker'
 $verifyText2 = $verifyHcMarker.Text
 $verifyHcComment = Set-Pin $verifyText2 'HandheldCompanion\.dll \(([0-9A-Fa-f]{8})\.\.\.\)' $hcShort 1 'verify.hcComment'
@@ -355,9 +388,10 @@ $sym += [pscustomobject]@{ Sym = "verify 'YeManFanHost.dll' pin"; File = 'tools\
 $sym += [pscustomobject]@{ Sym = 'verify approvedHostDllSha256 marker'; File = 'tools\verify-r5v9-fan-host-payload.ps1'; Line = $verifyDllMarker.Lines[0]; Old = $verifyDllMarker.Olds[0]; New = $newDll.ToUpperInvariant(); Hits = 1 }
 $sym += [pscustomobject]@{ Sym = "verify 'YeManFanHost.exe' pin (expect unchanged)"; File = 'tools\verify-r5v9-fan-host-payload.ps1'; Line = $verifyExe.Lines[0]; Old = $verifyExe.Olds[0]; New = $newExe.ToUpperInvariant(); Hits = 1 }
 $sym += [pscustomobject]@{ Sym = 'auth approvedHostDllSha256'; File = 'PowerControl\fan-host\YeManFanHost.authorization.md'; Line = $authDll.Lines[0]; Old = $authDll.Olds[0]; New = $newDll.ToUpperInvariant(); Hits = 1 }
-$sym += [pscustomobject]@{ Sym = 'auth approvedHostExeSha256 (expect unchanged)'; File = 'PowerControl\fan-host\YeManFanHost.authorization.md'; Line = $authExe.Lines[0]; Old = $authExe.Olds[0]; New = $newExe.ToUpperInvariant(); Hits = 1 }
+$sym += [pscustomobject]@{ Sym = 'auth approvedHostExeSha256'; File = 'PowerControl\fan-host\YeManFanHost.authorization.md'; Line = $authExe.Lines[0]; Old = $authExe.Olds[0]; New = $newExe.ToUpperInvariant(); Hits = 1 }
 $sym += [pscustomobject]@{ Sym = 'auth approvedHcSha256'; File = 'PowerControl\fan-host\YeManFanHost.authorization.md'; Line = $authHc.Lines[0]; Old = $authHc.Olds[0]; New = $newHc.ToUpperInvariant(); Hits = 1 }
-$sym += [pscustomobject]@{ Sym = 'native HC pin ($hc[0].sha256)'; File = 'native\main.cpp'; Line = $nativeHc.Lines[0]; Old = $nativeHc.Olds[0]; New = $hcUpper; Hits = 1 }
+$sym += [pscustomobject]@{ Sym = 'native HC pin ($hc[0].sha256)'; File = 'native\main.cpp'; Line = $nativeHc.Lines[0]; Old = $nativeHc.Olds[0]; New = $nativeHc.NewAudit; Hits = 1 }
+$sym += [pscustomobject]@{ Sym = 'verify approvedHostExeSha256 marker'; File = 'tools\verify-r5v9-fan-host-payload.ps1'; Line = $verifyExeMarker.Lines[0]; Old = $verifyExeMarker.Olds[0]; New = $newExe.ToUpperInvariant(); Hits = 1 }
 $sym += [pscustomobject]@{ Sym = 'verify approvedHcSha256 marker'; File = 'tools\verify-r5v9-fan-host-payload.ps1'; Line = $verifyHcMarker.Lines[0]; Old = $verifyHcMarker.Olds[0]; New = $hcUpper; Hits = 1 }
 $sym += [pscustomobject]@{ Sym = 'verify HC comment'; File = 'tools\verify-r5v9-fan-host-payload.ps1'; Line = $verifyHcComment.Lines[0]; Old = $verifyHcComment.Olds[0]; New = $hcShort; Hits = 1 }
 $sym += [pscustomobject]@{ Sym = 'realHost ExpectedHcSha256'; File = 'FanLab\real-host\Program.cs'; Line = $realHostPin.Lines[0]; Old = $realHostPin.Olds[0]; New = $newHc; Hits = 1 }
@@ -447,5 +481,7 @@ Write-Output ("Evidence: $evidenceDir\preimage.json")
 
 # ---------------------------------------------------------------- post-apply verify
 & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File $verifier
-Write-Output ("VERIFY_EXIT=$LASTEXITCODE")
+$verifyExit = $LASTEXITCODE
+Write-Output ("VERIFY_EXIT=$verifyExit")
+if ($verifyExit -ne 0) { throw "rebaseline post-apply verifier failed: exit=$verifyExit" }
 Write-Output '==== END PLAN ===='

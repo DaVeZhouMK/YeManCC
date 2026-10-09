@@ -1,6 +1,8 @@
 import { invoke } from './ipc';
 import { getUiSetting, setUiSettings } from './uiSettings';
 
+export const DEFAULT_BACKGROUND_VIDEO_PATH = 'C:\\SOFT\\YeMan\\Demo\\MP4\\SteamDeck.mp4';
+
 export type BackgroundKind = 'image' | 'video';
 
 export interface BackgroundState {

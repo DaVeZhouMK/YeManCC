@@ -211,12 +211,35 @@ jobs:
           powershell -NoProfile -ExecutionPolicy Bypass -File tools/fan_host_path_gate.ps1 -ProjectRoot $env:GITHUB_WORKSPACE -ReleaseZip (Join-Path $env:GITHUB_WORKSPACE 'Release\Packages\YeManCC.zip')
           if ($LASTEXITCODE -ne 0) { throw 'Local Fan Host V2 path/identity gate failed.' }
 
+      - name: Assemble complete release attachments from the immutable source tag
+        shell: pwsh
+        run: |
+          $tag = '${{ github.ref_name }}'
+          $tagCommit = (git rev-parse "$tag^{commit}").Trim()
+          if ($LASTEXITCODE -ne 0 -or $tagCommit -ne (git rev-parse HEAD).Trim()) { throw 'Source archive must come from the checked-out release tag.' }
+          $sourceName = "YeManCC-source-$tag.zip"
+          $sourcePath = Join-Path $env:GITHUB_WORKSPACE "Release/Packages/$sourceName"
+          git archive --format=zip --prefix=YeManCC/ --output=$sourcePath $tag
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) { throw 'Tagged source ZIP creation failed.' }
+          $packageDir = Join-Path $env:GITHUB_WORKSPACE 'Release/Packages'
+          Copy-Item -LiteralPath Release/version.json -Destination (Join-Path $packageDir 'version.json') -Force
+          $rows = foreach ($name in @('YeManCC.zip', $sourceName, 'version.json')) {
+            $file = Join-Path $packageDir $name
+            $hash = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash
+            "$hash  $name"
+          }
+          [IO.File]::WriteAllText((Join-Path $packageDir 'SHA256SUMS.txt'), (($rows -join "`n") + "`n"), [Text.Encoding]::ASCII)
+          Write-Output "COMPLETE_RELEASE_ATTACHMENTS_OK sourceTag=$tag commit=$tagCommit"
+
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
             Release/Packages/YeManCC.zip
-          overwrite_files: true
+            Release/Packages/YeManCC-source-${{ github.ref_name }}.zip
+            Release/Packages/version.json
+            Release/Packages/SHA256SUMS.txt
+          overwrite_files: false
           body_path: ${{ env.RELEASE_NOTES_PATH }}
           generate_release_notes: false
         env:
@@ -243,6 +266,27 @@ jobs:
           $publishedHash = (Get-FileHash -LiteralPath (Join-Path $downloadRoot 'YeManCC.zip') -Algorithm SHA256).Hash
           if ($publishedHash -ne [string]$manifest.sha256) {
             throw "Published asset SHA-256 mismatch: expected $($manifest.sha256), got $publishedHash"
+          }
+
+      - name: Verify every complete-release attachment by downloading published bytes
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = '${{ github.ref_name }}'
+          $names = @('YeManCC.zip', "YeManCC-source-$tag.zip", 'version.json', 'SHA256SUMS.txt')
+          $downloadRoot = Join-Path $env:RUNNER_TEMP 'published-yemancc'
+          foreach ($name in $names) {
+            $local = Join-Path $env:GITHUB_WORKSPACE "Release/Packages/$name"
+            $public = Join-Path $downloadRoot $name
+            if (-not (Test-Path -LiteralPath $public -PathType Leaf)) {
+              gh release download $tag --repo '${{ github.repository }}' --pattern $name --dir $downloadRoot
+              if ($LASTEXITCODE -ne 0) { throw "Cannot download published attachment: $name" }
+            }
+            if ((Get-FileHash -LiteralPath $local -Algorithm SHA256).Hash -ne (Get-FileHash -LiteralPath $public -Algorithm SHA256).Hash) {
+              throw "Published attachment differs from its built/source bytes: $name"
+            }
+            Write-Output "PUBLIC_ATTACHMENT_HASH_OK $name"
           }
 
       - name: Verify published Fan Host V2 lane and source-bound bytes
@@ -312,3 +356,14 @@ jobs:
           $result = $payload | gh api --method PUT "repos/$repo/contents/version.json" --input - | ConvertFrom-Json
           if (-not $result.commit.sha) { throw 'Failed to commit generated version manifest through GitHub API' }
           Write-Output "version manifest committed: $($result.commit.sha)"
+
+      - name: Preserve release provenance and checksums
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-provenance-${{ github.ref_name }}
+          path: |
+            ${{ runner.temp }}/release-runner-compatibility.json
+            ${{ runner.temp }}/version.json
+            Release/Packages/SHA256SUMS.txt
+          if-no-files-found: warn

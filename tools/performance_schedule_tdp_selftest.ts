@@ -103,6 +103,7 @@ async function main(): Promise<void> {
     const autofloat = await import('../src/bridge/autofloat');
     const cpuProfiles = await import('../src/bridge/cpuProfiles');
     const schedule = await import('../src/bridge/performanceSchedule');
+    const frameRates = await import('../src/bridge/frameRateLimits');
     settings.setSettingsDirectory(dir);
     yeman.setPowerControlDir(dir);
     autofloat.setAutofloatPowerControlDir(dir);
@@ -132,6 +133,8 @@ async function main(): Promise<void> {
     await settings.saveSettingsSection('fan', { deviceIdentity: reactive({ manufacturer: 'fixture', model: 'test' }) });
     await settings.saveSettingsSection('quickApps', { apps: reactive([{ name: 'fixture', path: 'fixture.exe' }]) });
 
+    await frameRates.saveGlobalFrameRate('ac',120);
+    await frameRates.saveGlobalFrameRate('dc',60);
     const autoApplied = await schedule.applyPerformanceSchedule('dc', 'balanced', config);
     assert(autoApplied, 'TDP rc=6 不应让手动→自动切换返回失败');
     assert(autofloat.getFloatInfo().enabled, 'TDP rc=6 后 CPU 浮动仍应启动');
@@ -146,15 +149,17 @@ async function main(): Promise<void> {
     assert(writes.some((item) => item.name === 'DCSettingIndex'), 'TDP 失败后 DC CPU 参数仍应写入');
     assert(!writes.some((item) => item.path.endsWith(`\\${CPU_MAX_STATE}`)), 'CPU 浮动接管时不得重复应用固定 CPU 挡位');
 
-    // 0 = 不锁帧：自动档位不得继续启动或继承 CPU/TDP 浮动。
+    // Deprecated per-combination FPS (including zero) cannot stop floating or rebind independent FPS.
     config.profiles.dc.balanced.fpsTarget = 0;
     config.profiles.dc.balanced.cpuTarget = 'aggressive';
     config.profiles.dc.balanced.tdpStrategy = 'aggressive';
     writes.length = 0;
     const noLockApplied = await schedule.applyPerformanceSchedule('dc', 'balanced', config);
     assert(noLockApplied, '不锁帧档位仍应完成自动模式应用');
-    assert(!autofloat.getFloatInfo().enabled, '不锁帧不得启动 CPU/TDP 浮动');
-    assert(autofloat.getFloatInfo().target === 0, '不锁帧必须保留真实目标值 0');
+    assert(autofloat.getFloatInfo().enabled, '组合旧帧率为0也不能关闭CPU/TDP浮动');
+    assert(autofloat.getFloatInfo().target === 60, '优化参考目标必须读取独立DC帧率，不读取组合旧帧率');
+    config.profiles.dc.balanced.cpuTarget='none';writes.length=0;
+    await schedule.applyPerformanceSchedule('dc','balanced',config);
     assert(writes.length === 12, `固定 CPU 挡位应只写当前 DC 侧 12 项，实际=${writes.length}`);
     assert(writes.every((item) => item.name === 'DCSettingIndex'), 'DC 自动挡位不得覆盖 AC 保存值');
     const valueFor = (setting: string) => writes.find((item) => item.path.endsWith(`\\${setting}`))?.value;
@@ -169,7 +174,9 @@ async function main(): Promise<void> {
     config.profiles.dc.balanced.fpsTarget = 45;
     const relockApplied = await schedule.applyPerformanceSchedule('dc', 'balanced', config);
     assert(relockApplied, '从不锁帧切回有效目标后应能重新应用自动浮动');
-    assert(autofloat.getFloatInfo().enabled, '有效 FPS 目标应重新启动浮动');
+    assert(autofloat.getFloatInfo().enabled, '性能组合应用不受旧帧率字段控制');
+    assert(autofloat.getFloatInfo().target===60, '切换旧组合帧率不能改变独立DC值');
+    assert((await frameRates.loadGlobalFrameRates()).ac.fps===120, 'DC模式不得改写独立AC帧率');
 
     await schedule.disablePerformanceSchedule(config);
     assert(!autofloat.getFloatInfo().enabled, '自动→手动必须停止 CPU 浮动控制');
@@ -204,6 +211,7 @@ async function main(): Promise<void> {
     offWarning();
     console.log('performance schedule TDP isolation: PASS');
   } finally {
+    await (await import('../src/bridge/autofloat')).disableFloat().catch(()=>{});
     rmSync(dir, { recursive: true, force: true });
     delete (globalThis as any).__mockShellResponder;
     delete (globalThis as any).__mockIpcResponder;

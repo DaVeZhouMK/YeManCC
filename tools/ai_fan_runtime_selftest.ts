@@ -10,7 +10,7 @@ if(fs.existsSync(out) && !(process.env.CPU_AI_FAN_CLIENT_TRANSPORT==='1' && fs.r
 fs.mkdirSync(out,{recursive:true});
 const clientTransport=process.env.CPU_AI_FAN_CLIENT_TRANSPORT==='1';
 if(clientTransport && (!process.execPath.startsWith(out+path.sep)||path.basename(process.execPath)!=='YeManCC.exe'))throw Error('CLIENT_TEST_REQUIRES_ISOLATED_NODE_FIXTURE');
-const artifact=path.resolve(process.env.CPU_AI_FAN_HOST_ARTIFACT ?? 'Build/Validation/CPU-AI-Fan-Integration-20261004/fan-host-candidate-v4');
+const artifact=path.resolve(process.env.CPU_AI_FAN_HOST_ARTIFACT ?? 'FanLab/real-host/bin/Release/net10.0-windows10.0.19041.0/win-x64');
 const hostDir=path.join(clientTransport?path.dirname(path.dirname(process.execPath)):out,'PowerControl','fan-host-v2');fs.mkdirSync(hostDir,{recursive:true});
 for(const file of fs.readdirSync(artifact)){if(fs.statSync(path.join(artifact,file)).isFile())fs.copyFileSync(path.join(artifact,file),path.join(hostDir,file));}
 const hostExe=path.join(hostDir,'YeManFanHost.exe');
@@ -45,10 +45,18 @@ async function invoke(cmd:string,a:Record<string,any>){
  case 'fs.readTextFile':{reads++;const b=await fsp.readFile(localPath(a.path));if(b.length>a.maxBytes)throw Error('TOO_LARGE');return b.toString('utf8');}
  case 'fs.writeTextFileAtomic':{writes++;const p=localPath(a.path);await fsp.mkdir(path.dirname(p),{recursive:true});await fsp.writeFile(p+'.tmp',a.content);await fsp.rename(p+'.tmp',p);return true;}
  case 'proc.findExact':assert.equal(path.resolve(a.path).toLowerCase(),hostExe.toLowerCase());return {found:ownedPid()>0,pid:ownedPid()};
+ case 'process.identity':return a.pid===ownedPid()&&ownedPid()>0?{valid:true,pid:ownedPid(),processCreated:fixtureCreationTime,path:hostExe}:{valid:false,pid:a.pid};
+ case 'process.terminateExact':{
+  const matches=a.pid===ownedPid()&&a.processCreated===fixtureCreationTime&&path.resolve(a.path).toLowerCase()===hostExe.toLowerCase();
+  if(!ownedPid())return {ok:true,matched:false,exited:true,reason:'already-exited'};
+  if(!matches)return {ok:false,matched:false,exited:false,reason:'identity-mismatch'};
+  forcedKills++;child!.kill();return {ok:true,matched:true,exited:false,reason:'termination-requested'};
+ }
  case 'process.terminateTree':if(!ownedPid())return {ok:true,attempted:0,terminated:0};assert.equal(a.pid,ownedPid());forcedKills++;child!.kill();return {ok:true,attempted:1,terminated:1};
  case 'shell.hidden':{
   assert.equal(path.resolve(a.program).toLowerCase(),hostExe.toLowerCase());assert.equal(ownedPid(),0);assert.ok(a.args.includes('--mock-handshake')&&a.args.includes('--mock-zero-hardware-evidence'));assert.ok(!a.args.some((x:string)=>/real-backend|allow-hardware|authorization|confirm/.test(x)));
-  hostStarts++;fixtureCreationTime=String(BigInt(Date.now()+11644473600000)*10000n);child=spawn(hostExe,a.args,{windowsHide:true,stdio:['ignore','pipe','pipe']});childExited=false;child.stdout!.pipe(stdout,{end:false});child.stderr!.pipe(stderr,{end:false});child.once('exit',()=>{childExited=true});child.once('error',()=>{childExited=true});if(clientTransport)fixtureCreationTime=queryIdentity(child.pid!).creationTime100ns;return {ok:true,pid:child.pid};
+  hostStarts++;fixtureCreationTime=String(BigInt(Date.now()+11644473600000)*10000n);child=spawn(hostExe,a.args,{windowsHide:true,stdio:['ignore','pipe','pipe']});childExited=false;child.stdout!.pipe(stdout,{end:false});child.stderr!.pipe(stderr,{end:false});child.once('exit',()=>{childExited=true});child.once('error',()=>{childExited=true});// Creation-time identity is a production admission gate, not a guessed fixture timestamp.
+  fixtureCreationTime=queryIdentity(child.pid!).creationTime100ns;return {ok:true,pid:child.pid};
  }
  case 'http.request':{
   const url=new URL(a.url);assert.equal(url.hostname,'127.0.0.1');assert.equal(url.port,'8765');const method=a.method??'GET';

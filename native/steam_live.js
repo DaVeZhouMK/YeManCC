@@ -22,6 +22,38 @@
       if (!Number.isInteger(request.account) || id.GetAccountID() !== request.account) fail('steam-account-changed');
     };
     checkAccount();
+    if (request.operation === 'settings.get' || request.operation === 'settings.set') {
+      const s = window.settingsStore;
+      if (!s || typeof s.GetClientSetting !== 'function' || typeof SteamClient?.Settings?.SetSetting !== 'function') fail('live-api-unavailable');
+      const specs = {
+        enable_overlay: ['boolean'], overlay_fps_counter_corner: ['number',0,6,true],
+        overlay_fps_counter_detail_level: ['number',1,4,true], overlay_fps_counter_scale_factor: ['number',.2,1.4],
+        overlay_fps_counter_saturation_factor: ['number',0,1], overlay_fps_counter_bgopacity: ['number',0,1],
+      };
+      const keys = request.operation === 'settings.get' ? request.keys : Object.keys(request.values || {});
+      if (!Array.isArray(keys) || !keys.length || keys.length>6 || new Set(keys).size!==keys.length) fail('invalid-steam-settings');
+      const before = {}, desired = {};
+      for (const key of keys) {
+        const spec=specs[key];if(!spec)fail('invalid-steam-settings');
+        const pair=s.GetClientSetting(key);
+        if(typeof pair?.[0]!==spec[0] || typeof pair?.[1]!=='function')fail('live-api-unavailable');
+        before[key]=pair[0];
+        if(request.operation==='settings.set'){
+          const value=request.values[key];
+          if(typeof value!==spec[0] || (spec[0]==='number' && (!Number.isFinite(value) || value<spec[1]-1e-6 || value>spec[2]+1e-6 || (spec[3] ? !Number.isInteger(value) : Math.abs(value*10-Math.round(value*10))>1e-5))))fail('invalid-steam-settings');
+          desired[key]=value;
+        }
+      }
+      if(request.operation==='settings.get')return {ok:true,values:before,via:'live'};
+      // Preflight every field before the first mutation. One request/one Steam context,
+      // setters remain Steam-owned; never write its live VDF from YMCC.
+      for(const key of keys){
+        checkAccount();const value=desired[key];
+        if(before[key]!==value){stage='setting';mutated=true;await bounded(s.GetClientSetting(key)[1](value));}
+      }
+      await waitFor(()=>keys.every(key=>{const value=s.GetClientSetting(key)[0];return typeof value==='number'?Math.abs(value-desired[key])<1e-5:value===desired[key]}));
+      checkAccount();return {ok:true,values:desired,before,runtimeAccepted:true,via:'live'};
+    }
     if (request.operation === 'overlay.get' || request.operation === 'overlay.set') {
       const s = window.settingsStore;
       if (!s || typeof s.GetClientSetting !== 'function' || typeof SteamClient?.Settings?.SetSetting !== 'function') fail('live-api-unavailable');

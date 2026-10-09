@@ -1,4 +1,5 @@
 import { fs, powerLifecycle } from './api';
+import { ensureGlobalFrameRates, frameRatePair, dedicatedFrameRatePair, dedicatedFrameRateRecord, frameRateSetting, type FrameRatePair } from './frameRateLimits';
 import { getSettingsGeneration, assertSettingsGeneration, mergeSettings, readSettingsSection, replaceSettingsSection, saveSettingsSection } from './settingsRepository';
 import { detectPolicyGame, isPolicyTargetCurrent } from './gamePolicyTarget';
 import { detectGame } from './gamedetect';
@@ -25,6 +26,7 @@ import {
   type FloatProfile,
   type TdpFloatStrategy,
   cancelPendingRtssSync,
+  setFloatRtssLinked,
 } from './autofloat';
 
 export type PowerSide = 'ac' | 'dc';
@@ -43,6 +45,7 @@ export interface ScheduleProfile {
   cpuPreset: CpuPreset;
   coreMode: CoreMode;
   tdpMax: number;
+  /** Legacy migration scalar only: never bound/applied by a performance combination. */
   fpsTarget: number;
   cpuTarget: FloatProfile;
   tdpStrategy: TdpFloatStrategy;
@@ -157,10 +160,6 @@ export async function runOptionalPerformanceScheduleTdp(
     publishPerformanceScheduleWarning(warning);
     return warning;
   }
-}
-
-function hasFpsFloatTarget(profile: ScheduleProfile): boolean {
-  return Number(profile.fpsTarget) > 0;
 }
 
 export function getPerformanceScheduleWarning(): PerformanceScheduleWarning | null {
@@ -319,6 +318,7 @@ function queueScheduleWrite(config: PerformanceScheduleConfig): Promise<void> {
   const snapshot = normalizeConfig(config);
   const generation = getSettingsGeneration();
   const next = scheduleWriteQueue.then(async () => {
+    await ensureGlobalFrameRates(); // freeze legacy FPS before a combination/active mode changes
     await saveSettingsSection('performanceSchedule', snapshot as any, generation);
     configCache = snapshot;
     emitPerformanceSchedule(snapshot);
@@ -494,7 +494,9 @@ async function applyPerformanceScheduleUnsafe(
   }
 
   const profile = current.profiles[side][mode];
-  const fpsFloatEnabled = hasFpsFloatTarget(profile);
+  const independent = (await ensureGlobalFrameRates())[side];
+  const optimizationTarget = independent.fps || independent.lastFps;
+  setFloatRtssLinked(false);
   // CPU 控制轴互斥：cpuTarget!=='none' 时由「CPU 浮动值」接管 autofloat 的 CPU 主频降低策略；
   // cpuTarget==='none' 时由「CPU 挡位」(cpuPreset) 直接设置硬件 CPU 档位。
   // 两路不得叠加：cpuTarget!=='none' 不调用 runResetProfile，避免 preset 基线被压制层覆盖。
@@ -519,16 +521,9 @@ async function applyPerformanceScheduleUnsafe(
       await notifyTdpMaxChanged(profile.tdpMax);
     });
     assertScheduleOpCurrent();
-    if (!fpsFloatEnabled) {
-      // 不锁帧=0：RTSS 解锁，停止 CPU/TDP 浮动，并用固定 CPU 挡位接管。
-      await setFloatTarget(0);
-      assertScheduleOpCurrent();
-      await applyCpuPresetBaseline(side, profile.cpuPreset);
-    } else {
-      if (cpuTarget === 'none') await applyCpuPresetBaseline(side, profile.cpuPreset);
-      assertScheduleOpCurrent();
-      await applyFloatSettings(profile.fpsTarget, cpuTarget, profile.tdpStrategy);
-    }
+    if (cpuTarget === 'none') await applyCpuPresetBaseline(side, profile.cpuPreset);
+    assertScheduleOpCurrent();
+    await applyFloatSettings(optimizationTarget, cpuTarget, profile.tdpStrategy);
     assertScheduleOpCurrent();
     await applyCoreModeIfHybrid(side, profile.coreMode);
     assertScheduleOpCurrent();
@@ -544,19 +539,9 @@ async function applyPerformanceScheduleUnsafe(
     await setTdp(side, profile.tdpMax, { apply: true, save: true });
   });
   assertScheduleOpCurrent();
-  if (!fpsFloatEnabled) {
-    await setFloatTarget(0);
-    assertScheduleOpCurrent();
-    await applyCpuPresetBaseline(side, profile.cpuPreset);
-  } else {
-    if (cpuTarget === 'none') await applyCpuPresetBaseline(side, profile.cpuPreset);
-    assertScheduleOpCurrent();
-    await enableFloat(
-      profile.fpsTarget,
-      cpuTarget,
-      profile.tdpStrategy,
-    );
-  }
+  if (cpuTarget === 'none') await applyCpuPresetBaseline(side, profile.cpuPreset);
+  assertScheduleOpCurrent();
+  await enableFloat(optimizationTarget, cpuTarget, profile.tdpStrategy);
   assertScheduleOpCurrent();
   await applyCoreModeIfHybrid(side, profile.coreMode);
   assertScheduleOpCurrent();
@@ -621,7 +606,7 @@ export async function restorePerformanceScheduleIfConfigured(
           pid: game.pid,
           processCreated: game.processCreated,
           policyTarget: true,
-        });
+        }, dedicatedFrameRatePair(custom.rtss[key.endsWith('.exe') ? key : `${key}.exe`], await ensureGlobalFrameRates()));
         if (!applied) throw new SkipApplyError();
         // “auto” 表示当前硬件已经由性能策略 owner（这里是专属 owner）接管，
         // 调用方不应再紧接着执行普通 CPU 自动档覆盖它。
@@ -752,12 +737,16 @@ export interface GameCustomProfile {
   // 2026-09-30 用户裁决：陀螺仪下拉直接用陀螺仪页的四个预设——选预设 = 启用陀螺仪
   // 并展开该预设参数。'on' 为旧档值（下拉不再提供，仅在当前生效时如实显示）。
   gyroOverride?: 'follow' | 'off' | 'on' | 'fps' | 'racing' | 'custom' | 'steam';
+  // Remember the original preset while gyroOverride is off; same EXE record, no sidebar store.
+  gyroPreset?: 'fps' | 'racing' | 'custom' | 'steam';
 }
 
 export interface GameCustomRtssProfile {
   enabled: boolean;
   acFps: number;
   dcFps: number;
+  acCeiling?: number; dcCeiling?: number;
+  acLastFps?: number; dcLastFps?: number;
 }
 
 /**
@@ -824,6 +813,8 @@ function normalizeCustomProfile(raw: unknown, fallback: ScheduleProfile): GameCu
     hyperThreadPolicy,
     padPersona,
     gyroOverride,
+    gyroPreset: ['fps','racing','custom','steam'].includes(r.gyroOverride as string) ? r.gyroOverride as GameCustomProfile['gyroPreset']
+      : ['fps','racing','custom','steam'].includes(r.gyroPreset as string) ? r.gyroPreset as GameCustomProfile['gyroPreset'] : undefined,
   };
 }
 
@@ -848,10 +839,20 @@ function normalizeGameCustom(value: unknown): GameCustomConfig {
     if (k in rtss) continue;
     const r = val && typeof val === 'object' ? (val as Record<string, unknown>) : {};
     rtss[k] = {
+      ...r, // Preserve fields owned by newer RTSS/dedicated config versions.
       enabled: r.enabled !== false,
-      acFps: Math.max(0, Math.round(Number(r.acFps) || 0)),
-      dcFps: Math.max(0, Math.round(Number(r.dcFps) || 0)),
+      acFps: frameRateSetting(Number(r.acFps) || 0).fps,
+      dcFps: frameRateSetting(Number(r.dcFps) || 0).fps,
+      acCeiling: frameRateSetting({fps:Number(r.acFps)||0,ceiling:r.acCeiling,lastFps:r.acLastFps}).ceiling,
+      dcCeiling: frameRateSetting({fps:Number(r.dcFps)||0,ceiling:r.dcCeiling,lastFps:r.dcLastFps}).ceiling,
+      acLastFps: frameRateSetting({fps:Number(r.acFps)||0,lastFps:r.acLastFps}).lastFps,
+      dcLastFps: frameRateSetting({fps:Number(r.dcFps)||0,lastFps:r.dcLastFps}).lastFps,
     };
+  }
+  // Old dedicated snapshots migrate once into an independent RTSS map; after
+  // saving, selecting a different performance combination cannot rebind them.
+  for (const [key,entry] of Object.entries(entries)) if(!rtss[key]) {
+    rtss[key]=dedicatedFrameRateRecord({ac:frameRateSetting(entry.ac.fpsTarget),dc:frameRateSetting(entry.dc.fpsTarget)});
   }
   const restoreRaw = raw.inputRestore && typeof raw.inputRestore === 'object'
     ? (raw.inputRestore as Record<string, unknown>)
@@ -979,7 +980,10 @@ export async function loadGameCustomConfig(): Promise<GameCustomConfig> {
 }
 
 export async function saveGameCustomConfig(config: GameCustomConfig): Promise<void> {
+  await ensureGlobalFrameRates();
+  const defaultFrames = frameRatePair({});
   const snapshot = normalizeGameCustom(config);
+  for(const key of Object.keys(config.entries))if(!config.rtss?.[key])snapshot.rtss[key]=dedicatedFrameRateRecord(defaultFrames);
   // 队列吞错保活（一次 I/O 失败不再卡死后续写入）；但 run 本身仍向调用方抛出写入失败，
   // 让 UI 能感知「保存失败」而非静默丢失（修复：首败后所有保存永久失效 —— 2026-08-05）。
   const run = gameCustomWriteQueue.then(async () => {
@@ -1059,10 +1063,13 @@ async function applyGameCustomProfilesUnsafe(
   acProfile: ScheduleProfile,
   dcProfile: ScheduleProfile,
   expectedTarget?: PerformanceScheduleTarget,
+  frameRates?: FrameRatePair,
 ): Promise<boolean> {
   const profile = side === 'ac' ? acProfile : dcProfile;
   const cpuTarget: FloatProfile = profile.cpuTarget;
-  const fpsFloatEnabled = hasFpsFloatTarget(profile);
+  const independent = (frameRates ?? await ensureGlobalFrameRates())[side];
+  const optimizationTarget = independent.fps || independent.lastFps;
+  setFloatRtssLinked(false);
 
   const targetStillCurrent = async (): Promise<boolean> => {
     if (!expectedTarget) return true;
@@ -1091,16 +1098,9 @@ async function applyGameCustomProfilesUnsafe(
       await notifyTdpMaxChanged(profile.tdpMax);
     });
     if (!(await checkpoint())) return false;
-    if (!fpsFloatEnabled) {
-      // 专属档位同样遵守 0=不锁帧：不继承上一个游戏/档位的 CPU/TDP 浮动。
-      await setFloatTarget(0);
-      if (!(await checkpoint())) return false;
-      await applyCpuPresetBaseline(side, profile.cpuPreset);
-    } else {
-      if (cpuTarget === 'none') await applyCpuPresetBaseline(side, profile.cpuPreset);
-      if (!(await checkpoint())) return false;
-      await applyFloatSettings(profile.fpsTarget, cpuTarget, profile.tdpStrategy);
-    }
+    if (cpuTarget === 'none') await applyCpuPresetBaseline(side, profile.cpuPreset);
+    if (!(await checkpoint())) return false;
+    await applyFloatSettings(optimizationTarget, cpuTarget, profile.tdpStrategy);
     if (!(await checkpoint())) return false;
     await applyCoreModeIfHybrid(side, profile.coreMode);
     return checkpoint();
@@ -1110,15 +1110,9 @@ async function applyGameCustomProfilesUnsafe(
     await setTdp(side, profile.tdpMax, { apply: true, save: true });
   });
   if (!(await checkpoint())) return false;
-  if (!fpsFloatEnabled) {
-    await setFloatTarget(0);
-    if (!(await checkpoint())) return false;
-    await applyCpuPresetBaseline(side, profile.cpuPreset);
-  } else {
-    if (cpuTarget === 'none') await applyCpuPresetBaseline(side, profile.cpuPreset);
-    if (!(await checkpoint()) || (await detectPowerMode()) !== side) return false;
-    await enableFloat(profile.fpsTarget, cpuTarget, profile.tdpStrategy);
-  }
+  if (cpuTarget === 'none') await applyCpuPresetBaseline(side, profile.cpuPreset);
+  if (!(await checkpoint()) || (await detectPowerMode()) !== side) return false;
+  await enableFloat(optimizationTarget, cpuTarget, profile.tdpStrategy);
   if (!(await checkpoint())) return false;
   await applyCoreModeIfHybrid(side, profile.coreMode);
   return checkpoint();
@@ -1150,8 +1144,8 @@ export async function applyGameCustomRtssOnly(
     // enable/disable autofloat or touch its CPU/TDP/core state.
     cancelPendingRtssSync();
     const side = await detectPowerMode();
-    const profile = side === 'ac' ? acProfile : dcProfile;
-    const fps = Math.max(0, Math.round(Number(profile.fpsTarget) || 0));
+    const {effectiveFrameRates}=await import('./frameRateLimits');
+    const fps=(await effectiveFrameRates()).pair[side].fps;
     await setRtssLimit(fps);
     const actual = await readRtssLimit();
     if (actual !== fps) throw new Error(`RTSS FPS 回读不一致：期望 ${fps}，实际 ${actual}`);
@@ -1165,6 +1159,7 @@ export async function applyGameCustomProfiles(
   acProfile: ScheduleProfile,
   dcProfile: ScheduleProfile,
   expectedTarget?: PerformanceScheduleTarget,
+  frameRates?: FrameRatePair,
 ): Promise<boolean> {
   // This is an explicit top-menu action. It is allowed in both automatic and
   // manual global modes; manual mode only changes hardware when the user asks
@@ -1182,7 +1177,7 @@ export async function applyGameCustomProfiles(
         await ensureRememberedYemanSchemeActive();
         assertScheduleOpCurrent();
         const side = await detectPowerMode();
-        return applyGameCustomProfilesUnsafe(side, acProfile, dcProfile, expectedTarget);
+        return applyGameCustomProfilesUnsafe(side, acProfile, dcProfile, expectedTarget, frameRates);
       });
     } catch (error) {
       if (!(error instanceof SkipApplyError) || attempt === maxAttempts - 1) throw error;

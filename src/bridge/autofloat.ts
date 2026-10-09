@@ -901,13 +901,19 @@ async function tick(): Promise<void> {
 
 // 帧数目标是固定值：开启（含程序启动自动启用）时立即把 RTSS 锁帧应用到目标值。
 // 无条件应用——即使当前限制为 0（用户原本未锁帧）也启用；关闭时恢复启用前原值。
+let floatRtssLinked = true; // legacy direct-float callers; performance/standalone FPS explicitly detach it
+export function setFloatRtssLinked(linked:boolean):void {
+  floatRtssLinked=linked;
+  if(!linked){cancelPendingRtssSync();rtssOriginalReady=false;}
+}
 let rtssOriginal = 0; // 启用浮动前 RTSS 锁帧值（可为 0），关闭时恢复
 let rtssOriginalReady = false;
 let rtssSyncQueue: Promise<void> = Promise.resolve();
 async function syncRtssLimit(target: number): Promise<void> {
+  if(!floatRtssLinked)return;
   const next = rtssSyncQueue.then(async () => {
     try {
-      await setRtssLimit(target);
+      if(floatRtssLinked)await setRtssLimit(target,()=>floatRtssLinked);
     } catch {
       /* 忽略：RTSS 不可用不影响其它流程 */
     }
@@ -927,6 +933,7 @@ export function cancelPendingRtssSync(): void {
 }
 
 function scheduleRtssSync(target: number): void {
+  if(!floatRtssLinked)return;
   if (rtssSyncTimer !== null) window.clearTimeout(rtssSyncTimer);
   rtssSyncTimer = window.setTimeout(() => {
     rtssSyncTimer = null;
@@ -951,7 +958,7 @@ async function initializeFloatPeripherals(runId: number, target: FpsTarget): Pro
     if (runId !== floatRunId) return;
 
     // 先保存原值；只有保存成功后才允许浮动改写 RTSS，关闭时才有安全恢复依据。
-    const original = await readRtssLimit().catch(() => null);
+    const original = floatRtssLinked ? await readRtssLimit().catch(() => null) : null;
     if (runId !== floatRunId) return;
     if (original !== null) {
       rtssOriginal = original;

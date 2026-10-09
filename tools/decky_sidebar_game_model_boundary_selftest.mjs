@@ -1,0 +1,51 @@
+import { task } from './fixtures/decky_task_paths.mjs';
+// Original EXE model characterization. User chose preservation, not a SteamID resolver.
+// Pure original functions only: no native bridge, business files or hardware.
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import vm from 'node:vm';
+import {createRequire} from 'node:module';
+const root=path.resolve(import.meta.dirname,'..');
+const require=createRequire(path.join(root,'package.json'));
+const {transformSync}=require('esbuild');
+const ts=require('typescript');
+const source=fs.readFileSync(path.join(root,'src/bridge/performanceSchedule.ts'),'utf8');
+function between(start,end){const a=source.indexOf(start),b=source.indexOf(end,a+start.length);assert.ok(a>=0&&b>a);return source.slice(a,b);}
+function load(text,globals={}){const module={exports:{}};vm.runInNewContext(transformSync(text,{loader:'ts',format:'cjs'}).code,{module,exports:module.exports,structuredClone,...globals,require:()=>{throw new Error('No real dependency/IO allowed');}});return module.exports;}
+const a=source.indexOf('const AUTO_MODES:'),end=source.indexOf('];',a)+2;assert.ok(a>=0&&end>a);
+const pure=source.slice(a,end)+'\n'+between('function isMode(','function normalizeConfig(')+'\n'+between('function normalizeCustomProfile(','function normalizeGameCustom(')+'\n'+between('export function resolveGameCustomProfiles(','export function getCustomRtssFor(');
+const {normalizeCustomProfile,resolveGameCustomProfiles}=load(pure+'\nmodule.exports.normalizeCustomProfile=normalizeCustomProfile;');
+const {gamePolicyKey}=load(fs.readFileSync(path.join(root,'src/bridge/gamePolicyHysteresis.ts'),'utf8'));
+const panel=fs.readFileSync(path.join(root,'src/components/GameCustomProfilePanel.vue'),'utf8').split('<script setup lang="ts">')[1].split('</script>')[0];
+const tree=ts.createSourceFile('GameCustomProfilePanel.ts',panel,ts.ScriptTarget.Latest,true,ts.ScriptKind.TS);
+const needed=['cloneProfile','isCorePolicyMode','isHyperThreadMode','isPadPersonaOverride','isGyroOverride','makeEntry'];
+const optionNames=['PAD_PERSONA_OPTIONS','GYRO_OVERRIDE_OPTIONS','GYRO_LEGACY_OPTIONS'];
+const nodes=tree.statements.filter(node=>ts.isFunctionDeclaration(node)&&needed.includes(node.name?.text)||ts.isVariableStatement(node)&&node.declarationList.declarations.some(declaration=>optionNames.includes(declaration.name.getText(tree))));
+assert.equal(nodes.length,needed.length+optionNames.length);
+const {makeEntry}=load(nodes.map(node=>node.getText(tree)).join('\n')+'\nmodule.exports.makeEntry=makeEntry;',{gameName:{value:'Fixture game'}});
+const results=[];const check=(name,action)=>{action();results.push(name);};
+const base={cpuPreset:'balanced',coreMode:'big',tdpMax:20,fpsTarget:60,cpuTarget:'none',tdpStrategy:'none'};
+const schedule={active:{ac:'balanced',dc:'eco'},profiles:{ac:{performance:{...base,tdpMax:35},balanced:{...base,tdpMax:28}},dc:{eco:{...base,tdpMax:8},balanced:{...base,tdpMax:22}}}};
+check('Steam and non-Steam observations use the same original EXE key',()=>{const g={path:'C:/Games/MyGame.EXE',pid:1};assert.equal(gamePolicyKey(g),'mygame.exe');assert.equal(gamePolicyKey({...g,steamAppId:'480'}),gamePolicyKey(g));});
+check('Steam AppID changes cannot create a second configuration key',()=>{assert.equal(gamePolicyKey({path:'C:/Games/Game.exe',steamAppId:'480'}),gamePolicyKey({path:'C:/Games/Game.exe',steamAppId:'570'}));});
+check('same EXE basenames share the original key even across paths and Steam identities',()=>{assert.equal(gamePolicyKey({path:'C:/A/Game.exe',pid:1,steamAppId:'480'}),gamePolicyKey({path:'D:/B/Game.exe',pid:2,steamAppId:'570'}));});
+check('path beats display title; missing path uses original name fallback',()=>{assert.equal(gamePolicyKey({path:'C:/Games/actual.exe',name:'Store title'}),'actual.exe');assert.equal(gamePolicyKey({name:'Portable'}),'portable.exe');});
+check('unavailable game does not invent an AppID or executable key',()=>assert.equal(gamePolicyKey(null),''));
+const entry=normalizeCustomProfile({displayName:'sample',ac:{...base,tdpMax:25},dc:{...base,tdpMax:15},steamAppId:'480',inheritDc:true},base);
+check('original normalizer does not expose new SteamID or inheritance fields',()=>{assert.ok(!Object.hasOwn(entry,'steamAppId'));assert.ok(!Object.hasOwn(entry,'inheritDc'));});
+check('legacy missing enabled flag remains active; explicit false stays inactive',()=>{assert.equal(entry.enabled,true);assert.equal(normalizeCustomProfile({...entry,enabled:false},base).enabled,false);});
+check('unset legacy AC/DC modes keep original saved snapshots',()=>{const value=resolveGameCustomProfiles(entry,schedule);assert.equal(value.ac.tdpMax,25);assert.equal(value.dc.tdpMax,15);});
+check('an explicit AC mode uses original preset; untouched legacy DC is not dynamic inheritance',()=>{entry.acMode='performance';schedule.active.dc='balanced';const value=resolveGameCustomProfiles(entry,schedule);assert.equal(value.ac.tdpMax,35);assert.equal(value.dc.tdpMax,15);});
+check('changing referenced preset affects mode-based entries through the original resolver',()=>{schedule.profiles.ac.performance.tdpMax=37;assert.equal(resolveGameCustomProfiles(entry,schedule).ac.tdpMax,37);});
+check('follow is a display sentinel, not a new persisted AC/DC mode',()=>{const normalized=normalizeCustomProfile({ac:base,dc:base,acMode:'follow'},base);assert.equal(normalized.acMode,undefined);assert.equal(resolveGameCustomProfiles(normalized,schedule).ac.tdpMax,20);});
+const created=makeEntry(undefined,schedule,{...schedule.active});
+check('original panel creation remembers both current preset names and snapshots',()=>{assert.equal(created.acMode,'balanced');assert.equal(created.dcMode,'balanced');assert.equal(created.ac.tdpMax,28);assert.equal(created.dc.tdpMax,22);assert.notEqual(created.ac,schedule.profiles.ac.balanced);});
+check('original creation saves disabled; first dropdown is not already a hardware activation',()=>{assert.equal(created.enabled,false);});
+check('original creation carries the existing big-small core default; activation must not hide it',()=>{assert.equal(created.corePolicyMode,'big-small');assert.equal(created.corePolicyEnabled,true);assert.equal(created.hyperThreadPolicyEnabled,false);});
+check('original edit preserves existing enable and input-policy values',()=>{const previous={...created,enabled:true,corePolicyMode:'only-small',hyperThreadPolicy:'off',padPersona:'elite',gyroOverride:'racing'};const edited=makeEntry(previous,schedule,{ac:'performance',dc:'eco'});assert.equal(edited.enabled,true);assert.equal(edited.corePolicyMode,'only-small');assert.equal(edited.hyperThreadPolicy,'off');assert.equal(edited.padPersona,'elite');assert.equal(edited.gyroOverride,'racing');});
+const host=fs.readFileSync(path.join(root,'src/bridge/deckyMirrorHost.ts'),'utf8');
+check('production uses original EXE key and resolver, with thin game binding and no raw hardware API',()=>{assert.ok(host.includes('entries[gamePolicyKey(game)]'));assert.ok(host.includes('resolveGameCustomProfiles(entry,schedule!)'));assert.ok(host.includes('gameActions.execute(command,args,context)'));assert.ok(host.includes('save: saveGameCustomConfig'));assert.ok(!host.includes('applyGameCustomProfiles('));});
+const record={project:'YMCC Decky 侧边栏',stage:process.argv.includes('--stage14')?'Implementation14':process.argv.includes('--stage13')?'Implementation13':process.argv.includes('--stage12')?'Implementation12':process.argv.includes('--stage11')?'Implementation11':process.argv.includes('--stage10')?'Implementation10':'Implementation08',dateHongKong:'2026-10-09',cases:results.length,results,originalFunctionsExecuted:true,originalModelEdited:true,configurationIO:false,hardwareIO:false,compatibilityExtensionRequired:true,extension:'optional remembered gyroPreset in original EXE record, no second store',latestHumanDecision:'Preserve EXE keys, matching, remembering and original AC/DC resolution; supplemental SteamID remains volatile',steamIdPrimaryKey:false,secondBusinessStore:false,gameWritesEnabled:true,activationRoutePreparationRemaining:false};
+fs.writeFileSync(path.resolve(task,process.argv.includes('--stage14')?'validation/GAME-MODEL-BOUNDARY-IMPLEMENTATION14.json':process.argv.includes('--stage13')?'validation/GAME-MODEL-BOUNDARY-IMPLEMENTATION13.json':process.argv.includes('--stage12')?'validation/GAME-MODEL-BOUNDARY-IMPLEMENTATION12.json':process.argv.includes('--stage11')?'validation/GAME-MODEL-BOUNDARY-IMPLEMENTATION11.json':process.argv.includes('--stage10')?'validation/GAME-MODEL-BOUNDARY-IMPLEMENTATION10.json':'validation/GAME-MODEL-BOUNDARY-IMPLEMENTATION08.json'),JSON.stringify(record,null,2));
+console.log(`EXE-preserving original game model characterized: ${results.length}`);

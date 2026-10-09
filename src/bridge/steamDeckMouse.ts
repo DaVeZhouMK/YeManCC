@@ -16,13 +16,13 @@ export interface SteamDeckMouseState {
 }
 export const STEAM_DECK_MOUSE_DEFAULT = 100;
 export function steamDeckMouseGet(): Promise<SteamDeckMouseState> {
-  return invoke<SteamDeckMouseState>('steamDeckMouse.get');
+  return invoke<SteamDeckMouseState>('steam.settings.get',{scope:'mouse'});
 }
 export function steamDeckMouseSet(percent: number): Promise<SteamDeckMouseState> {
   if (!Number.isInteger(percent) || percent < 1 || percent > 300) {
     return Promise.reject(new Error('灵敏度必须为 1%–300% 的整数'));
   }
-  return invoke<SteamDeckMouseState>('steamDeckMouse.set', { percent });
+  return invoke<SteamDeckMouseState>('steam.settings.set',{mousePercent:percent});
 }
 export function steamDeckMouseMessage(reason?: string): string {
   switch (reason) {

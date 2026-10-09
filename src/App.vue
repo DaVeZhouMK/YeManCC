@@ -13,7 +13,7 @@ import { getFloatInfo, applyCpuAutoEnable, setAutofloatPowerControlDir } from '@
 import { readTdpAutoApply, applyAutoTdpIfNeeded } from '@/bridge/tdpAutoApply';
 import { app, fs, powerLifecycle, windowApi } from '@/bridge/api';
 import { initMusic } from '@/bridge/music';
-import { readTdp, setTdp, setRtssLimit, readFps, rtssRunning, toggleTask, taskExists, detectPowerMode, detectPowerModeReliable, detectPowerModeStable, reconcileRememberedPowerScheme, resumeTdpDaemonAfterWake, getSleepPowerPlanOptimizationEnabled, optimizeSleepPowerPlans } from '@/bridge/yeman';
+import { readTdp, setTdp, toggleTask, taskExists, detectPowerMode, detectPowerModeReliable, detectPowerModeStable, reconcileRememberedPowerScheme, resumeTdpDaemonAfterWake, getSleepPowerPlanOptimizationEnabled, optimizeSleepPowerPlans } from '@/bridge/yeman';
 import TopMonitorBar from '@/components/TopMonitorBar.vue';
 import { applyTheme } from '@/bridge/theme';
 import { cyclePerformanceScheduleMode, getPerformanceScheduleOwnership, refreshPerformanceScheduleCoreMode, restorePerformanceScheduleIfConfigured, SkipApplyError } from '@/bridge/performanceSchedule';
@@ -32,6 +32,9 @@ import {
 } from '@/bridge/dynamicBackground';
 import { detectGame, subscribeGameStatus, type DetectedGame } from '@/bridge/gamedetect';
 import { startGamePolicyRuntime, stopGamePolicyRuntime } from '@/bridge/gamePolicyRuntime';
+import { applyIndependentFrameRates } from '@/bridge/frameRateLimits';
+import { startDeckyMirrorHost } from '@/bridge/deckyMirrorHost';
+let deckyMirrorHost: ReturnType<typeof startDeckyMirrorHost> | null = null;
 import { startGameInputOverrideWatch, stopGameInputOverrideWatch } from '@/bridge/gameInputOverride';
 import { BOOT_CONTROL_CENTER_TASK, bootMirrorExists, ensureRtssOverlayInstalled, setPowerControlDir, toggleBootMirror } from '@/bridge/yeman';
 import { getUiSetting, loadUiSettings } from '@/bridge/uiSettings';
@@ -989,7 +992,7 @@ function onFanGuardState(e: Event): void {
 }
 
 async function applyProgramControls() {
-  const [tdp, fps] = await Promise.all([readTdp('ac'), readFps('ac')]);
+  const tdp = await readTdp('ac');
   const floating = getFloatInfo().enabled;
   const scheduleOwned = await getPerformanceScheduleOwnership().catch(() => false);
   // 启动自动应用 TDP：仅当开关开启且帧数目标浮动优化未接管时，才把保存的 TDP 最大值下发硬件。
@@ -998,27 +1001,11 @@ async function applyProgramControls() {
     const auto = await readTdpAutoApply();
     if (auto.boot) void setTdp('ac', tdp, { apply: true, save: false }).catch(() => {});
   }
-  // 启动恢复锁帧：读程序配置的 FPS 帧率上限并应用到 RTSS。
-  // 开机初期 RTSS 可能未启动 / Profiles\Global 尚未生成（setRtssLimit 会静默跳过），
-  // 因此带轮询重试：直到 RTSS 在跑且配置已应用成功一次。
-  if (fps != null && !getFloatInfo().enabled && scheduleOwned !== 'auto') {
-    void applyRtssLimitConfig(fps > 0 ? fps : 0).catch(() => {});
-  }
+  // Independent AC/DC + dedicated FPS ownership; never restore an AC scalar
+  // over a battery/dedicated owner or let an optimizer retake RTSS.
+  void applyIndependentFrameRates().catch(() => {});
 }
 
-// RTSS 启动恢复锁帧：写配置 + 最多 12 次（约 60 秒）轮询，RTSS 就绪后应用一次即停。
-// 浮动优化运行时（enabled）由 autofloat 自己接管 RTSS，本函数不应介入（调用方已跳过）。
-async function applyRtssLimitConfig(fps: number): Promise<void> {
-  for (let i = 0; i < 12; i++) {
-    try {
-      await setRtssLimit(fps);
-      if (await rtssRunning()) return; // RTSS 已在跑并收到新配置
-    } catch {
-      /* 继续重试 */
-    }
-    await new Promise((r) => setTimeout(r, 5000));
-  }
-}
 let stopGamepad: (() => void) | null = null;
 let stopGyroTelemetry: (() => void) | null = null;
 // 手柄后台（未开浮动时）调节 RTSS 帧率上限：setRtssLimit 较重（LoadProfile+UpdateProfiles），
@@ -1422,6 +1409,7 @@ onMounted(async () => {
     window.dispatchEvent(new CustomEvent('app-startup-ready'));
     return;
   }
+  deckyMirrorHost = startDeckyMirrorHost();
   try {
     aiFanMockActive = parseAiFanMockSession(await app.aiFanMockSession()) !== null;
   } catch (error) {
@@ -1722,8 +1710,10 @@ onMounted(async () => {
     applyCpuAutostart().catch(() => {});
   }, 30000);
 
+  if (!aiFanMockActive && !aiCpuIsolated) deckyMirrorHost?.ready();
 });
 onUnmounted(() => {
+  deckyMirrorHost?.stop(); deckyMirrorHost = null;
   stopAiFanService?.();
   stopAiFanService = null;
   window.removeEventListener('ui-settings:changed', onWindowPlacementSettingsChanged);
