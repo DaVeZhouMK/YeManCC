@@ -87,3 +87,7 @@ Desktop.ini
 
 # HC Wavefront meshes are locked source resources, not compiler .obj output.
 !deps/handheldcompanion-runtime/source/3DModels/**/*.obj
+
+# Locked compile-time Decky SDK modules are source inputs, not disposable outputs.
+!decky-plugin/vendor/decky-api-1.1.3/dist/
+!decky-plugin/vendor/decky-api-1.1.3/dist/*
