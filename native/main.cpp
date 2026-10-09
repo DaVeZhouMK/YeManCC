@@ -45590,6 +45590,18 @@ static void reg_window() {
         SetWindowPos(g_hwnd, nullptr, x, y, 0, 0, SWP_NOSIZE | SWP_NOZORDER);
         return true;
     });
+    ipc_on("window.place", [](const json& a) -> json {
+        RECT wr; GetWindowRect(g_hwnd, &wr);
+        int ww = wr.right - wr.left, wh = wr.bottom - wr.top;
+        HMONITOR mon = MonitorFromWindow(g_hwnd, MONITOR_DEFAULTTONEAREST);
+        MONITORINFO mi{sizeof(mi)};
+        GetMonitorInfoW(mon, &mi);
+        int y = mi.rcWork.top + (mi.rcWork.bottom - mi.rcWork.top - wh) / 2;
+        std::string side = a.value("side", "right");
+        int x = (side == "left") ? mi.rcWork.left : (mi.rcWork.right - ww);
+        SetWindowPos(g_hwnd, nullptr, x, y, 0, 0, SWP_NOSIZE | SWP_NOZORDER);
+        return true;
+    });
     ipc_on("window.setAlwaysOnTop", [](const json& a) -> json {
         HWND z = a.value("top", true) ? HWND_TOPMOST : HWND_NOTOPMOST;
         SetWindowPos(g_hwnd, z, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);

@@ -1324,29 +1324,10 @@ function onDynamicBackgroundLoaded(e: Event): void {
     applyBackgroundState(state, 'dynamic');
   }).catch(() => {});
 }
-// 主窗口呼出位置：按设置项 windowPlacement 将窗口对齐到当前显示器工作区的左侧/右侧/居中。
-// 依赖 native 的 window.size（客户区尺寸）+ window.setPosition，配合 Chromium screen 工作区。
+// 主窗口呼出位置：按设置项 windowPlacement 对齐到当前显示器工作区左侧/右侧（垂直居中）。
+// native window.place 用 GetMonitorInfoW 工作区 + GetWindowRect 全窗口物理像素计算，与 window.center 同源，避免 DPI/客户区尺寸不一致。
 async function applyWindowPlacement(): Promise<void> {
-  const placement = getUiSetting('windowPlacement');
-  if (placement === 'center') {
-    await windowApi.center();
-    return;
-  }
-  const size = await windowApi.size().catch(() => null);
-  if (!size) {
-    await windowApi.center().catch(() => {});
-    return;
-  }
-  const scr = window.screen as Screen & { availLeft?: number; availTop?: number };
-  const availLeft = typeof scr.availLeft === 'number' ? scr.availLeft : 0;
-  const availTop = typeof scr.availTop === 'number' ? scr.availTop : 0;
-  const availWidth = typeof scr.availWidth === 'number' ? scr.availWidth : scr.width;
-  const availHeight = typeof scr.availHeight === 'number' ? scr.availHeight : scr.height;
-  const w = size.w || 0;
-  const h = size.h || 0;
-  const y = availTop + Math.max(0, Math.floor((availHeight - h) / 2));
-  const x = placement === 'left' ? availLeft : availLeft + Math.max(0, availWidth - w);
-  await windowApi.setPosition(x, y).catch(() => {});
+  await windowApi.place(getUiSetting('windowPlacement')).catch(() => {});
 }
 onMounted(async () => {
   // A shortcut editor popup is another renderer owned by the same native

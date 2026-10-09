@@ -212,7 +212,7 @@ function onThemeChange(value: string | number): void {
   setTheme(next);
 }
 function onWindowPlacementChange(value: string | number): void {
-  const next = String(value) as 'left' | 'right' | 'center';
+  const next = String(value) as 'left' | 'right';
   windowPlacement.value = next;
   void setUiSettings({ windowPlacement: next });
 }
@@ -680,7 +680,6 @@ onBeforeUnmount(() => {
         :options="[
           { value: 'left', label: '左侧' },
           { value: 'right', label: '右侧' },
-          { value: 'center', label: '居中' },
         ]"
         color="accent"
         full
