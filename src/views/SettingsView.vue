@@ -658,7 +658,7 @@ onBeforeUnmount(() => {
     <div v-if="errMsg" class="err-bar page-error">{{ errMsg }}</div>
     <!-- ── 以下内容原属「支持」页面，已合并至设置下方 ── -->
     <section class="card">
-      <h3 class="card-title"><InlineIcon name="palette" /> 界面颜色</h3>
+      <h3 class="card-title"><InlineIcon name="star" /> 界面颜色</h3>
       <SegButton
         :model-value="theme"
         :options="[
@@ -674,7 +674,7 @@ onBeforeUnmount(() => {
     </section>
 
     <section class="card">
-      <h3 class="card-title"><InlineIcon name="monitor" /> 窗口呼出位置</h3>
+      <h3 class="card-title"><InlineIcon name="target" /> 窗口位置</h3>
       <SegButton
         :model-value="windowPlacement"
         :options="[
