@@ -1329,6 +1329,8 @@ function onDynamicBackgroundLoaded(e: Event): void {
 async function applyWindowPlacement(): Promise<void> {
   await windowApi.place(getUiSetting('windowPlacement')).catch(() => {});
 }
+// 窗口贴左侧时侧边导航栏翻到右侧（贴近屏幕中心侧），与 windowPlacement 联动。
+const windowPlacement = ref<'left' | 'right'>(getUiSetting('windowPlacement'));
 onMounted(async () => {
   // A shortcut editor popup is another renderer owned by the same native
   // process, not a second YMCC application instance. Do not start the main
@@ -1421,9 +1423,13 @@ onMounted(async () => {
   backgroundOpacity.value = getBackgroundOpacity();
   backgroundBlur.value = getBackgroundBlur();
   backgroundVideoAutoPause.value = getUiSetting('videoBatteryPause');
+  windowPlacement.value = getUiSetting('windowPlacement');
   // 用真实设置覆盖早先默认定位；设置页改动时实时生效。
   void applyWindowPlacement().catch(() => {});
-  window.addEventListener('ui-settings:changed', () => { void applyWindowPlacement().catch(() => {}); });
+  window.addEventListener('ui-settings:changed', () => {
+    windowPlacement.value = getUiSetting('windowPlacement');
+    void applyWindowPlacement().catch(() => {});
+  });
   window.addEventListener('background:changed', onBackgroundChanged as EventListener);
   window.addEventListener('background:opacity-changed', onBackgroundOpacityChanged as EventListener);
   window.addEventListener('background:blur-changed', onBackgroundBlurChanged as EventListener);
@@ -1764,7 +1770,7 @@ onUnmounted(() => {
         :style="backgroundStyle"
         aria-hidden="true"
       />
-      <div v-if="!isStandaloneEditor" class="app-body">
+      <div v-if="!isStandaloneEditor" class="app-body" :class="{ 'app-body--nav-right': windowPlacement === 'left' }">
         <NavRail />
         <main class="app-main">
           <!-- 顶部监控条：独立于页面滚动层，左右顶满 app-main，不受滚动条宽度影响 -->
@@ -1841,6 +1847,14 @@ onUnmounted(() => {
   min-height: 0;
   position: relative;
   z-index: 1;
+}
+/* 窗口贴左侧时，侧边导航栏翻到右侧（贴近屏幕中心侧）；分隔线随之移到导航栏左缘。 */
+.app-body--nav-right {
+  flex-direction: row-reverse;
+}
+.app-body--nav-right :deep(.navrail) {
+  border-right: none;
+  border-left: 1px solid #1c2533;
 }
 .standalone-body {
   width: 100%;
