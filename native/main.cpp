@@ -572,6 +572,10 @@ static bool g_allowWebviewPermissions = false;
 // Use the existing ui settings section for every native reflow, not a second settings owner.
 static bool windowPlacementIsLeft();
 
+// 判断窗口是否铺满整块显示器（含任务栏条带）。实现位于下方焦点模块，这里前向声明。
+static bool focusWindowCoversMonitor(HWND hwnd, RECT monitorRect);
+static HMONITOR focusResolveMonitor(const FocusTargetSnapshot& target);
+
 // Full-height edge layout: startup, summon, DPI and work-area changes share this policy.
 static bool applyFullHeightLayout(HMONITOR preferredMonitor = nullptr, bool dockLeft = windowPlacementIsLeft()) {
     if (!g_hwnd) return false;
@@ -579,9 +583,34 @@ static bool applyFullHeightLayout(HMONITOR preferredMonitor = nullptr, bool dock
     MONITORINFO mi{sizeof(mi)};
     if (!GetMonitorInfoW(mon, &mi)) return false;
     int waX = mi.rcWork.left;
-    int waY = mi.rcWork.top;
     int waW = mi.rcWork.right - mi.rcWork.left;
-    int waH = mi.rcWork.bottom - mi.rcWork.top;
+    // 任务栏隐藏/自动隐藏时，工作区往往仍保留任务栏条带，窗口底部会留缝。
+    // 任务栏不可见或处于自动隐藏时，按整块显示器计算垂直范围，让底部贴屏幕下沿。
+    bool taskbarHidden = false;
+    if (HWND tray = FindWindowW(L"Shell_TrayWnd", nullptr)) {
+        if (!IsWindowVisible(tray)) taskbarHidden = true;
+    }
+    APPBARDATA abd{};
+    abd.cbSize = sizeof(abd);
+    if ((SHAppBarMessage(ABM_GETSTATE, &abd) & ABS_AUTOHIDE) != 0) taskbarHidden = true;
+    // Notification state is global: BUSY may mean presentation settings, and a
+    // fullscreen app on another display says nothing about this taskbar. Only
+    // use a captured fullscreen target on this monitor, or a foreground window
+    // that actually reaches every edge of this monitor.
+    if (!taskbarHidden && g_focusSession.target.valid && g_focusSession.target.fullscreen &&
+        IsWindow(g_focusSession.target.hwnd) && focusResolveMonitor(g_focusSession.target) == mon) {
+        // Preserve the pre-summon snapshot after an exclusive game loses focus.
+        taskbarHidden = true;
+    }
+    if (!taskbarHidden) {
+        HWND foreground = GetForegroundWindow();
+        if (foreground && foreground != g_hwnd &&
+            focusWindowCoversMonitor(foreground, mi.rcMonitor)) {
+            taskbarHidden = true;
+        }
+    }
+    int waY = taskbarHidden ? mi.rcMonitor.top : mi.rcWork.top;
+    int waH = (taskbarHidden ? mi.rcMonitor.bottom : mi.rcWork.bottom) - waY;
     if (g_baseW <= 0 || g_baseH <= 0 || waW <= 0 || waH <= 0) return false;
     double R = (double)g_baseW / (double)g_baseH; // 设计基准宽高比
     int targetH = waH;                            // 横屏默认上下贴合全屏
@@ -5674,18 +5703,16 @@ static bool focusWindowCoversMonitor(HWND hwnd, RECT monitorRect) {
         !GetWindowRect(hwnd, &windowRect)) {
         return false;
     }
-    RECT intersection{};
-    if (!IntersectRect(&intersection, &windowRect, &monitorRect)) return false;
-    const long long monitorArea = static_cast<long long>(monitorRect.right - monitorRect.left) *
-                                  static_cast<long long>(monitorRect.bottom - monitorRect.top);
-    const long long intersectionArea = static_cast<long long>(intersection.right - intersection.left) *
-                                       static_cast<long long>(intersection.bottom - intersection.top);
+    if (monitorRect.right <= monitorRect.left || monitorRect.bottom <= monitorRect.top)
+        return false;
     const int tolerance = (std::max)(3, MulDiv(3, static_cast<int>(GetDpiForWindow(hwnd)), 96));
-    const bool edgeMatch = abs(windowRect.left - monitorRect.left) <= tolerance &&
-                           abs(windowRect.top - monitorRect.top) <= tolerance &&
-                           abs(windowRect.right - monitorRect.right) <= tolerance &&
-                           abs(windowRect.bottom - monitorRect.bottom) <= tolerance;
-    return edgeMatch || (monitorArea > 0 && intersectionArea * 100 >= monitorArea * 98);
+    // A maximized desktop app can occupy >=98% on a high-resolution display
+    // while still leaving the taskbar visible. Require all four monitor edges;
+    // allow only frame/DPI rounding, and windows spanning multiple displays.
+    return windowRect.left <= monitorRect.left + tolerance &&
+           windowRect.top <= monitorRect.top + tolerance &&
+           windowRect.right >= monitorRect.right - tolerance &&
+           windowRect.bottom >= monitorRect.bottom - tolerance;
 }
 
 static bool focusWindowLooksFullscreen(HWND hwnd, RECT monitorRect) {
