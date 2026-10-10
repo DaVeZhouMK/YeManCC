@@ -535,10 +535,17 @@ struct FocusSessionState {
     // （native 先算一次，前端 ipc:window.summoned 后 window.place 再算一次），
     // 第二次时前台已变成本窗口、游戏的瞬时全屏信号消失；锁存后两次结果一致。
     bool fullHeightLatched = false;
+    HMONITOR fullHeightMonitor = nullptr;
+    RECT fullHeightMonitorRect{};
     ULONGLONG returnStarted = 0;
     ULONGLONG returnDeadline = 0;
 };
 static FocusSessionState g_focusSession;
+static void focusInvalidateFullHeightLatch() {
+    g_focusSession.fullHeightLatched = false;
+    g_focusSession.fullHeightMonitor = nullptr;
+    g_focusSession.fullHeightMonitorRect = {};
+}
 static FocusTargetSnapshot g_pendingSummonTarget; // LB/RB 首个肩键按下时抓取，防覆盖层在0.5s内抢前台
 static FocusTargetSnapshot g_rememberedGameTarget; // 一键启动LS前由前端登记的真实游戏
 static ULONGLONG g_rememberedGameDeadline = 0;
@@ -591,7 +598,10 @@ static bool applyFullHeightLayout(HMONITOR preferredMonitor = nullptr, bool dock
     if (!g_hwnd) return false;
     HMONITOR mon = preferredMonitor ? preferredMonitor : MonitorFromWindow(g_hwnd, MONITOR_DEFAULTTONEAREST);
     MONITORINFO mi{sizeof(mi)};
-    if (!GetMonitorInfoW(mon, &mi)) return false;
+    if (!GetMonitorInfoW(mon, &mi)) {
+        focusInvalidateFullHeightLatch();
+        return false;
+    }
     int waX = mi.rcWork.left;
     int waW = mi.rcWork.right - mi.rcWork.left;
     // 任务栏隐藏/自动隐藏时，工作区往往仍保留任务栏条带，窗口底部会留缝。
@@ -622,10 +632,21 @@ static bool applyFullHeightLayout(HMONITOR preferredMonitor = nullptr, bool dock
     // 呼出会话内锁存：第一次布局时游戏仍是前台（或快照标了全屏）→ 按整块显示器算；
     // 第二次布局（前端 ipc:window.summoned → window.place）时前台已变成本窗口，上述
     // 瞬时信号消失，纯几何前台判定也不再命中，于是会退回 rcWork 让窗口先铺满再弹回。
-    // 只要本次呼出期间判定过全高，就保持到会话结束（focusClearSession 复位）。
+    // 仅复用同一显示器、同一几何范围内的判定；跨屏/显示拓扑变化不能把旧屏的
+    // 全高信号带到任务栏仍可见的新屏。会话结束时 focusClearSession 仍会整体复位。
     if (g_focusSession.active) {
-        if (taskbarHidden) g_focusSession.fullHeightLatched = true;
-        else if (g_focusSession.fullHeightLatched) taskbarHidden = true;
+        const RECT& latchedRect = g_focusSession.fullHeightMonitorRect;
+        const bool sameMonitor = g_focusSession.fullHeightMonitor == mon &&
+            latchedRect.left == mi.rcMonitor.left && latchedRect.top == mi.rcMonitor.top &&
+            latchedRect.right == mi.rcMonitor.right && latchedRect.bottom == mi.rcMonitor.bottom;
+        if (g_focusSession.fullHeightLatched && !sameMonitor) focusInvalidateFullHeightLatch();
+        if (taskbarHidden) {
+            g_focusSession.fullHeightLatched = true;
+            g_focusSession.fullHeightMonitor = mon;
+            g_focusSession.fullHeightMonitorRect = mi.rcMonitor;
+        } else if (g_focusSession.fullHeightLatched) {
+            taskbarHidden = true;
+        }
     }
     int waY = taskbarHidden ? mi.rcMonitor.top : mi.rcWork.top;
     int waH = (taskbarHidden ? mi.rcMonitor.bottom : mi.rcWork.bottom) - waY;
@@ -60799,6 +60820,9 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         return 0;
 
     case WM_DISPLAYCHANGE:
+        // HMONITOR handles can be reused after a topology rebuild, even when
+        // the replacement display has identical bounds. Never reuse its latch.
+        focusInvalidateFullHeightLatch();
         ymcc::screenpads::refresh();
         // Exclusive fullscreen / Steam Big Picture can rebuild the display
         // compositor without a normal tray restore. Reflow the window and
