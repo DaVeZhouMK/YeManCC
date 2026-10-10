@@ -1,7 +1,10 @@
 ﻿{
-    "version":  "0.0.34",
-    "notes":  "0.0.34 群友测试版：YMCC 控制台侧栏、风扇恢复与安装修复、独立帧率与 Steam 设置、屏幕触控板及窗口布局更新；完整包含依赖与源码附件。",
-    "sha256":  "864AF10CE0986859322BCCE50AF704BFAB73BD99F1333A5CAD22781B776A46EA",
-    "publishedAt":  "2026-10-09",
+    "version":  "0.0.35",
+    "notes":  "0.0.35 测试候选：控制台侧栏启动与输入操作、独立触控板特殊按键、手柄视觉导航、Steam 观察及导出身份链更新；正常构建不启用实验 HUD。",
+    "sha256":  "E4C52BFDF8E48542936D6FD23EF81A9C54154C3D1211A6038E27C7348CAE1E3F",
+    "publishedAt":  "2026-10-10",
+    "buildId":  "90de1837e47c45e71c03e21c60d8409fa134a23d53c4ebe81d9c6becf1ff2be7",
+    "nativeSha256":  "574d9afb6bdee5dee44b1207592de26be9e3a8175d1123d3643ad49e3885e079",
+    "pluginSha256":  "120d8b6674d4257ccd143c6f5fa945a59808a9ee9decc4d76b38c88ca6bea2be",
     "package":  "Packages/YeManCC.zip"
 }
