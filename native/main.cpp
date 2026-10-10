@@ -531,6 +531,10 @@ struct FocusSessionState {
     bool active = false;
     bool returning = false;
     bool ownedTopmost = false;
+    // 本次呼出会话内是否已判定过「按整块显示器取全高」。呼出时布局会被执行两次
+    // （native 先算一次，前端 ipc:window.summoned 后 window.place 再算一次），
+    // 第二次时前台已变成本窗口、游戏的瞬时全屏信号消失；锁存后两次结果一致。
+    bool fullHeightLatched = false;
     ULONGLONG returnStarted = 0;
     ULONGLONG returnDeadline = 0;
 };
@@ -614,6 +618,14 @@ static bool applyFullHeightLayout(HMONITOR preferredMonitor = nullptr, bool dock
             focusWindowCoversMonitor(foreground, mi.rcMonitor)) {
             taskbarHidden = true;
         }
+    }
+    // 呼出会话内锁存：第一次布局时游戏仍是前台（或快照标了全屏）→ 按整块显示器算；
+    // 第二次布局（前端 ipc:window.summoned → window.place）时前台已变成本窗口，上述
+    // 瞬时信号消失，纯几何前台判定也不再命中，于是会退回 rcWork 让窗口先铺满再弹回。
+    // 只要本次呼出期间判定过全高，就保持到会话结束（focusClearSession 复位）。
+    if (g_focusSession.active) {
+        if (taskbarHidden) g_focusSession.fullHeightLatched = true;
+        else if (g_focusSession.fullHeightLatched) taskbarHidden = true;
     }
     int waY = taskbarHidden ? mi.rcMonitor.top : mi.rcWork.top;
     int waH = (taskbarHidden ? mi.rcMonitor.bottom : mi.rcWork.bottom) - waY;
@@ -38300,6 +38312,10 @@ static bool nativeYmccShortcutSummon(const FocusTargetSnapshot& target, bool max
         appendNativeLifecycleLog("gamepad-summon-hidden", {{"generation", generation}});
         return true;
     }
+    // bringToFront() 通过全局 g_pendingSummonTarget 建立呼出会话。手柄 LB+RB 路径
+    // 已预先写入；掌机专用键/触控板/重复启动等路径只把本次捕获的目标当作形参传入，
+    // 必须写回，否则会话里没有全屏快照，第二次布局会退回工作区高度导致闪回。
+    g_pendingSummonTarget = target;
     // Show/notify first. Expensive game registration remains on its existing worker.
     bringToFront(g_hwnd, maximizeWindow);
     ipc_emit("gamepad.summon", nativeSummonCandidateSnapshot(target, generation));
