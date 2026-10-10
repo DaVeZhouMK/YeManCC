@@ -13,7 +13,7 @@ import { getFloatInfo, applyCpuAutoEnable, setAutofloatPowerControlDir } from '@
 import { readTdpAutoApply, applyAutoTdpIfNeeded } from '@/bridge/tdpAutoApply';
 import { app, fs, powerLifecycle, windowApi } from '@/bridge/api';
 import { initMusic } from '@/bridge/music';
-import { readTdp, setTdp, setRtssLimit, readFps, rtssRunning, toggleTask, taskExists, detectPowerMode, detectPowerModeReliable, detectPowerModeStable, reconcileRememberedPowerScheme, resumeTdpDaemonAfterWake, getSleepPowerPlanOptimizationEnabled, optimizeSleepPowerPlans } from '@/bridge/yeman';
+import { readTdp, setTdp, toggleTask, taskExists, detectPowerMode, detectPowerModeReliable, detectPowerModeStable, reconcileRememberedPowerScheme, resumeTdpDaemonAfterWake, getSleepPowerPlanOptimizationEnabled, optimizeSleepPowerPlans } from '@/bridge/yeman';
 import TopMonitorBar from '@/components/TopMonitorBar.vue';
 import { applyTheme } from '@/bridge/theme';
 import { cyclePerformanceScheduleMode, getPerformanceScheduleOwnership, refreshPerformanceScheduleCoreMode, restorePerformanceScheduleIfConfigured, SkipApplyError } from '@/bridge/performanceSchedule';
@@ -32,6 +32,9 @@ import {
 } from '@/bridge/dynamicBackground';
 import { detectGame, subscribeGameStatus, type DetectedGame } from '@/bridge/gamedetect';
 import { startGamePolicyRuntime, stopGamePolicyRuntime } from '@/bridge/gamePolicyRuntime';
+import { applyIndependentFrameRates } from '@/bridge/frameRateLimits';
+import { startDeckyMirrorHost } from '@/bridge/deckyMirrorHost';
+let deckyMirrorHost: ReturnType<typeof startDeckyMirrorHost> | null = null;
 import { startGameInputOverrideWatch, stopGameInputOverrideWatch } from '@/bridge/gameInputOverride';
 import { BOOT_CONTROL_CENTER_TASK, bootMirrorExists, ensureRtssOverlayInstalled, setPowerControlDir, toggleBootMirror } from '@/bridge/yeman';
 import { getUiSetting, loadUiSettings } from '@/bridge/uiSettings';
@@ -815,23 +818,86 @@ const BASE_H = 780;
 const SCALE_BOOST = 1.3; // "再放大 30%"
 const uiScale = ref(1);
 const viewportHeight = ref(window.innerHeight);
+// 原生 WM_SIZE 下发的物理客户区尺寸。窗口从隐藏状态被呼出时，WebView2 恢复渲染前
+// window.innerWidth/Height 仍是旧值；只依赖它会让 stage 高度停在旧尺寸，底部露出透明带。
+const nativeViewport = ref<{ w: number; h: number } | null>(null);
 function setUiScale(scale: number) {
   uiScale.value = scale;
   // Dropdown 等 Teleport 到 body 的浮层不在 .app-stage 的 zoom 树中。
   // 把同一缩放值发布到根节点，供这些浮层同步字号与控件尺寸。
   document.documentElement.style.setProperty('--ui-scale', String(scale));
 }
+// 视口尺寸取「原生上报值」与「JS 测量值」的较大者：两者一致时无副作用，原生值更新
+// 更及时时以它为准，避免呼出瞬间读到过期视口。native 未设置 WebView 缩放因子，故
+// 物理像素按 devicePixelRatio 换算即为 CSS 像素。
+// documentElement/visualViewport 是额外兜底：WebView2 从隐藏恢复时三种读数可能
+// 先后更新，取最大者保证不会因为某个读数滞后而把 stage 算短（底部露出透明带）。
+function viewportSize(): { w: number; h: number } {
+  const dpr = window.devicePixelRatio || 1;
+  // Native window.resized is broadcast by the main HWND to child renderers.
+  // A standalone editor must use its own DOM viewport, not the main window size.
+  const native = isStandaloneEditor.value ? null : nativeViewport.value;
+  const root = document.documentElement;
+  const vv = window.visualViewport;
+  return {
+    w: Math.max(
+      window.innerWidth,
+      root ? root.clientWidth : 0,
+      vv ? vv.width : 0,
+      native ? native.w / dpr : 0,
+    ),
+    h: Math.max(
+      window.innerHeight,
+      root ? root.clientHeight : 0,
+      vv ? vv.height : 0,
+      native ? native.h / dpr : 0,
+    ),
+  };
+}
 function updateScale() {
-  viewportHeight.value = window.innerHeight;
-  if (window.innerHeight <= 0 || window.innerWidth <= 0) {
+  const { w, h } = viewportSize();
+  viewportHeight.value = h;
+  if (h <= 0 || w <= 0) {
     setUiScale(1);
     return;
   }
   // 用户视觉目标：在原本 innerHeight/BASE_H 的基础上再乘 1.3
-  const boosted = (window.innerHeight / BASE_H) * SCALE_BOOST;
+  const boosted = (h / BASE_H) * SCALE_BOOST;
   // 宽度兜底：BASE_W * scale 不能超过 innerWidth（避免焦点跑到屏幕外）
-  const widthCapped = window.innerWidth / BASE_W;
+  const widthCapped = w / BASE_W;
   setUiScale(Math.min(boosted, widthCapped));
+}
+// 呼出/尺寸变化后视口读数可能分多帧才稳定（WebView2 隐藏→恢复、DWM 合成延迟）。
+// 按「帧数」而非墙钟时间收尾：窗口隐藏时 rAF 会被暂停，墙钟计时会提前结束。
+let settleFrames = 0;
+let settleRaf = 0;
+function settleScale(frames = 90) {
+  if (settleRaf) {
+    settleFrames = Math.max(settleFrames, frames);
+    return;
+  }
+  settleFrames = frames;
+  const step = () => {
+    updateScale();
+    settleFrames -= 1;
+    if (settleFrames > 0) settleRaf = requestAnimationFrame(step);
+    else settleRaf = 0;
+  };
+  settleRaf = requestAnimationFrame(step);
+}
+function onNativeResize(e: Event) {
+  const detail = (e as CustomEvent<{ w?: number; h?: number }>).detail;
+  if (!isStandaloneEditor.value && detail && Number(detail.w) > 0 && Number(detail.h) > 0) {
+    nativeViewport.value = { w: Number(detail.w), h: Number(detail.h) };
+  }
+  updateScale();
+  settleScale();
+}
+// 呼出后 WebView2 才恢复渲染，此时原生尺寸消息可能晚于 DOM 视口更新到达。跨多帧重算
+// 兜底，确保视口稳定后再定稿缩放与 stage 高度。
+function refreshScaleAfterSummon() {
+  updateScale();
+  settleScale();
 }
 const scalerStyle = computed(() => {
   if (isStandaloneEditor.value) {
@@ -842,12 +908,18 @@ const scalerStyle = computed(() => {
       '--gamepad-safe-bottom': '0px',
     };
   }
+  const scale = Math.max(uiScale.value, 0.01);
+  // 设计基准 580×780 与窗口宽高比一致时，stage 恰好铺满窗口。但当实际视口比设计
+  // 比例更高（例如隐藏任务栏后窗口底部吸附到屏幕下沿、高度增加），按宽度算出的
+  // 缩放会让 stage 高度小于视口，底部露出透明带（底板/背景层没有延伸）。
+  // 这里让 stage 至少撑满视口高度，保证底板与背景层始终覆盖整个窗口。
+  const stageHeight = Math.max(BASE_H, Math.ceil(viewportHeight.value / scale));
   return {
     width: BASE_W + 'px',
-    height: BASE_H + 'px',
+    height: stageHeight + 'px',
     // zoom 同时参与布局和命中测试；transform 只放大绘制层，会让 WebView2
     // 看到的坐标与鼠标点击坐标分离，表现为内容区"看得到但点不到"。
-    zoom: uiScale.value,
+    zoom: scale,
     // Keep the physical safe area proportional to the viewport, then convert
     // it back to the zoomed layout coordinate space used by app-content.
     '--gamepad-safe-bottom': `${Math.max(32, Math.min(64, viewportHeight.value * 0.06)) / Math.max(0.5, uiScale.value)}px`,
@@ -920,7 +992,7 @@ function onFanGuardState(e: Event): void {
 }
 
 async function applyProgramControls() {
-  const [tdp, fps] = await Promise.all([readTdp('ac'), readFps('ac')]);
+  const tdp = await readTdp('ac');
   const floating = getFloatInfo().enabled;
   const scheduleOwned = await getPerformanceScheduleOwnership().catch(() => false);
   // 启动自动应用 TDP：仅当开关开启且帧数目标浮动优化未接管时，才把保存的 TDP 最大值下发硬件。
@@ -929,27 +1001,11 @@ async function applyProgramControls() {
     const auto = await readTdpAutoApply();
     if (auto.boot) void setTdp('ac', tdp, { apply: true, save: false }).catch(() => {});
   }
-  // 启动恢复锁帧：读程序配置的 FPS 帧率上限并应用到 RTSS。
-  // 开机初期 RTSS 可能未启动 / Profiles\Global 尚未生成（setRtssLimit 会静默跳过），
-  // 因此带轮询重试：直到 RTSS 在跑且配置已应用成功一次。
-  if (fps != null && !getFloatInfo().enabled && scheduleOwned !== 'auto') {
-    void applyRtssLimitConfig(fps > 0 ? fps : 0).catch(() => {});
-  }
+  // Independent AC/DC + dedicated FPS ownership; never restore an AC scalar
+  // over a battery/dedicated owner or let an optimizer retake RTSS.
+  void applyIndependentFrameRates().catch(() => {});
 }
 
-// RTSS 启动恢复锁帧：写配置 + 最多 12 次（约 60 秒）轮询，RTSS 就绪后应用一次即停。
-// 浮动优化运行时（enabled）由 autofloat 自己接管 RTSS，本函数不应介入（调用方已跳过）。
-async function applyRtssLimitConfig(fps: number): Promise<void> {
-  for (let i = 0; i < 12; i++) {
-    try {
-      await setRtssLimit(fps);
-      if (await rtssRunning()) return; // RTSS 已在跑并收到新配置
-    } catch {
-      /* 继续重试 */
-    }
-    await new Promise((r) => setTimeout(r, 5000));
-  }
-}
 let stopGamepad: (() => void) | null = null;
 let stopGyroTelemetry: (() => void) | null = null;
 // 手柄后台（未开浮动时）调节 RTSS 帧率上限：setRtssLimit 较重（LoadProfile+UpdateProfiles），
@@ -1324,6 +1380,24 @@ function onDynamicBackgroundLoaded(e: Event): void {
     applyBackgroundState(state, 'dynamic');
   }).catch(() => {});
 }
+// Only the main renderer owns placement listeners; unrelated UI settings do not move it.
+const windowPlacement = ref<'left' | 'right'>(getUiSetting('windowPlacement'));
+async function applyWindowPlacement(): Promise<void> {
+  const placed = await windowApi.place(windowPlacement.value);
+  if (!placed) throw new Error('Native window placement failed');
+}
+function reportWindowPlacementError(error: unknown): void {
+  console.warn('[window placement]', error);
+}
+function onWindowPlacementSettingsChanged(): void {
+  const next = getUiSetting('windowPlacement');
+  if (next === windowPlacement.value) return;
+  windowPlacement.value = next;
+  void applyWindowPlacement().catch(reportWindowPlacementError);
+}
+function onWindowPlacementSummoned(): void {
+  void applyWindowPlacement().catch(reportWindowPlacementError);
+}
 onMounted(async () => {
   // A shortcut editor popup is another renderer owned by the same native
   // process, not a second YMCC application instance. Do not start the main
@@ -1335,6 +1409,7 @@ onMounted(async () => {
     window.dispatchEvent(new CustomEvent('app-startup-ready'));
     return;
   }
+  deckyMirrorHost = startDeckyMirrorHost();
   try {
     aiFanMockActive = parseAiFanMockSession(await app.aiFanMockSession()) !== null;
   } catch (error) {
@@ -1414,6 +1489,11 @@ onMounted(async () => {
   backgroundOpacity.value = getBackgroundOpacity();
   backgroundBlur.value = getBackgroundBlur();
   backgroundVideoAutoPause.value = getUiSetting('videoBatteryPause');
+  windowPlacement.value = getUiSetting('windowPlacement');
+  // Await saved placement before signalling first-paint readiness; never place using defaults first.
+  await applyWindowPlacement().catch(reportWindowPlacementError);
+  window.addEventListener('ui-settings:changed', onWindowPlacementSettingsChanged);
+  window.addEventListener('ui-settings:loaded', onWindowPlacementSettingsChanged);
   window.addEventListener('background:changed', onBackgroundChanged as EventListener);
   window.addEventListener('background:opacity-changed', onBackgroundOpacityChanged as EventListener);
   window.addEventListener('background:blur-changed', onBackgroundBlurChanged as EventListener);
@@ -1423,6 +1503,8 @@ onMounted(async () => {
   window.addEventListener('ipc:window.shown', onBackgroundWindowShown as EventListener);
   window.addEventListener('ipc:window.maximized', onBackgroundWindowShown as EventListener);
   window.addEventListener('ipc:window.summoned', onBackgroundWindowShown as EventListener);
+  // 唤起（托盘呼出）时按设置项对齐主窗口位置。
+  window.addEventListener('ipc:window.summoned', onWindowPlacementSummoned);
   document.addEventListener('visibilitychange', onBackgroundVisibilityChange);
   const initialWindowState = await windowApi.getState().catch(() => null);
   if (initialWindowState) {
@@ -1628,10 +1710,15 @@ onMounted(async () => {
     applyCpuAutostart().catch(() => {});
   }, 30000);
 
+  if (!aiFanMockActive && !aiCpuIsolated) deckyMirrorHost?.ready();
 });
 onUnmounted(() => {
+  deckyMirrorHost?.stop(); deckyMirrorHost = null;
   stopAiFanService?.();
   stopAiFanService = null;
+  window.removeEventListener('ui-settings:changed', onWindowPlacementSettingsChanged);
+  window.removeEventListener('ui-settings:loaded', onWindowPlacementSettingsChanged);
+  window.removeEventListener('ipc:window.summoned', onWindowPlacementSummoned);
   videoPowerProbeGeneration++;
   if (videoPowerProbeTimer !== null) {
     window.clearTimeout(videoPowerProbeTimer);
@@ -1709,50 +1796,71 @@ onUnmounted(() => {
 });
 
 // ── UI 缩放：监听窗口尺寸 / 原生 resize 事件，保持设计比例填满窗口 ──
+let stageResizeObserver: ResizeObserver | null = null;
 onMounted(() => {
   updateScale();
-  // 首帧后再校准一次（WebView2 宿主尺寸刚就绪时 innerHeight 可能未稳定）
-  requestAnimationFrame(updateScale);
+  settleScale();
   window.addEventListener('resize', updateScale);
-  window.addEventListener('ipc:window.resized', updateScale as EventListener);
+  window.addEventListener('ipc:window.resized', onNativeResize as EventListener);
+  // 呼出后重新定稿：原生尺寸消息可能早于 WebView2 视口恢复到达。
+  window.addEventListener('ipc:window.summoned', refreshScaleAfterSummon as EventListener);
+  window.visualViewport?.addEventListener('resize', updateScale);
+  // 原生 reflow（隐藏任务栏后窗口吸底变高）可能不派发 window resize，
+  // 用 ResizeObserver 监测文档根节点尺寸变化兜底，避免内容层停留在旧尺寸、
+  // 底部露出透明带。
+  if (typeof ResizeObserver !== 'undefined') {
+    stageResizeObserver = new ResizeObserver(() => {
+      updateScale();
+      settleScale();
+    });
+    stageResizeObserver.observe(document.documentElement);
+  }
 });
 onUnmounted(() => {
+  stageResizeObserver?.disconnect();
+  stageResizeObserver = null;
+  if (settleRaf) cancelAnimationFrame(settleRaf);
+  settleRaf = 0;
+  settleFrames = 0;
   window.removeEventListener('resize', updateScale);
-  window.removeEventListener('ipc:window.resized', updateScale as EventListener);
+  window.removeEventListener('ipc:window.resized', onNativeResize as EventListener);
+  window.removeEventListener('ipc:window.summoned', refreshScaleAfterSummon as EventListener);
+  window.visualViewport?.removeEventListener('resize', updateScale);
 });
 </script>
 
 <template>
   <div class="app-root">
+    <video
+      v-if="backgroundUrl && backgroundKind === 'video' && !backgroundVideoSuspended"
+      :key="backgroundVideoGeneration"
+      ref="backgroundVideo"
+      class="user-background-video"
+      :src="isHlsUrl(backgroundUrl) ? undefined : backgroundUrl"
+      :style="{ opacity: String(backgroundOpacity) }"
+      muted
+      loop
+      playsinline
+      preload="metadata"
+      disablepictureinpicture
+      tabindex="-1"
+      aria-hidden="true"
+      @loadedmetadata="onBackgroundVideoLoaded"
+      @canplay="onBackgroundVideoCanPlay"
+      @playing="onBackgroundVideoPlaying"
+      @pause="onBackgroundVideoPause"
+      @error="() => onBackgroundVideoError()"
+    />
+    <div
+      v-else-if="backgroundUrl"
+      class="user-background-image"
+      :style="backgroundStyle"
+      aria-hidden="true"
+    />
+    <div class="app-backdrop" aria-hidden="true" />
     <div class="app-stage" :data-ui-visible="uiVisible" :style="scalerStyle">
       <div v-if="!hasVisibleBackgroundMedia" class="empty-background" aria-hidden="true" />
-      <video
-        v-if="backgroundUrl && backgroundKind === 'video' && !backgroundVideoSuspended"
-        :key="backgroundVideoGeneration"
-        ref="backgroundVideo"
-        class="user-background-video"
-        :src="isHlsUrl(backgroundUrl) ? undefined : backgroundUrl"
-        :style="{ opacity: String(backgroundOpacity) }"
-        muted
-        loop
-        playsinline
-        preload="metadata"
-        disablepictureinpicture
-        tabindex="-1"
-        aria-hidden="true"
-        @loadedmetadata="onBackgroundVideoLoaded"
-        @canplay="onBackgroundVideoCanPlay"
-        @playing="onBackgroundVideoPlaying"
-        @pause="onBackgroundVideoPause"
-        @error="() => onBackgroundVideoError()"
-      />
-      <div
-        v-else-if="backgroundUrl"
-        class="user-background-image"
-        :style="backgroundStyle"
-        aria-hidden="true"
-      />
-      <div v-if="!isStandaloneEditor" class="app-body">
+      <div v-if="!isStandaloneEditor" class="app-body" :class="{ 'app-body--nav-right': windowPlacement === 'left' }">
         <NavRail />
         <main class="app-main">
           <!-- 顶部监控条：独立于页面滚动层，左右顶满 app-main，不受滚动条宽度影响 -->
@@ -1800,10 +1908,35 @@ onUnmounted(() => {
   /* width / height / zoom 由 inline style 注入；保持原视觉根职责 */
   display: flex;
   flex-direction: column;
+  /* 兜底（纯 CSS，不依赖 JS 读数）：窗口从隐藏被呼出时，JS 的 viewportHeight 可能
+     读到过期值，使 inline height 偏小，stage 物理高度小于视口，底部露出一块未铺满的
+     暗色区域。这里用 100vh 换算回 zoom 坐标系（zoom == --ui-scale），保证 stage 物理
+     高度恒 >= 视口高度（zoom * 100vh/zoom == 100vh）。JS 读数正确时该值与 inline
+     height 取大者，不改变既有布局。 */
+  min-height: calc(100vh / max(0.01, var(--ui-scale, 1)));
   /* 根节点透明；可辨识度由导航、卡片和控件底板分块提供。 */
   background: transparent;
   position: relative;
   isolation: isolate;
+  /* 必须在全窗底板（.app-backdrop, z-index 1）之上，内容才不会被底板盖住。 */
+  z-index: 2;
+}
+/* 全窗暗色底板：有壁纸（视频/图片）时铺满整个窗口，尺寸始终等于窗口并随窗口自适应。
+   此前该底板由 .app-main 自绘（右缘止于导航栏，只有 487px 宽），在壁纸上会呈现为
+   「一块比窗口小的黑色矩形」。改由根节点整窗层承担后，底板恒等于窗口大小。
+   挂在 .app-root（position:fixed; inset:0）直下，纯 CSS 自适应，无需跟随 stage 缩放。 */
+.app-backdrop {
+  position: absolute;
+  inset: 0;
+  /* 必须与 .user-background-video 一样显式写满 100%：.app-root 是
+     display:grid + place-items:center，栅格容器会给绝对定位子项施加
+     justify-self/align-self:center，只写 inset:0 时在 Chromium 里可能收缩，
+     导致底板只覆盖左上角、右下露出透明。视频层因带 width/height:100% 不受影响。 */
+  width: 100%;
+  height: 100%;
+  z-index: 1;
+  background: color-mix(in srgb, var(--bg-solid) 62%, transparent);
+  pointer-events: none;
 }
 .empty-background {
   position: absolute;
@@ -1823,12 +1956,34 @@ onUnmounted(() => {
   pointer-events: none;
   background: transparent;
 }
+/* 自定义图片背景层：与视频层同为铺满 stage 的绝对定位层。此前缺少定位/尺寸规则，
+   该 div 高度为 0，图片背景完全不可见（且 empty-background 会被 hasVisibleBackgroundMedia
+   关掉，导致没有底板托底）。 */
+.user-background-image {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  width: 100%;
+  height: 100%;
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  pointer-events: none;
+}
 .app-body {
   flex: 1 1 auto;
   display: flex;
   min-height: 0;
   position: relative;
   z-index: 1;
+}
+/* 窗口贴左侧时，侧边导航栏翻到右侧（贴近屏幕中心侧）；分隔线随之移到导航栏左缘。 */
+.app-body--nav-right {
+  flex-direction: row-reverse;
+}
+.app-body--nav-right :deep(.navrail) {
+  border-right: none;
+  border-left: 1px solid #1c2533;
 }
 .standalone-body {
   width: 100%;
@@ -1845,8 +2000,10 @@ onUnmounted(() => {
   min-height: 0;
   overflow: hidden; /* 页面滚动移到 app-content，监控条不受滚动条影响 */
   padding: 0;
-  /* 界面底板不再使用整体毛玻璃；自定义图片自身模糊由背景图片滑块控制。 */
-  background: color-mix(in srgb, var(--bg-solid) 62%, transparent);
+  /* 界面底板不再使用整体毛玻璃；自定义图片自身模糊由背景图片滑块控制。
+     暗色底板已整体上移到全窗层 .app-backdrop，内容区不再自绘，避免同一块
+     色板叠两层、也避免它只覆盖内容列（右缘止于导航栏）而看起来「比窗口小」。 */
+  background: transparent;
   position: relative;
   z-index: 1;
 }
