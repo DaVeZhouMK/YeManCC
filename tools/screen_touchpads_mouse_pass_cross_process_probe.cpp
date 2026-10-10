@@ -1,0 +1,43 @@
+// Real Windows experiment: unchanged production touchpad HWND over an OWN target
+// in another process. No click forwarding, global hook, UIAccess or config writes.
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include "screen_touchpads.h"
+#include <iostream>
+using namespace ymcc::screenpads;
+struct Shared { DWORD magic,ownerPid; volatile LONG mouseDowns,touchDowns; ULONG_PTR target; };
+static Shared* shared=nullptr;
+static WNDPROC original=nullptr;
+static int mode=0;
+static unsigned overlayMouse=0,touchHitQueries=0;
+static Json hitSources=Json::array();
+static LRESULT CALLBACK targetProc(HWND h,UINT m,WPARAM w,LPARAM l){
+ if(m==WM_LBUTTONDOWN){const ULONG_PTR e=(ULONG_PTR)GetMessageExtraInfo();if((e&0xffffff00u)!=0xff515700u||(e&0x80u)==0)InterlockedIncrement(&shared->mouseDowns);return 0;}
+ if(m==WM_POINTERDOWN){POINTER_INPUT_TYPE type{};if(GetPointerType(GET_POINTERID_WPARAM(w),&type)&&type==PT_TOUCH)InterlockedIncrement(&shared->touchDowns);return 0;}
+ if(m==WM_POINTERUP||m==WM_POINTERUPDATE)return 0;
+ if(m==WM_TIMER){DestroyWindow(h);return 0;}
+ if(m==WM_CLOSE){DestroyWindow(h);return 0;}if(m==WM_DESTROY){PostQuitMessage(0);return 0;}
+ return DefWindowProcW(h,m,w,l);
+}
+static LRESULT CALLBACK observed(HWND h,UINT m,WPARAM w,LPARAM l){
+ if(m==WM_NCHITTEST){INPUT_MESSAGE_SOURCE src{};const bool known=GetCurrentInputMessageSource(&src)!=FALSE;if(hitSources.size()<64)hitSources.push_back({{"mode",mode},{"sourceKnown",known},{"device",src.deviceType},{"origin",src.originId}});if(mode==1)return HTTRANSPARENT;}
+ if(m==WM_TOUCHHITTESTING){++touchHitQueries;if(mode==3){RECT rect{};GetWindowRect(h,&rect);const auto input=reinterpret_cast<const TOUCH_HIT_TESTING_INPUT*>(l);TOUCH_HIT_TESTING_PROXIMITY_EVALUATION eval{};if(input&&EvaluateProximityToRect(&rect,input,&eval))return PackTouchHitTestingProximityEvaluation(input,&eval);}}
+ if(m==WM_LBUTTONDOWN)++overlayMouse;
+ return CallWindowProcW(original,h,m,w,l);
+}
+static void pump(DWORD ms){const auto end=GetTickCount64()+ms;MSG m{};do{while(PeekMessageW(&m,nullptr,0,0,PM_REMOVE))DispatchMessageW(&m);Sleep(1);}while(GetTickCount64()<end);}
+static bool click(POINT p){INPUT in[3]{};for(auto& e:in)e.type=INPUT_MOUSE;const int x=GetSystemMetrics(SM_XVIRTUALSCREEN),y=GetSystemMetrics(SM_YVIRTUALSCREEN),w=GetSystemMetrics(SM_CXVIRTUALSCREEN),h=GetSystemMetrics(SM_CYVIRTUALSCREEN);in[0].mi.dx=MulDiv(p.x-x,65535,w-1);in[0].mi.dy=MulDiv(p.y-y,65535,h-1);in[0].mi.dwFlags=MOUSEEVENTF_MOVE|MOUSEEVENTF_ABSOLUTE|MOUSEEVENTF_VIRTUALDESK;in[1].mi.dwFlags=MOUSEEVENTF_LEFTDOWN;in[2].mi.dwFlags=MOUSEEVENTF_LEFTUP;return SendInput(3,in,sizeof(INPUT))==3;}
+static bool touch(POINT p){POINTER_TOUCH_INFO t{};t.pointerInfo.pointerType=PT_TOUCH;t.pointerInfo.pointerId=0;t.pointerInfo.ptPixelLocation=p;t.touchMask=TOUCH_MASK_CONTACTAREA|TOUCH_MASK_ORIENTATION|TOUCH_MASK_PRESSURE;t.rcContact={p.x-2,p.y-2,p.x+2,p.y+2};t.orientation=90;t.pressure=512;t.pointerInfo.pointerFlags=POINTER_FLAG_DOWN|POINTER_FLAG_INRANGE|POINTER_FLAG_INCONTACT;const bool down=InjectTouchInput(1,&t)!=FALSE;pump(40);t.pointerInfo.pointerFlags=POINTER_FLAG_UP;const bool up=InjectTouchInput(1,&t)!=FALSE;pump(100);return down&&up;}
+static int runTarget(const wchar_t* mapName){if(std::wstring(mapName).rfind(L"Local\\YmccOwnMousePass_",0)!=0)return 4;HANDLE map=OpenFileMappingW(FILE_MAP_ALL_ACCESS,FALSE,mapName);if(!map)return 5;shared=(Shared*)MapViewOfFile(map,FILE_MAP_ALL_ACCESS,0,0,sizeof(Shared));if(!shared||shared->magic!=0x594d5042u)return 6;SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);WNDCLASSW c{};c.hInstance=GetModuleHandleW(nullptr);c.lpszClassName=L"YmccOwnCrossProcessMousePassTarget";c.lpfnWndProc=targetProc;c.hCursor=LoadCursorW(nullptr,IDC_ARROW);c.hbrBackground=(HBRUSH)(COLOR_WINDOW+1);if(!RegisterClassW(&c))return 7;const HWND h=CreateWindowExW(WS_EX_TOPMOST|WS_EX_TOOLWINDOW,c.lpszClassName,L"YMCC 自有跨进程输入验收",WS_POPUP|WS_VISIBLE,300,220,500,340,nullptr,nullptr,c.hInstance,nullptr);if(!h)return 8;shared->target=(ULONG_PTR)h;SetTimer(h,1,20000,nullptr);MSG m{};while(GetMessageW(&m,nullptr,0,0)>0)DispatchMessageW(&m);UnmapViewOfFile(shared);CloseHandle(map);return 0;}
+int wmain(int argc,wchar_t**argv){if(argc==3&&std::wstring(argv[1])==L"--target")return runTarget(argv[2]);if(argc!=2)return 2;SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);POINT priorCursor{};GetCursorPos(&priorCursor);const HWND priorForeground=GetForegroundWindow();const DWORD owner=GetCurrentProcessId();const std::wstring name=L"Local\\YmccOwnMousePass_"+std::to_wstring(owner)+L"_"+std::to_wstring(GetTickCount64());HANDLE map=CreateFileMappingW(INVALID_HANDLE_VALUE,nullptr,PAGE_READWRITE,0,sizeof(Shared),name.c_str());if(!map||GetLastError()==ERROR_ALREADY_EXISTS)return 3;shared=(Shared*)MapViewOfFile(map,FILE_MAP_ALL_ACCESS,0,0,sizeof(Shared));if(!shared)return 4;*shared={0x594d5042u,owner,0,0,0};wchar_t self[32768]{};if(!GetModuleFileNameW(nullptr,self,32768))return 5;std::wstring command=L"\""+std::wstring(self)+L"\" --target \""+name+L"\"";STARTUPINFOW si{};si.cb=sizeof(si);PROCESS_INFORMATION child{};if(!CreateProcessW(self,command.data(),nullptr,nullptr,FALSE,CREATE_NO_WINDOW,nullptr,nullptr,&si,&child))return 6;CloseHandle(child.hThread);
+ Json result={{"actualWindowsInput",true},{"targetDifferentProcess",true},{"clickForwarded",false},{"globalHookInstalled",false},{"uiAccessChanged",false},{"productionInputChanged",false},{"physicalHardwareWrites",0},{"realConfigurationWrites",0},{"childPid",child.dwProcessId},{"cases",Json::array()}};HWND target=nullptr;for(int i=0;i<200;i++){target=(HWND)shared->target;if(target)break;Sleep(5);}DWORD targetPid=0;if(target)GetWindowThreadProcessId(target,&targetPid);if(!target||targetPid!=child.dwProcessId){result["failure"]="Own target identity/ready check failed";}else{
+  Config cfg;cfg.enabled=true;cfg.layout=Layout::Single;cfg.single=Mode::Mouse;dryRun=true;initialize(GetModuleHandleW(nullptr),nullptr,cfg);const HWND input=windows[0];SetWindowPos(input,HWND_TOPMOST,360,280,260,200,SWP_NOACTIVATE|SWP_SHOWWINDOW);SetWindowPos(outlines[0],HWND_TOPMOST,360,280,260,200,SWP_NOACTIVATE|SWP_SHOWWINDOW);sizes[0]={260,200};original=(WNDPROC)SetWindowLongPtrW(input,GWLP_WNDPROC,(LONG_PTR)observed);const LONG_PTR style=GetWindowLongPtrW(input,GWL_EXSTYLE);const bool touchReady=InitializeTouchInjection(2,TOUCH_FEEDBACK_NONE)!=FALSE;POINT point{450,350};
+  for(mode=0;mode<=3;mode++){
+   SetWindowLongPtrW(input,GWL_EXSTYLE,style|(mode>=2?WS_EX_TRANSPARENT:0));SetLastError(0);const bool registered=RegisterTouchHitTestingWindow(input,mode==3?TOUCH_HIT_TESTING_CLIENT:TOUCH_HIT_TESTING_DEFAULT)!=FALSE;const DWORD error=registered?0:GetLastError();pump(80);const LONG beforeMouse=shared->mouseDowns,beforeTouch=shared->touchDowns;const unsigned beforeOverlay=overlayMouse,beforeHit=touchHitQueries;const auto beforeEvents=eventCount;const bool mouseSent=click(point);pump(100);const LONG actualMouse=shared->mouseDowns-beforeMouse;const bool touchSent=touchReady&&touch(point);
+   const bool both=actualMouse==1&&eventCount>beforeEvents&&shared->touchDowns==beforeTouch;result["cases"].push_back({{"mode",mode},{"name",mode==0?"production-baseline":mode==1?"unconditional-HTTRANSPARENT":mode==2?"layered-WS_EX_TRANSPARENT":"layered-transparent-client-touch-hit-testing"},{"targetMouseClicks",actualMouse},{"overlayMouseClicks",overlayMouse-beforeOverlay},{"mouseInjected",mouseSent},{"touchInjected",touchSent},{"touchpadPointerEvents",eventCount-beforeEvents},{"targetTouchDowns",shared->touchDowns-beforeTouch},{"touchHitTestingRegistered",registered},{"registrationError",error},{"touchHitQueries",touchHitQueries-beforeHit},{"preservesMousePassAndTouchCapture",both}});
+  }
+  result["hitSources"]=hitSources;SetWindowLongPtrW(input,GWL_EXSTYLE,style);SetWindowLongPtrW(input,GWLP_WNDPROC,(LONG_PTR)original);shutdown();
+ }
+ if(target&&IsWindow(target)){DWORD pid=0;GetWindowThreadProcessId(target,&pid);if(pid==child.dwProcessId)PostMessageW(target,WM_CLOSE,0,0);}const DWORD ended=WaitForSingleObject(child.hProcess,30000);result["ownedTargetTerminal"]=ended==WAIT_OBJECT_0;DWORD exitCode=STILL_ACTIVE;GetExitCodeProcess(child.hProcess,&exitCode);result["ownedTargetExitCode"]=exitCode;CloseHandle(child.hProcess);UnmapViewOfFile(shared);CloseHandle(map);POINT now{};GetCursorPos(&now);if(now.x==450&&now.y==350)SetCursorPos(priorCursor.x,priorCursor.y);if(priorForeground&&IsWindow(priorForeground))SetForegroundWindow(priorForeground);std::ofstream out(std::filesystem::path(argv[1]),std::ios::binary);out<<result.dump(2);std::cout<<result.dump(2);return ended==WAIT_OBJECT_0?0:9;
+}

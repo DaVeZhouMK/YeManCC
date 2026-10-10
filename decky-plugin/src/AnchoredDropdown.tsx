@@ -8,7 +8,11 @@ const React = SP_REACT;
 export function AnchoredDropdown(props: { label: any; selectedOption: string; rgOptions: Choice[]; disabled: boolean;
   opened: boolean; onMenuWillOpen: (show: () => void) => boolean; onCancel: () => void; onChange: (choice: Choice) => void }) {
   const root = React.useRef(null), trigger = React.useRef(null), wasOpen = React.useRef(false);
-  const cancel = (event?: any) => { event?.stopPropagation?.(); event?.preventDefault?.(); props.onCancel(); return true; };
+  const latest = React.useRef(props); latest.current = props;
+  const cancel = (event?: any, owner = props) => { event?.stopPropagation?.(); event?.preventDefault?.(); owner.onCancel(); return true; };
+  // Registered while closed, so Steam can cancel even before the conditional
+  // options join its native focus tree. The stable callback reads current props.
+  const nativeCancel = React.useRef((event?: any) => latest.current.opened ? cancel(event, latest.current) : false);
   React.useEffect(() => {
     if (props.opened) {
       const selected = root.current?.querySelector('[role="option"][aria-selected="true"]:not([aria-disabled="true"])');
@@ -25,7 +29,8 @@ export function AnchoredDropdown(props: { label: any; selectedOption: string; rg
     const next = event.key === 'Home' ? 0 : event.key === 'End' ? options.length - 1 : (current + (event.key === 'ArrowUp' ? -1 : 1) + options.length) % options.length;
     options[next]?.focus(); event.preventDefault(); event.stopPropagation();
   };
-  return <div ref={root} className="ymcc-anchored-dropdown" onKeyDownCapture={keys}>
+  return <DFL.Focusable ref={root} className="ymcc-anchored-dropdown" data-ymcc-menu-owner="native-scope"
+    focusable={false} flow-children="column" onCancel={nativeCancel.current} onKeyDownCapture={keys}>
     <DFL.DropdownItem label={props.label} selectedOption={props.selectedOption} rgOptions={props.rgOptions}
       controlled={true} childrenContainerWidth="max" bottomSeparator="none" disabled={props.disabled}
       dropDownControlRef={trigger} onMenuWillOpen={() => { if (props.opened) props.onCancel(); else props.onMenuWillOpen(() => {}); return false; }}
@@ -39,5 +44,5 @@ export function AnchoredDropdown(props: { label: any; selectedOption: string; rg
       </DFL.Focusable>)}
       <DFL.Focusable role="button" className="ymcc-anchored-option ymcc-anchored-cancel" focusable={true} onActivate={cancel}>取消</DFL.Focusable>
     </DFL.Focusable>}
-  </div>;
+  </DFL.Focusable>;
 }

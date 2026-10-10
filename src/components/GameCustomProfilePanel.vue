@@ -763,7 +763,7 @@ onUnmounted(() => {
 
     <Transition name="custom-submenu-pop" @before-leave="disableLeavingBody">
       <div v-if="expanded && gameAvailable" class="custom-top-body" data-gp-custom-body>
-      <div class="power-mode-list">
+      <div class="power-mode-list dedicated-frame-limits">
         <div
           v-for="item in POWER_SIDES"
           :key="item"
@@ -776,23 +776,30 @@ onUnmounted(() => {
             <strong>{{ item.toUpperCase() }}</strong>
             <small>{{ item === 'ac' ? '交流电' : '电池' }}</small>
           </div>
-          <div class="mode-picker">
-            <Dropdown
-              :model-value="selectedModes[item]"
-              :options="modeOptionsFor(item)"
+          <div class="power-mode-content">
+            <div class="mode-picker">
+              <Dropdown
+                :model-value="selectedModes[item]"
+                :options="modeOptionsFor(item)"
+                :disabled="busy || !game || !schedule"
+                :color="item === 'dc' ? 'dc' : 'accent'"
+                :aria-label="`${item.toUpperCase()} 专属性能档位`"
+                @update:model-value="selectMode(item, $event)"
+              />
+              <small>{{ modeDetail(item, selectedModes[item]) }}</small>
+            </div>
+            <FrameRatePair
+              class="mode-frame-controls"
+              :data-gp-group="'custom-frame-' + item"
+              :values="dedicatedFrames"
+              :side="item"
+              hide-side-label
               :disabled="busy || !game || !schedule"
-              :color="item === 'dc' ? 'dc' : 'accent'"
-              :aria-label="`${item.toUpperCase()} 专属性能档位`"
-              @update:model-value="selectMode(item, $event)"
+              label-prefix="专用"
+              @commit="saveDedicatedFrameRate"
             />
-            <small>{{ modeDetail(item, selectedModes[item]) }}</small>
           </div>
         </div>
-      </div>
-
-      <div class="game-setting-bubble dedicated-frame-limits" data-gp-group="custom-frame-limits">
-        <div class="game-setting-title"><strong>游戏专属帧率上限</strong></div>
-        <FrameRatePair :values="dedicatedFrames" :disabled="busy || !game || !schedule" label-prefix="专用" @commit="saveDedicatedFrameRate"/>
       </div>
 
       <div class="game-setting-bubble" data-gp-group="custom-core-policy">
@@ -1007,7 +1014,7 @@ onUnmounted(() => {
   grid-template-columns: 22px 52px minmax(0, 1fr);
   align-items: center;
   gap: 10px;
-  padding: 10px 11px;
+  padding: 12px 11px;
   border-radius: 9px;
   background: var(--bg-input);
   border: 1px solid rgba(255,255,255,.055);
@@ -1017,7 +1024,7 @@ onUnmounted(() => {
 .power-mode-row.current.dc .side-icon { color: var(--dc-accent); }
 .power-mode-row.current.ac { border-color: color-mix(in srgb, var(--accent) 42%, transparent); }
 .power-mode-row.current.dc { border-color: color-mix(in srgb, var(--dc-accent) 42%, transparent); }
-.side-name { display: flex; flex-direction: column; align-items: center; gap: 2px; text-align: center; }
+.side-name { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; }
 .side-name strong { font-size: 13px; }
 .side-name small, .mode-picker > small, .custom-top-hint { color: var(--text-dim); font-size: 11px; white-space: nowrap; }
 .mode-picker { min-width: 0; display: grid; gap: 4px; }
@@ -1032,8 +1039,8 @@ onUnmounted(() => {
   border-radius: 9px;
   background: var(--bg-input);
 }
-.dedicated-frame-limits { display: block; }
-.dedicated-frame-limits > .game-setting-title { margin-bottom: 12px; }
+.power-mode-content { display: grid; gap: 10px; min-width: 0; }
+.mode-frame-controls { min-width: 0; padding-top: 2px; }
 .game-setting-title { flex: 0 0 auto; min-width: 0; }
 .game-setting-title strong { font-size: 12px; }
 .game-setting-fields {

@@ -259,10 +259,10 @@ const editorGridKeys = computed(() => {
 function editorGridPosition(key: string): { row: number; col: number } | undefined {
   const index = editorGridKeys.value.indexOf(key);
   if (index < 0) return undefined;
-  return { row: 1 + Math.floor(index / 2), col: index % 2 };
+  return { row: 6 + Math.floor(index / 2), col: index % 2 };
 }
 const editorGridRowCount = computed(() => Math.ceil(editorGridKeys.value.length / 2));
-const editorTdpRow = computed(() => 1 + editorGridRowCount.value);
+const editorTdpRow = computed(() => 6 + editorGridRowCount.value);
 const editorActionsRow = computed(() => editorTdpRow.value + 1);
 const STRATEGY_LABEL: Record<TdpFloatStrategy, string> = {
   none: '无下降',
@@ -901,7 +901,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <section class="schedule-view">
+  <section class="schedule-view" data-gp-scope="performance-schedule">
     <header v-if="statusMsg || warningMsg || errMsg" class="page-head">
       <div v-if="statusMsg || warningMsg || errMsg" class="page-title-block">
         <div v-if="statusMsg" class="head-notice ok">{{ statusMsg }}</div>
@@ -967,26 +967,32 @@ onUnmounted(() => {
               <strong>{{ side.toUpperCase() }}</strong>
               <small>{{ side === 'ac' ? '交流电' : '电池' }}</small>
             </div>
-            <div v-if="config.enabled" class="mode-picker">
-              <Dropdown
-                :model-value="config.active[side]"
-                :options="modeOptionsFor(side)"
-                :disabled="busy || performanceControlsLocked"
-                :color="side === 'dc' ? 'dc' : 'accent'"
-                :aria-label="`${side.toUpperCase()} 性能档位`"
-                @update:model-value="selectMode(side, $event)"
+            <div class="power-mode-content">
+              <div v-if="config.enabled" class="mode-picker">
+                <Dropdown
+                  data-gp-vertical-lane="schedule-mode"
+                  :gp-row="side === 'ac' ? 0 : 2"
+                  gp-col="0"
+                  :model-value="config.active[side]"
+                  :options="modeOptionsFor(side)"
+                  :disabled="busy || performanceControlsLocked"
+                  :color="side === 'dc' ? 'dc' : 'accent'"
+                  :aria-label="`${side.toUpperCase()} 性能档位`"
+                  @update:model-value="selectMode(side, $event)"
+                />
+                <small>{{ modeDetail(side, config.active[side]) }}</small>
+              </div>
+              <FrameRatePair
+                class="mode-frame-controls"
+                :data-gp-group="'schedule-frame-' + side"
+                :values="framePair"
+                :side="side"
+                :gp-row-start="side === 'ac' ? 1 : 3"
+                hide-side-label
+                :disabled="frameBusy"
+                @commit="commitFrame"
               />
-              <small>{{ modeDetail(side, config.active[side]) }}</small>
             </div>
-            <FrameRatePair
-              class="mode-frame-controls"
-              :data-gp-group="'schedule-frame-' + side"
-              :values="framePair"
-              :side="side"
-              hide-side-label
-              :disabled="frameBusy"
-              @commit="commitFrame"
-            />
           </div>
         </div>
         <p v-if="frameError" class="schedule-frame-error" role="status">{{ frameError }}</p>
@@ -996,19 +1002,19 @@ onUnmounted(() => {
     <div class="schedule-tools card">
       <div class="tool-actions" data-gp-group="schedule-tools">
         <!-- 自动模式：切换为手动模式在最前 -->
-        <button v-if="config.enabled" type="button" data-gp-group="schedule-tools" class="tool-mode-btn" :disabled="busy || performanceControlsLocked" @click="enterManualMode">
+        <button v-if="config.enabled" type="button" data-gp-group="schedule-tools" class="tool-mode-btn" data-gp-row="4" data-gp-col="0" :disabled="busy || performanceControlsLocked" @click="enterManualMode">
           <AppIcon name="settings" />切换为手动模式
         </button>
         <!-- 手动模式：切换为自动模式在最前 -->
-        <button v-else type="button" data-gp-group="schedule-tools" class="tool-mode-btn" :disabled="busy || performanceControlsLocked" @click="enableQuickMode">
+        <button v-else type="button" data-gp-group="schedule-tools" class="tool-mode-btn" data-gp-row="4" data-gp-col="0" :disabled="busy || performanceControlsLocked" @click="enableQuickMode">
           <AppIcon name="rocket" />切换为自动模式
         </button>
         <!-- 编辑：再点一次关闭（双击开关）；仅自动模式下可编辑性能组合，手动模式隐藏（手动模式由 TDP 功耗 / CPU 调度页面直接控制） -->
-        <button v-if="config.enabled" type="button" data-gp-group="schedule-tools" :class="{ active: !!editing }" :disabled="busy || performanceControlsLocked" @click="toggleEditor">
+        <button v-if="config.enabled" type="button" data-gp-group="schedule-tools" :class="{ active: !!editing }" data-gp-row="4" data-gp-col="1" :disabled="busy || performanceControlsLocked" @click="toggleEditor">
           <AppIcon name="edit" />编辑性能组合
         </button>
         <!-- 监控：状态按钮，点击切换 -->
-        <button type="button" data-gp-group="schedule-tools" class="tool-monitor-btn" :class="{ active: showMonitor }" :disabled="busy" @click="showMonitor = !showMonitor">
+        <button type="button" data-gp-group="schedule-tools" class="tool-monitor-btn" :class="{ active: showMonitor }" data-gp-row="4" data-gp-col="2" :disabled="busy" @click="showMonitor = !showMonitor">
           <AppIcon name="monitor" />{{ showMonitor ? '监控已打开' : '监控已关闭' }}
         </button>
       </div>
@@ -1035,7 +1041,7 @@ onUnmounted(() => {
             :options="editModeOptions"
             :color="sideColor"
             :disabled="busy || performanceControlsLocked"
-            gp-row="0"
+            gp-row="5"
             gp-col="0"
             show-selected-sub
             aria-label="选择要编辑的性能档位"
@@ -1345,14 +1351,14 @@ button:disabled { opacity: .42; cursor: default; }
   background: var(--bg-input);
   border: 1px solid rgba(255,255,255,.055);
 }
+.power-mode-content {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
 .mode-frame-controls {
-  grid-column: 2 / -1;
   min-width: 0;
   padding-top: 2px;
-}
-.power-mode-row.frames-only .mode-frame-controls {
-  grid-column: 3;
-  grid-row: 1;
 }
 .schedule-frame-error {
   color: var(--danger);

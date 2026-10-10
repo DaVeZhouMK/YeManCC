@@ -4,7 +4,7 @@ const root=path.resolve(import.meta.dirname,'..'),require=createRequire(path.joi
 const args=process.argv.slice(2),outIndex=args.indexOf('--out');
 const outdir=outIndex>=0?path.resolve(args[outIndex+1]):path.join(root,'PowerControl/decky/plugins/ymcc-sidebar');
 const check=args.includes('--check'),hash=value=>crypto.createHash('sha256').update(value).digest('hex');
-const output=await build({entryPoints:[path.join(root,'decky-plugin/src/index.tsx')],bundle:true,minify:true,sourcemap:false,format:'esm',platform:'browser',target:'es2020',jsxFactory:'SP_REACT.createElement',jsxFragment:'SP_REACT.Fragment',plugins:deckyApiPlugins(),write:false});
+const output=await build({entryPoints:[path.join(root,'decky-plugin/src/index.tsx')],bundle:true,minify:true,sourcemap:false,format:'esm',platform:'browser',target:'es2020',define:{__YMCC_HUD_PROBE_BUILD__:args.includes('--hud-probe')?'true':'false'},jsxFactory:'SP_REACT.createElement',jsxFragment:'SP_REACT.Fragment',plugins:deckyApiPlugins(),write:false});
 const expected=[{name:'dist/index.js',bytes:Buffer.from(output.outputFiles[0].contents)},...['package.json','plugin.json','LICENSE.decky-api'].map(name=>({name,bytes:fs.readFileSync(path.join(root,'decky-plugin',name))}))];
 const loader=path.join(root,'PowerControl/decky/PluginLoader_noconsole.exe');
 if(!fs.existsSync(loader)||hash(fs.readFileSync(loader))!=='1d8e06921ced35b0349e677207953d90e548ea254079150d99ced4d360381824')throw Error('Locked mainline Windows Loader is missing or changed');

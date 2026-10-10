@@ -22,6 +22,26 @@
       if (!Number.isInteger(request.account) || id.GetAccountID() !== request.account) fail('steam-account-changed');
     };
     checkAccount();
+    if (request.operation === 'menu.toggle') {
+      if (!['main', 'quick-access'].includes(request.menu)) fail('invalid-steam-menu');
+      const s = window.SteamUIStore;
+      const w = s?.GetFocusedWindowInstance?.() || s?.WindowStore?.GamepadUIMainWindowInstance;
+      const m = w?.MenuStore;
+      if (!s || !w || !m || typeof w.BHasMenus !== 'function' || !w.BHasMenus() ||
+          typeof m.GetOpenSideMenu !== 'function' || typeof m.ToggleSideMenu !== 'function') fail('live-api-unavailable');
+      if (s.GetShowingLockScreen?.() || s.BHomeAndQuickAccessButtonsEnabled?.() === false ||
+          s.WindowStore?.BHasStandaloneKeyboard?.() || w.IsAnyVRWindow?.() || m.m_cSuppressRequests > 0) fail('steam-menu-blocked');
+      // Steam MenuStore: 0=None, 1=Main, 2=QuickAccess. Verify its state/API
+      // before using the enum; never depend on Decky or a connected controller.
+      const before = m.GetOpenSideMenu(), menu = request.menu === 'main' ? 1 : 2;
+      if (![0, 1, 2].includes(before)) fail('live-api-unavailable');
+      const desired = before === menu ? 0 : menu;
+      checkAccount(); stage = 'menu'; mutated = true;
+      await bounded(m.ToggleSideMenu(menu, desired !== 0));
+      await waitFor(() => m.GetOpenSideMenu() === desired);
+      checkAccount();
+      return { ok: true, before, menu: desired, runtimeAccepted: true, via: 'live' };
+    }
     if (request.operation === 'settings.get' || request.operation === 'settings.set') {
       const s = window.settingsStore;
       if (!s || typeof s.GetClientSetting !== 'function' || typeof SteamClient?.Settings?.SetSetting !== 'function') fail('live-api-unavailable');

@@ -121,7 +121,7 @@ inline void cursorSyncInfo(CURSORINFO ci,ULONGLONG now=GetTickCount64()) {
     if(!active && !retained){cursorHide();return;}
     const bool suppressed=(ci.flags&CURSOR_SUPPRESSED) && !(ci.flags&CURSOR_SHOWING);
     if(suppressed)cursorResetHandoff();
-    else if(ci.flags&CURSOR_SHOWING) {
+    else if((ci.flags&CURSOR_SHOWING) && ci.hCursor) {
         if(!cursorVisible){cursorHide();return;}
         // A mouse output can flip SHOWING for a single sample, then the next
         // touch flips it back. Keep the same HWND at the current hotspot until
@@ -133,6 +133,10 @@ inline void cursorSyncInfo(CURSORINFO ci,ULONGLONG now=GetTickCount64()) {
         if(cursorShowingSamples>=2 && now-cursorShowingSince>=kCursorHandoffMs) {
             ++cursorHandoffs;cursorHide();return;
         }
+    } else if(ci.flags&CURSOR_SHOWING) {
+        // SHOWING alone is not a drawable compositor cursor: a transient NULL
+        // shape must not retire the last valid software frame or complete handoff.
+        cursorResetHandoff();
     } else {cursorHide();return;} // Respect explicit application hiding (flags=0).
     // Suppression can clear hCursor. During a handoff keep the cached bitmap
     // instead of blinking just because Windows momentarily returns NULL.
@@ -157,7 +161,9 @@ inline void cursorSync() {
     cursorSyncInfo(ci);
 }
 inline bool cursorRetainAfterUp(HWND dispatch,const CURSORINFO& ci) {
-    if(!cursorTracking.load(std::memory_order_acquire) || !(ci.flags&CURSOR_SUPPRESSED) || (ci.flags&CURSOR_SHOWING))return false;
+    const bool waiting=((ci.flags&CURSOR_SUPPRESSED) && !(ci.flags&CURSOR_SHOWING)) ||
+        ((ci.flags&CURSOR_SHOWING) && !ci.hCursor && cursorVisible);
+    if(!cursorTracking.load(std::memory_order_acquire) || !waiting)return false;
     cursorTracking.store(false,std::memory_order_release);cursorRetained.store(true,std::memory_order_release);
     cursorDispatchWindow.store(dispatch,std::memory_order_release);cursorNextRetainedPoll.store(0,std::memory_order_relaxed);
     cursorSyncInfo(ci);cursorRequestSync();return true;

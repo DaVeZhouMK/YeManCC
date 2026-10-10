@@ -11,11 +11,15 @@ export interface DeckySidebarState {
   error?: number;
   bindingRetry?: boolean;
   bindingAttempts?: number;
+  launchStage?:string;
+  launchMode?:string;
 }
 
 export interface DeckySidebarEnvironment {
   ready: boolean; bundled: boolean; pythonRequired: boolean; nodeRequired: boolean;
   createdSteamDebugMarker: boolean; reason: string; error?: number;
+  steamDirectory?:string;resourceDirectory?:string;loaderPath?:string;pluginPath?:string;missingPath?:string;
+  powerControlDirectory?:string;directorySource?:string;configuredOverride?:string;logPath?:string;
 }
 export const deckySidebar = {
   environment: () => invoke<DeckySidebarEnvironment>('deckySidebar.environment', {}, { timeoutMs: 5000 }),
@@ -29,6 +33,7 @@ export function deckySidebarDescription(state: DeckySidebarState | null): string
   if (!state.enabled) return '开启后自动准备所需环境，与 Steam 联动；无需手动安装 Decky/Python/Node';
   if (state.phase === 'waiting-steam') return '已开启，等待 Steam 启动';
   if (state.phase === 'starting') return '正在启动侧栏加载器…';
+  if(state.reason==='live-debug-unavailable'&&state.bindingRetry)return 'Steam 本地界面接口正在启动，正在有限连接重试；无需重复开关';
   const messages: Record<string, string> = {
     'resource-missing': '侧栏加载器资源尚未部署',
     'resource-hash-mismatch': '侧栏加载器资源校验失败，未启动',
@@ -43,6 +48,9 @@ export function deckySidebarDescription(state: DeckySidebarState | null): string
     'steam-not-installed': '未检测到 Steam；请先安装 Steam',
     'steam-debug-create-failed': '无法准备 Steam 本地调试，未启动加载器',
     'environment-check-failed': '环境检测失败，未启动加载器',
+    'launch-failed': '加载器降权启动失败；未以管理员权限运行',
+    'ownership-failed': '加载器进程隔离未完成，已停止本次启动',
+    'environment-failed': '加载器启动环境准备失败',
     'loader-exited': '加载器已退出；关闭后重新开启可重试',
     'steam-state-unknown': 'Steam 状态未知，未启动加载器',
     'mirror-bootstrap-context-unavailable': 'Steam 界面暂未就绪',
@@ -62,7 +70,8 @@ export function deckySidebarDescription(state: DeckySidebarState | null): string
       return `加载器保留；镜像未确认：${messages[state.reason] ?? state.reason}`;
     return '加载器已启动，等待 YMCC 镜像连接确认';
   }
-  return messages[state.reason ?? ''] ?? `侧栏暂不可用：${state.reason || state.phase}`;
+  const message=messages[state.reason ?? ''] ?? `侧栏暂不可用：${state.reason || state.phase}`;
+  return message+(state.error?`（Windows 错误码 ${state.error}${state.launchStage?'；阶段 '+state.launchStage:''}）`:state.launchStage?'（阶段 '+state.launchStage+'）':'');
 }
 
 
@@ -78,4 +87,18 @@ export function deckySidebarEnvironmentDescription(environment: DeckySidebarEnvi
   if (reason === 'steam-not-installed') return '未检测到 Steam，请先安装 Steam';
   if (reason === 'steam-debug-access-denied') return 'Steam 安装目录不可写，需要使用 YMCC 原管理员启动方式';
   return `环境未就绪：${reason}`;
+}
+
+/** Error rendering must preserve the original reason when a read-only follow-up fails. */
+export function deckySidebarSetupFailure(error:unknown,environment?:DeckySidebarEnvironment|null):string {
+  const raw=error instanceof Error?error.message:String(error);
+  const reason=environment && !environment.ready?environment.reason:raw;
+  const message=deckySidebarDescription({enabled:true,steamKnown:false,steamRunning:false,pid:0,revision:0,phase:'unavailable',reason});
+  const parts=['YMCC 控制台设置失败：'+message];
+  if(environment?.missingPath)parts.push('缺失路径：'+environment.missingPath);
+  else if(environment?.resourceDirectory && ['resource-missing','plugin-missing','resource-hash-mismatch'].includes(reason))parts.push('检查目录：'+environment.resourceDirectory);
+  if(environment?.directorySource==='environment-override')parts.push('当前使用 YEMAN_POWER_CONTROL_DIR 测试目录；请先确认现有配置，不要直接切换数据目录');
+  if(environment?.error)parts.push('Windows 错误码：'+environment.error);
+  if(environment?.logPath)parts.push('诊断日志：'+environment.logPath);
+  return parts.join('；');
 }

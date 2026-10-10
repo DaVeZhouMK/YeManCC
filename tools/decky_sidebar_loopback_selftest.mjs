@@ -90,7 +90,7 @@ try{
    await client.mutate('game.setField',{field:'dcMode',value:'balanced'});await awaitState(client,state=>state.snapshot?.game?.fields.dcMode.value==='balanced');
    await client.mutate('game.setField',{field:'padPersona',value:'elite'});await awaitState(client,state=>state.snapshot?.game?.fields.padPersona.value==='elite');
    await client.mutate('game.setField',{field:'gyroOverride',value:'fps'});await awaitState(client,state=>state.snapshot?.game?.fields.gyroOverride.value==='fps');
-   assert.equal(gameSaves,4);assert.deepEqual(gameMemory.raw().rtss,{'other.exe':{enabled:true,acFps:50,dcFps:30}});assert.equal(gameMemory.lock.isQuickActionBusy(),false);cases.push('DC/input settings round-trip through same EXE map and preserve RTSS-only map');
+   assert.equal(gameSaves,4);assert.deepEqual(gameMemory.raw().rtss,{'other.exe':{enabled:true,acFps:50,dcFps:30,acCeiling:60,dcCeiling:30,acLastFps:50,dcLastFps:30},'game.exe':{enabled:true,acFps:120,dcFps:60,acCeiling:120,dcCeiling:60,acLastFps:120,dcLastFps:60}});assert.equal(gameMemory.lock.isQuickActionBusy(),false);cases.push('DC/input settings round-trip through same EXE map, preserve the other RTSS-only record and remember the independent whole-profile pair');
  }else{
    const on=await client.mutate('fan.setEnabled',{enabled:true});assert.equal(on.applied,true);await awaitState(client,state=>state.snapshot?.fan.enabled===true);
    const firstEnablePacket=resources[0].sent.find(packet=>packet.command==='fan.setEnabled');

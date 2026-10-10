@@ -623,21 +623,13 @@ onBeforeUnmount(() => {
     </div>
     <div v-if="mouseNotice" class="quick-control-notice">{{ mouseNotice }}</div>
 
-    <div class="game-quick-actions" data-gp-group="game-quick-actions">
-      <button type="button" class="quick-action" data-gp-game-row="actions-1" data-gp-row="1" data-gp-col="0" data-gp-game-control="fsr-import" :disabled="disabledForAction" @click="runFsr">
-        <AppIcon name="bolt" /><span><strong>FSR4.1/Xess-OPT自动导入</strong><small>FSR4 / XeSS 自动套用 · OPT 客户端</small></span>
-      </button>
-      <button type="button" class="quick-action" data-gp-game-row="actions-1" data-gp-row="1" data-gp-col="1" :disabled="disabledForAction || !targetGame" @click="runLosslessScaling">
-        <AppIcon name="rocket" /><span><strong>Lossless Scaling</strong><small>LosslessScaling 插帧一键插帧</small></span>
-      </button>
-      <button type="button" class="quick-action" data-gp-game-row="actions-2" data-gp-row="2" data-gp-col="0" :disabled="disabledForAction || !targetGame" @click="runTrainer">
-        <AppIcon :name="trainerBusy ? 'close' : 'play'" /><span><strong>游戏修改器</strong><small>{{ trainerBusy ? '处理中…点击终止' : '识别后打开' }}</small></span>
-      </button>
-      <div class="quick-speed" :class="{ 'is-disabled': disabledForAction || !targetGame }" data-gp-game-row="actions-2" data-gp-row="2" data-gp-col="1">
-        <span class="quick-speed-title"><AppIcon name="speed" /> 游戏变速</span>
-        <Dropdown :model-value="speedFactor" :options="speedOptions" :disabled="disabledForAction || !targetGame" aria-label="游戏变速倍率" gp-row="2" gp-col="1" @change="(v) => runSpeed(Number(v))" />
-      </div>
-    </div>
+    <!-- 第二排专属配置、第三排游戏黑白名单；视觉顺序与手柄导航一致。 -->
+    <GameCustomProfilePanel
+      :game="policyGame"
+      :open="open"
+      @status="onCustomStatus"
+      @changed="refreshPadPersona"
+    />
 
     <GameRulePanel
       :game="targetGame"
@@ -648,12 +640,21 @@ onBeforeUnmount(() => {
       @changed="onRulesChanged"
     />
 
-    <GameCustomProfilePanel
-      :game="policyGame"
-      :open="open"
-      @status="onCustomStatus"
-      @changed="refreshPadPersona"
-    />
+    <div class="game-quick-actions" data-gp-group="game-quick-actions">
+      <button type="button" class="quick-action" data-gp-game-row="actions-1" data-gp-row="1" data-gp-col="0" data-gp-game-control="fsr-import" :disabled="disabledForAction" @click="runFsr">
+        <AppIcon name="bolt" /><span><strong>FSR4.1/Xess-OPT自动导入</strong><small>FSR4 / XeSS 自动套用 · OPT 客户端</small></span>
+      </button>
+      <button type="button" class="quick-action" data-gp-game-row="actions-1" data-gp-row="1" data-gp-col="1" :disabled="disabledForAction || !targetGame" @click="runLosslessScaling">
+        <AppIcon name="rocket" /><span><strong>小黄鸭插帧</strong><small>Lossless Scaling · 一键插帧</small></span>
+      </button>
+      <button type="button" class="quick-action" data-gp-game-row="actions-2" data-gp-row="2" data-gp-col="0" :disabled="disabledForAction || !targetGame" @click="runTrainer">
+        <AppIcon :name="trainerBusy ? 'close' : 'play'" /><span><strong>游戏修改器</strong><small>{{ trainerBusy ? '处理中…点击终止' : '识别后打开' }}</small></span>
+      </button>
+      <div class="quick-speed" :class="{ 'is-disabled': disabledForAction || !targetGame }" data-gp-game-row="actions-2" data-gp-row="2" data-gp-col="1">
+        <span class="quick-speed-title"><AppIcon name="speed" /> 游戏变速</span>
+        <Dropdown :model-value="speedFactor" :options="speedOptions" :disabled="disabledForAction || !targetGame" aria-label="游戏变速倍率" gp-row="2" gp-col="1" @change="(v) => runSpeed(Number(v))" />
+      </div>
+    </div>
 
     <div class="game-quick-footer" data-gp-group="game-quick-footer" data-gp-game-row="footer">
       <button type="button" :disabled="disabledForAction" @click="refreshGame"><strong class="quick-key-y">Y</strong>刷新游戏获取</button>

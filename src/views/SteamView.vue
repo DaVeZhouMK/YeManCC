@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, onActivated, onDeactivated, inject, watch, type Ref } from 'vue';
 import Toggle from '@/components/Toggle.vue';
-import { deckySidebar, deckySidebarDescription, type DeckySidebarState } from '@/bridge/deckySidebar';
+import { deckySidebar, deckySidebarDescription, deckySidebarSetupFailure, type DeckySidebarState } from '@/bridge/deckySidebar';
 import InlineIcon from '@/components/InlineIcon.vue';
 import { dialog, shell } from '@/bridge/api';
 import { isUiVisible, onUiVisibilityChange } from '@/bridge/uiLifecycle';
@@ -40,7 +40,10 @@ async function setDeckyEnabled(enabled: boolean) {
   deckyBusy.value = true;
   const epoch = deckyViewEpoch;
   try { const state = await deckySidebar.setEnabled(enabled); if (epoch === deckyViewEpoch) acceptDeckyState(state); }
-  catch (error) { if (epoch === deckyViewEpoch) showNotice('YMCC 控制台设置失败：' + (error as Error).message); }
+  catch (error) {
+    const environment=await deckySidebar.environment().catch(()=>null);
+    if(epoch===deckyViewEpoch)showNotice(deckySidebarSetupFailure(error,environment));
+  }
   finally { if (epoch === deckyViewEpoch) deckyBusy.value = false; }
 }
 onMounted(() => {

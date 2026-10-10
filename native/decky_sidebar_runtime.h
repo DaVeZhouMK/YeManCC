@@ -4,6 +4,7 @@
 #include <windows.h>
 #include "steam_session_observer.h"
 #include "decky_sidebar_temp.h"
+#include "decky_sidebar_launch.h"
 #include <filesystem>
 #include <functional>
 #include <atomic>
@@ -28,6 +29,8 @@ struct State {
     DWORD error = 0;
     bool bindingRetry = false;
     unsigned bindingAttempts = 0;
+    std::string launchStage;
+    std::string launchMode;
 };
 struct Config {
     std::wstring executable;
@@ -77,47 +80,11 @@ class Runtime {
         }
         result.push_back(L'\0'); return result;
     }
-    void publish(std::string phase, std::string reason = {}, DWORD error = 0, DWORD pid = 0, bool retry = false, unsigned attempts = 0) {
+    void publish(std::string phase, std::string reason = {}, DWORD error = 0, DWORD pid = 0, bool retry = false, unsigned attempts = 0, std::string launchStage = {}, std::string launchMode = {}) {
         State copy;
         { std::lock_guard lock(stateMutex_); state_.phase = std::move(phase); state_.reason = std::move(reason);
-          state_.error = error; state_.pid = pid; state_.bindingRetry=retry; state_.bindingAttempts=attempts; ++state_.revision; copy = state_; }
+          state_.error = error; state_.pid = pid; state_.bindingRetry=retry; state_.bindingAttempts=attempts;state_.launchStage=std::move(launchStage);state_.launchMode=std::move(launchMode); ++state_.revision; copy = state_; }
         try { if (reporting_.load() && config_.changed) config_.changed(copy); } catch (...) {} // Best-effort presentation only.
-    }
-    static BOOL createChild(const std::wstring& executable, std::wstring& command,
-                            std::vector<wchar_t>& env, const std::wstring& directory,
-                            STARTUPINFOW& startup, PROCESS_INFORMATION& child) {
-        // YMCC may be elevated; a third-party plugin framework must not inherit that elevation.
-        HANDLE token = nullptr;
-        if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token)) return FALSE;
-        TOKEN_ELEVATION elevation{}; DWORD bytes = 0;
-        if (!GetTokenInformation(token, TokenElevation, &elevation, sizeof(elevation), &bytes)) {
-            const auto error = GetLastError(); CloseHandle(token); SetLastError(error); return FALSE;
-        }
-        const DWORD flags = CREATE_SUSPENDED | CREATE_NO_WINDOW | CREATE_UNICODE_ENVIRONMENT;
-        if (!elevation.TokenIsElevated) {
-            CloseHandle(token);
-            return CreateProcessW(executable.c_str(), command.data(), nullptr, nullptr, FALSE,
-                flags, env.data(), directory.c_str(), &startup, &child);
-        }
-        TOKEN_LINKED_TOKEN linked{};
-        if (!GetTokenInformation(token, TokenLinkedToken, &linked, sizeof(linked), &bytes)) {
-            const auto error = GetLastError(); CloseHandle(token); SetLastError(error); return FALSE;
-        }
-        TOKEN_ELEVATION linkedElevation{};
-        DWORD currentSession = 0, linkedSession = 0;
-        const bool safe = GetTokenInformation(linked.LinkedToken, TokenElevation, &linkedElevation, sizeof(linkedElevation), &bytes) &&
-            !linkedElevation.TokenIsElevated &&
-            GetTokenInformation(token, TokenSessionId, &currentSession, sizeof(currentSession), &bytes) &&
-            GetTokenInformation(linked.LinkedToken, TokenSessionId, &linkedSession, sizeof(linkedSession), &bytes) &&
-            currentSession == linkedSession;
-        HANDLE primary = nullptr;
-        const bool duplicated = safe && DuplicateTokenEx(linked.LinkedToken, MAXIMUM_ALLOWED, nullptr, SecurityImpersonation, TokenPrimary, &primary);
-        CloseHandle(linked.LinkedToken); CloseHandle(token);
-        if (!duplicated) { SetLastError(ERROR_ACCESS_DENIED); return FALSE; }
-        const BOOL created = CreateProcessWithTokenW(primary, LOGON_WITH_PROFILE, executable.c_str(), command.data(), flags,
-            env.data(), directory.c_str(), &startup, &child);
-        const auto error = GetLastError(); CloseHandle(primary); SetLastError(error);
-        return created; // NO fallback to an elevated CreateProcess.
     }
     bool launchAllowed(unsigned long long intent) {
         std::lock_guard lock(stateMutex_);
@@ -135,7 +102,8 @@ class Runtime {
         if(worker_.joinable())CancelSynchronousIo(worker_.native_handle());
     }
     static bool retryableBinding(const std::string& reason) {
-        return reason=="mirror-bootstrap-context-unavailable" || reason=="live-context-unavailable" ||
+        // Steam can be present before its own CDP listener exists. Only the existing finite startup/resume window retries this.
+        return reason=="live-debug-unavailable" || reason=="mirror-bootstrap-context-unavailable" || reason=="live-context-unavailable" ||
             reason=="mirror-bootstrap-async-error" || reason=="mirror-bootstrap-deadline" ||
             reason=="mirror-bootstrap-discovery-timeout" || reason=="mirror-bootstrap-context-exited" ||
             reason=="mirror-bootstrap-steam-unavailable";
@@ -194,8 +162,9 @@ class Runtime {
                 const auto temp=temporary.prepare(config_.home);
                 auto env=environment(config_.home,temp);
                 const auto directory=std::filesystem::path(config_.executable).parent_path().wstring();
-                if(!createChild(config_.executable,command,env,directory,startup,child)){
-                    const DWORD error=GetLastError();closeOwned();publish("failed","launch-failed",error);return;
+                const auto launch=ymcc::deckylaunch::create(config_.executable,command,env.data(),directory,startup,child);
+                if(!launch.created){
+                    closeOwned();publish("failed","launch-failed",launch.error,0,false,attempts,launch.stage,launch.mode);return;
                 }
                 process=child.hProcess;
                 const bool assigned=AssignProcessToJobObject(job,process)!=FALSE;
@@ -210,7 +179,7 @@ class Runtime {
                     CloseHandle(child.hThread);closeOwned();publish("failed","ownership-failed",error);
                 }else{
                     CloseHandle(child.hThread);
-                    publish("loader-started","mirror-handshake-pending",0,child.dwProcessId,false,attempts);
+                    publish("loader-started","mirror-handshake-pending",0,child.dwProcessId,false,attempts,launch.stage,launch.mode);
                 }
             }catch(...){closeOwned();publish("failed","environment-failed");}
         };

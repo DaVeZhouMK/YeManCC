@@ -289,6 +289,7 @@ inline bool initialized=false; // HWND owner thread only.
 inline Json* testTrace=nullptr; // Only the self-test sets this; no production trace allocations.
 #include "screen_touchpad_cursor.h"
 inline Config getConfig() {std::lock_guard<std::mutex> l(mutex);return core.config;}
+#include "screen_standalone_special.h"
 inline void output(const Action& a) {
     // Called only on the HWND owner thread. Diff edges, never repeat held keys.
     static constexpr WORD vk[8]={'W','S','A','D',VK_UP,VK_DOWN,VK_LEFT,VK_RIGHT};
@@ -363,7 +364,7 @@ inline void setContext(const std::string& persona,bool targetEnabled) {
     const bool deck=next==1 && targetEnabled,ps=(persona=="dualsense" || persona=="dualsense-edge" || persona=="dualshock4") && targetEnabled;
     const bool deckChanged=available.exchange(deck)!=deck,psChanged=psAvailable.exchange(ps)!=ps;
     const bool availabilityChanged=deckChanged || psChanged || ps4Changed || controlChanged || edgeChanged;
-    if(changed || availabilityChanged)screenButtonMask.store(0,std::memory_order_release);
+    if(changed || availabilityChanged) {screenButtonMask.store(0,std::memory_order_release);standaloneCancel();}
     if(changed || availabilityChanged) if(HWND h=owner.load()) PostMessageW(h,kRefreshMessage,0,0);
 }
 inline bool permitted(Mode mode) {return mode!=Mode::Off && (mode!=Mode::Deck || available.load()) && (mode!=Mode::DualSense || psAvailable.load());}
@@ -553,13 +554,16 @@ inline Json state() {
     j["events"]=eventCount;j["injectedInputs"]=injectedCount;j["repaints"]=repaintCount;
     j["cursorPolicyVersion"]=2;j["cursorHandoffGraceMs"]=kCursorHandoffMs;j["cursorRetainedPollMs"]=kCursorRetainedPollMs;j["cursorRetainedAfterUp"]=cursorRetained.load();j["cursorFallbackShows"]=cursorShows;j["cursorFallbackHides"]=cursorHides;j["cursorFallbackHandoffs"]=cursorHandoffs;
     j["cursorFallbackVisible"]=cursorVisible;j["cursorFallbackSyncs"]=cursorSyncs;j["cursorFallbackUploads"]=cursorUploads;j["cursorFallbackError"]=cursorError;
+    const auto specialStatus=standaloneStatus.load(std::memory_order_acquire);
+    j["standaloneSpecialStatus"]=standaloneStatusName(specialStatus);
+    j["standaloneSpecialRequests"]=standaloneRequests.load();j["standaloneSpecialCompleted"]=standaloneCompleted.load();
     j["error"]=inputError?inputError:windowError;j["reason"]="";return j;
 }
 inline Json profileState(const Config& cfg,int profile) {
     Json j=state();const bool current=profile==activeProfile.load() && profile==appliedProfile.load();
     j.update(configJson(cfg));j["persona"]=profileName(profile);
     j["steamDeckAvailable"]=profile==1 && available.load();j["ps5Available"]=profile==2 && psAvailable.load() && !ps4Target.load();j["ps4Available"]=profile==2 && psAvailable.load() && ps4Target.load();
-    if(!current) {j["visible"]=false;j["error"]=0;j["ok"]=true;}return j;
+    if(!current) {j["visible"]=false;j["error"]=0;j["ok"]=true;j["reason"]="";j["standaloneSpecialStatus"]="idle";}return j;
 }
 #include "screen_button_overlay.h"
 

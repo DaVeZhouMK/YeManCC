@@ -5,6 +5,8 @@ import Slider from './Slider.vue';
 import InlineIcon from './InlineIcon.vue';
 import { on } from '@/bridge/ipc';
 import { steamSettings, steamMonitorMessage, STEAM_MONITOR_POSITIONS, STEAM_MONITOR_DETAILS, type SteamMonitorValues, type SteamMonitorState } from '@/bridge/steamSettings';
+// Standalone component defaults to local coordinates; the monitor page supplies its row offset.
+const props=withDefaults(defineProps<{gpRowStart?:number}>(),{gpRowStart:0});
 const values=reactive<SteamMonitorValues>({position:0,detail:1,scale:1,saturation:1,opacity:1});
 const available=ref(false), status=ref('读取 Steam 监控设置…'), saving=ref(false);
 let firstActivation=true, active=true, version=0, queued:Partial<SteamMonitorValues>={}, off:(()=>void)|undefined;
@@ -46,13 +48,13 @@ onUnmounted(()=>{active=false;++version;off?.();});
   <section class="card steam-monitor" data-gp-group="steam-monitor">
     <h3 class="card-title"><InlineIcon name="steam" /> Steam监控</h3>
     <div class="steam-monitor-selects">
-      <label><span>Steam监控位置</span><Dropdown :model-value="values.position" :options="STEAM_MONITOR_POSITIONS" :disabled="!available" width="100%" color="accent" aria-label="Steam监控位置" :gp-row="0" :gp-col="0" @update:model-value="v=>change({position:Number(v)})" /></label>
-      <label><span>性能详情等级</span><Dropdown :model-value="values.detail" :options="STEAM_MONITOR_DETAILS" :disabled="!available" width="100%" color="accent" aria-label="性能详情等级" :gp-row="0" :gp-col="1" @update:model-value="v=>change({detail:Number(v)})" /></label>
+      <label><span>Steam监控位置</span><Dropdown :model-value="values.position" :options="STEAM_MONITOR_POSITIONS" :disabled="!available" width="100%" color="accent" aria-label="Steam监控位置" :gp-row="props.gpRowStart" :gp-col="0" @update:model-value="v=>change({position:Number(v)})" /></label>
+      <label><span>性能详情等级</span><Dropdown :model-value="values.detail" :options="STEAM_MONITOR_DETAILS" :disabled="!available" width="100%" color="accent" aria-label="性能详情等级" :gp-row="props.gpRowStart" :gp-col="1" @update:model-value="v=>change({detail:Number(v)})" /></label>
     </div>
     <div class="steam-monitor-sliders">
-      <Slider :model-value="values.scale*100" :min="20" :max="140" :step="10" :accelerate="false" label="文字大小缩放" unit="%" :value-text="Math.round(values.scale*100)+'%'" :disabled="!available" color="accent" :gp-row="1" :gp-col="0" @update:model-value="v=>values.scale=v/100" @commit="v=>percent('scale',v)" />
-      <Slider :model-value="values.saturation*100" :min="0" :max="100" :step="10" :accelerate="false" label="文字对比度/饱和度" unit="%" :value-text="Math.round(values.saturation*100)+'%'" :disabled="!available" color="accent" :gp-row="2" :gp-col="0" @update:model-value="v=>values.saturation=v/100" @commit="v=>percent('saturation',v)" />
-      <Slider :model-value="values.opacity*100" :min="0" :max="100" :step="10" :accelerate="false" label="背景不透明度" unit="%" :value-text="Math.round(values.opacity*100)+'%'" :disabled="!available" color="accent" :gp-row="3" :gp-col="0" @update:model-value="v=>values.opacity=v/100" @commit="v=>percent('opacity',v)" />
+      <Slider :model-value="values.scale*100" :min="20" :max="140" :step="10" :accelerate="false" label="文字大小缩放" unit="%" :value-text="Math.round(values.scale*100)+'%'" :disabled="!available" color="accent" :gp-row="props.gpRowStart+1" :gp-col="0" @update:model-value="v=>values.scale=v/100" @commit="v=>percent('scale',v)" />
+      <Slider :model-value="values.saturation*100" :min="0" :max="100" :step="10" :accelerate="false" label="文字对比度/饱和度" unit="%" :value-text="Math.round(values.saturation*100)+'%'" :disabled="!available" color="accent" :gp-row="props.gpRowStart+2" :gp-col="0" @update:model-value="v=>values.saturation=v/100" @commit="v=>percent('saturation',v)" />
+      <Slider :model-value="values.opacity*100" :min="0" :max="100" :step="10" :accelerate="false" label="背景不透明度" unit="%" :value-text="Math.round(values.opacity*100)+'%'" :disabled="!available" color="accent" :gp-row="props.gpRowStart+3" :gp-col="0" @update:model-value="v=>values.opacity=v/100" @commit="v=>percent('opacity',v)" />
     </div>
     <p class="steam-monitor-status" role="status">{{status}}</p>
   </section>

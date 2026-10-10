@@ -1,10 +1,12 @@
 #pragma once
 // Additive cancellable bootstrap IO. All WinHTTP calls/close are issued by ONE owner.
+// Sequential ownership may transfer to the event watcher after startup.
 // Async callbacks only record completions. Buffers outlive HANDLE_CLOSING.
 // Reference: learn.microsoft.com/windows/win32/winhttp/concurrency-in-winhttp
 #include <windows.h>
 #include <winhttp.h>
 #include <array>
+#include <algorithm>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -74,9 +76,9 @@ class AsyncRequest {
         for(;;){
             check();
             {std::lock_guard lock(state_->mutex);if(state_->error)throw std::runtime_error("mirror-bootstrap-async-error");if(state_->completed==expected)return;}
-            const auto now=GetTickCount64();if(now>=deadline_)throw std::runtime_error("mirror-bootstrap-deadline");
+            const auto now=GetTickCount64();if(deadline_&&now>=deadline_)throw std::runtime_error("mirror-bootstrap-deadline");
             HANDLE handles[2]{cancellation_->event(),state_->changed};
-            const auto result=WaitForMultipleObjects(2,handles,FALSE,static_cast<DWORD>(deadline_-now));
+            const auto result=WaitForMultipleObjects(2,handles,FALSE,deadline_?static_cast<DWORD>((std::min)(deadline_-now,static_cast<ULONGLONG>(INFINITE-1))):INFINITE);
             if(result==WAIT_OBJECT_0)throw std::runtime_error("mirror-bootstrap-canceled");
             if(result==WAIT_TIMEOUT)throw std::runtime_error("mirror-bootstrap-deadline");
             if(result!=WAIT_OBJECT_0+1)throw std::runtime_error("mirror-bootstrap-wait-failed");
@@ -98,10 +100,13 @@ public:
     ~AsyncRequest(){if(handle_){WinHttpCloseHandle(handle_);handle_=nullptr;}/* callback lifetime owns pending buffers until final callback */}
     AsyncRequest(const AsyncRequest&)=delete;
     HINTERNET handle() const{return handle_;}
+    // Zero is an event/cancel-only idle wait; command/reply IO always has a finite budget.
+    // Called only by the current sequential owner with no operation outstanding.
+    void setDeadline(ULONGLONG value){deadline_=value;}
     std::weak_ptr<AsyncState> callbackState() const{return state_;} // Read-only verification/diagnostic, no extra owner.
     void check() const{
         if(!cancellation_||cancellation_->canceled())throw std::runtime_error("mirror-bootstrap-canceled");
-        if(GetTickCount64()>=deadline_)throw std::runtime_error("mirror-bootstrap-deadline");
+        if(deadline_&&GetTickCount64()>=deadline_)throw std::runtime_error("mirror-bootstrap-deadline");
     }
     void handshake(bool upgrade=false){
         if(upgrade&&!WinHttpSetOption(handle_,WINHTTP_OPTION_UPGRADE_TO_WEB_SOCKET,nullptr,0))throw std::runtime_error("mirror-bootstrap-upgrade-failed");

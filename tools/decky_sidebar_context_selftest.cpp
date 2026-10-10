@@ -30,7 +30,7 @@ int main(int argc,char** argv){
         if(!size||size>=32768)throw std::runtime_error("fixture path");
         const std::wstring executable(buffer,size);
         const std::filesystem::path build=std::filesystem::path(executable).parent_path();
-        if(build!=L"G:\\YeManCC-Work\\Build\\Tasks\\YMCC-Decky-Sidebar\\Build" && build!=L"G:\\YeManCC-Work\\Build\\Tasks\\YMCC-Decky-Console20\\Build" && build!=L"G:\\YeManCC-Work\\Build\\Tasks\\YMCC-Decky-Console22\\NativeRegression\\Build" && build!=L"G:\\YeManCC-Work\\Build\\Tasks\\YMCC-Decky-Console23\\Build")throw std::runtime_error("fixture outside explicit task Build roots");
+        if(build!=L"G:\\YeManCC-Work\\Build\\Tasks\\YMCC-Decky-Sidebar\\Build" && build!=L"G:\\YeManCC-Work\\Build\\Tasks\\YMCC-Decky-Console20\\Build" && build!=L"G:\\YeManCC-Work\\Build\\Tasks\\YMCC-Decky-Console22\\NativeRegression\\Build" && build!=L"G:\\YeManCC-Work\\Build\\Tasks\\YMCC-Decky-Console23\\Build" && build!=LR"(G:\YeManCC-Work\Build\Tasks\YMCC-Decky-Launch25\Build)" && build!=LR"(G:\YeManCC-Work\Build\Tasks\YMCC-Decky-Bootstrap26\Build)" && build!=LR"(G:\YeManCC-Work\Build\Tasks\YMCC-Decky-Input27\Build)")throw std::runtime_error("fixture outside explicit task Build roots");
         if(std::filesystem::path(executable).parent_path()!=build)throw std::runtime_error("fixture must stay in task Build");
         const auto home=(build/L"YMCC-Decky-Context-Fixture-Home").wstring();
         std::filesystem::create_directories(home); // Task-local inert home; no settings files.

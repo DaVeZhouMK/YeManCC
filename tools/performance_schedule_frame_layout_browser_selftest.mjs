@@ -71,7 +71,7 @@ try {
     await page.setViewportSize({ width, height: 1050 });
     const layout = await page.evaluate(() => {
       const rect = node => { const r = node.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height, right: r.right, bottom: r.bottom }; };
-      return { overflow: document.documentElement.scrollWidth > innerWidth, monitor: rect(document.querySelector('.monitor-chart')), card: rect(document.querySelector('.schedule-card')), rows: [...document.querySelectorAll('.power-mode-row')].map(row => ({ row: rect(row), mode: rect(row.querySelector('.mode-picker')), frames: rect(row.querySelector('.mode-frame-controls')), slider: rect(row.querySelector('.slider')), dropdown: rect(row.querySelector('.frame-rate-controls .dd-trigger')) })) };
+      return { overflow: document.documentElement.scrollWidth > innerWidth, monitor: rect(document.querySelector('.monitor-chart')), card: rect(document.querySelector('.schedule-card')), rows: [...document.querySelectorAll('.power-mode-row')].map(row => ({ row: rect(row), icon: rect(row.querySelector('.side-icon')), name: rect(row.querySelector('.side-name')), mode: rect(row.querySelector('.mode-picker')), frames: rect(row.querySelector('.mode-frame-controls')), slider: rect(row.querySelector('.slider')), track: rect(row.querySelector('input[type=range]')), dropdown: rect(row.querySelector('.frame-rate-controls .dd-trigger')) })) };
     });
     assert.equal(layout.overflow, false);
     assert(layout.card.y >= layout.monitor.bottom);
@@ -79,7 +79,10 @@ try {
     for (const row of layout.rows) {
       assert(row.frames.y >= row.mode.bottom);
       assert(row.row.height >= 100);
+      assert(Math.abs((row.icon.y + row.icon.height / 2) - (row.row.y + row.row.height / 2)) <= 1);
+      assert(Math.abs((row.name.y + row.name.height / 2) - (row.row.y + row.row.height / 2)) <= 1);
       assert(row.slider.width >= 100);
+      assert(Math.abs(row.track.y + row.track.height / 2 - row.dropdown.y - row.dropdown.height / 2) <= 1, 'Frame track and ceiling trigger must share the visual centerline');
       assert(row.dropdown.right <= row.row.right);
     }
     assert(Math.abs(layout.rows[0].dropdown.x - layout.rows[1].dropdown.x) <= 1);

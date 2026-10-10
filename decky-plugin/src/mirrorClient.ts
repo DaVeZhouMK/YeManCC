@@ -3,9 +3,10 @@
 import { validSteamObservation, type SteamRunningObservation } from './steamRunningContext';
 export interface Choice { data: string; label: string; disabled?: boolean; }
 export interface MirrorField { value: string; choices: Choice[]; supported: boolean; inherited?: boolean; }
-export type MirrorCommand = 'game.setField' | 'fan.setEnabled' | 'fan.setPreset' | 'frame.setField' | 'touchpad.setField';
+export type MirrorCommand = 'game.setField' | 'fan.setEnabled' | 'fan.setPreset' | 'frame.setField' | 'touchpad.setField' | 'global.setField';
 export interface MirrorFrameSetting {fps:number;ceiling:number;lastFps:number;}
 export interface MirrorSnapshot {
+  global?: {fields:Record<string,MirrorField>};
   frames?: {pair:Record<'ac'|'dc',MirrorFrameSetting>;dedicated:boolean};
   touchpads?: {persona:string;fields:Record<string,MirrorField>};
   powerSource?: 'ac' | 'dc' | null;
@@ -17,7 +18,7 @@ export interface MirrorSnapshot {
   game: null | { label: string; identity: string; fields: Record<string, MirrorField> };
   fan: { supported: boolean; enabled: boolean; preset: string; choices: Choice[]; canToggle?:boolean };
   notice?: string;
-  actions?: { fan:boolean; game:boolean; frames?:boolean; touchpads?:boolean };
+  actions?: { fan:boolean; game:boolean; frames?:boolean; touchpads?:boolean; global?:boolean };
   steam?:SteamRunningObservation;
 }
 export interface Bootstrap { endpoint: string; token: string; runId: string; }
@@ -41,12 +42,13 @@ function validSnapshot(value: any, runId: string): value is MirrorSnapshot {
     const fields = Object.values(value.game.fields) as any[];
     if (fields.length > 16 || !fields.every(field => field && typeof field.value === 'string' && typeof field.supported === 'boolean' && (field.inherited === undefined || typeof field.inherited === 'boolean') && validChoices(field.choices))) return false;
   }
+  if(value.global!==undefined&&(!value.global||!value.global.fields||typeof value.global.fields!=='object'||Array.isArray(value.global.fields)||Object.keys(value.global.fields).length>8||!Object.values(value.global.fields).every((f:any)=>f&&typeof f.value==='string'&&typeof f.supported==='boolean'&&validChoices(f.choices))))return false;
   if(value.powerSource !== undefined && value.powerSource !== null && !['ac', 'dc'].includes(value.powerSource)) return false;
   if(value.provenance!==undefined && (!value.provenance || !['ymcc-native','unconfirmed'].includes(value.provenance.kind) || (value.provenance.kind==='ymcc-native' && (!Number.isSafeInteger(value.provenance.pid) || value.provenance.pid<=0))))return false;
   if(value.steam!==undefined&&!validSteamObservation(value.steam))return false;
   if(value.frames!==undefined && (!value.frames || typeof value.frames.dedicated!=='boolean' || !['ac','dc'].every(side=>{const s=value.frames.pair?.[side];return s && ['fps','ceiling','lastFps'].every(k=>Number.isSafeInteger(s[k])&&s[k]>=0&&s[k]<=300);})))return false;
   if(value.touchpads!==undefined && (!value.touchpads || typeof value.touchpads.persona!=='string' || !value.touchpads.fields || typeof value.touchpads.fields!=='object' || Array.isArray(value.touchpads.fields) || Object.keys(value.touchpads.fields).length>8 || !Object.values(value.touchpads.fields).every((f:any)=>f && typeof f.value==='string' && typeof f.supported==='boolean' && validChoices(f.choices))))return false;
-  if (value.actions !== undefined && (!value.actions || typeof value.actions.fan !== 'boolean' || typeof value.actions.game !== 'boolean' || value.actions.frames!==undefined&&typeof value.actions.frames!=='boolean' || value.actions.touchpads!==undefined&&typeof value.actions.touchpads!=='boolean')) return false;
+  if (value.actions !== undefined && (!value.actions || typeof value.actions.fan !== 'boolean' || typeof value.actions.game !== 'boolean' || value.actions.frames!==undefined&&typeof value.actions.frames!=='boolean' || value.actions.touchpads!==undefined&&typeof value.actions.touchpads!=='boolean' || value.actions.global!==undefined&&typeof value.actions.global!=='boolean')) return false;
   if (value.fan.canToggle !== undefined && typeof value.fan.canToggle !== 'boolean') return false;
   return value.notice === undefined || typeof value.notice === 'string';
 }
@@ -61,6 +63,7 @@ export class MirrorClient {
   private retry: ReturnType<typeof setTimeout> | null = null;
   private connectDeadline: ReturnType<typeof setTimeout> | null = null;
   private pending: null | { id: string; timer: ReturnType<typeof setTimeout>; resolve: (value: unknown) => void; reject: (error: Error) => void } = null;
+  private operationError: null | { notice:string;runId:string;generation:number;identity:string } = null;
   private listeners = new Set<(state: ClientState) => void>();
   private state: ClientState = { connected: false, snapshot: null, notice: '等待 YMCC 镜像连接', busy: false };
   constructor(private deps: ClientDeps) {}
@@ -90,6 +93,7 @@ export class MirrorClient {
     this.publish({ busy: false });
   }
   private disconnect(reason: string) {
+    this.operationError=null;
     ++this.epoch;
     if (this.retry !== null) { this.deps.cancel(this.retry); this.retry = null; }
     if (this.connectDeadline !== null) { this.deps.cancel(this.connectDeadline); this.connectDeadline = null; }
@@ -132,10 +136,13 @@ export class MirrorClient {
         if (!validSnapshot(snap, boot.runId)) { this.disconnect('镜像身份无效'); return; }
         if (this.state.snapshot && snap.revision < this.state.snapshot.revision) return;
         if (this.connectDeadline !== null) { this.deps.cancel(this.connectDeadline); this.connectDeadline = null; }
-        this.attempt = 0; this.publish({ connected: true, snapshot: snap, notice: snap.notice ?? '' });
+        if(this.operationError && (this.operationError.runId!==snap.runId || this.operationError.generation!==snap.generation || this.operationError.identity!==(snap.game?.identity??'')))this.operationError=null;
+        this.attempt = 0; this.publish({ connected: true, snapshot: snap, notice: this.operationError?.notice ?? snap.notice ?? '' });
       } else if (message.type === 'reply' && this.pending && message.id === this.pending.id) {
         const pending = this.pending; this.pending = null; this.deps.cancel(pending.timer);
-        this.publish({ busy: false, notice: message.ok ? (message.notice ?? '') : (message.error ?? '操作失败') });
+        const error=message.ok?null:(message.error??'操作失败');
+        this.operationError=error&&this.state.snapshot?{notice:error,runId:boot.runId,generation:this.state.snapshot.generation,identity:this.state.snapshot.game?.identity??''}:null;
+        this.publish({ busy: false, notice: message.ok ? (message.notice ?? '') : error });
         if (message.ok) pending.resolve(message.result); else pending.reject(new Error(message.error ?? '操作失败'));
       }
     });
@@ -146,7 +153,7 @@ export class MirrorClient {
       if (this.connectDeadline !== null) { this.deps.cancel(this.connectDeadline); this.connectDeadline = null; }
       ++this.epoch;
       const recoveryEpoch = this.epoch;
-      this.socket = null; this.rejectPending('连接中断；不自动重放设置操作');
+      this.operationError=null;this.socket = null; this.rejectPending('连接中断；不自动重放设置操作');
       this.publish({ connected: false, snapshot: null, notice: '连接已中断，正在有限重连' });
       const delays = [250, 1000, 3000];
       if (this.visible && !this.disposed && this.attempt < delays.length) {
@@ -169,11 +176,12 @@ export class MirrorClient {
       return Promise.reject(new Error('调节快照已变化'));
     }
     if (command === 'game.setField' && !snap.game) return Promise.reject(new Error('尚未确认当前游戏'));
-    if (snap.actions && (command === 'game.setField' ? !snap.actions.game : command === 'frame.setField' ? !snap.actions.frames : command === 'touchpad.setField' ? !snap.actions.touchpads : !snap.actions.fan)) return Promise.reject(new Error('该镜像操作尚不可用'));
+    if (snap.actions && (command === 'game.setField' ? !snap.actions.game : command === 'frame.setField' ? !snap.actions.frames : command === 'touchpad.setField' ? !snap.actions.touchpads : command === 'global.setField' ? !snap.actions.global : !snap.actions.fan)) return Promise.reject(new Error('该镜像操作尚不可用'));
+    this.operationError=null;
     const sequence = ++this.sequence;
     const id = `${this.deps.clientId}:${sequence}`;
     const request = { command, args: structuredClone(args), id, clientId:this.deps.clientId, sequence, runId: snap.runId, generation: snap.generation,
-      revision: snap.revision, identity: command === 'game.setField' ? snap.game!.identity : command === 'frame.setField' ? snap.game?.identity??'' : undefined };
+      revision: snap.revision, identity: command === 'game.setField' ? snap.game!.identity : command === 'frame.setField' ? snap.game?.identity??'' : command === 'global.setField' ? '' : undefined };
     return new Promise((resolve, reject) => {
       const timer = this.deps.schedule(() => {
         if (this.pending?.id !== id) return;

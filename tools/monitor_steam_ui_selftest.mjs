@@ -7,7 +7,7 @@ const {chromium}=createRequire(path.join(runtime,'_monitor-steam.cjs'))('playwri
 const out=path.resolve(root,'../../Build/Validation/monitor-steam-settings-20261009/browser');fs.mkdirSync(out,{recursive:true});
 const cases=[],images=[],errors=[],styles=[];
 const rtss=fs.readFileSync('src/views/RtssView.vue','utf8'),schedule=fs.readFileSync('src/views/PerformanceScheduleView.vue','utf8'),router=fs.readFileSync('src/router.ts','utf8');
-assert(!rtss.includes('title="FPS 锁帧"'));assert(!rtss.includes('RTSS 锁定帧率上限'));assert(schedule.includes('<RtssFrameLimit />'));assert(router.includes("name: 'rtss', title: '监控'"));
+assert(!rtss.includes('title="FPS 锁帧"'));assert(!rtss.includes('RTSS 锁定帧率上限'));assert(schedule.includes('<RtssFrameLimit v-slot='));assert(router.includes("name: 'rtss', title: '监控'"));
 const mocks={
  '@/bridge/frameRateLimits':`import {frameRatePair,frameRateSetting} from './src/bridge/frameRateModel.ts';export {frameRatePair};const listeners=new Set();export async function loadGlobalFrameRates(){return frameRatePair(window.__fixture.frames)};export function onFrameRatesChanged(cb){listeners.add(cb);return ()=>listeners.delete(cb)};export async function saveGlobalFrameRate(side,value){const f=window.__fixture;f.frames[side]=frameRateSetting(value);f.fpsWrites.push({side,...f.frames[side]});for(const cb of listeners)cb(frameRatePair(f.frames));return frameRatePair(f.frames)};export async function applyIndependentFrameRates(){const f=window.__fixture;f.limit=f.frames.ac.fps;f.limitWrites.push(f.limit);return true;}`,
  '@/bridge/yeman':`const f=()=>window.__fixture;export const FPS_MIN=20,FPS_CEILINGS=[0,30,60,90,120,200,300],RTSS_ZOOM_MIN=1,RTSS_ZOOM_MAX=12,BOOT_RTSS_TASK='rtss',BOOT_MIRROR_CHANGED_EVENT='boot-mirror';

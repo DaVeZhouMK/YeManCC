@@ -1,7 +1,7 @@
 {
   "name": "yemancc",
   "private": true,
-  "version": "0.0.34",
+  "version": "0.0.35",
   "packageManager": "pnpm@11.16.0",
   "type": "module",
   "description": "YeManCC — 野蛮系统控制中心 (Vue3 + QiangQiang WebView2 shell)",
@@ -185,7 +185,8 @@
     "test:updater-install-chain": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/updater_install_chain_selftest.ps1",
     "publish": "pnpm run release",
     "test:gyro-ui-param-parity": "esbuild tools/gyro_ui_param_parity_selftest.ts --bundle --platform=node --format=esm --outfile=../../Build/Validation/SelfTests/gyro_ui_param_parity_selftest.mjs && node ../../Build/Validation/SelfTests/gyro_ui_param_parity_selftest.mjs",
-    "test:gyro-hc-vocab-parity": "esbuild tools/gyro_hc_vocabulary_parity_selftest.ts --bundle --platform=node --format=esm --outfile=../../Build/Validation/SelfTests/gyro_hc_vocabulary_parity_selftest.mjs && node ../../Build/Validation/SelfTests/gyro_hc_vocabulary_parity_selftest.mjs"
+    "test:gyro-hc-vocab-parity": "esbuild tools/gyro_hc_vocabulary_parity_selftest.ts --bundle --platform=node --format=esm --outfile=../../Build/Validation/SelfTests/gyro_hc_vocabulary_parity_selftest.mjs && node ../../Build/Validation/SelfTests/gyro_hc_vocabulary_parity_selftest.mjs",
+    "test:gamepad-visual-navigation": "node tools/gamepad_visual_navigation_browser_selftest.mjs && node tools/gamepad_visual_navigation_browser_selftest.mjs --monitor && node tools/top_menu_power_group_browser_selftest.mjs"
   },
   "dependencies": {
     "pinia": "^2.1.7",

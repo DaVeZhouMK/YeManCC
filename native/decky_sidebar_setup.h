@@ -8,23 +8,31 @@
 namespace ymcc::deckysetup {
 using Json = nlohmann::json;
 inline constexpr const char* loaderSha = "1d8e06921ced35b0349e677207953d90e548ea254079150d99ced4d360381824";
+inline std::string pathText(const std::filesystem::path& path) {
+    const auto value=path.u8string();return std::string(value.begin(),value.end());
+}
 using Digest = std::function<std::string(const std::wstring&)>;
 inline Json inspect(const std::filesystem::path& steam, const std::filesystem::path& home, const Digest& digest) {
     Json result={{"ready",false},{"bundled",true},{"pythonRequired",false},{"nodeRequired",false},{"createdSteamDebugMarker",false},{"reason","steam-not-installed"}};
+    result["steamDirectory"]=pathText(steam);
+    result["resourceDirectory"]=pathText(home);
+    result["loaderPath"]=pathText(home/L"PluginLoader_noconsole.exe");
+    result["pluginPath"]=pathText(home/L"plugins"/L"ymcc-sidebar");
     try {
         if(steam.empty() || !std::filesystem::is_regular_file(steam/L"steam.exe"))return result;
         const auto loader=home/L"PluginLoader_noconsole.exe";
-        if(!std::filesystem::is_regular_file(loader)){result["reason"]="resource-missing";return result;}
+        std::error_code ec;
+        if(!std::filesystem::is_regular_file(loader,ec)){result["reason"]="resource-missing";result["missingPath"]=pathText(loader);result["error"]=ec.value();return result;}
         if(digest(loader.wstring())!=loaderSha){result["reason"]="resource-hash-mismatch";return result;}
         for(const auto& name:{L"plugin.json",L"dist\\index.js"}) if(!std::filesystem::is_regular_file(home/L"plugins"/L"ymcc-sidebar"/name)){
-            result["reason"]="plugin-missing";return result;
+            result["reason"]="plugin-missing";result["missingPath"]=pathText(home/L"plugins"/L"ymcc-sidebar"/name);return result;
         }
         const auto marker=steam/L".cef-enable-remote-debugging";
         const DWORD attributes=GetFileAttributesW(marker.c_str());
         if(attributes==INVALID_FILE_ATTRIBUTES){
             const auto error=GetLastError();
             result["reason"]=error==ERROR_FILE_NOT_FOUND||error==ERROR_PATH_NOT_FOUND?"steam-debug-missing":"steam-debug-access-denied";
-            return result;
+            result["error"]=error;return result;
         }
         if(attributes&(FILE_ATTRIBUTE_DIRECTORY|FILE_ATTRIBUTE_REPARSE_POINT)){result["reason"]="steam-debug-unsafe-path";return result;}
         result["ready"]=true;result["reason"]="ready";return result;

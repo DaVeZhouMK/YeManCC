@@ -89,6 +89,16 @@ static int modelTest(const char* path) {
             }
             check(prefix+"-interleave-cadence-"+std::to_string(cadence)+"ms-no-visibility-edges",stable && cursorHides==hides && cursorShows==shows);
         }
+        ci.flags=CURSOR_SUPPRESSED;ci.hCursor=arrow;cursorSyncInfo(ci,4000);
+        const auto missingShapeHides=cursorHides;
+        ci.flags=CURSOR_SHOWING;ci.hCursor=nullptr;cursorSyncInfo(ci,4010);cursorSyncInfo(ci,4200);
+        check(prefix+"-SHOWING-null-is-not-a-compositor-ready-handoff",cursorVisible && cursorHides==missingShapeHides);
+        ci.flags=CURSOR_SUPPRESSED;ci.hCursor=arrow;cursorSyncInfo(ci,4300);
+        ci.flags=CURSOR_SHOWING;ci.hCursor=nullptr;
+        check(prefix+"-normal-up-retains-a-SHOWING-null-cached-cursor",cursorRetainAfterUp(windows[0],ci) && cursorVisible && cursorRetained.load());
+        ci.hCursor=arrow;cursorSyncInfo(ci,4350);
+        check(prefix+"-normal-up-valid-system-shape-handoffs",!cursorVisible && !cursorRetained.load());
+        cursorTracking.store(true);cursorDispatchWindow.store(windows[0]);
         ci.flags=CURSOR_SUPPRESSED;ci.hCursor=arrow;cursorSyncInfo(ci,5000);
         ci.flags=CURSOR_SHOWING;cursorSyncInfo(ci,5010);cursorSyncInfo(ci,5080);
         ci.flags=CURSOR_SUPPRESSED;cursorSyncInfo(ci,5085);ci.flags=CURSOR_SHOWING;cursorSyncInfo(ci,5090);

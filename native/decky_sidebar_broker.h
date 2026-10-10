@@ -194,7 +194,7 @@ class Broker {
                             const auto request=Json::parse(frame.payload);
                             if(!request.is_object()||request.value("runId",std::string{})!=runId_)throw std::runtime_error("stale-run");
                             const auto command=request.value("command",std::string{});
-                            if(command!="snapshot"&&command!="game.setField"&&command!="fan.setEnabled"&&command!="fan.setPreset"&&command!="frame.setField"&&command!="touchpad.setField")throw std::runtime_error("command-denied");
+                            if(command!="snapshot"&&command!="game.setField"&&command!="fan.setEnabled"&&command!="fan.setPreset"&&command!="frame.setField"&&command!="touchpad.setField"&&command!="global.setField")throw std::runtime_error("command-denied");
                             if(reporting_.load()&&config_.request)config_.request(connection,request);
                         }
                         if(authenticated&&peer!=INVALID_SOCKET&&!input.empty()&&!fragmentDeadline)fragmentDeadline=GetTickCount64()+3000;

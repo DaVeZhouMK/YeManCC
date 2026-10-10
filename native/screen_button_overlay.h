@@ -1,6 +1,7 @@
 #pragma once
 // Included inside ymcc::screenpads after the shared transparent-window helpers.
-// Same UI owner and BUS submitter as the touchpads; no hook, timer or worker.
+// Same UI owner as the pads: native personas use BUS; disabled uses direct actions.
+// No hook, periodic timer or dedicated worker.
 inline std::array<HWND,7> buttonWindows{},buttonOutlines{};
 inline std::array<UINT32,7> buttonContacts{};
 inline std::array<bool,7> buttonArmed{};
@@ -53,6 +54,7 @@ inline bool buttonPermitted(const Config& cfg,int index) {
     const unsigned mask=effectiveRearMask(cfg);const unsigned bit=1u<<(index-3);return (mask&bit)!=0 && (profile==1 || (profile==2 && controlEdgeEnabled.load()));
 }
 inline void buttonsRelease() {
+    standaloneCancel();
     screenButtonMask.store(0,std::memory_order_release);
     buttonContacts={};buttonArmed={};
 }
@@ -69,13 +71,15 @@ inline bool buttonEvent(int index,UINT32 id,int phase,float x,float y,int width,
     if(phase==0) {
         if(buttonContacts[index] || !buttonHit(x,y,width,height))return false;
         buttonContacts[index]=id;buttonArmed[index]=true;
-        if(bit)screenButtonMask.fetch_or(bit,std::memory_order_release);
+        if(bit && activeProfile.load()!=0)screenButtonMask.fetch_or(bit,std::memory_order_release);
     } else {
         if(buttonContacts[index]!=id)return false;
         if(phase==1) {buttonArmed[index]=buttonHit(x,y,width,height);return false;}
-        const bool summon=index==0 && buttonArmed[index] && !canceled && buttonHit(x,y,width,height);
+        const bool clicked=buttonArmed[index] && !canceled && buttonHit(x,y,width,height);
+        const bool summon=index==0 && clicked;
         buttonContacts[index]=0;buttonArmed[index]=false;
         if(bit)screenButtonMask.fetch_and(~bit,std::memory_order_release);
+        if(index && clicked && activeProfile.load()==0)standaloneDispatch(cfg,index);
         return summon;
     }
     return false;
@@ -92,7 +96,7 @@ inline LRESULT CALLBACK buttonProc(HWND h,UINT m,WPARAM w,LPARAM lp) {
     if(m==WM_POINTERDOWN || m==WM_POINTERUPDATE || m==WM_POINTERUP) {
         POINTER_INFO pi{};const UINT32 id=GET_POINTERID_WPARAM(w);
         if(!GetPointerInfo(id,&pi) || (pi.pointerType!=PT_TOUCH && pi.pointerType!=PT_PEN))return 0;
-        if(index && !dryRun && owner.load()==GetForegroundWindow()){buttonsRelease();return 0;}
+        if(index && activeProfile.load()!=0 && !dryRun && owner.load()==GetForegroundWindow()){buttonsRelease();return 0;}
         POINT p=pi.ptPixelLocation;ScreenToClient(h,&p);RECT r{};GetClientRect(h,&r);
         const bool canceled=(pi.pointerFlags&POINTER_FLAG_CANCELED)!=0;
         const bool summon=buttonEvent(index,id,canceled?2:m==WM_POINTERDOWN?0:m==WM_POINTERUP?2:1,(float)p.x,(float)p.y,r.right,r.bottom,canceled);
@@ -356,7 +360,7 @@ inline Json buttonCoreCases() {
             parseConfig(configJson(standalone),profileDefault(0),parsedStandalone) && parsedStandalone.standaloneSpecialMode==mode);
         buttonEvent(1,81,0,30,20,100,54);buttonEvent(2,82,0,30,20,100,54);
         check(mode==StandaloneSpecialMode::SteamDeck?"disabled-Steam-special-does-not-enable-output":"disabled-PS5-special-does-not-enable-output",
-            screenButtonMask.load()==3 && buttonSnapshot()==0 && activeProfile.load()==0 && !controlTargetEnabled.load());
+            screenButtonMask.load()==0 && buttonSnapshot()==0 && activeProfile.load()==0 && !controlTargetEnabled.load());
         buttonsRelease();check("standalone-special-release-clears-held-bits",screenButtonMask.load()==0);
         ProfileBank bank;bank.slots[0]=standalone;const ProfileBank restored(bank.json());
         check("standalone-special-stored-in-disabled-slot-only",restored.json()==bank.json() && restored.slots[1].standaloneSpecialMode==StandaloneSpecialMode::Off &&

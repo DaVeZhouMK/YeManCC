@@ -35,8 +35,8 @@ Assert-Contains $custom 'grid-template-columns: repeat(2, minmax(0, 1fr));' 'cor
 Assert-Contains $engine "['custom-core-big-picker', 'custom-core-smt-picker']" 'core/SMT selectors must share the first controller row'
 Assert-Contains $engine "['custom-input-pad', 'custom-input-gyro']" 'pad/gyro selectors must share the second controller row'
 Assert-Contains $engine "customRows.push('custom-input-gyro')" 'semantic controller order must visit core/SMT before pad/gyro selectors'
-Assert-Contains $schedule '自动优化不可用【专属配置优先中】' 'automatic optimization must expose the dedicated-profile priority state'
-Assert-Contains $schedule ':disabled="busy || automaticOptimizationUnavailable"' 'automatic AC/DC selectors must be disabled while a dedicated profile is active'
+Assert-Contains $schedule "automaticOptimizationUnavailable.value ? '游戏专属配置生效中' : '自动优化'" 'automatic optimization must expose the dedicated-profile priority state'
+Assert-Contains $schedule ':disabled="busy || performanceControlsLocked"' 'automatic AC/DC selectors must be disabled while a dedicated profile is active'
 Assert-Contains $custom 'class="custom-top-active">当前启用</span>' 'dedicated profile header must retain its active indicator while collapsed'
 # 2026-09-30 用户裁决：顶部陀螺仪下拉直接用陀螺仪页四预设（去掉「陀螺仪开启」），
 # 选中任一项 = 启用陀螺仪；「遵循全局 / 陀螺仪关闭」保留。
@@ -52,8 +52,24 @@ Assert-Contains $mapping 'closeJoyxoffIfRunning' 'controller page persona switch
 Assert-Contains $quick "steamDeckPadActive.value ? 'Steam鼠标' : '模拟鼠标'" 'steam deck pad must relabel the top menu mouse row'
 # 2026-09-30 用户裁决：控制器页背部按键气泡改为真实能力反馈（陀螺仪 / 背键数量）。
 Assert-Contains $mapping '支持识别' 'controller page must report the real back-button count'
-Assert-Contains $mapping '陀螺仪 -' 'controller page must report gyro support per persona'
+Assert-Contains $mapping '陀螺仪-' 'controller page must report gyro support per persona'
 if ($mapping.Contains('映射背部按键（常开）')) { throw 'back-button bubble must not keep the hardcoded always-on claim' }
 # 2026-09-30 用户裁决：Steam 预设说明小字位于「输入模式」上方。
 Assert-Contains $gyro '请在 Steam 内设置，支持 SteamDeck 和 PS5 虚拟手柄' 'steam preset hint is missing above the input-mode card'
-Write-Output 'game rule gamepad layout selftest: 33/33 passed'
+# 2026-10-10：顶部顺序改为控制行、专属配置、游戏黑白名单、快捷功能。
+$controlsIndex = $quick.IndexOf('<div class="quick-game-controls"')
+$customIndex = $quick.IndexOf('<GameCustomProfilePanel')
+$rulesIndex = $quick.IndexOf('<GameRulePanel')
+$actionsIndex = $quick.IndexOf('<div class="game-quick-actions"')
+if (-not ($controlsIndex -ge 0 -and $controlsIndex -lt $customIndex -and $customIndex -lt $rulesIndex -and $rulesIndex -lt $actionsIndex)) {
+  throw 'top menu visual order must be controls, dedicated profile, rules, quick actions'
+}
+Assert-Contains $engine "const customRows = ['custom-ac', '专用frame-ac', 'custom-dc', '专用frame-dc']" 'each dedicated power preset must be followed by its own frame row'
+Assert-Contains $engine "rows.indexOf('custom-entry') + 1" 'expanded profile controls must follow the profile entry'
+Assert-Contains $engine "rows.indexOf('rules-entry') + 1" 'expanded rule controls must follow the rules entry'
+Assert-Contains $engine 'spatialNavigationTarget(explicitCandidates, base' 'local profile coordinates must not match other top-menu regions'
+Assert-Contains $engine 'if (rows[i] === pairSibling) continue;' 'vertical navigation must skip horizontal core/input siblings'
+Assert-Contains $custom ':side="item"' 'dedicated power groups must render only their own side frame controls'
+Assert-Contains $custom 'class="power-mode-content"' 'dedicated power and frame settings must share a vertically centered group'
+Assert-Contains $schedule 'class="power-mode-content"' 'automatic power and frame settings must share a vertically centered group'
+Write-Output 'game rule gamepad layout selftest: PASS'

@@ -67,6 +67,10 @@ $BuildRoot = Join-Path $WorkspaceRoot 'Build'
 $AppBuildRoot = Join-Path $BuildRoot 'App'
 $WebBuild = Join-Path $AppBuildRoot 'Web'
 $NativeBuild = Join-Path $AppBuildRoot 'Native'
+$DeckyBuild = Join-Path $AppBuildRoot 'Decky/plugins/ymcc-sidebar'
+. (Join-Path $PSScriptRoot 'release-export-identity.ps1')
+$exportWorkspaceLock = Enter-ExportWorkspaceLock $WorkspaceRoot
+try {
 
 Assert-ChildPath $AppBuildRoot $WorkspaceRoot 'Build output'
 if ((Get-FullPath $AppBuildRoot) -ne (Get-FullPath (Join-Path $WorkspaceRoot 'Build\App'))) {
@@ -234,9 +238,14 @@ try {
   & node (Join-Path $ProjectRoot 'scripts\write-version.mjs')
   if ($LASTEXITCODE -ne 0) { throw "Version generation failed: exit=$LASTEXITCODE" }
 
+  # Pin compiler inputs after version generation, before any compiler runs.
+  $exportSourcesBefore = @(Get-ExportSourceIndex $ProjectRoot)
   # YMCC Decky sidebar: build the additive passive payload from the authoritative mainline sources.
   & node (Join-Path $ProjectRoot 'tools\build-decky-sidebar-plugin.mjs')
   if ($LASTEXITCODE -ne 0) { throw "Decky sidebar payload build failed: exit=$LASTEXITCODE" }
+  # Keep a workspace-local plugin output beside THIS Native/Web build.
+  & node (Join-Path $ProjectRoot 'tools\build-decky-sidebar-plugin.mjs') --out $DeckyBuild
+  if ($LASTEXITCODE -ne 0) { throw "Workspace Decky payload build failed: exit=$LASTEXITCODE" }
   & pnpm exec vue-tsc --noEmit
   if ($LASTEXITCODE -ne 0) { throw "Type check failed: exit=$LASTEXITCODE" }
 
@@ -324,6 +333,8 @@ if ($LASTEXITCODE -ne 0) {
   throw "Adopted-optimization inheritance gate FAILED at build (exit=$LASTEXITCODE); see $OptBuildManifest"
 }
 
+$exportBuildIdentity = Write-ExportBuildIdentity -ProjectRoot $ProjectRoot -WorkspaceRoot $WorkspaceRoot -SourceBefore $exportSourcesBefore
+Write-Output ('EXPORT_BUILD_ID=' + $exportBuildIdentity.buildId)
 $exe = Get-Item -LiteralPath (Join-Path $NativeBuild 'YeManCC.exe')
 $hash = Get-Sha256 $exe.FullName
 Write-Output "BUILD_OK"
@@ -331,3 +342,4 @@ Write-Output "Workspace: $WorkspaceRoot"
 Write-Output "Web:       $WebBuild"
 Write-Output "Native:    $($exe.FullName)"
 Write-Output "EXE SHA256: $hash"
+} finally { $exportWorkspaceLock.ReleaseMutex(); $exportWorkspaceLock.Dispose() }

@@ -44,6 +44,7 @@ export interface ScreenTouchpadState extends ScreenTouchpadConfig {
   ok: boolean; available: boolean; visible: boolean;
   events?: number; injectedInputs?: number; repaints?: number;
   error?: number; reason?: string;
+  standaloneSpecialStatus?: string; standaloneSpecialRequests?: number; standaloneSpecialCompleted?: number;
 }
 export const SCREEN_TOUCHPAD_DEFAULT: ScreenTouchpadConfig = {
   summonPosition: 'off', standaloneSpecialMode: 'off', specialMask: 0, rearMask: 0,

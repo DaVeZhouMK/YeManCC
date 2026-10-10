@@ -845,42 +845,55 @@ function moveGameMenuFocus(menu: HTMLElement, base: HTMLElement, dy: number): HT
   const currentRow = base.closest<HTMLElement>('[data-gp-game-row]')?.dataset.gpGameRow || '';
   const rows = [
     'controls',
+    'custom-entry',
+    'rules-entry',
     'actions-1',
     'actions-2',
-    'rules-entry',
-    'custom-entry',
     'footer',
   ];
   const rulesPanel = menu.querySelector<HTMLElement>('[data-gp-game-rules][data-gp-expanded="true"]');
   if (rulesPanel) {
-    const entryIndex = rows.indexOf('custom-entry');
+    const entryIndex = rows.indexOf('rules-entry') + 1;
     rows.splice(entryIndex, 0, 'rules-current', 'rules-editor');
     if (rulesPanel.querySelector('[data-gp-game-row="rules-dropdown"]')) rows.splice(entryIndex + 2, 0, 'rules-dropdown');
     rows.splice(entryIndex + (rows.includes('rules-dropdown') ? 3 : 2), 0, 'rules-footer');
   }
   const customPanel = menu.querySelector<HTMLElement>('[data-gp-custom-panel][data-gp-expanded="true"]');
   if (customPanel) {
-    const footerIndex = rows.indexOf('footer');
-    const customRows = ['custom-ac', 'custom-dc'];
+    const customIndex = rows.indexOf('custom-entry') + 1;
+    const customRows = ['custom-ac', '专用frame-ac', 'custom-dc', '专用frame-dc'];
     // 语义行序 == 视觉行序：核心/超线程一行，手柄/陀螺仪一行，最后操作行。
     if (customPanel.querySelector('[data-gp-game-row="custom-core-big-picker"]')) customRows.push('custom-core-big-picker');
     if (customPanel.querySelector('[data-gp-game-row="custom-core-smt-picker"]')) customRows.push('custom-core-smt-picker');
     if (customPanel.querySelector('[data-gp-game-row="custom-input-pad"]')) customRows.push('custom-input-pad');
     if (customPanel.querySelector('[data-gp-game-row="custom-input-gyro"]')) customRows.push('custom-input-gyro');
     if (customPanel.querySelector('[data-gp-game-row="custom-actions"]')) customRows.push('custom-actions');
-    rows.splice(footerIndex, 0, ...customRows);
+    rows.splice(customIndex, 0, ...customRows);
   }
   const index = rows.indexOf(currentRow);
   if (index < 0) return null;
 
-  // FSR import intentionally returns to the first control in the first row:
-  // “切换程序”. Keep this route semantic instead of relying on visual nearest
-  // distance, which changes under high UI zoom.
-  if (dy < 0 && base.dataset.gpGameControl === 'fsr-import') {
-    return menu.querySelector<HTMLElement>('[data-gp-game-control="switch-program"]') || null;
-  }
+  // The two selectors in a core/input row are horizontal siblings, not
+  // another vertical stop. At a pair's top/bottom edge continue to the next
+  // actual row while still allowing either enabled column to be entered.
+  const pairSibling = ({
+    'custom-core-big-picker': 'custom-core-smt-picker',
+    'custom-core-smt-picker': 'custom-core-big-picker',
+    'custom-input-pad': 'custom-input-gyro',
+    'custom-input-gyro': 'custom-input-pad',
+  } as Record<string, string>)[currentRow];
+  // Follow the visible order, including the new profile/rules rows above FSR.
   for (let i = index + (dy > 0 ? 1 : -1); i >= 0 && i < rows.length; i += dy > 0 ? 1 : -1) {
-    const target = gameMenuControlForRow(menu, rows[i]);
+    if (rows[i] === pairSibling) continue;
+    // The quick actions form a visual 2x2 grid. Preserve the column across
+    // rows: FSR <-> trainer, frame generation <-> game speed. Choosing the
+    // first control in every row incorrectly sends the right column left.
+    const actionPair = currentRow.startsWith('actions-') && rows[i].startsWith('actions-');
+    const sameColumn = actionPair ? focusables().find((el) =>
+      menu.contains(el) && el.dataset.gpCol === base.dataset.gpCol &&
+      el.closest<HTMLElement>('[data-gp-game-row]')?.dataset.gpGameRow === rows[i],
+    ) : null;
+    const target = sameColumn || gameMenuControlForRow(menu, rows[i]);
     if (target && target !== base) return target;
   }
   return null;
@@ -894,8 +907,8 @@ function moveFocus(dx: number, dy: number) {
   const customExpanded = !!customPanel;
   // The dedicated-profile editor is a self-contained controller region. Once
   // expanded, do not let spatial navigation land on its hidden/colliding
-  // header or its action row. From the profile's last visible control, Up
-  // exits directly to the blacklist/whitelist entry as requested.
+  // header or its action row. AC-with-frame and DC-with-frame stay grouped
+  // between the top control row and the blacklist/whitelist entry.
   // The collapsed/expanded header is a visual container, not a second
   // controller stop. The action buttons remain in the list when expanded so A
   // can still activate them, but the header itself is excluded to prevent the
@@ -942,13 +955,35 @@ function moveFocus(dx: number, dy: number) {
   // Vue transitions temporarily remove a row from the focus list. Core
   // policy and rule-editor navigation are handled by their dedicated paths
   // below/above this branch.
-  const inGameRuleBody = !!base.closest('[data-gp-game-rules-body]');
-  const inCustomBody = !!base.closest('[data-gp-custom-body]');
+  // Profile frame rows reuse local 0/1 coordinates. Vertical movement must
+  // follow the whole menu's semantic order, including expanded submenus;
+  // horizontal movement must never match another region's reused coordinates.
+  const menuRowKey = activeGameMenu?.contains(base)
+    ? base.closest<HTMLElement>('[data-gp-game-row]')?.dataset.gpGameRow || ''
+    : '';
   const useGameMenuSemanticVertical = !!activeGameMenu &&
-    activeGameMenu.contains(base) && dy !== 0 && !inGameRuleBody && !inCustomBody;
+    activeGameMenu.contains(base) && dy !== 0;
+  // Coordinates are page-local, never global across nested components or
+  // resident pages. Scoped pages declare every enabled stop in one row map.
+  const pageScope = base.closest<HTMLElement>('[data-gp-scope]');
+  const pageCandidates = pageScope
+    ? navEls.filter((el) => el.closest('[data-gp-scope]') === pageScope)
+    : navEls;
+  // AC/DC controls are parallel vertical lanes. Keep the same control type
+  // and column between power groups, then resume the page map at lane edges.
+  const verticalLane = pageScope && dy !== 0
+    ? base.closest<HTMLElement>('[data-gp-vertical-lane]')?.dataset.gpVerticalLane
+    : undefined;
+  const laneCandidates = verticalLane ? pageCandidates.filter((el) =>
+    el !== base && el.closest<HTMLElement>('[data-gp-vertical-lane]')?.dataset.gpVerticalLane === verticalLane &&
+    (Number(el.dataset.gpRow) - Number(base.dataset.gpRow)) * dy > 0,
+  ) : [];
+  const explicitCandidates = menuRowKey && dx !== 0
+    ? navEls.filter(el => el.closest<HTMLElement>('[data-gp-game-row]')?.dataset.gpGameRow === menuRowKey)
+    : laneCandidates.length > 0 ? [base, ...laneCandidates] : pageCandidates;
   const explicitTarget = useGameMenuSemanticVertical
     ? undefined
-    : spatialNavigationTarget(navEls, base, {
+    : spatialNavigationTarget(explicitCandidates, base, {
         dx: dx === 0 ? 0 : dx > 0 ? 1 : -1,
         dy: dy === 0 ? 0 : dy > 0 ? 1 : -1,
       });
@@ -1067,37 +1102,34 @@ function moveFocus(dx: number, dy: number) {
       !customTarget.matches('[data-gp-ignore]') &&
       customTarget.getAttribute('aria-disabled') !== 'true';
     const insideRules = !!base.closest('[data-gp-game-rules-body]');
-    // 黑/白名单入口与其二级气泡都属于同一条菜单路径：按下时明确
-    // 跳到专属配置入口/内容，不能让空间距离算法把焦点穿到页脚或其它控件。
-    if (dy > 0 && customTarget && customTargetAvailable &&
+    // 黑白名单位于专属配置下方；向上回到专属配置，不再按旧顺序跳转。
+    if (dy < 0 && customTarget && customTargetAvailable &&
       (base === rulesEntry || insideRules)) {
       best = customTarget;
     }
-    // 从专属配置内部按上，永远直接返回“游戏黑 / 白名单”这一排；
-    // 不再经过专属配置标题或第一条 AC 气泡，避免焦点重叠。
-    if (dy < 0 && rulesEntry && navEls.includes(rulesEntry) &&
-      (isInsideCustomPanel(base) || base === customEntry)) {
-      best = rulesEntry;
+    // 专属配置现在位于控制行下方；跨区域向上返回顶部控制行。
+    if (dy < 0 && (isInsideCustomPanel(base) || base === customEntry)) {
+      best = directGameMenuTarget('controls');
     }
 
     // 顶部游戏菜单是固定的菜单序列，不让浮动布局/动画参与“下一个气泡”
-    // 的判断。尤其 FSR4.1 / 游戏加速按下必须先到黑白名单入口，再到专属配置。
+    // 的判断。专属配置与黑白名单分别是第二、第三排，快捷功能位于其后。
     if (!best && activeGameMenu) {
       const currentRow = gameRowKey(base);
       const targetRow = dy > 0
         ? ({
-            controls: 'actions-1',
+            controls: 'custom-entry',
+            'custom-entry': 'rules-entry',
+            'rules-entry': 'actions-1',
             'actions-1': 'actions-2',
-            'actions-2': 'rules-entry',
-            'rules-entry': 'custom-entry',
-            'custom-entry': 'footer',
+            'actions-2': 'footer',
           } as Record<string, string>)[currentRow]
         : ({
-            footer: 'custom-entry',
-            'custom-entry': 'rules-entry',
-            'rules-entry': 'actions-2',
+            footer: 'actions-2',
             'actions-2': 'actions-1',
-            'actions-1': 'controls',
+            'actions-1': 'rules-entry',
+            'rules-entry': 'custom-entry',
+            'custom-entry': 'controls',
           } as Record<string, string>)[currentRow];
       best = directGameMenuTarget(targetRow) || nearestGameRow(targetRow);
     }
@@ -1120,7 +1152,7 @@ function moveFocus(dx: number, dy: number) {
       if (!best) return;
     }
     if (best) {
-      // 已命中专属配置 → 黑 / 白名单的专用返回路径，不再让空间导航覆盖它。
+      // 已命中顶部菜单的固定行序，不再让空间导航覆盖它。
     } else {
     // 先找垂直最近的元素，再用它的 y 定义“目标行”
     cands.sort((a, b) => a.dyAbs - b.dyAbs);

@@ -288,7 +288,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="page">
+  <div class="page" data-gp-scope="monitor">
     <div v-if="errMsg" class="err-bar">{{ errMsg }}</div>
     <div v-if="monitorHint" class="info-bar">{{ monitorHint }}</div>
     <div v-if="zoomHint" class="info-bar">{{ zoomHint }}</div>
@@ -298,15 +298,15 @@ onUnmounted(() => {
         检测到游戏「<strong>{{ gameRunningWarn.game.name }}</strong>」正在运行（PID {{ gameRunningWarn.game.pid }}）。
         当前操作会导致游戏闪退（停止 RTSS / 复位）。请先关闭游戏，正在监控等待…
       </div>
-      <button class="action-btn ghost" @click="cancelGameWatch">取消</button>
+      <button class="action-btn ghost" data-gp-row="-1" data-gp-col="0" @click="cancelGameWatch">取消</button>
     </div>
 
     <section class="card">
       <div class="monitor-template-head" data-gp-group="monitor-template">
         <h3 class="card-title"><InlineIcon name="monitor" /> 监控模板</h3>
         <div class="monitor-template-switches">
-          <Toggle :model-value="rtssOn" label="RTSS" compact :disabled="busy" :gp-row="0" :gp-col="1" @update:model-value="toggleRtssOn" />
-          <Toggle :model-value="monOn" label="监控数据" compact :disabled="busy" :gp-row="0" :gp-col="2" @update:model-value="toggleMonitor" />
+          <Toggle :model-value="rtssOn" label="RTSS" compact :disabled="busy" :gp-row="0" :gp-col="0" @update:model-value="toggleRtssOn" />
+          <Toggle :model-value="monOn" label="监控数据" compact :disabled="busy" :gp-row="0" :gp-col="1" @update:model-value="toggleMonitor" />
         </div>
       </div>
       <Slider
@@ -314,6 +314,8 @@ onUnmounted(() => {
         :min="RTSS_ZOOM_MIN * 20"
         :max="RTSS_ZOOM_MAX * 20"
         :step="20"
+        gp-row="1"
+        gp-col="0"
         label="监控大小"
         unit="%"
         color="accent"
@@ -321,6 +323,7 @@ onUnmounted(() => {
         @commit="onZoomCommit"
       />
       <SegButton
+        gp-row="2"
         :model-value="overlay"
         :disabled="busy"
         :options="[
@@ -334,17 +337,17 @@ onUnmounted(() => {
       />
     </section>
 
-    <SteamMonitorSettings />
+    <SteamMonitorSettings :gp-row-start="3" />
 
     <section class="card">
       <div v-if="confirmingReset" class="confirm-bar">
         <span class="confirm-text">确认复位 RTSS 全部设置？将关闭 RTSS、清除锁帧与所有相关任务、关闭监控显示。</span>
         <div class="confirm-actions">
-          <button class="action-btn" :disabled="busy" @click="doReset">确认复位</button>
-          <button class="action-btn ghost" @click="confirmingReset = false">取消</button>
+          <button class="action-btn" data-gp-row="7" data-gp-col="0" :disabled="busy" @click="doReset">确认复位</button>
+          <button class="action-btn ghost" data-gp-row="7" data-gp-col="1" @click="confirmingReset = false">取消</button>
         </div>
       </div>
-      <button class="danger-btn" :disabled="busy || confirmingReset" @click="resetAll">复位 RTSS 全部设置</button>
+      <button class="danger-btn" data-gp-row="7" data-gp-col="0" :disabled="busy || confirmingReset" @click="resetAll">复位 RTSS 全部设置</button>
     </section>
   </div>
 </template>

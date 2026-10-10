@@ -1,17 +1,19 @@
 // YMCC Decky sidebar snapshot: existing stores/owners only, no new configuration.
-import { readSettingsSection } from './settingsRepository';
+import { compareAndSwapInputSettings, onInputSettingsChanged, readSettingsSection } from './settingsRepository';
 import { loadGlobalFrameRates, saveGlobalFrameRate, applyIndependentFrameRates, onFrameRatesChanged, dedicatedFrameRatePair, type FrameRatePair } from './frameRateLimits';
 import { createFrameMirrorActions, type FrameMirrorRead } from './deckyFrameActions';
 import { createTouchpadMirrorActions, touchpadMirrorFields, touchpadMirrorSource, type TouchpadMirrorRead } from './deckyTouchpadActions';
 import { screenTouchpadsGet, screenTouchpadsSet, screenTouchpadProfile } from './screenTouchpads';
 import { watch } from 'vue';
+import { createGlobalMirrorActions, globalMirrorRead } from './deckyGlobalActions';
+import { getGameInputOverrideState } from './gameInputOverride';
 import { invoke, on } from './ipc';
 import { powerLifecycle } from './api';
 import { powerSourceMode, refreshPowerSourceSnapshot } from './powerSource';
 import { readLosslessScaling, losslessField, setLosslessFromMirror, onLosslessScalingChanged, type LsDocument } from './losslessScaling';
 import { getPolicyGame, gamePolicyKey, subscribePolicyGameStatus } from './gamePolicyTarget';
 import { getGameCustomConfig, loadGameCustomConfig, saveGameCustomConfig, loadPerformanceSchedule, resolveGameCustomProfiles, onGameCustomConfigChanged, onPerformanceScheduleChanged,
-  type PerformanceScheduleConfig, type ScheduleMode, type ScheduleProfile } from './performanceSchedule';
+  applyPerformanceSchedule, type PerformanceScheduleConfig, type ScheduleMode, type ScheduleProfile } from './performanceSchedule';
 import { detectGameCorePolicy, type GameCorePolicyCapabilities } from './gameCorePolicy';
 import { fanFeatureEnabled, fanControlActive, getFanFeatureSettings, getFanPresetCurve, saveFanCurve,
   setFanControlActive, setFanNavigationDuty, recordFanHandshake, FAN_IMPORT_ENABLED, FAN_FORCE_PREVIEW } from './fanFeature';
@@ -63,6 +65,8 @@ export function startDeckyMirrorHost(): { ready: () => void; stop: () => void } 
     currentSchedule: () => schedule, rememberWholeInput:true, gyroDefaults:readGameMirrorGyroDefaults, save: saveGameCustomConfig, closeJoyxoff: closeJoyxoffIfRunning,
   });
   const speedActions = createSpeedMirrorActions({featureAllowed:() => hostReady && !ended,game:getPolicyGame,power:() => powerLifecycle.get(),acquire:tryAcquireQuickAction,presets:SPEED_PRESETS,blocked:isMinecraftTarget,state:getGameSpeedState,apply:(game,factor) => applyGameSpeed(game.pid,factor,game,'user-factor'),clear:game => clearGameSpeed(game.pid,'user-reset')});
+  const readGlobal=async()=>globalMirrorRead(await loadPerformanceSchedule(),await readSettingsSection('input') as any);
+  const globalActions=createGlobalMirrorActions({allowed:()=>hostReady&&!ended,game:getPolicyGame,locked:()=>getGameInputOverrideState().locked,side:()=>powerSourceMode.value,read:readGlobal,power:()=>powerLifecycle.get(),acquire:tryAcquireQuickAction,apply:applyPerformanceSchedule,cas:compareAndSwapInputSettings,closeJoyxoff:closeJoyxoffIfRunning,clearShortcut:()=>invoke('input.shortcutRuntime.clear',{})});
   const readFrames=async(fresh=true):Promise<FrameMirrorRead>=>{
     const game=getPolicyGame(),global=await loadGlobalFrameRates();
     const config=fresh?await loadGameCustomConfig():getGameCustomConfig();
@@ -154,12 +158,14 @@ export function startDeckyMirrorHost(): { ready: () => void; stop: () => void } 
       let frames:FrameMirrorRead|null=null,touchpads:TouchpadMirrorRead|null=null,controlError='';
       try{frames=await readFrames(false);}catch{controlError='独立帧率读取失败，暂不可修改';}
       try{touchpads=await readTouchpads();}catch{controlError=controlError||'全局触摸板读取失败，暂不可修改';}
+      let global:Awaited<ReturnType<typeof readGlobal>>|null=null;if(!game){try{global=await readGlobal();}catch{controlError=controlError||'全局 TDP / 虚拟手柄读取失败';}}
       const settings = getFanFeatureSettings();
       return { gameAdmission:game ? {...makeGameMirrorAdmission(entry,schedule!,lossless?.xml,gyroDefaults?.source),speed:JSON.stringify(speedState)} : undefined,steam:structuredClone(steam),generation:power.generation,ready:power.phase === 'ready' && power.hardwareWritesAllowed === true,
-        controlAdmission:{frames:frames?.source,touchpads:touchpads?.source},
+        controlAdmission:{frames:frames?.source,touchpads:touchpads?.source,global:global?.source},
+        global:global?{fields:global.fields}:undefined,
         frames:frames?{pair:frames.pair,dedicated:frames.dedicated}:undefined,
         touchpads:touchpads?{persona:touchpads.persona,fields:touchpads.fields}:undefined,
-        actions:{frames:!!frames&&powerSourceMode.value!==null,touchpads:!!touchpads&&touchpads.state.ok&&touchpads.state.available,fan:FAN_IMPORT_ENABLED && !FAN_FORCE_PREVIEW && !isFanMirrorUiBusy(),game:!!game && !!gamePolicyKey(game)},
+        actions:{global:!!global&&!game&&!getGameInputOverrideState().locked,frames:!!frames&&powerSourceMode.value!==null,touchpads:!!touchpads&&touchpads.state.ok&&touchpads.state.available,fan:FAN_IMPORT_ENABLED && !FAN_FORCE_PREVIEW && !isFanMirrorUiBusy(),game:!!game && !!gamePolicyKey(game)},
         game:game ? {label:entry?.displayName || gameLabel(game),
           identity:gameMirrorIdentity(game),fields} : null,
         provenance, powerSource:powerSourceMode.value,
@@ -179,6 +185,7 @@ export function startDeckyMirrorHost(): { ready: () => void; stop: () => void } 
         stops.push(subscribePolicyGameStatus(invalidate));
         stops.push(watch(() => [fanFeatureEnabled.value,fanControlActive.value,getFanFeatureSettings().preset,powerSourceMode.value],invalidate));
         stops.push(on('input.shortcutRuntime',invalidate));
+        stops.push(onInputSettingsChanged(invalidate));
         stops.push(on('power.pending',invalidate));
         stops.push(on('power.resumed',invalidate));
         stops.push(on('fan.resume-ready',invalidate));
@@ -187,6 +194,7 @@ export function startDeckyMirrorHost(): { ready: () => void; stop: () => void } 
       return () => { for (const stop of stops) stop(); };
     },
     execute(command,args,context) {
+      if(command === 'global.setField')return globalActions.execute(args,context);
       if(command === 'frame.setField')return frameActions.execute(args,context);
       if(command === 'touchpad.setField')return touchpadActions.execute(args,context);
       if(command === 'game.setField' && args.field === 'speedFactor') return speedActions.execute(args,context);

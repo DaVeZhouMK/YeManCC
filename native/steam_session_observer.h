@@ -95,6 +95,30 @@ class Observer {
     std::atomic<bool> openWindow{false};
     std::atomic<int> presence{-1};
     using Changed = std::function<void(bool)>; // true=session change, false=bounded retry
+    // Some Steam starts keep ActiveProcess.pid at zero and never change the
+    // account/root values. A verified top-level window event is a startup wake,
+    // not consent to write registry state or a recurring process scan.
+    inline static thread_local Observer* windowObserver = nullptr;
+    static void CALLBACK windowEvent(HWINEVENTHOOK, DWORD event, HWND window, LONG object, LONG child, DWORD, DWORD) {
+        auto* self = windowObserver;
+        if (!self || !window || object != OBJID_WINDOW || child != CHILDID_SELF ||
+            (event != EVENT_OBJECT_CREATE && event != EVENT_OBJECT_SHOW)) return;
+        DWORD pid = 0; GetWindowThreadProcessId(window, &pid);
+        ULONGLONG birth = 0;
+        const HANDLE candidate = verifiedProcess(pid, steamRoot(self->registryPath), &birth);
+        if (!candidate) return;
+        CloseHandle(candidate);
+        if (self->pokeEvent) SetEvent(self->pokeEvent);
+    }
+    struct WindowSubscription {
+        HWINEVENTHOOK hook = nullptr;
+        explicit WindowSubscription(Observer* owner) {
+            windowObserver = owner;
+            hook = SetWinEventHook(EVENT_OBJECT_CREATE, EVENT_OBJECT_SHOW, nullptr, windowEvent,
+                0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
+        }
+        ~WindowSubscription() { if (hook) UnhookWinEvent(hook); windowObserver = nullptr; }
+    };
     void run(const Changed& changed, const std::function<bool()>& needsRetry) {
         HANDLE notify = CreateEventW(nullptr, FALSE, FALSE, nullptr);
         HKEY key = nullptr;
@@ -166,6 +190,7 @@ class Observer {
             }
             return false;
         };
+        WindowSubscription windows(this); // Its callbacks run only on this existing observer thread.
         armed = arm(); // Subscribe BEFORE reading, so startup changes cannot be lost.
         inspect(true);
         for (;;) {
@@ -174,7 +199,14 @@ class Observer {
             if (armed) handles[registryIndex] = notify;
             const DWORD processIndex = process ? count++ : MAXDWORD;
             if (process) handles[processIndex] = process;
-            const DWORD result = WaitForMultipleObjects(count, handles, FALSE, retries.timeout(GetTickCount64()));
+            const DWORD result = MsgWaitForMultipleObjectsEx(count, handles, retries.timeout(GetTickCount64()), QS_ALLINPUT, MWMO_INPUTAVAILABLE);
+            if (result == WAIT_OBJECT_0 + count) {
+                MSG message{};
+                while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE)) {
+                    TranslateMessage(&message); DispatchMessageW(&message);
+                }
+                continue; // A verified Steam callback signals pokeEvent; inspect on that handle.
+            }
             if (result == WAIT_OBJECT_0 || result == WAIT_FAILED) break;
             if (result == WAIT_TIMEOUT) {
                 if (retries.take(GetTickCount64()) && needsRetry()) {

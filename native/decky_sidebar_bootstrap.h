@@ -2,6 +2,7 @@
 // Additive bootstrap injection. Never edits Steam preferences or launches/restarts Steam.
 #include "steam_live_cdp.h"
 #include "decky_sidebar_async_http.h"
+#include "decky_sidebar_bootstrap_watch.h"
 namespace ymcc::deckymirror {
 // Path ownership alone is insufficient when several Windows users share one Steam install.
 inline bool sameWindowsUserAndSession(DWORD pid) {
@@ -59,9 +60,11 @@ public:
     HANDLE take(){const auto value=handle_;handle_=nullptr;return value;}
 };
 inline nlohmann::json injectBootstrap(const std::wstring& steam, const nlohmann::json& bootstrap,
-    std::shared_ptr<CancelToken> cancellation = {}, HANDLE* contextProcess = nullptr) {
+    std::shared_ptr<CancelToken> cancellation = {}, HANDLE* contextProcess = nullptr,
+    BootstrapWatch* watch = nullptr, BootstrapWatch::Diagnostic diagnostic = {}) {
     using namespace ymcc::steamlive;
     if(contextProcess)*contextProcess=nullptr;
+    if(watch)watch->stop();
     bool sent=false;
     try {
         if(!bootstrap.is_object() || !bootstrap.contains("endpoint") || !bootstrap.contains("token") || !bootstrap.contains("runId"))
@@ -76,15 +79,15 @@ inline nlohmann::json injectBootstrap(const std::wstring& steam, const nlohmann:
         const auto checkpoint=[&]{if(cancellation->canceled())throw std::runtime_error("mirror-bootstrap-canceled");if(GetTickCount64()>=deadline)throw std::runtime_error("mirror-bootstrap-deadline");};
         checkpoint();
         const auto candidates=listeners(steam);
-        HttpHandle session(WinHttpOpen(L"YMCC-DeckyMirror/1",WINHTTP_ACCESS_TYPE_NO_PROXY,WINHTTP_NO_PROXY_NAME,WINHTTP_NO_PROXY_BYPASS,WINHTTP_FLAG_ASYNC));
-        WinHttpSetTimeouts(session.h,1000,1000,1500,1500);
+        auto session=std::make_shared<HttpHandle>(WinHttpOpen(L"YMCC-DeckyMirror/1",WINHTTP_ACCESS_TYPE_NO_PROXY,WINHTTP_NO_PROXY_NAME,WINHTTP_NO_PROXY_BYPASS,WINHTTP_FLAG_ASYNC));
+        WinHttpSetTimeouts(session->h,1000,1000,1500,1500);
         std::optional<Endpoint> selected;std::string target;
         const auto started=GetTickCount64();
         for(const auto& candidate:candidates) {
             checkpoint();if(GetTickCount64()-started>5000)throw std::runtime_error("mirror-bootstrap-discovery-timeout");
             if (!sameWindowsUserAndSession(candidate.pid)) continue;
             try {
-                HttpHandle probe(WinHttpConnect(session.h,candidate.host.c_str(),candidate.port,0));
+                HttpHandle probe(WinHttpConnect(session->h,candidate.host.c_str(),candidate.port,0));
                 AsyncRequest lookup(WinHttpOpenRequest(probe.h,L"GET",L"/json/list",nullptr,WINHTTP_NO_REFERER,WINHTTP_DEFAULT_ACCEPT_TYPES,0),cancellation,deadline);
                 lookup.handshake();if(lookup.status()!=200)throw std::runtime_error("mirror-bootstrap-targets-status");
                 const auto path=targetPath(nlohmann::json::parse(lookup.httpBody(1024*1024)),candidate);
@@ -100,18 +103,18 @@ inline nlohmann::json injectBootstrap(const std::wstring& steam, const nlohmann:
         const auto endpoint=*selected;
         ObservedProcess observed(endpoint.pid);
         if(!stillOwned(steam,endpoint) || !sameWindowsUserAndSession(endpoint.pid))throw std::runtime_error("mirror-bootstrap-owner-mismatch");
-        HttpHandle connection(WinHttpConnect(session.h,endpoint.host.c_str(),endpoint.port,0));
-        AsyncRequest request(WinHttpOpenRequest(connection.h,L"GET",widenAscii(target).c_str(),nullptr,WINHTTP_NO_REFERER,WINHTTP_DEFAULT_ACCEPT_TYPES,0),cancellation,deadline);
+        auto connection=std::make_shared<HttpHandle>(WinHttpConnect(session->h,endpoint.host.c_str(),endpoint.port,0));
+        AsyncRequest request(WinHttpOpenRequest(connection->h,L"GET",widenAscii(target).c_str(),nullptr,WINHTTP_NO_REFERER,WINHTTP_DEFAULT_ACCEPT_TYPES,0),cancellation,deadline);
         request.handshake(true);if(request.status()!=101)throw std::runtime_error("mirror-bootstrap-upgrade-status");
         checkpoint();
-        AsyncRequest socket(WinHttpWebSocketCompleteUpgrade(request.handle(),0),cancellation,deadline,true);
+        auto socket=std::make_shared<AsyncRequest>(WinHttpWebSocketCompleteUpgrade(request.handle(),0),cancellation,deadline,true);
         if(!stillOwned(steam,endpoint) || !sameWindowsUserAndSession(endpoint.pid))throw std::runtime_error("mirror-bootstrap-owner-mismatch");
-        const std::string expression="(() => { const value = "+bootstrap.dump()+"; Object.defineProperty(window, '__YMCC_DECKY_MIRROR__', { value: Object.freeze(value), configurable: true, writable: false }); window.dispatchEvent(new Event('ymcc-decky-bootstrap')); return value.runId; })()";
+        const std::string expression="(() => { if (window !== window.top || location.origin !== 'https://steamloopback.host') return; const value = "+bootstrap.dump()+"; Object.defineProperty(window, '__YMCC_DECKY_MIRROR__', { value: Object.freeze(value), configurable: true, writable: false }); window.dispatchEvent(new Event('ymcc-decky-bootstrap')); return value.runId; })()";
         const auto message=nlohmann::json{{"id",8101},{"method","Runtime.evaluate"},{"params",{{"expression",expression},{"returnByValue",true}}}}.dump();
-        sent=true;socket.sendText(message);
+        sent=true;socket->sendText(message);
         unsigned packets=0;
         for(;;){
-            const auto reply=nlohmann::json::parse(socket.receiveText(65536));
+            const auto reply=nlohmann::json::parse(socket->receiveText(65536));
             if(++packets>128)throw std::runtime_error("mirror-bootstrap-reply-limit");
             if(reply.value("id",0)!=8101)continue;
             if(reply.contains("error")||!reply.contains("result")||reply["result"].contains("exceptionDetails")||
@@ -121,9 +124,18 @@ inline nlohmann::json injectBootstrap(const std::wstring& steam, const nlohmann:
         }
         if(!observed.alive()||!stillOwned(steam,endpoint))throw std::runtime_error("mirror-bootstrap-context-exited");
         auto success=nlohmann::json{{"ok",true},{"mutated",true},{"contextPid",observed.pid},{"contextCreated",observed.created}};
+        success["bootstrapStage"]="injected";
+        if(watch){
+            auto lease=std::make_shared<ObservedProcess>(endpoint.pid);
+            const auto failure=watch->start(session,connection,socket,cancellation,
+                [steam,endpoint,lease]{return lease->alive()&&sameWindowsUserAndSession(endpoint.pid)&&stillOwned(steam,endpoint);},
+                expression,run,endpoint.pid,std::move(diagnostic),deadline);
+            if(!failure.empty())throw std::runtime_error(failure);
+            success["watching"]=true;
+        }
         if(contextProcess)*contextProcess=observed.release();
         return success;
-    }catch(const std::exception& error){return {{"ok",false},{"reason",error.what()},{"mutated",sent}};}
+    }catch(const std::exception& error){return {{"ok",false},{"reason",bootstrapSafeReason(error)},{"mutated",sent}};}
 }
 } // namespace ymcc::deckymirror
 

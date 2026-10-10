@@ -1,5 +1,5 @@
 // Global touchpad profile slots only. Never uses an EXE or game-override persona.
-import { SCREEN_TOUCHPAD_LAYOUTS, SCREEN_SUMMON_POSITIONS, LEFT_TOUCHPAD_MODES, RIGHT_TOUCHPAD_MODES, SINGLE_TOUCHPAD_MODES,
+import { SCREEN_TOUCHPAD_LAYOUTS, SCREEN_SUMMON_POSITIONS, LEFT_TOUCHPAD_MODES, RIGHT_TOUCHPAD_MODES, SINGLE_TOUCHPAD_MODES, STANDALONE_SPECIAL_MODES,
   screenTouchpadProfile, type ScreenTouchpadState, type ScreenTouchpadConfig } from './screenTouchpads';
 import type { MirrorField } from '../../decky-plugin/src/mirrorClient';
 import type { PowerLifecycleState } from './api';
@@ -23,19 +23,22 @@ export function touchpadMirrorFields(persona:string,virtualEnabled:boolean,state
     summonPosition:field(state.summonPosition,SCREEN_SUMMON_POSITIONS.map(o=>({data:o.value,label:o.label}))),
     specialMask:field(String(profile==='elite'||ps4?state.specialMask&1:state.specialMask),specials.map(([data,label])=>({data,label})),profile!=='disabled'),
     rearMask:field(String(state.rearMask),rear.map(([data,label])=>({data,label})),profile==='steamdeck'||profile==='dualsense-edge'),
+    // The disabled slot uses its original independent-key setting, never a virtual button mask.
+    ...(profile==='disabled'?{standaloneSpecialMode:field(state.standaloneSpecialMode??'off',
+      STANDALONE_SPECIAL_MODES.map(o=>({data:o.value,label:o.label})),STANDALONE_SPECIAL_MODES.some(o=>o.value===state.standaloneSpecialMode))}:{}),
   };
 }
 export function touchpadMirrorSource(persona:string,virtualEnabled:boolean,state:ScreenTouchpadState):string {
   // Exclude runtime event/repaint/visible counters, include only saved config and capability gates.
   return JSON.stringify({persona,virtualEnabled,layout:state.layout,singleMode:state.singleMode,leftMode:state.leftMode,rightMode:state.rightMode,
-    summonPosition:state.summonPosition,specialMask:state.specialMask,rearMask:state.rearMask,scale:state.scale,transparency:state.transparency,mouseSensitivity:state.mouseSensitivity,
+    summonPosition:state.summonPosition,standaloneSpecialMode:state.standaloneSpecialMode,specialMask:state.specialMask,rearMask:state.rearMask,scale:state.scale,transparency:state.transparency,mouseSensitivity:state.mouseSensitivity,
     enabled:state.enabled,summonEnabled:state.summonEnabled,specialEnabled:state.specialEnabled,rearEnabled:state.rearEnabled,
     ok:state.ok,available:state.available,deck:state.steamDeckAvailable,ps5:state.ps5Available,ps4:state.ps4Available});
 }
 export function createTouchpadMirrorActions(deps:{allowed:()=>boolean;read:()=>Promise<TouchpadMirrorRead>;power:()=>Promise<PowerLifecycleState>;
   acquire:(owner:string)=>(()=>void)|null;set:(patch:Partial<ScreenTouchpadConfig>,persona:ReturnType<typeof screenTouchpadProfile>)=>Promise<ScreenTouchpadState>}) {
  return {async execute(args:Record<string,unknown>,context:RelayMutationContext){
-  if(Object.keys(args).length!==2 || typeof args.field!=='string' || !['layout','singleMode','leftMode','rightMode','summonPosition','specialMask','rearMask'].includes(args.field) || typeof args.value!=='string')throw Error('TOUCHPAD_MIRROR_INVALID_REQUEST');
+  if(Object.keys(args).length!==2 || typeof args.field!=='string' || !['layout','singleMode','leftMode','rightMode','summonPosition','specialMask','rearMask','standaloneSpecialMode'].includes(args.field) || typeof args.value!=='string')throw Error('TOUCHPAD_MIRROR_INVALID_REQUEST');
   const checkpoint=()=>{context.checkpoint();if(!deps.allowed())throw Error('TOUCHPAD_MIRROR_NOT_READY');};checkpoint();
   const source=context.controlAdmission?.touchpads;if(typeof source!=='string')throw Error('TOUCHPAD_MIRROR_SOURCE_REQUIRED');
   const release=deps.acquire('decky-global-touchpad');if(!release)throw Error('TOUCHPAD_MIRROR_BUSY');
@@ -54,6 +57,7 @@ export function createTouchpadMirrorActions(deps:{allowed:()=>boolean;read:()=>P
       }
       if(value==='single'&&read.state.singleMode==='dualsense'&&read.fields.singleMode.choices.find(o=>o.data==='dualsense')?.disabled)patch.singleMode='mouse';
     } else if(args.field==='summonPosition'){patch.summonPosition=value as ScreenTouchpadConfig['summonPosition'];patch.summonEnabled=value!=='off';}
+    else if(args.field==='standaloneSpecialMode'){patch.standaloneSpecialMode=value as ScreenTouchpadConfig['standaloneSpecialMode'];}
     else if(args.field==='specialMask'){patch.specialMask=Number(value);patch.specialEnabled=Number(value)!==0;}
     else if(args.field==='rearMask'){patch.rearMask=Number(value);patch.rearEnabled=Number(value)!==0;}
     else Object.assign(patch,{[args.field]:value});

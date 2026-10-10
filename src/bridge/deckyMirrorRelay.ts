@@ -3,7 +3,7 @@
 import { validSteamObservation, type SteamRunningObservation } from '../../decky-plugin/src/steamRunningContext';
 import type { MirrorSnapshot } from '../../decky-plugin/src/mirrorClient';
 import type { GameMirrorAdmission } from './deckyGameActions';
-export interface MirrorControlAdmission {frames?:string;touchpads?:string;}
+export interface MirrorControlAdmission {frames?:string;touchpads?:string;global?:string;}
 export type RelayReadSnapshot = Omit<MirrorSnapshot,'runId'|'revision'> & {gameAdmission?:GameMirrorAdmission;controlAdmission?:MirrorControlAdmission};
 export interface MirrorPeer { connection: string; runId: string; connected?: boolean; revision?: number; }
 export interface MirrorRequest extends MirrorPeer { request: { command: string; runId: string; id?: string; clientId?: string; [key: string]: unknown }; }
@@ -121,7 +121,7 @@ export class ReadOnlyMirrorRelay {
     const args = request.args;
     const clientId = request.clientId;
     const sequence = request.sequence as number;
-    if ((command !== 'game.setField' && command !== 'fan.setPreset' && command !== 'fan.setEnabled' && command !== 'frame.setField' && command !== 'touchpad.setField') ||
+    if ((command !== 'game.setField' && command !== 'fan.setPreset' && command !== 'fan.setEnabled' && command !== 'frame.setField' && command !== 'touchpad.setField' && command !== 'global.setField') ||
       typeof clientId !== 'string' || !/^[a-zA-Z0-9_-]{1,64}$/.test(clientId) || !Number.isSafeInteger(sequence) || sequence <= 0 ||
       request.id !== `${clientId}:${sequence}` || !args || typeof args !== 'object' || Array.isArray(args)) {
       await failure('镜像请求格式无效，未执行操作'); return;
@@ -130,7 +130,7 @@ export class ReadOnlyMirrorRelay {
     if (Object.keys(request).some(key => !allowedKeys.includes(key)) ||
       command === 'fan.setEnabled' && (Object.keys(args).length !== 1 || typeof (args as any).enabled !== 'boolean') ||
       command === 'fan.setPreset' && (Object.keys(args).length !== 1 || !['soft','balanced','aggressive'].includes((args as any).preset)) ||
-      ['game.setField','frame.setField','touchpad.setField'].includes(command) && (Object.keys(args).length !== 2 || typeof (args as any).field !== 'string' || typeof (args as any).value !== 'string')) {
+      ['game.setField','frame.setField','touchpad.setField','global.setField'].includes(command) && (Object.keys(args).length !== 2 || typeof (args as any).field !== 'string' || typeof (args as any).value !== 'string')) {
       await failure('镜像参数不在白名单中，未执行操作'); return;
     }
     // Keep exact packet identity; duplicate mutation returns its prior outcome, never executes twice.
@@ -154,12 +154,13 @@ export class ReadOnlyMirrorRelay {
         !Number.isSafeInteger(request.revision) || request.revision !== snapshot.revision) {
       await failure('状态已变化，请重新读取后操作'); return;
     }
-    if (command === 'game.setField' ? !snapshot.actions?.game : command === 'frame.setField' ? !snapshot.actions?.frames : command === 'touchpad.setField' ? !snapshot.actions?.touchpads : !snapshot.actions?.fan) {
+    if (command === 'game.setField' ? !snapshot.actions?.game : command === 'frame.setField' ? !snapshot.actions?.frames : command === 'touchpad.setField' ? !snapshot.actions?.touchpads : command === 'global.setField' ? !snapshot.actions?.global : !snapshot.actions?.fan) {
       await failure('该镜像功能尚未接线，未修改配置'); return;
     }
     if (command === 'game.setField' && (!snapshot.game || request.identity !== snapshot.game.identity)) {
       await failure('当前游戏身份已变化，未执行操作'); return;
     }
+    if(command==='global.setField'&&(snapshot.game!==null||request.identity!=='')){await failure('全局目标已变化，未执行操作');return;}
     if(command==='frame.setField' && request.identity!==(snapshot.game?.identity??'')){await failure('帧率目标已变化，未执行操作');return;}
     if (command === 'fan.setPreset' && !snapshot.fan.supported || command === 'fan.setEnabled' && !snapshot.fan.canToggle) {
       await failure('风扇操作当前不可用'); return;
@@ -182,7 +183,7 @@ export class ReadOnlyMirrorRelay {
       try {
         checkpoint();
         const result = await this.deps.execute!(command,structuredClone(args) as Record<string,unknown>,
-          {generation:snapshot.generation,revision:snapshot.revision,gameIdentity:command === 'game.setField'||command === 'frame.setField' ? snapshot.game?.identity??'' : undefined,gameAdmission:command === 'game.setField'||command === 'frame.setField' ? this.gameAdmissions.get(snapshot) : undefined,controlAdmission:this.controlAdmissions.get(snapshot),checkpoint});
+          {generation:snapshot.generation,revision:snapshot.revision,gameIdentity:command === 'game.setField'||command === 'frame.setField'||command === 'global.setField' ? snapshot.game?.identity??'' : undefined,gameAdmission:command === 'game.setField'||command === 'frame.setField' ? this.gameAdmissions.get(snapshot) : undefined,controlAdmission:this.controlAdmissions.get(snapshot),checkpoint});
         return {type:'reply',runId:event.runId,id:request.id,ok:true,result,notice:result.notice};
       } catch(error) {
         const sourceChanged=(error as {message?:unknown})?.message==='GAME_MIRROR_SOURCE_CHANGED';

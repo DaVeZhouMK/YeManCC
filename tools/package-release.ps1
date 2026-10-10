@@ -434,12 +434,16 @@ if ([string]::IsNullOrWhiteSpace($WorkspaceRoot)) {
   $WorkspaceRoot = Get-FullPath $WorkspaceRoot
 }
 
+. (Join-Path $PSScriptRoot 'release-export-identity.ps1')
+$exportWorkspaceLock = Enter-ExportWorkspaceLock $WorkspaceRoot
+try {
 $BuildRoot = Join-Path $WorkspaceRoot 'Build'
 $ReleaseRoot = Join-Path $WorkspaceRoot 'Release'
 $BackupReleaseRoot = Join-Path $WorkspaceRoot 'Backup\Release'
 $AssetsRoot = Join-Path $WorkspaceRoot 'Assets'
 $BuildWeb = Join-Path $BuildRoot 'App\Web'
 $BuildNative = Join-Path $BuildRoot 'App\Native'
+$BuildDecky = Join-Path $BuildRoot 'App\Decky\plugins\ymcc-sidebar'
 $PackageBuildRoot = Join-Path $BuildRoot 'Package'
 $StagingRoot = Join-Path $PackageBuildRoot 'Staging'
 $StagingYeManCC = Join-Path $StagingRoot 'YeManCC'
@@ -527,7 +531,8 @@ foreach ($path in $requiredBuild) {
 # Freshness gate: never package an artifact older than its source (see
 # Assert-ExportIsFresh for the QPC/0910-17 stale-build regression this prevents).
 # Verify compiled passive JS/source/license identity and the locked Windows loader before export.
-& node (Join-Path $ProjectRoot 'tools\build-decky-sidebar-plugin.mjs') --check
+$exportBuildIdentity = Assert-ExportBuildIdentity -ProjectRoot $ProjectRoot -WorkspaceRoot $WorkspaceRoot
+& node (Join-Path $ProjectRoot 'tools\build-decky-sidebar-plugin.mjs') --out $BuildDecky --check
 if ($LASTEXITCODE -ne 0) { throw "Decky sidebar payload freshness rejected: exit=$LASTEXITCODE" }
 Assert-ExportIsFresh $ProjectRoot $WorkspaceRoot | Out-Null
 
@@ -599,6 +604,8 @@ if ($LASTEXITCODE -ne 0) { throw 'Gamepad prerequisites payload build failed.' }
 $sourcePowerControl = Join-Path $ProjectRoot 'PowerControl'
 Assert-HcSlimSourcePolicy $sourcePowerControl
 Copy-PowerControlTemplates $sourcePowerControl $StagingPowerControl
+# Use the plugin captured beside this build, never a cached source dist.
+Copy-DirectoryContents $BuildDecky (Join-Path $StagingPowerControl 'decky\plugins\ymcc-sidebar')
 # Keep the release/updater tree self-contained even when the installer exists
 # only in the operator-reserved default redist path. Never accept a drifted file.
 $stagedHidHideInstaller = Join-Path $StagingPowerControl ("redist\" + $installerName)
@@ -782,9 +789,13 @@ foreach ($file in Get-ChildItem -LiteralPath $StagingRoot -Recurse -Force -File)
 }
 if ($forbidden.Count -gt 0) { throw "Forbidden files entered Release staging: $($forbidden -join ', ')" }
 
+# Reject copy drift before touching the previous Release.
+Assert-ExportStagedBuild $StagingRoot $exportBuildIdentity
+$null = Assert-ExportBuildIdentity -ProjectRoot $ProjectRoot -WorkspaceRoot $WorkspaceRoot
 $publishStarted = $false
+$releaseLedger = [Collections.Generic.List[object]]::new()
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
-$backupRoot = Join-Path $BackupReleaseRoot "PreTask5-$stamp"
+$backupRoot = Join-Path $BackupReleaseRoot ("PreTask5-$stamp-"+[Guid]::NewGuid().ToString('N'))
 try {
 New-Item -ItemType Directory -Force -Path $ReleaseRoot | Out-Null
 $releaseItems = @($updateLayoutRoots | ForEach-Object { Join-Path $ReleaseRoot ([string]$_.source) }) + @(
@@ -795,18 +806,14 @@ $releaseItems = @($updateLayoutRoots | ForEach-Object { Join-Path $ReleaseRoot (
   (Join-Path $ReleaseRoot 'release-manifest.sha256'),
   (Join-Path $ReleaseRoot 'TESTING.md')
 )
-foreach ($path in $releaseItems) { Move-ExistingReleaseItem $path $backupRoot }
-
-Move-Item -LiteralPath $StagingYeManCC -Destination $ReleaseYeManCC
-Move-Item -LiteralPath $StagingPowerControl -Destination $ReleasePowerControl
-if (Test-Path -LiteralPath $StagingRoot) { Remove-Item -LiteralPath $StagingRoot -Recurse -Force }
-New-Item -ItemType Directory -Force -Path $ReleasePackages | Out-Null
+# Publication is deferred until the entire candidate ZIP passes its gates.
+# A working Release is not rotated merely to assemble a candidate.
 
 # Keep every declared product directory at the ZIP root. The updater and the
 # archive validator both consume this same root list, so adding a future root
 # no longer requires another hand-written Copy-Item branch here.
 foreach ($root in $updateLayoutRoots) {
-  $source = Join-Path $ReleaseRoot ([string]$root.source)
+  $source = Join-Path $StagingRoot ([string]$root.source)
   $destination = Join-Path $UpdateRoot ([string]$root.source)
   Copy-DirectoryContents $source $destination
 }
@@ -848,7 +855,10 @@ if (-not $isLegacyBootstrap -and -not (Test-Path -LiteralPath (Join-Path $Update
 # 2026-09-23 用户裁定：只产出唯一一个完整包 YeManCC.zip（同时承担更新包
 # 与完整快照两个角色），包名沿用公开 v0.0.28 的 YeManCC.zip，但内容为完整包。UpdateRoot 保留为
 # "包根 <-> update-manifest roots" 的目录级证明（见上），不参与压缩。
-$packagePath = Join-Path $ReleasePackages 'YeManCC.zip'
+$candidatePackages = Join-Path $PackageBuildRoot 'CandidatePackages'
+Assert-ExportWorkspaceChild $candidatePackages $WorkspaceRoot
+New-Item -ItemType Directory -Force -Path $candidatePackages | Out-Null
+$packagePath = Join-Path $candidatePackages 'YeManCC.zip'
 # 2026-10-07 user ruling: exactly one full payload, retaining the v0.0.28 filename.
 if (Test-Path -LiteralPath (Join-Path $ReleasePackages 'YeManCC-Complete.zip')) { throw 'Incorrect complete-package filename survived staging' }
 # Complete runnable snapshot artifact: a data-closed copy of the formal Release
@@ -857,10 +867,11 @@ if (Test-Path -LiteralPath (Join-Path $ReleasePackages 'YeManCC-Complete.zip')) 
 # machine can run this snapshot directly, and it is the only package the
 # updater consumes.
 $completeStaging = Join-Path $PackageBuildRoot 'CompleteRoot'
+Assert-ExportWorkspaceChild $completeStaging $WorkspaceRoot
 if (Test-Path -LiteralPath $completeStaging) { Remove-Item -LiteralPath $completeStaging -Recurse -Force }
 New-Item -ItemType Directory -Force -Path $completeStaging | Out-Null
-Copy-DirectoryContents $ReleaseYeManCC (Join-Path $completeStaging 'YeManCC')
-Copy-DirectoryContents $ReleasePowerControl (Join-Path $completeStaging 'PowerControl')
+Copy-DirectoryContents $StagingYeManCC (Join-Path $completeStaging 'YeManCC')
+Copy-DirectoryContents $StagingPowerControl (Join-Path $completeStaging 'PowerControl')
 $cliName = 'HidHideCLI.exe'
 $cliSha256 = '9DD283FEDFBD301E1A574A3D4B8663F6274CCB5C896F468ED55A6239F9ADE270'
 # 批111（2026-09-13 执行单）：HC 资源单一真值重构——共享 6 DLL 唯一真值
@@ -988,6 +999,8 @@ foreach ($runtimeFile in $declaredRuntime) {
 }
 if (-not (Test-Path -LiteralPath (Join-Path $hcRuntimeComplete 'HandheldCompanion.runtime.json') -PathType Leaf)) { throw 'Complete package is missing locked HC runtime manifest' }
 Assert-HcSlimStagedPolicy (Join-Path $completeStaging 'PowerControl')
+$null = Assert-ExportBuildIdentity -ProjectRoot $ProjectRoot -WorkspaceRoot $WorkspaceRoot
+$exportPackageIdentity = Write-ExportPackageIdentity -Root $completeStaging -BuildIdentity $exportBuildIdentity
 Compress-Archive -Path (Join-Path $completeStaging '*') -DestinationPath $packagePath -CompressionLevel Optimal -Force
 Write-Output "Complete package:    $packagePath"
 Add-Type -AssemblyName System.IO.Compression.FileSystem
@@ -1113,6 +1126,27 @@ try {
 } finally {
   $zipArchive.Dispose()
 }
+# Verify the shipped ZIP itself, not only the source dist checked above.
+# Source -> complete staging -> final ZIP must carry exactly the same six Decky assets.
+. (Join-Path $PSScriptRoot 'decky-release-identity.ps1')
+$deckyExportReceipt = Assert-DeckyExportPayload -ReleaseZip $packagePath -SourcePowerControl $sourcePowerControl -StagedPowerControl (Join-Path $completeStaging 'PowerControl')
+$deckyReceiptDirectory = Join-Path $BuildRoot 'Validation\DeckyExport'
+New-Item -ItemType Directory -Path $deckyReceiptDirectory -Force | Out-Null
+$deckyExportReceipt | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $deckyReceiptDirectory 'FINAL-ZIP-IDENTITY.json') -Encoding UTF8
+$exportArchiveReceipt = Assert-ExportArchiveIdentity -Zip $packagePath -Root $completeStaging -BuildIdentity $exportBuildIdentity
+$null = Assert-ExportBuildIdentity -ProjectRoot $ProjectRoot -WorkspaceRoot $WorkspaceRoot
+# Every source/build/stage/archive check passed; now publish transactionally.
+foreach ($path in $releaseItems) { Backup-ExportReleaseItem -Path $path -BackupRoot $backupRoot -WorkspaceRoot $WorkspaceRoot -Ledger $releaseLedger }
+Move-Item -LiteralPath $StagingYeManCC -Destination $ReleaseYeManCC
+Move-Item -LiteralPath $StagingPowerControl -Destination $ReleasePowerControl
+Copy-Item -LiteralPath (Join-Path $completeStaging 'YeManCC\export-identity.json') -Destination (Join-Path $ReleaseYeManCC 'export-identity.json') -Force
+New-Item -ItemType Directory -Force -Path $ReleasePackages | Out-Null
+$publishedPackagePath = Join-Path $ReleasePackages 'YeManCC.zip'
+Move-Item -LiteralPath $packagePath -Destination $publishedPackagePath
+$packagePath = $publishedPackagePath
+$exportArchiveReceipt.zip = $packagePath
+$exportReceiptPath = Join-Path $BuildRoot 'Validation\ExportIdentity\FINAL-ZIP-IDENTITY.json'
+$exportArchiveReceipt | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $exportReceiptPath -Encoding UTF8
 $packageHash = Get-Sha256 $packagePath
   $fanHostTestingLine1 = if ($includeFanHostInFullTestPackage) { 'This full release includes PowerControl/fan-host-v2; the legacy fan-host lane is preserved.' } else { 'PowerControl/fan-host is excluded from this release; an existing installed' }
   $fanHostTestingLine2 = if ($includeFanHostInFullTestPackage) { 'Use the included Fan Host payload together with this package.' } else { 'Fan Host is preserved and is not overwritten by the updater.' }
@@ -1122,6 +1156,9 @@ $releaseVersion = [ordered]@{
   notes = [string]$versionInfo.notes
   sha256 = $packageHash
   publishedAt = (Get-Date -Format 'yyyy-MM-dd')
+  buildId = $exportBuildIdentity.buildId
+  nativeSha256 = $exportArchiveReceipt.nativeSha256
+  pluginSha256 = $exportArchiveReceipt.pluginSha256
   package = 'Packages/YeManCC.zip'
 }
 $releaseVersion | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $ReleaseRoot 'version.json') -Encoding UTF8
@@ -1187,6 +1224,9 @@ if ($LASTEXITCODE -ne 0) {
 
 # Archive lane/identity gate: no legacy path can receive PACKAGE_OK.
 & (Join-Path $PSScriptRoot 'fan_host_path_gate.ps1') -ProjectRoot $ProjectRoot -ReleaseZip $packagePath | Out-Null
+# Late edits cannot receive PACKAGE_OK or leave a mixed release.
+$null = Assert-ExportBuildIdentity -ProjectRoot $ProjectRoot -WorkspaceRoot $WorkspaceRoot
+Write-Output ('EXPORT_BUILD_ID=' + $exportBuildIdentity.buildId)
 Write-Output 'PACKAGE_OK'
 Write-Output "Release YeManCC:      $ReleaseYeManCC"
 Write-Output "Release PowerControl: $ReleasePowerControl"
@@ -1201,16 +1241,9 @@ $publishStarted = $true
   # after old output was backed up, restore every published item so the next
   # run never starts from a half-built Release directory.
   if (-not $publishStarted) {
-    foreach ($path in $releaseItems) {
-      if (Test-Path -LiteralPath $path) {
-        Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction SilentlyContinue
-      }
-      $backupPath = Join-Path $backupRoot ([IO.Path]::GetFileName($path))
-      if (Test-Path -LiteralPath $backupPath) {
-        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $path) | Out-Null
-        Move-Item -LiteralPath $backupPath -Destination $path -Force -ErrorAction SilentlyContinue
-      }
-    }
+    Undo-ExportReleaseItems -WorkspaceRoot $WorkspaceRoot -Ledger $releaseLedger
   }
   throw
 }
+
+} finally { $exportWorkspaceLock.ReleaseMutex(); $exportWorkspaceLock.Dispose() }

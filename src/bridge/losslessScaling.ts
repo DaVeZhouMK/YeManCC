@@ -10,7 +10,7 @@ import type { MirrorActionResult } from './deckyFanActions';
 export { onLosslessScalingChanged };
 export async function readLosslessScaling(gamePath:string){return getLosslessGameState(gamePath);}
 export function losslessField(document:Awaited<ReturnType<typeof readLosslessScaling>>|null):MirrorField {
-  return {value:document?.enabled===null?'unknown':document?.enabled?'on':'off',supported:!!document?.profile&&document.enabled!==null,
+  return {value:document?.enabled===null?'unknown':document?.enabled?'on':'off',supported:!!document&&!!document.xml&&document.enabled!==null,
     choices:[{data:'off',label:'关闭'},{data:'on',label:'开启'}]};
 }
 export type LsDocument=Awaited<ReturnType<typeof readLosslessScaling>>;
@@ -24,7 +24,7 @@ export async function setLosslessFromMirror(args:Record<string,unknown>,context:
     checkpoint();const power=await powerLifecycle.get();checkpoint();
     if(power.generation!==context.generation||power.phase!=='ready'||!power.hardwareWritesAllowed)throw new Error('LOSSLESS_POWER_NOT_READY');
     const document=await readLosslessScaling(game.path);checkpoint();
-    if(!document.profile||document.xml!==context.gameAdmission!.lossless)throw new Error('GAME_MIRROR_SOURCE_CHANGED');
+    if((!document.profile&&args.value!=='on')||document.xml!==context.gameAdmission!.lossless)throw new Error('GAME_MIRROR_SOURCE_CHANGED');
     if(document.enabled===null)throw new Error('LOSSLESS_STATE_UNCONFIRMED');
     const currentPower=await powerLifecycle.get();checkpoint();
     if(currentPower.generation!==context.generation||currentPower.phase!=='ready'||!currentPower.hardwareWritesAllowed)throw new Error('LOSSLESS_POWER_NOT_READY');

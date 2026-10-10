@@ -18,6 +18,7 @@
 #include <iterator>
 #include <map>
 #include <optional>
+#include <functional>
 #include <set>
 #include "json.hpp"
 #include "steam_live_script.h"
@@ -186,7 +187,7 @@ struct BoundedSocket {
         if (h) WinHttpCloseHandle(h);
     }
 };
-inline Json run(const std::wstring& steam, const Json& request) {
+inline Json run(const std::wstring& steam, const Json& request, const std::function<bool()>& admitAction = {}) {
     std::lock_guard<std::mutex> serial(transportMutex);
     bool sent = false;
     try {
@@ -230,6 +231,9 @@ inline Json run(const std::wstring& steam, const Json& request) {
         const std::string expression = std::string(kScript) + "(" + request.dump() + ")";
         const std::string message = Json{{"id", 1}, {"method", "Runtime.evaluate"}, {"params", {
             {"expression", expression}, {"returnByValue", true}, {"awaitPromise", true}, {"timeout", 14000}}}}.dump();
+        // Recheck event/config/power admission after discovery and socket setup.
+        // A cancelled action must not be sent merely because it entered the queue earlier.
+        if (admitAction && !admitAction()) return {{"ok", false}, {"reason", "live-action-cancelled"}, {"mutated", false}};
         sent = true;
         if (WinHttpWebSocketSend(socket, WINHTTP_WEB_SOCKET_UTF8_MESSAGE_BUFFER_TYPE, const_cast<char*>(message.data()), static_cast<DWORD>(message.size())) != NO_ERROR)
             throw std::runtime_error("live-transport-uncertain");

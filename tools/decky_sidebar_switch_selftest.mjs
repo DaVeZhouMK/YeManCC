@@ -9,8 +9,9 @@ const require=createRequire(path.join(root,'package.json'));const {transformSync
 const source=fs.readFileSync(path.join(root,'src/views/SteamView.vue'),'utf8');
 const start=source.indexOf('function acceptDeckyState(');const end=source.indexOf('onMounted(() => {',start);
 const fragment=source.slice(start,end)+'\nexport {acceptDeckyState,setDeckyEnabled};';
+const bridge={exports:{}};vm.runInNewContext(transformSync(fs.readFileSync(path.join(root,'src/bridge/deckySidebar.ts'),'utf8'),{loader:'ts',format:'cjs'}).code,{module:bridge,exports:bridge.exports,Error,require:()=>({})});
 function fixture(){let resolve,reject,calls=0;const pending=new Promise((yes,no)=>{resolve=yes;reject=no;});const notices=[];
-const module={exports:{}};const context=vm.createContext({module,exports:module.exports,deckyState:{value:{enabled:false,revision:10}},deckyBusy:{value:false},deckyViewEpoch:1,deckySidebar:{setEnabled:()=>{calls++;return pending;}},showNotice:m=>notices.push(m)});
+const module={exports:{}};const context=vm.createContext({module,exports:module.exports,deckyState:{value:{enabled:false,revision:10}},deckyBusy:{value:false},deckyViewEpoch:1,deckySidebar:{setEnabled:()=>{calls++;return pending;},environment:async()=>null},deckySidebarSetupFailure:bridge.exports.deckySidebarSetupFailure,showNotice:m=>notices.push(m)});
 vm.runInContext(transformSync(fragment,{loader:'ts',format:'cjs'}).code,context);return {api:module.exports,context,resolve,reject,notices,count:()=>calls};}
 const cases=[];
 async function check(name,fn){await fn();cases.push({name,status:'passed'});}

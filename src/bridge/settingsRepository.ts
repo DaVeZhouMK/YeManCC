@@ -772,6 +772,8 @@ class InputSettingsCommitConflict extends Error {
   constructor(readonly document: UnifiedSettings) { super('输入配置在提交前已变更'); }
 }
 
+const inputSettingsListeners=new Set<() => void>();
+export function onInputSettingsChanged(listener:()=>void):()=>void {inputSettingsListeners.add(listener);return()=>{inputSettingsListeners.delete(listener);};}
 async function writeSettings(
   next: UnifiedSettings,
   baseline: JsonObject,
@@ -798,7 +800,9 @@ async function writeSettings(
     throw new Error("输入配置写入回执缺少可验证的实际文档");
   }
   cacheStamp = null;
-  return normalize(committed || next);
+  const normalized=normalize(committed || next);
+  if(JSON.stringify(normalized.input)!==JSON.stringify(baseline.input))for(const listener of inputSettingsListeners){try{listener();}catch{}}
+  return normalized;
 }
 
 export async function readSettingsSection<T extends JsonObject = JsonObject>(section: SettingsSection): Promise<T> {

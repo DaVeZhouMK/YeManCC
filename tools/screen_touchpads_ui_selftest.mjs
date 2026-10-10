@@ -12,6 +12,8 @@ try {
   const originalSetup = Component.setup;
   for (const [name, config, expected] of [
     ['disabled', { enabled: false }, ['屏幕触摸板']],
+    ['standalone-steam-error', { enabled:false, standaloneSpecialMode:'steamdeck', standaloneSpecialStatus:'steam-menu-unavailable' }, ['Steam 菜单不可用']],
+    ['standalone-microphone-error', { enabled:false, standaloneSpecialMode:'ps5', standaloneSpecialStatus:'microphone-mute-failed' }, ['默认麦克风静音失败']],
     ['legacy-xbox-buttons', { enabled: false, specialMask: 3, specialEnabled: true }, ['都开启']],
     ['legacy-rear-buttons', { enabled: false, rearMask: 2, rearEnabled: true }, ['选择组合']],
     ['steamdeck', { enabled: true, leftMode: 'steamdeck', rightMode: 'steamdeck' }, ['左侧映射', '右侧映射', 'SteamDeck 左触摸板 (Steam内设置)', 'SteamDeck 右触摸板 (Steam内设置)', '触摸板缩放', '触摸板显示透明度']],
@@ -36,7 +38,7 @@ try {
       }
       return bindings;
     } };
-    const html = await renderToString(createSSRApp(Fixture,{persona: ['single-ps5','dual-ps5'].includes(name)?'dualsense-edge':name==='dual-ps4'?'dualshock4':name==='legacy-xbox-buttons'?'elite':'steamdeck',ps5Enabled:true,steamDeckEnabled:true}));
+    const html = await renderToString(createSSRApp(Fixture,{persona: name.startsWith('standalone-')?'disabled':['single-ps5','dual-ps5'].includes(name)?'dualsense-edge':name==='dual-ps4'?'dualshock4':name==='legacy-xbox-buttons'?'elite':'steamdeck',ps5Enabled:true,steamDeckEnabled:true}));
     for (const label of expected) assert.ok(html.includes(label), `${name}: missing ${label}`);
     assert.ok(html.includes('aria-label="屏幕触摸板布局"'));
     for(const label of ['YMCC呼出位置','专用按键组合','背部按键组合'])assert.ok(html.includes('aria-label="'+label+'"'));

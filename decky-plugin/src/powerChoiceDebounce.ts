@@ -13,10 +13,10 @@ export class PowerChoiceDebounce {
   private notify() { for (const listener of this.listeners) listener(); }
   private valid(choice: PendingPowerChoice, state: ClientState) {
     const current = state.snapshot, expected = choice.snapshot;
-    return state.connected && !state.busy && current?.ready && current.actions?.game &&
+    return state.connected && !state.busy && current?.ready && (current.game?current.actions?.game:current.actions?.global) &&
       current.runId === expected.runId && current.generation === expected.generation && current.revision === expected.revision &&
       current.game?.identity === expected.game?.identity && current.powerSource === (choice.field === 'acMode' ? 'ac' : 'dc') &&
-      current.game?.fields[choice.field]?.supported && current.game.fields[choice.field].choices.some(option => option.data === choice.value && !option.disabled);
+      (current.game?.fields??current.global?.fields)?.[choice.field]?.supported && (current.game?.fields??current.global?.fields)![choice.field].choices.some(option => option.data === choice.value && !option.disabled);
   }
   observe(state: ClientState) { if (this.pending && !this.valid(this.pending, state)) this.cancel(); }
   choose(field: 'acMode' | 'dcMode', value: string, snapshot: MirrorSnapshot) {
@@ -24,7 +24,7 @@ export class PowerChoiceDebounce {
     if (!this.valid(choice, this.deps.state()) || value === 'follow' || value === 'legacy') return;
     this.cancel();
     // Returning to the saved value cancels the previous intent, without a write.
-    if (value === snapshot.game?.fields[field]?.value) return;
+    if (value === (snapshot.game?.fields??snapshot.global?.fields)?.[field]?.value) return;
     this.pending = choice;
     this.timer = this.deps.schedule(() => {
       if (this.pending !== choice) return;

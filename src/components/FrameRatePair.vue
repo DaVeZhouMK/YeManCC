@@ -5,7 +5,7 @@ import Dropdown from './Dropdown.vue';
 import AppIcon from './AppIcon.vue';
 import {FPS_MIN,FPS_CEILINGS} from '@/bridge/yeman';
 import {frameRatePair,frameRateSetting,type FrameRatePair,type FrameRateSide,type FrameRateSetting} from '@/bridge/frameRateModel';
-const props=withDefaults(defineProps<{values:FrameRatePair;disabled?:boolean;labelPrefix?:string;side?:FrameRateSide;hideSideLabel?:boolean}>(),{disabled:false,labelPrefix:'',hideSideLabel:false});
+const props=withDefaults(defineProps<{values:FrameRatePair;disabled?:boolean;labelPrefix?:string;side?:FrameRateSide;hideSideLabel?:boolean;gpRowStart?:number}>(),{disabled:false,labelPrefix:'',hideSideLabel:false,gpRowStart:0});
 const emit=defineEmits<{(e:'commit',side:FrameRateSide,value:FrameRateSetting):void}>();
 const draft=ref(frameRatePair(props.values));
 watch(()=>props.values,value=>{draft.value=frameRatePair(value);},{deep:true});
@@ -26,8 +26,8 @@ function ceiling(side:FrameRateSide,value:string|number){
     <div v-for="(side,index) in sides" :key="side" class="frame-rate-row" :class="[side,{'side-label-hidden':hideSideLabel}]" :data-gp-game-row="labelPrefix+'frame-'+side">
       <div v-if="!hideSideLabel" class="frame-rate-side"><AppIcon :name="side==='ac'?'plug':'battery'"/><span>{{side==='ac'?'插电 AC':'电池 DC'}}</span></div>
       <div class="frame-rate-controls">
-        <Slider :model-value="draft[side].fps" :min="draft[side].fps===0?0:FPS_MIN" :max="draft[side].ceiling || FPS_MIN" :step="5" :label="labelPrefix ? '帧率上限[游戏专属]' : hideSideLabel ? '帧率上限' : (side==='ac'?'插电帧率上限':'电池帧率上限')" :unit="draft[side].fps===0?undefined:'FPS'" :value-text="draft[side].fps===0?'不锁帧':undefined" :color="side==='dc'?'dc':'accent'" :disabled="disabled || draft[side].fps===0" :gp-row="index" :gp-col="0" @update:model-value="v=>draft[side].fps=v" @commit="()=>commit(side)" />
-        <Dropdown :model-value="draft[side].ceiling" :options="options" :disabled="disabled" :color="side==='dc'?'dc':'accent'" width="104px" :aria-label="labelPrefix+(side==='ac'?'插电锁帧上限':'电池锁帧上限')" :gp-row="index" :gp-col="1" @update:model-value="v=>ceiling(side,v)" />
+        <Slider data-gp-vertical-lane="frame-slider" :model-value="draft[side].fps" :min="draft[side].fps===0?0:FPS_MIN" :max="draft[side].ceiling || FPS_MIN" :step="5" :label="hideSideLabel ? '帧率上限' : labelPrefix ? '帧率上限[游戏专属]' : (side==='ac'?'插电帧率上限':'电池帧率上限')" :unit="draft[side].fps===0?undefined:'FPS'" :value-text="draft[side].fps===0?'不锁帧':undefined" :color="side==='dc'?'dc':'accent'" :disabled="disabled || draft[side].fps===0" :gp-row="gpRowStart+index" :gp-col="0" @update:model-value="v=>draft[side].fps=v" @commit="()=>commit(side)" />
+        <Dropdown data-gp-vertical-lane="frame-ceiling" :model-value="draft[side].ceiling" :options="options" :disabled="disabled" :color="side==='dc'?'dc':'accent'" width="104px" :aria-label="labelPrefix+(side==='ac'?'插电锁帧上限':'电池锁帧上限')" :gp-row="gpRowStart+index" :gp-col="1" @update:model-value="v=>ceiling(side,v)" />
       </div>
     </div>
   </div>
@@ -40,7 +40,10 @@ function ceiling(side:FrameRateSide,value:string|number){
 .frame-rate-side :deep(svg){width:16px;height:16px;}
 .frame-rate-row.ac .frame-rate-side {color:var(--accent);}
 .frame-rate-row.dc .frame-rate-side {color:var(--dc-accent);}
-.frame-rate-controls {display:flex;align-items:center;gap:12px;min-width:0;}
-.frame-rate-controls :deep(.slider) {flex:1;min-width:0;}
+.frame-rate-controls {display:grid;grid-template-columns:minmax(0,1fr) 104px;align-items:end;gap:12px;min-width:0;}
+/* Put the actual range track, not the label+track container, on the dropdown centerline. */
+.frame-rate-controls :deep(.slider) {min-width:0;padding:0;}
+.frame-rate-controls :deep(.slider-track-wrap) {height:var(--btn-min-h);}
+.frame-rate-controls :deep(.dd-trigger) {height:var(--btn-min-h);padding-block:0;}
 @media(max-width:480px){.frame-rate-row{grid-template-columns:minmax(0,1fr);gap:5px;}.frame-rate-controls{gap:10px;}}
 </style>

@@ -53,9 +53,18 @@ const rearOptions = computed(() => profile === 'steamdeck'
     : [{ value: 0, label: '全关闭' }]);
 const overlaysEnabled = computed(() => (standaloneSpecial && state.value.standaloneSpecialMode !== undefined && state.value.standaloneSpecialMode !== 'off') || state.value.layout !== 'off' || state.value.summonPosition !== 'off' || state.value.specialMask !== 0 || state.value.rearMask !== 0 || state.value.summonEnabled || state.value.specialEnabled || state.value.rearEnabled);
 const mouseEnabled = computed(() => state.value.layout === 'single' ? state.value.singleMode === 'mouse' : state.value.leftMode === 'mouse' || state.value.rightMode === 'mouse');
-// Keep actionable errors; omit the normal-operation explanatory text.
-const status = computed(() => error.value || (state.value.error
-  ? `触摸板操作失败（Windows ${state.value.error}）；请关闭开关后重试。` : ''));
+// Standalone actions surface real backend failures instead of a successful UI-only click.
+const specialErrors: Record<string,string> = {
+  'action-queue-unavailable': '专用按键执行队列不可用，请重试。',
+  'input-power-gate': '专用按键暂不可用，请等待唤醒恢复完成。',
+  'steam-menu-unavailable': 'Steam 菜单不可用：请进入大屏幕模式；未开启本地调试时需让 Steam 位于前台。',
+  'steam-menu-result-uncertain': 'Steam 菜单未确认响应，请先检查当前菜单状态，避免重复触发。',
+  'microphone-mute-failed': '默认麦克风静音失败，请检查录音设备与权限。',
+  'keyboard-injection-failed': 'Steam 快捷键发送失败，请检查权限。',
+  'physical-modifiers-held': '请先松开 Ctrl、Shift、Alt 或 Windows 键后重试。',
+};
+const status = computed(() => error.value || (standaloneSpecial && specialErrors[state.value.standaloneSpecialStatus ?? '']) ||
+  (state.value.error ? `触摸板操作失败（Windows ${state.value.error}）；请关闭开关后重试。` : ''));
 async function refresh(): Promise<void> {
   if (disposed || saving.value || Object.keys(queued).length) return;
   const ticket = ++generation;

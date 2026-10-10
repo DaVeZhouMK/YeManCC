@@ -8,7 +8,7 @@ const state={connected:true,snapshot:null,busy:false,notice:''},mutations=[],vis
 class InertClient{snapshot(){return state;}subscribe(fn){subscriptions.add(fn);fn(state);return()=>subscriptions.delete(fn);}setVisible(value){visibleCalls.push(value);}bootstrapChanged(){}dispose(){disposed++;}mutate(command,args,expected){if(expected&&(expected.runId!==state.snapshot?.runId||expected.generation!==state.snapshot?.generation||expected.revision!==state.snapshot?.revision||expected.game?.identity!==state.snapshot?.game?.identity))return Promise.reject(Error('stale'));mutations.push({command,args:structuredClone(args)});return Promise.resolve();}}
 const react={createElement:(type,props,...children)=>({type,props:props??{},children}),Fragment:'Fragment',useState:initial=>{const index=hi++;if(!(index in hooks))hooks[index]=initial;return [hooks[index],value=>{hooks[index]=value;}];},useRef:initial=>{const index=ri++;return refs[index]??= {current:initial};},useEffect:(action,deps)=>{const index=ei++;const old=cleanups[index];if(!old||JSON.stringify(old.deps)!==JSON.stringify(deps)){old?.stop?.();cleanups[index]={deps,stop:action()};}}};
 const DFL={PanelSection:'PanelSection',PanelSectionRow:'PanelSectionRow',SliderField:'SliderField',DropdownItem:'DropdownItem',ToggleField:'ToggleField',Router:{}};
-const module={exports:{}};vm.runInNewContext(transformSync(source,{loader:'tsx',format:'cjs',jsxFactory:'SP_REACT.createElement'}).code,{module,exports:module.exports,SP_REACT:react,DFL,crypto:{randomUUID:()=> 'fixture'},window:{addEventListener:(k,v)=>events.set(k,v),removeEventListener:k=>events.delete(k)},structuredClone,setTimeout:schedule,clearTimeout:cancel,require:name=>{if(name==='../../src/bridge/frameRateModel')return load(fs.readFileSync(path.join(root,'src/bridge/frameRateModel.ts'),'utf8'));if(name==='./AnchoredDropdown')return {AnchoredDropdown:'AnchoredDropdown'};if(name==='./powerChoiceDebounce')return powerModule;if(name==='@decky/api')return {useQuickAccessVisible:()=>visible};if(name==='./qamPlacement')return {installConsoleTab:()=>({active:false,dispose(){}})};if(name==='./mirrorClient')return {MirrorClient:InertClient};if(name==='./steamRunningContext')return {observeSteamRunning:()=>({availability:'unavailable'})};throw Error('unmocked '+name);}});
+const module={exports:{}};vm.runInNewContext(transformSync(source,{loader:'tsx',format:'cjs',jsxFactory:'SP_REACT.createElement'}).code,{module,exports:module.exports,SP_REACT:react,DFL,crypto:{randomUUID:()=> 'fixture'},window:{addEventListener:(k,v)=>events.set(k,v),removeEventListener:k=>events.delete(k)},structuredClone,setTimeout:schedule,clearTimeout:cancel,require:name=>{if(name==='../../src/bridge/frameRateModel')return load(fs.readFileSync(path.join(root,'src/bridge/frameRateModel.ts'),'utf8'));if(name==='./steamHudProbe')return {installSteamHudProbe:()=>{throw Error('Default build must not install HUD probe');}};if(name==='./AnchoredDropdown')return {AnchoredDropdown:'AnchoredDropdown'};if(name==='./powerChoiceDebounce')return powerModule;if(name==='@decky/api')return {useQuickAccessVisible:()=>visible};if(name==='./qamPlacement')return {installConsoleTab:()=>({active:false,dispose(){}})};if(name==='./mirrorClient')return {MirrorClient:InertClient};if(name==='./steamRunningContext')return {observeSteamRunning:()=>({availability:'unavailable'})};throw Error('unmocked '+name);}});
 const plugin=module.exports.default();const render=()=>{hi=ri=ei=0;return plugin.content.type();};
 function flatten(v,out=[]){if(Array.isArray(v))v.forEach(c=>flatten(c,out));else if(v&&typeof v==='object'){out.push(v);flatten(v.children,out);}return out;}
 function text(v){if(Array.isArray(v))return v.map(text).join('');if(v&&typeof v==='object')return text(v.children);return v==null||v===false?'':String(v);}
@@ -17,6 +17,7 @@ const flush=async()=>{for(let i=0;i<100;i++)await Promise.resolve();};const adva
 const host=await createMirrorHostFixture();host.ready();host.emit('deckySidebar.mirrorRequest',{connection:'1',runId:'a'.repeat(32),request:{command:'snapshot',runId:'a'.repeat(32)}});await flush();state.snapshot=host.replies.at(-1).message.snapshot;host.stop();const baseline=structuredClone(state.snapshot);
 const cases=[];async function check(name,fn){await fn();cases.push(name);}
 const choose=async(label,value)=>{const widget=find(label);widget.props.onMenuWillOpen(()=>{});widget.props.onChange({data:value});await flush();};
+await check('console Y uses the native QAM SVG layout without changing tab height or font baseline',()=>{const icon=plugin.icon;assert.equal(icon.type,'svg');assert.equal(icon.props['aria-label'],'YMCC 控制台');assert.equal(icon.props.role,'img');assert.equal(icon.props.viewBox,'0 0 24 24');assert.equal(icon.props.width,'1em');assert.equal(icon.props.height,'1em');assert.equal(icon.props.fill,'currentColor');assert.equal(icon.props.style,undefined);assert.equal(icon.children.filter(c=>c&&typeof c==='object')[0].type,'path');assert.ok(!icon.children.some(c=>typeof c==='string'&&c.trim()));});
 await check('browser timer APIs keep native Window binding and all dropdowns share the same alignment grid',()=>{assert.ok(source.includes('schedule:(action,delay) => setTimeout(action,delay)'));assert.ok(source.includes('cancel:handle => clearTimeout(handle)'));assert.ok(source.includes('grid-template-columns: 76px minmax(0,1fr)'));assert.ok(source.includes('width: calc(100% - 84px)'));assert.ok(!source.includes('width: 64%'));});
 await check('one AC/DC and fan sliders, four anchored dropdowns and four switches',()=>{const c=controls();assert.equal(c.filter(n=>n.type==='SliderField').length,3);assert.equal(c.filter(n=>n.type==='AnchoredDropdown').length,11);assert.equal(c.filter(n=>n.type==='ToggleField').length,4);assert.equal(plugin.name,'YMCC 控制台');assert.equal(mutations.length,0);});
 await check('core order big first, small last; gyro still exactly four original presets; speed eight original factors',()=>{assert.equal(find('核心调度').props.rgOptions[0].data,'big-small');assert.equal(find('核心调度').props.rgOptions.at(-1).data,'only-small');assert.deepEqual(Array.from(find('陀螺仪预设').props.rgOptions,c=>c.data),['fps','racing','custom','steam']);assert.deepEqual(Array.from(find('游戏变速').props.rgOptions,c=>c.data),['0.5','0.8','1','1.2','1.5','2','4','8']);});
@@ -35,5 +36,66 @@ await check('FPS slider only commits on native completion, ceiling uses original
 await check('four primary touchpad dropdowns always render, mappings follow original off/single/dual layout',()=>{for(const layout of ['off','single','dual']){state.snapshot=structuredClone(baseline);state.snapshot.touchpads.fields.layout.value=layout;emit();for(const label of ['屏幕触摸板','YMCC呼出','专用按键','背部按键'])assert.ok(find(label));assert.equal(!!find('触摸板映射'),layout==='single');assert.equal(!!find('左侧映射'),layout==='dual');assert.equal(!!find('右侧映射'),layout==='dual');}state.snapshot=structuredClone(baseline);emit();});
 await check('touchpad dropdown calls only global touchpad command; global controls usable with no game',async()=>{state.snapshot=structuredClone(baseline);state.snapshot.game=null;state.snapshot.actions.game=false;emit();assert.ok(find('屏幕触摸板'));assert.ok(find('插电锁帧 AC'));assert.equal(find('核心调度'),undefined);await choose('YMCC呼出','right');assert.deepEqual(mutations.at(-1),{command:'touchpad.setField',args:{field:'summonPosition',value:'right'}});await choose('背部按键','10');assert.deepEqual(mutations.at(-1),{command:'touchpad.setField',args:{field:'rearMask',value:'10'}});state.snapshot=structuredClone(baseline);emit();});
 await check('unknown/disabled global control permissions prevent frame and touchpad callbacks',async()=>{state.snapshot=structuredClone(baseline);state.snapshot.actions.frames=false;state.snapshot.actions.touchpads=false;emit();const n=mutations.length;assert.equal(find('插电锁帧 AC').props.disabled,true);assert.equal(find('屏幕触摸板').props.disabled,true);find('插电锁帧 AC').props.onChangeComplete(90);find('屏幕触摸板').props.onMenuWillOpen(()=>{throw Error('unsupported');});await flush();assert.equal(mutations.length,n);state.snapshot=structuredClone(baseline);emit();});
+await check('six requested module headings remain present while connecting, no game, and game',()=>{const saved=state.snapshot;for(const snapshot of [null,{...structuredClone(baseline),game:null},structuredClone(baseline)]){state.snapshot=snapshot;emit();const ids=flatten(render()).filter(n=>n.props?.['data-ymcc-module']).map(n=>n.props['data-ymcc-module']);assert.deepEqual(ids,['tdp','frames','fan','lossless','virtual','touchpads']);assert.ok(find('LosslessScaling 插帧'),'LS does not disappear without a game');assert.ok(find('风扇控制（全局）'));if(!snapshot?.game)assert.equal(find('LosslessScaling 插帧').props.disabled,true);}state.snapshot=saved;emit();});
+await check('no-game TDP and virtual controller use original global intents; power retains trailing 3-second delay',async()=>{const f=await createMirrorHostFixture();f.state.game=null;f.ready();f.emit('deckySidebar.mirrorRequest',{connection:'1',runId:'a'.repeat(32),request:{command:'snapshot',runId:'a'.repeat(32)}});await flush();state.snapshot=f.replies.at(-1).message.snapshot;f.stop();emit();assert.ok(find('交流电方案'));assert.ok(find('虚拟手柄'));assert.equal(find('虚拟手柄').props.disabled,false);const n=mutations.length;find('交流电方案').props.onChange(state.snapshot.global.fields.acMode.choices.findIndex(o=>o.data==='performance'));await advance(2999);assert.equal(mutations.length,n);await advance(1);assert.equal(mutations.at(-1).command,'global.setField');await choose('虚拟手柄','elite');assert.deepEqual(mutations.at(-1),{command:'global.setField',args:{field:'padPersona',value:'elite'}});state.snapshot=structuredClone(baseline);emit();});
+
+// Use production host data for the new disabled-slot capability; no external input/device IO.
+const originalScreen=load(fs.readFileSync(path.join(root,'src/bridge/screenTouchpads.ts'),'utf8'),{'./ipc':{isNativeRuntime:false}});
+async function independentSnapshot(mode='off',layout='off') {
+  const f=await createMirrorHostFixture();f.state.game=null;
+  f.state.input.outputTarget={persona:'disabled',buttonMappingEnabled:false};
+  f.state.touchpads={...originalScreen.screenTouchpadDefaults('disabled'),ok:true,available:true,visible:false,persona:'disabled',layout,enabled:layout!=='off',steamDeckAvailable:false,ps5Available:false};
+  if(mode===null)delete f.state.touchpads.standaloneSpecialMode;else f.state.touchpads.standaloneSpecialMode=mode;
+  f.ready();f.emit('deckySidebar.mirrorRequest',{connection:'1',runId:'a'.repeat(32),request:{command:'snapshot',runId:'a'.repeat(32)}});
+  await flush();const snapshot=f.replies.at(-1).message.snapshot;f.stop();return snapshot;
+}
+const specialControls=()=>controls().filter(n=>text(n.props.label)==='专用按键');
+await check('disabled persona reuses exactly one of four primary dropdowns and leaves touch mappings unchanged',async()=>{
+  for(const layout of ['off','single','dual']) {
+    state.snapshot=await independentSnapshot('off',layout);emit();
+    for(const label of ['屏幕触摸板','YMCC呼出','专用按键','背部按键'])assert.ok(find(label));
+    assert.equal(specialControls().length,1);
+    assert.deepEqual(Array.from(find('专用按键').props.rgOptions,c=>({data:c.data,label:c.label})),Array.from(originalScreen.STANDALONE_SPECIAL_MODES,c=>({data:c.value,label:c.label})));
+    assert.equal(find('专用按键').props.disabled,false);assert.equal(find('背部按键').props.disabled,true);
+    assert.equal(!!find('触摸板映射'),layout==='single');assert.equal(!!find('左侧映射'),layout==='dual');assert.equal(!!find('右侧映射'),layout==='dual');
+    for(const label of ['触摸板映射','左侧映射','右侧映射'])if(find(label))assert.ok(!find(label).props.rgOptions.some(c=>c.data==='steamdeck'||c.data==='dualsense'));
+  }
+  state.snapshot=structuredClone(baseline);emit();
+});
+await check('independent dropdown sends only original global standaloneSpecialMode; selecting same mode is a no-op',async()=>{
+  state.snapshot=await independentSnapshot();emit();const start=mutations.length;
+  for(const value of ['steamdeck','ps5','off']) {
+    await choose('专用按键',value);
+    assert.deepEqual(mutations.at(-1),{command:'touchpad.setField',args:{field:'standaloneSpecialMode',value}});
+    state.snapshot.touchpads.fields.standaloneSpecialMode.value=value;emit();
+  }
+  assert.equal(mutations.length,start+3);await choose('专用按键','off');assert.equal(mutations.length,start+3);
+  state.snapshot=structuredClone(baseline);emit();
+});
+await check('independent mode descriptions show the four functional actions without advertising virtual touch reports',async()=>{
+  state.snapshot=await independentSnapshot('steamdeck');emit();let output=text(render());
+  assert.match(output,/Steam 键：Steam 主菜单；三点键：Steam 快捷菜单/);assert.ok(!output.includes('PS 静音键'));
+  state.snapshot=await independentSnapshot('ps5');emit();output=text(render());
+  assert.match(output,/PS 主页键：Steam 主菜单；PS 静音键：默认麦克风静音/);assert.ok(!output.includes('三点键：'));
+  state.snapshot=await independentSnapshot('off');emit();assert.ok(!text(render()).includes('PS 静音键'));
+  state.snapshot=structuredClone(baseline);emit();
+});
+await check('virtual persona keeps its original specialMask options and callback, with no duplicate independent entry',async()=>{
+  state.snapshot=structuredClone(baseline);emit();assert.equal(specialControls().length,1);
+  assert.deepEqual(Array.from(find('专用按键').props.rgOptions,c=>c.data),['0','1','2','3']);
+  await choose('专用按键','1');assert.deepEqual(mutations.at(-1),{command:'touchpad.setField',args:{field:'specialMask',value:'1'}});
+  assert.ok(!text(render()).includes('PS 静音键'));state.snapshot=structuredClone(baseline);emit();
+});
+await check('unavailable independent backend or permission disables the existing entry without a virtual-controller fallback',async()=>{
+  // Missing backend field is tested before the first published snapshot, not by mutating a cached snapshot.
+  for(const scenario of ['legacy','invalid','permission']) {
+    state.snapshot=await independentSnapshot(scenario==='legacy'?null:scenario==='invalid'?'unknown':'off');
+    if(scenario==='permission')state.snapshot.actions.touchpads=false;emit();const n=mutations.length;
+    assert.equal(specialControls().length,1);const dropdown=find('专用按键');assert.equal(dropdown.props.disabled,true);
+    dropdown.props.onMenuWillOpen(()=>{throw Error('unsupported independent entry opened');});dropdown.props.onChange({data:'steamdeck'});await flush();
+    assert.equal(mutations.length,n);assert.equal(state.snapshot.touchpads.fields.specialMask.supported,false);assert.equal(timers.size,0);
+  }
+  state.snapshot=structuredClone(baseline);emit();
+});
 await check('menu bounded lease expires and cleanup removes all owned timers/listeners',async()=>{state.snapshot=structuredClone(baseline);emit();find('核心调度').props.onMenuWillOpen(()=>{});assert.equal(timers.size,1);await advance(45000);assert.equal(timers.size,0);find('交流电方案').props.onChange(state.snapshot.game.fields.acMode.choices.findIndex(c=>c.data==='performance'));for(const c of cleanups)c?.stop?.();plugin.onDismount();assert.equal(timers.size,0);assert.equal(subscriptions.size,0);assert.equal(events.size,0);assert.equal(disposed,1);});
 fs.writeFileSync(path.join(task,'validation/MAINLINE22-PLUGIN-PRESENTATION.json'),JSON.stringify({cases:cases.length,results:cases,exactProductionTsx:true,actualHostSnapshotData:true,inertReact:true,actualSteam:false,realConfigWrites:0,hardwareWrites:0},null,2));console.log('Plugin presentation PASS '+cases.length);

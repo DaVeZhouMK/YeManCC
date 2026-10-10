@@ -47,6 +47,7 @@
 #include "steam_session_observer.h"
 #include "decky_sidebar_runtime.h"
 #include "decky_sidebar_setup.h"
+#include "decky_sidebar_diagnostics.h"
 #include "decky_sidebar_broker.h"
 #include "decky_sidebar_bootstrap.h"
 #include "ai_fan_session.h"
@@ -156,6 +157,7 @@ static bool fanHostOwnsLoopbackPort(DWORD pid, unsigned short port);
 
 #include "json.hpp"
 #include "screen_touchpads.h"
+#include "screen_special_actions.h"
 #include "game_input_override.h"
 #include "input_shortcut_toggle.h"
 #include "shortcut_window_toggle.h"
@@ -904,6 +906,8 @@ static std::deque<json> g_deckyEvents;
 static bool g_deckyEventPosted = false;
 static ymcc::deckymirror::CancelSignal g_deckyBootstrapCancel;
 static ymcc::deckymirror::ContextHandleSlot g_deckyContextProcess;
+static ymcc::deckymirror::BootstrapWatch g_deckyBootstrapWatch;
+static void deckySidebarDiagnostic(const char* event,const json& detail,bool force=false);
 static ymcc::deckymirror::Broker g_deckyMirrorBroker;
 static ymcc::deckysidebar::Runtime g_deckySidebarRuntime;
 static std::atomic<bool> g_deckySteamRestartRequired{false};
@@ -23520,7 +23524,7 @@ static bool sofApplyNowLocked(const char* reason, int desired) {
 
 // Local debugging must already be enabled by the user. Native callers whitelist
 // both the operation and target; the frontend cannot submit CDP/JS or a URL.
-static json steamLiveRequest(DWORD account, json request) {
+static json steamLiveRequest(DWORD account, json request, const std::function<bool()>& admitAction = {}) {
     if (g_aiFanMockSession.isolated) return {{"ok", false}, {"reason", "isolated-session"}, {"mutated", false}};
     // Both features share one Steam JS context: serialize our own calls on workers.
     static std::mutex liveMx;
@@ -23532,9 +23536,9 @@ static json steamLiveRequest(DWORD account, json request) {
     sofRegDWORD(HKEY_CURRENT_USER, L"Software\\Valve\\Steam\\ActiveProcess", L"pid", &pid);
     const auto root = sofRegSZ(HKEY_CURRENT_USER, L"Software\\Valve\\Steam", L"SteamPath");
     request["account"] = account;
-    auto result = ymcc::steamlive::run(root, request);
+    auto result = ymcc::steamlive::run(root, request, admitAction);
     const auto operation = request.value("operation", std::string());
-    const bool setter = operation == "mouse.set" || operation == "overlay.set" || operation == "settings.set";
+    const bool setter = operation == "mouse.set" || operation == "overlay.set" || operation == "settings.set" || operation == "menu.toggle";
     const auto failure = result.value("reason", std::string());
     if (!setter && !result.value("ok", false) && (failure == "live-transport-uncertain" || failure == "live-transport-failed" ||
         failure == "live-timeout" || failure == "live-discovery-timeout" || failure == "live-readback-failed")) {
@@ -23909,7 +23913,9 @@ static std::string deckySidebarInjectBinding() {
     const auto bootstrap = g_deckyMirrorBroker.bootstrap();
     if (bootstrap.empty()) return "mirror-broker-not-active";
     HANDLE context=nullptr;
-    const auto result = ymcc::deckymirror::injectBootstrap(root, bootstrap, g_deckyBootstrapCancel.current(), &context);
+    const auto result = ymcc::deckymirror::injectBootstrap(root, bootstrap, g_deckyBootstrapCancel.current(), &context, &g_deckyBootstrapWatch,
+        [](const json& detail){deckySidebarDiagnostic("bootstrap-watch",detail);});
+    deckySidebarDiagnostic("bootstrap",result);
     g_deckyContextProcess.replace(context);
     return result.value("ok", false) ? std::string{} : result.value("reason", std::string("mirror-bootstrap-failed"));
 }
@@ -23918,11 +23924,13 @@ static std::string deckySidebarStartMirror() {
         [](const std::string& connection, const json& request) {
             const auto status = g_deckyMirrorBroker.status();
             if (status.value("connection", std::string{}) != connection) return;
+            if(request.value("command",std::string{})=="snapshot")deckySidebarDiagnostic("mirror-snapshot-request",{{"connected",true},{"revision",status["revision"]}});
             if (!deckySidebarPost("deckySidebar.mirrorRequest", {{"connection", connection}, {"runId", status["runId"]}, {"revision", status["revision"]}, {"request", request}}) && request.contains("id"))
                 g_deckyMirrorBroker.reply(connection, {{"type", "reply"}, {"runId", status["runId"]}, {"id", request["id"]}, {"ok", false}, {"error", "镜像请求队列已满"}});
         },
         [](const std::string& connection, const std::string& runId, bool connected) {
             const auto status = g_deckyMirrorBroker.status();
+            deckySidebarDiagnostic("mirror-peer",{{"connected",connected},{"revision",status["revision"]}});
             deckySidebarPost("deckySidebar.mirrorPeer", {{"connection", connection}, {"runId", runId}, {"connected", connected}, {"revision", status["revision"]}});
         }})) return "mirror-broker-start-failed";
     const auto error = deckySidebarInjectBinding();
@@ -23934,7 +23942,7 @@ static std::string deckySidebarStartMirror() {
 static json deckySidebarStateJson(const ymcc::deckysidebar::State& state) {
     return {{"enabled", state.enabled}, {"steamKnown", state.steamKnown}, {"steamRunning", state.steamRunning},
         {"pid", state.pid}, {"revision", state.revision}, {"phase", state.phase}, {"reason", state.reason}, {"error", state.error},
-        {"bindingRetry",state.bindingRetry},{"bindingAttempts",state.bindingAttempts}};
+        {"bindingRetry",state.bindingRetry},{"bindingAttempts",state.bindingAttempts},{"launchStage",state.launchStage},{"launchMode",state.launchMode}};
 }
 static std::string deckySidebarPortPreflight() {
     const auto port = [](DWORD value) { return static_cast<unsigned short>(((value & 0xff) << 8) | ((value >> 8) & 0xff)); };
@@ -23955,6 +23963,21 @@ static std::string deckySidebarPortPreflight() {
     }
     return {};
 }
+static std::wstring deckySidebarLogPath() { return yemancc_data_dir()+L"\\decky-sidebar.log"; }
+static void deckySidebarDiagnostic(const char* event,const json& detail,bool force) {
+    try {
+        static std::mutex mutex;static std::map<std::string,std::string> previous;
+        auto line=ymcc::deckydiag::record(event?event:"unknown",detail);
+        line["powerControlDirectory"]=W2U(POWER_CONTROL_DIR);
+        const auto signature=line.dump();
+        std::lock_guard lock(mutex);
+        auto& last=previous[event?event:"unknown"];if(!force&&last==signature)return;
+        const auto path=deckySidebarLogPath();rotateOneLogFile(path,ymcc::deckydiag::maxBytes);
+        line["time"]=nativeLifecycleTimestamp();line["processPid"]=GetCurrentProcessId();
+        std::ofstream output(fspath::path(path),std::ios::binary|std::ios::app);
+        output<<line.dump()<<"\n";output.flush();if(output.good())last=signature;
+    }catch(...){} // A logging failure must not change setup, settings or process policy.
+}
 static json deckySidebarEnvironment(bool prepare) {
     wchar_t steamRoot[32768]{}; DWORD bytes=sizeof(steamRoot);
     if(RegGetValueW(HKEY_CURRENT_USER,L"Software\\Valve\\Steam",L"SteamPath",RRF_RT_REG_SZ,nullptr,steamRoot,&bytes)!=ERROR_SUCCESS)steamRoot[0]=0;
@@ -23965,12 +23988,24 @@ static json deckySidebarEnvironment(bool prepare) {
                        :ymcc::deckysetup::inspect(steamRoot,home,digest);
     if(result.value("createdSteamDebugMarker",false)&&g_steamSettingsObserver.steamPresence()!=0)g_deckySteamRestartRequired.store(true);
     if(g_deckySteamRestartRequired.load()){result["ready"]=false;result["reason"]="steam-restart-required";}
+    wchar_t overridePath[32768]{};
+    const auto length=GetEnvironmentVariableW(L"YEMAN_POWER_CONTROL_DIR",overridePath,static_cast<DWORD>(_countof(overridePath)));
+    result["powerControlDirectory"]=W2U(POWER_CONTROL_DIR);
+    result["directorySource"]="production-default";
+    if(length>0&&length<_countof(overridePath)){
+        result["configuredOverride"]=W2U(overridePath);
+        result["directorySource"]=POWER_CONTROL_DIR==overridePath?"environment-override":"ignored-invalid-override";
+    }
+    try { result["logPath"]=W2U(deckySidebarLogPath()); } catch (...) {} // Diagnostics remain best-effort.
+    deckySidebarDiagnostic(prepare?"prepare":"environment",result,prepare);
     return result;
 }
 static std::string deckySidebarPreflight(const std::wstring&) {
     const auto environment=deckySidebarEnvironment(true);
     if(!environment.value("ready",false))return environment.value("reason",std::string("environment-check-failed"));
-    return deckySidebarPortPreflight();
+    const auto reason=deckySidebarPortPreflight();
+    if(!reason.empty())deckySidebarDiagnostic("port-preflight",{{"reason",reason}});
+    return reason;
 }
 static void deckySidebarInitialize() {
     if (g_aiFanMockSession.isolated) return; // Never activate in the existing mock/device isolation mode.
@@ -23978,8 +24013,10 @@ static void deckySidebarInitialize() {
     g_deckySidebarRuntime.initialize({root + L"\\PluginLoader_noconsole.exe", root,
         [root] { return deckySidebarPreflight(root); },
         [](const ymcc::deckysidebar::State& state) {
-            if (state.phase != "starting" && state.phase != "loader-started") g_deckyMirrorBroker.stop();
-            deckySidebarPost("deckySidebar.updated", deckySidebarStateJson(state));
+            if (state.phase != "starting" && state.phase != "loader-started") { g_deckyBootstrapWatch.stop(); g_deckyMirrorBroker.stop(); }
+            const auto detail=deckySidebarStateJson(state);
+            deckySidebarDiagnostic("runtime",detail);
+            deckySidebarPost("deckySidebar.updated", detail);
         }, [] { g_deckyMirrorBroker.stop(); return deckySidebarStartMirror(); },
         [] { g_deckyBootstrapCancel.renew(); }, [] { g_deckyBootstrapCancel.cancel(); },
         [] { return deckySidebarStartMirror(); }, [] { return g_deckyContextProcess.take(); }});
@@ -38287,6 +38324,51 @@ static bool nativeYmccShortcutSubmit(std::function<void()> job, SerialJobKind ki
         if (wmiGeneration) appendNativeLifecycleLog("oem-shortcut-click", {{"status", "executed"}, {"scope", "action-call"}, {"sourceGeneration", wmiGeneration}, {"sequence", wmiSequence}});
     }, kind);
 }
+// Standalone screen functional keys are actions, not BUS/InputHost/HID fields.
+static bool nativeScreenStandaloneSubmit(ymcc::screenpads::StandaloneAction action,UINT_PTR generation) {
+    using namespace ymcc::screenpads;
+    const auto powerGeneration=g_powerGeneration.load(std::memory_order_acquire);
+    return gamepadSerialSubmit([action,generation,powerGeneration] {
+        using namespace ymcc::screenpads;
+        if(!standaloneCurrent(generation))return;
+        const auto finish=[&](StandaloneStatus status) {
+            standaloneFinish(generation,status);
+            appendNativeLifecycleLog("screen-standalone-special",{{"action",static_cast<int>(action)},
+                {"status",standaloneStatusName(status)},{"virtual",false}});
+        };
+        const auto allowed=[&] {return standaloneCurrent(generation) && !g_exitRequested.load() &&
+            !g_shortcutRecordingActive.load() && g_inputReady.load() &&
+            powerGeneration==g_powerGeneration.load() && sgVirtualWriterAllowedNow();};
+        if(!allowed()) {finish(StandaloneStatus::PowerBlocked);return;}
+        if(action==StandaloneAction::MicrophoneMute) {
+            finish(ymcc::screenactions::toggleDefaultMicrophoneMute(allowed)?StandaloneStatus::Accepted:StandaloneStatus::MicrophoneFailed);
+            return;
+        }
+        if(action!=StandaloneAction::SteamMainMenu && action!=StandaloneAction::SteamQuickAccess) {finish(StandaloneStatus::QueueUnavailable);return;}
+        const bool quick=action==StandaloneAction::SteamQuickAccess;
+        DWORD account=0;sofRegDWORD(HKEY_CURRENT_USER,L"Software\\Valve\\Steam\\ActiveProcess",L"ActiveUser",&account);
+        auto result=steamLiveRequest(account,{{"operation","menu.toggle"},{"menu",quick?"quick-access":"main"}},allowed);
+        if(result.value("ok",false)) {finish(StandaloneStatus::Accepted);return;}
+        // Never retry an uncertain toggle (it may already have closed/opened).
+        if(result.value("mutated",false)) {finish(StandaloneStatus::SteamUncertain);return;}
+        const auto reason=result.value("reason",std::string());
+        if(reason!="live-debug-unavailable" && reason!="live-context-unavailable" && reason!="live-api-unavailable") {finish(StandaloneStatus::SteamUnavailable);return;}
+        if(!standaloneCurrent(generation))return;
+        if(powerGeneration!=g_powerGeneration.load() || !g_inputReady.load() || !sgVirtualWriterAllowedNow()) {finish(StandaloneStatus::PowerBlocked);return;}
+        // Without CDP, use Steam's Ctrl+1/Ctrl+2 only while Steam owns focus.
+        // Never send these shortcuts into a game or another foreground app.
+        const HWND foreground=GetForegroundWindow();
+        DWORD pid=0;GetWindowThreadProcessId(foreground,&pid);
+        const auto root=ymcc::steamlive::normalizedPath(sofRegSZ(HKEY_CURRENT_USER,L"Software\\Valve\\Steam",L"SteamPath"));
+        const auto image=ymcc::steamlive::processImage(pid);
+        const bool steamForeground=!root.empty() && (image==root+L"\\steam.exe" ||
+            (image.rfind(root+L"\\",0)==0 && std::filesystem::path(image).filename()==L"steamwebhelper.exe"));
+        if(!steamForeground) {finish(StandaloneStatus::SteamUnavailable);return;}
+        if(!allowed()) {finish(StandaloneStatus::PowerBlocked);return;}
+        if(ymcc::screenactions::modifiersHeld()) {finish(StandaloneStatus::ModifiersHeld);return;}
+        finish(ymcc::screenactions::sendMenuChord(quick,kInjectedTag,foreground)?StandaloneStatus::Accepted:StandaloneStatus::KeyboardFailed);
+    });
+}
 // Shared only by shortcut summon routes, not tray/startup/recovery focus calls.
 // A visible maximized/full-height window toggles off even when not foreground.
 static bool nativeYmccShortcutSummon(const FocusTargetSnapshot& target, bool maximizeWindow = false) {
@@ -46361,12 +46443,17 @@ static void reg_fs() {
     });
     // Frontend must discover the same effective root before any shared-settings I/O.
     ipc_on("deckySidebar.mirrorAttach", [](const json&) -> json {
-        auto peer=g_deckyMirrorBroker.status(); peer["owner"]="YMCC-native"; peer["pid"]=GetCurrentProcessId(); return peer; // Metadata only. Does not enable or start anything.
+        auto peer=g_deckyMirrorBroker.status(); deckySidebarDiagnostic("mirror-host-attach",peer); peer["owner"]="YMCC-native"; peer["pid"]=GetCurrentProcessId(); return peer; // Metadata only. Does not enable or start anything.
     });
     ipc_on("deckySidebar.mirrorReply", [](const json& args) -> json {
         if (args.size() != 2 || !args.contains("connection") || !args["connection"].is_string() ||
             !args.contains("message") || !args["message"].is_object()) return false;
-        return g_deckyMirrorBroker.reply(args["connection"].get<std::string>(), args["message"]);
+        const bool queued=g_deckyMirrorBroker.reply(args["connection"].get<std::string>(), args["message"]);
+        const auto& message=args["message"];
+        try{if(queued&&message.value("type",std::string{})=="snapshot"&&message.contains("snapshot")&&message["snapshot"].is_object())
+            deckySidebarDiagnostic("mirror-snapshot-queued",message["snapshot"]); // Allowlisted readiness/revision only, never business content.
+        }catch(...){} // Diagnostics cannot change an already queued reply's success.
+        return queued;
     });
     ipc_on("deckySidebar.environment", [](const json& args) -> json {
         if(!args.empty())throw std::runtime_error("Invalid environment query");
@@ -46380,13 +46467,17 @@ static void reg_fs() {
         if (!args.contains("enabled") || !args["enabled"].is_boolean() || args.size() != 1)
             throw std::runtime_error("Invalid sidebar preference");
         const bool desired = args["enabled"].get<bool>();
+        deckySidebarDiagnostic("set-enabled",{{"enabled",desired}},true);
         if(desired) { const auto prepared=deckySidebarEnvironment(true);
             if(!prepared.value("ready",false)&&prepared.value("reason",std::string{})!="steam-restart-required")
                 throw std::runtime_error(prepared.value("reason",std::string("environment-check-failed")));
         }
         auto extensions = ymSettingsSection("extensions");
         extensions["deckySidebar"] = {{"enabled", desired}};
-        if (!ymSettingsWriteSection("extensions", extensions)) throw std::runtime_error("Sidebar preference save failed");
+        if (!ymSettingsWriteSection("extensions", extensions)) {
+            deckySidebarDiagnostic("settings-save",{{"reason","settings-save-failed"},{"enabled",desired}},true);
+            throw std::runtime_error("Sidebar preference save failed");
+        }
         g_deckySidebarRuntime.observeSteam(g_steamSettingsObserver.steamPresence());
         g_deckySidebarRuntime.setEnabled(desired);
         return deckySidebarStateJson(g_deckySidebarRuntime.snapshot());
@@ -46597,6 +46688,7 @@ static void reg_fs() {
         addRotated(appDir + L"\\native-detail.log");
         addRotated(appDir + L"\\input-capture.jsonl");
         // 域/协调/输入宿主（yemancc_data_dir）
+        addRotated(dataDir + L"\\decky-sidebar.log");
         addRotated(dataDir + L"\\fan-api.log");
         addRotated(dataDir + L"\\fan-lifecycle.log");
         addRotated(dataDir + L"\\gyro-motion.log");
@@ -60675,6 +60767,10 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         return 0;
     }
     switch (m) {
+    case ymcc::screenpads::kStandaloneResultMessage:
+        if(ymcc::screenpads::standaloneCurrent(static_cast<UINT_PTR>(w)))
+            ipc_emit("screenTouchpads.updated",ymcc::screenpads::state());
+        return 0;
     case ymcc::screenpads::kSummonMessage:
         ymcc::screenpads::release();
         // Match LB+RB's default restore/reflow path. Forcing SW_MAXIMIZE here
@@ -68039,6 +68135,7 @@ int WINAPI wWinMain(HINSTANCE hi, HINSTANCE, LPWSTR, int ns) {
         ymcc::screenpads::setContext(persona,requested);
         const ymcc::screenpads::ProfileBank bank(ymSettingsSection("screenTouchpads"));
         const int profile=ymcc::screenpads::activeProfile.load();
+        ymcc::screenpads::standaloneSubmit=nativeScreenStandaloneSubmit;
         ymcc::screenpads::initialize(hi,g_hwnd,bank.slots[profile],profile);
     }
     deckySidebarInitialize();

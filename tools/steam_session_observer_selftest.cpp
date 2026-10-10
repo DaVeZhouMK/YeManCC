@@ -55,7 +55,12 @@ int wmain(int argc, wchar_t** argv) {
     if (argc == 3 && std::wstring(argv[1]) == L"--child") {
         HANDLE h = OpenEventW(SYNCHRONIZE, FALSE, argv[2]);
         if (!h) return 2;
-        WaitForSingleObject(h, 30000); CloseHandle(h); return 0; // Crash backstop; no polling.
+        // Real top-level creation/show event, kept off-screen; never touch the real Steam install.
+        const HWND window = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, L"STATIC", L"YMCC observer fixture",
+            WS_POPUP, -32000, -32000, 1, 1, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+        if (!window) { CloseHandle(h); return 3; }
+        ShowWindow(window, SW_SHOWNOACTIVATE);
+        WaitForSingleObject(h, 30000); DestroyWindow(window); CloseHandle(h); return 0; // Crash backstop; no polling.
     }
     try {
         RetryWindow budget;
@@ -106,16 +111,27 @@ int wmain(int argc, wchar_t** argv) {
         expect(until([&]{return changes.load()>deletedCount;}), "recreated key heals through ancestor subscription");
         Sleep(150);const auto stableCount=changes.load();Sleep(150);
         expect(changes==stableCount, "deleted/recreated key does not cause a notification spin");
+        const auto unchangedPid=regNumber(registry.path,L"pid");
+        expect(unchangedPid==0, "restart regression keeps the ActiveProcess PID at zero");
+        {
+            Child restarted(childPath); // No registry write or manual beginWindow.
+            expect(until([&]{return changes.load()==stableCount+1;}), "native Steam window creation wakes session discovery without a registry PID change");
+            expect(observer.steamPresence()==1, "event-only restart adopts the verified Steam process");
+            expect(regNumber(registry.path,L"pid")==unchangedPid, "observer never repairs or writes Steam registry state");
+            restarted.finish();
+            expect(until([&]{return changes.load()==stableCount+2;}), "event-adopted Steam process exit is observed via its owned read handle");
+        }
+        const auto postRestartCount=changes.load();
         observer.stop();
         expect(observer.steamPresence()==-1, "stopped observer cannot publish stale Steam absence/presence");
         registry.number(L"ActiveUser",99);Sleep(100);
-        expect(changes==stableCount, "stop closes waits and prevents further callbacks");observer.stop();
+        expect(changes==postRestartCount, "stop closes waits and prevents further callbacks");observer.stop();
         expect(observer.start([&](bool changed){if(changed)++changes;else ++retryCalls;},[]{return true;}), "observer can restart after cleanup");
-        expect(until([&]{return changes.load()==stableCount+1;}), "restart delivers one fresh session");
+        expect(until([&]{return changes.load()==postRestartCount+1;}), "restart delivers one fresh session");
         expect(until([&]{return retryCalls.load()==4;}, 23000), "real pending observer performs only four bounded retries");
         const auto exhaustedCpu = cpuTime();Sleep(1100);const auto afterBudgetCpu=cpuTime()-exhaustedCpu;
         std::cout << "EXHAUSTED_PENDING_IDLE_CPU_MS " << afterBudgetCpu/10000.0 << " over 1100ms\n";
-        expect(retryCalls==4&&changes==stableCount+1&&afterBudgetCpu<1000000, "exhausted pending request waits for events with no further callbacks or CPU work");observer.stop();
+        expect(retryCalls==4&&changes==postRestartCount+1&&afterBudgetCpu<1000000, "exhausted pending request waits for events with no further callbacks or CPU work");observer.stop();
         std::cout << "STEAM_SESSION_OBSERVER_OK tests=" << tests << " actualSteamOperations=0\n";return 0;
     } catch(const std::exception& e){std::cerr<<"FAILED "<<e.what()<<'\n';return 1;}
 }

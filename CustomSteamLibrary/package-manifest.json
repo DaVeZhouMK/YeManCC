@@ -2,7 +2,7 @@
     "schemaVersion":  2,
     "packageId":  "custom-steam-library",
     "packageType":  "green-child",
-    "packageVersion":  "0.0.34",
+    "packageVersion":  "0.0.35",
     "productName":  "Steam自定义游戏库",
     "productNameEnglish":  "Custom Steam Library",
     "entryPoint":  "CustomSteamLibrary.exe",
@@ -73,10 +73,10 @@
     "legacyPaths":  [
                         "D:\\YeMan\\Steam大屏"
                     ],
-    "generatedAt":  "2026-10-09T22:36:52.5707075+08:00",
+    "generatedAt":  "2026-10-10T14:34:48.1490426+08:00",
     "sourceBuild":  {
-                        "host":  "ccada6a19eaed5e94c00f49d8c6bdee489e084d1e9b66eec2ee149b81f07b976",
-                        "worker":  "b173c492b542ea9ce6840b233cb24e52e37a18a4f64cf816923dc749cb8b2e48",
+                        "host":  "26181db4cdb7dd0d2d3ebdba96158d9e34193f1734514d6c508942104a275512",
+                        "worker":  "d339a0b6fa1322e706bca7ada3451d1d230e54a9883cbbbc7d1d7583b1a7ac98",
                         "hostSources":  [
                                             {
                                                 "path":  "CustomSteamLibrary/assets/custom-steam-library.ico",
@@ -124,11 +124,11 @@
                                             },
                                             {
                                                 "path":  "native/custom-steam-library/workspace_host.rc",
-                                                "sha256":  "6354a62da4dbeb07bd21dee5c3e39bee1fd062a99fd2cdc76cab01f6d4bf2084"
+                                                "sha256":  "176a7500df6f3d392b69401148cd413f540624c726d6fee748cb0576f4399fca"
                                             },
                                             {
                                                 "path":  "tools/build-custom-steam-library-host.ps1",
-                                                "sha256":  "6c85a8602283750f276e92743e20bf0715c3cd9d714a860c42ae4db93aa48ed4"
+                                                "sha256":  "cf09ee26a03eaf68514094defb71b6fbc18c1656bfbf8b83c8bbb35dba60a887"
                                             },
                                             {
                                                 "path":  "tools/custom_steam_library_build_guard.ps1",
@@ -170,11 +170,11 @@
                                               },
                                               {
                                                   "path":  "native/custom-steam-library/steam_artwork_lab.rc",
-                                                  "sha256":  "1b7bbaf2a8bf1350b15d8c7f098e3da2ebc4903815ef673eb000ab1b48a3440c"
+                                                  "sha256":  "57216faf2a17d8b6bf83cc0bc305212694544233c5057bcd1f6b33c5f073f3fa"
                                               },
                                               {
                                                   "path":  "tools/build-custom-steam-library-worker.ps1",
-                                                  "sha256":  "abacfdf3af0f6b5032f24081daa893e8526c95eacd4700ca9c7ba0d87d7e2152"
+                                                  "sha256":  "52ae6fa141a5216d630eff86fe8e6811dc7c1ae71372f6f644192a5e8164ac92"
                                               },
                                               {
                                                   "path":  "tools/custom_steam_library_build_guard.ps1",
@@ -198,12 +198,12 @@
                       {
                           "path":  "CustomSteamLibrary.exe",
                           "bytes":  1476608,
-                          "sha256":  "ccada6a19eaed5e94c00f49d8c6bdee489e084d1e9b66eec2ee149b81f07b976"
+                          "sha256":  "26181db4cdb7dd0d2d3ebdba96158d9e34193f1734514d6c508942104a275512"
                       },
                       {
                           "path":  "SteamArtworkLab.exe",
                           "bytes":  2857472,
-                          "sha256":  "b173c492b542ea9ce6840b233cb24e52e37a18a4f64cf816923dc749cb8b2e48"
+                          "sha256":  "d339a0b6fa1322e706bca7ada3451d1d230e54a9883cbbbc7d1d7583b1a7ac98"
                       },
                       {
                           "path":  "run-workspace.bat",
@@ -222,8 +222,8 @@
                       },
                       {
                           "path":  "workspace-ui/app.js",
-                          "bytes":  189057,
-                          "sha256":  "a15cb232b194f28d928842433ac00607a42dd4e58ca822eb819f07d6ee381ade"
+                          "bytes":  186014,
+                          "sha256":  "5797328e0a18a4670f36662aa444113184f0fbaf9189f67136c3e63ea91da459"
                       },
                       {
                           "path":  "workspace-ui/styles.css",
