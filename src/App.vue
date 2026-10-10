@@ -1908,6 +1908,12 @@ onUnmounted(() => {
   /* width / height / zoom 由 inline style 注入；保持原视觉根职责 */
   display: flex;
   flex-direction: column;
+  /* 兜底（纯 CSS，不依赖 JS 读数）：窗口从隐藏被呼出时，JS 的 viewportHeight 可能
+     读到过期值，使 inline height 偏小，stage 物理高度小于视口，底部露出一块未铺满的
+     暗色区域。这里用 100vh 换算回 zoom 坐标系（zoom == --ui-scale），保证 stage 物理
+     高度恒 >= 视口高度（zoom * 100vh/zoom == 100vh）。JS 读数正确时该值与 inline
+     height 取大者，不改变既有布局。 */
+  min-height: calc(100vh / max(0.01, var(--ui-scale, 1)));
   /* 根节点透明；可辨识度由导航、卡片和控件底板分块提供。 */
   background: transparent;
   position: relative;
