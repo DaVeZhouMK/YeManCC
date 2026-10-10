@@ -87,6 +87,11 @@ await check('settings handler rejects invalid choices and rapid writes retain th
  const handler=evaluate(block(read('src/views/SettingsView.vue'),'async function onWindowPlacementChange(')+'\nexport {onWindowPlacementChange};',{getUiSetting:f.ui.getUiSetting,setUiSettings:f.ui.setUiSettings,errMsg,windowPlacement});
  await handler.onWindowPlacementChange('center');assert.equal(f.placements.length,0);await Promise.all([handler.onWindowPlacementChange('left'),handler.onWindowPlacementChange('right')]);await f.settle();assert.equal(windowPlacement.value,'right');assert.equal(f.disk.windowPlacement,'right');assert.deepEqual(f.placements,['left','right']);f.dispose();
 });
+await check('display changes invalidate the monitor-scoped summon latch before scheduling reflow',()=>{
+ const start=native.indexOf('    case WM_DISPLAYCHANGE:');assert(start>=0);
+ const displayChange=native.slice(start,native.indexOf('    case WM_MOVE:',start));
+ assert.match(displayChange,/focusInvalidateFullHeightLatch\(\);[\s\S]*focusScheduleDisplayReflow\(\);/);
+});
 await check('native lifecycle reflows all share the saved-side default policy',()=>{
  assert.match(native,/static bool applyFullHeightLayout\(HMONITOR preferredMonitor = nullptr, bool dockLeft = windowPlacementIsLeft\(\)\)/);
  for(const anchor of ['static void focusReflowMainWindow()', 'case WM_DPICHANGED:']){
@@ -155,6 +160,8 @@ if(process.argv.includes('--native')){
  assert.equal(process.platform,'win32','Native regression requires Windows/MSVC');
  const vcvars='C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Auxiliary/Build/vcvars64.bat';assert(fs.existsSync(vcvars),'MSVC x64 tools missing');
  const helper=block(native,'static bool windowPlacementIsLeft() {');
+ const focusSession=block(native,'struct FocusSessionState {')+';';
+ const invalidateLatch=block(native,'static void focusInvalidateFullHeightLatch() {');
  const layout=block(native,'static bool applyFullHeightLayout(');
  const covers=block(native,'static bool focusWindowCoversMonitor(HWND hwnd, RECT monitorRect) {');
  const looksFullscreen=block(native,'static bool focusWindowLooksFullscreen(HWND hwnd, RECT monitorRect) {');
@@ -186,7 +193,8 @@ using QUERY_USER_NOTIFICATION_STATE=int;constexpr int QUNS_NOT_PRESENT=1,QUNS_BU
 bool SUCCEEDED(long value){return value>=0;}
 long SHQueryUserNotificationState(QUERY_USER_NOTIFICATION_STATE* state){*state=qunsState;return 0;}
 struct FocusTargetSnapshot{HWND hwnd=nullptr;bool valid=false,fullscreen=false;};
-struct FocusSessionState{FocusTargetSnapshot target;};
+using ULONGLONG=unsigned long long;
+${focusSession}
 FocusSessionState g_focusSession;
 HWND g_foregroundWindow=nullptr;RECT gameRect{0,0,1920,1080};bool frameOk=true,gameRectOk=true;
 using LONG_PTR=long long;constexpr int GWL_STYLE=-16,DWMWA_EXTENDED_FRAME_BOUNDS=9;
@@ -205,6 +213,7 @@ BOOL SetWindowPos(HWND,void*,int x,int y,int w,int h,int flags){++moves;lastFlag
 std::function<json(const json&)> place;
 template<class F> void ipc_on(const char*,F fn){place=fn;}
 ${helper}
+${invalidateLatch}
 ${covers}
 ${looksFullscreen}
 ${layout}
@@ -230,6 +239,46 @@ int main(){try{registerPlace();int tests=0;
  run("fullscreen snapshot is scoped to its resolved monitor",[&]{work={0,0,1920,1040};g_focusSession.target={reinterpret_cast<HWND>(3),true,true};targetMonitor=reinterpret_cast<HMONITOR>(2);expect(applyFullHeightLayout(currentMonitor),"other snapshot monitor");expect(windowRect.bottom==1040,"other monitor snapshot");g_focusSession={};targetMonitor=currentMonitor;work=monitor;});
  run("maximized desktop app on a high-resolution monitor is not fullscreen",[&]{monitor={0,0,3840,2560};work={0,0,3840,2512};gameRect=work;gameStyle=WS_CAPTION;g_foregroundWindow=reinterpret_cast<HWND>(4);expect(!focusWindowCoversMonitor(g_foregroundWindow,monitor),"98 percent is not full coverage");expect(!focusWindowLooksFullscreen(g_foregroundWindow,monitor),"maximized classification");expect(applyFullHeightLayout(),"maximized foreground");expect(windowRect.bottom==2512,"visible taskbar remains excluded");qunsState=QUNS_RUNNING_D3D_FULL_SCREEN;expect(!focusWindowLooksFullscreen(g_foregroundWindow,monitor),"global D3D cannot override incomplete edges");qunsState=QUNS_NOT_PRESENT;g_foregroundWindow=nullptr;gameStyle=WS_POPUP;monitor={0,0,1920,1080};work=monitor;gameRect=monitor;});
  run("borderless fullscreen fills the monitor without notification hints",[&]{work={0,0,1920,1040};gameRect=monitor;g_foregroundWindow=reinterpret_cast<HWND>(4);expect(focusWindowLooksFullscreen(g_foregroundWindow,monitor),"borderless fullscreen");expect(applyFullHeightLayout(),"borderless layout");expect(windowRect.bottom==1080,"borderless bottom");g_foregroundWindow=nullptr;work=monitor;});
+ run("summon session holds full height across the second reflow",[&]{settings["windowPlacement"]="left";trayVisible=true;appbarState=0;qunsState=QUNS_NOT_PRESENT;work={0,0,1920,1040};monitor={0,0,1920,1080};gameRect=monitor;g_focusSession={};g_focusSession.active=true;g_foregroundWindow=reinterpret_cast<HWND>(4);expect(applyFullHeightLayout(),"summon first reflow");expect(windowRect.bottom==1080,"first reflow uses monitor bottom");g_foregroundWindow=nullptr;gameRect={0,0,1920,1080};expect(applyFullHeightLayout(),"summon second reflow after focus handoff");expect(windowRect.bottom==1080,"second reflow stays full height");g_focusSession={};expect(applyFullHeightLayout(),"session ended reflow");expect(windowRect.bottom==1040,"session end restores work area");work={0,0,1920,1080};gameRect=monitor;});
+
+ run("full-height latch never crosses monitors or revives after switching back",[&]{
+  g_focusSession={};g_focusSession.active=true;trayVisible=true;appbarState=0;g_foregroundWindow=reinterpret_cast<HWND>(4);
+  monitor={0,0,1920,1080};work={0,0,1920,1040};gameRect=monitor;const HMONITOR first=currentMonitor;
+  expect(applyFullHeightLayout(first),"first monitor layout");expect(windowRect.bottom==1080,"first monitor full height");
+  g_foregroundWindow=g_hwnd;const HMONITOR second=reinterpret_cast<HMONITOR>(2);monitor={1920,0,3840,1080};work={1920,0,3840,1040};
+  expect(applyFullHeightLayout(second),"second monitor layout");expect(windowRect.bottom==1040,"second monitor respects visible taskbar");
+  monitor={0,0,1920,1080};work={0,0,1920,1040};expect(applyFullHeightLayout(first),"return to first monitor");expect(windowRect.bottom==1040,"first monitor stale latch not revived");
+  g_focusSession={};g_foregroundWindow=nullptr;work=monitor;gameRect=monitor;
+ });
+ run("new monitor can establish its own full-height latch",[&]{
+  g_focusSession={};g_focusSession.active=true;trayVisible=true;appbarState=0;g_foregroundWindow=reinterpret_cast<HWND>(4);
+  monitor={0,0,1920,1080};work={0,0,1920,1040};gameRect=monitor;expect(applyFullHeightLayout(currentMonitor),"first monitor fullscreen");
+  const HMONITOR second=reinterpret_cast<HMONITOR>(2);monitor={1920,0,3840,1080};work={1920,0,3840,1040};gameRect=monitor;
+  expect(applyFullHeightLayout(second),"second monitor fullscreen");expect(windowRect.bottom==1080,"second fullscreen fills monitor");
+  g_foregroundWindow=g_hwnd;expect(applyFullHeightLayout(second),"second monitor focus handoff");expect(windowRect.bottom==1080,"second monitor keeps its own latch");
+  g_focusSession={};g_foregroundWindow=nullptr;monitor={0,0,1920,1080};work=monitor;gameRect=monitor;
+ });
+ run("monitor origin and resolution changes invalidate a reused monitor handle",[&]{
+  for(const RECT changed:{RECT{1920,0,3840,1080},RECT{0,-200,1920,880},RECT{0,0,2560,1080},RECT{0,0,1920,1440}}){
+   g_focusSession={};g_focusSession.active=true;trayVisible=true;appbarState=0;monitor={0,0,1920,1080};work={0,0,1920,1040};gameRect=monitor;g_foregroundWindow=reinterpret_cast<HWND>(4);
+   expect(applyFullHeightLayout(currentMonitor),"latch before geometry change");g_foregroundWindow=g_hwnd;monitor=changed;work=changed;work.bottom-=40;
+   expect(applyFullHeightLayout(currentMonitor),"changed geometry reflow");expect(windowRect.bottom==work.bottom,"changed geometry respects work area");expect(!g_focusSession.fullHeightLatched,"geometry change drops latch");
+  }
+  g_focusSession={};g_foregroundWindow=nullptr;monitor={0,0,1920,1080};work=monitor;gameRect=monitor;
+ });
+ run("display topology invalidation clears the latch even if handle and bounds repeat",[&]{
+  g_focusSession={};g_focusSession.active=true;trayVisible=true;appbarState=0;monitor={0,0,1920,1080};work={0,0,1920,1040};gameRect=monitor;g_foregroundWindow=reinterpret_cast<HWND>(4);
+  expect(applyFullHeightLayout(currentMonitor),"latch before display change");focusInvalidateFullHeightLatch();
+  expect(!g_focusSession.fullHeightLatched&&!g_focusSession.fullHeightMonitor,"topology invalidation clears latch identity");g_foregroundWindow=g_hwnd;
+  expect(applyFullHeightLayout(currentMonitor),"display replacement reflow");expect(windowRect.bottom==1040,"display replacement respects visible taskbar");
+  g_focusSession={};g_foregroundWindow=nullptr;work=monitor;gameRect=monitor;
+ });
+ run("failed monitor lookup discards the previous full-height latch",[&]{
+  g_focusSession={};g_focusSession.active=true;trayVisible=true;appbarState=0;monitor={0,0,1920,1080};work={0,0,1920,1040};gameRect=monitor;g_foregroundWindow=reinterpret_cast<HWND>(4);
+  expect(applyFullHeightLayout(currentMonitor),"latch before monitor lookup failure");monitorOk=false;expect(!applyFullHeightLayout(currentMonitor),"invalid monitor rejected");monitorOk=true;g_foregroundWindow=g_hwnd;
+  expect(applyFullHeightLayout(currentMonitor),"recovered monitor layout");expect(windowRect.bottom==1040,"monitor recovery does not reuse stale latch");
+  g_focusSession={};g_foregroundWindow=nullptr;work=monitor;gameRect=monitor;
+ });
  run("fullscreen on a negative-origin monitor uses that monitor edges",[&]{monitor={-1920,-200,0,880};work={-1920,-200,0,840};gameRect=monitor;g_foregroundWindow=reinterpret_cast<HWND>(4);expect(applyFullHeightLayout(),"negative-origin fullscreen");expect(windowRect.top==-200&&windowRect.bottom==880,"negative-origin monitor bounds");g_foregroundWindow=nullptr;monitor={0,0,1920,1080};work=monitor;gameRect=monitor;});
  run("fullscreen frame rounding and spanning-monitor windows are accepted",[&]{HWND game=reinterpret_cast<HWND>(4);gameRect={2,2,1918,1078};expect(focusWindowCoversMonitor(game,monitor),"frame rounding");gameRect={-1920,0,1920,1080};expect(focusWindowCoversMonitor(game,monitor),"spanning monitor");gameRect={0,0,1920,1040};expect(!focusWindowCoversMonitor(game,monitor),"missing taskbar edge");expect(!focusWindowCoversMonitor(game,RECT{}),"empty monitor");gameRect=monitor;});
  run("fullscreen geometry failure falls back safely",[&]{HWND game=reinterpret_cast<HWND>(4);gameRect=monitor;frameOk=false;expect(focusWindowCoversMonitor(game,monitor),"window rect fallback");gameRectOk=false;expect(!focusWindowCoversMonitor(game,monitor),"both geometry calls failed");frameOk=true;gameRectOk=true;});

@@ -533,10 +533,21 @@ struct FocusSessionState {
     bool active = false;
     bool returning = false;
     bool ownedTopmost = false;
+    // 本次呼出会话内是否已判定过「按整块显示器取全高」。呼出时布局会被执行两次
+    // （native 先算一次，前端 ipc:window.summoned 后 window.place 再算一次），
+    // 第二次时前台已变成本窗口、游戏的瞬时全屏信号消失；锁存后两次结果一致。
+    bool fullHeightLatched = false;
+    HMONITOR fullHeightMonitor = nullptr;
+    RECT fullHeightMonitorRect{};
     ULONGLONG returnStarted = 0;
     ULONGLONG returnDeadline = 0;
 };
 static FocusSessionState g_focusSession;
+static void focusInvalidateFullHeightLatch() {
+    g_focusSession.fullHeightLatched = false;
+    g_focusSession.fullHeightMonitor = nullptr;
+    g_focusSession.fullHeightMonitorRect = {};
+}
 static FocusTargetSnapshot g_pendingSummonTarget; // LB/RB 首个肩键按下时抓取，防覆盖层在0.5s内抢前台
 static FocusTargetSnapshot g_rememberedGameTarget; // 一键启动LS前由前端登记的真实游戏
 static ULONGLONG g_rememberedGameDeadline = 0;
@@ -589,7 +600,10 @@ static bool applyFullHeightLayout(HMONITOR preferredMonitor = nullptr, bool dock
     if (!g_hwnd) return false;
     HMONITOR mon = preferredMonitor ? preferredMonitor : MonitorFromWindow(g_hwnd, MONITOR_DEFAULTTONEAREST);
     MONITORINFO mi{sizeof(mi)};
-    if (!GetMonitorInfoW(mon, &mi)) return false;
+    if (!GetMonitorInfoW(mon, &mi)) {
+        focusInvalidateFullHeightLatch();
+        return false;
+    }
     int waX = mi.rcWork.left;
     int waW = mi.rcWork.right - mi.rcWork.left;
     // 任务栏隐藏/自动隐藏时，工作区往往仍保留任务栏条带，窗口底部会留缝。
@@ -614,6 +628,25 @@ static bool applyFullHeightLayout(HMONITOR preferredMonitor = nullptr, bool dock
         HWND foreground = GetForegroundWindow();
         if (foreground && foreground != g_hwnd &&
             focusWindowCoversMonitor(foreground, mi.rcMonitor)) {
+            taskbarHidden = true;
+        }
+    }
+    // 呼出会话内锁存：第一次布局时游戏仍是前台（或快照标了全屏）→ 按整块显示器算；
+    // 第二次布局（前端 ipc:window.summoned → window.place）时前台已变成本窗口，上述
+    // 瞬时信号消失，纯几何前台判定也不再命中，于是会退回 rcWork 让窗口先铺满再弹回。
+    // 仅复用同一显示器、同一几何范围内的判定；跨屏/显示拓扑变化不能把旧屏的
+    // 全高信号带到任务栏仍可见的新屏。会话结束时 focusClearSession 仍会整体复位。
+    if (g_focusSession.active) {
+        const RECT& latchedRect = g_focusSession.fullHeightMonitorRect;
+        const bool sameMonitor = g_focusSession.fullHeightMonitor == mon &&
+            latchedRect.left == mi.rcMonitor.left && latchedRect.top == mi.rcMonitor.top &&
+            latchedRect.right == mi.rcMonitor.right && latchedRect.bottom == mi.rcMonitor.bottom;
+        if (g_focusSession.fullHeightLatched && !sameMonitor) focusInvalidateFullHeightLatch();
+        if (taskbarHidden) {
+            g_focusSession.fullHeightLatched = true;
+            g_focusSession.fullHeightMonitor = mon;
+            g_focusSession.fullHeightMonitorRect = mi.rcMonitor;
+        } else if (g_focusSession.fullHeightLatched) {
             taskbarHidden = true;
         }
     }
@@ -38382,6 +38415,10 @@ static bool nativeYmccShortcutSummon(const FocusTargetSnapshot& target, bool max
         appendNativeLifecycleLog("gamepad-summon-hidden", {{"generation", generation}});
         return true;
     }
+    // bringToFront() 通过全局 g_pendingSummonTarget 建立呼出会话。手柄 LB+RB 路径
+    // 已预先写入；掌机专用键/触控板/重复启动等路径只把本次捕获的目标当作形参传入，
+    // 必须写回，否则会话里没有全屏快照，第二次布局会退回工作区高度导致闪回。
+    g_pendingSummonTarget = target;
     // Show/notify first. Expensive game registration remains on its existing worker.
     bringToFront(g_hwnd, maximizeWindow);
     ipc_emit("gamepad.summon", nativeSummonCandidateSnapshot(target, generation));
@@ -60879,6 +60916,9 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         return 0;
 
     case WM_DISPLAYCHANGE:
+        // HMONITOR handles can be reused after a topology rebuild, even when
+        // the replacement display has identical bounds. Never reuse its latch.
+        focusInvalidateFullHeightLatch();
         ymcc::screenpads::refresh();
         // Exclusive fullscreen / Steam Big Picture can rebuild the display
         // compositor without a normal tray restore. Reflow the window and
