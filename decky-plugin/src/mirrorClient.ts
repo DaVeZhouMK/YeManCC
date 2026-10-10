@@ -16,7 +16,7 @@ export interface MirrorSnapshot {
   revision: number;
   ready: boolean;
   game: null | { label: string; identity: string; fields: Record<string, MirrorField> };
-  fan: { supported: boolean; enabled: boolean; preset: string; choices: Choice[]; canToggle?:boolean };
+  fan: { supported: boolean; enabled: boolean; preset: string; choices: Choice[]; canToggle?:boolean; pending?:boolean; notice?:string };
   notice?: string;
   actions?: { fan:boolean; game:boolean; frames?:boolean; touchpads?:boolean; global?:boolean };
   steam?:SteamRunningObservation;
@@ -50,6 +50,7 @@ function validSnapshot(value: any, runId: string): value is MirrorSnapshot {
   if(value.touchpads!==undefined && (!value.touchpads || typeof value.touchpads.persona!=='string' || !value.touchpads.fields || typeof value.touchpads.fields!=='object' || Array.isArray(value.touchpads.fields) || Object.keys(value.touchpads.fields).length>8 || !Object.values(value.touchpads.fields).every((f:any)=>f && typeof f.value==='string' && typeof f.supported==='boolean' && validChoices(f.choices))))return false;
   if (value.actions !== undefined && (!value.actions || typeof value.actions.fan !== 'boolean' || typeof value.actions.game !== 'boolean' || value.actions.frames!==undefined&&typeof value.actions.frames!=='boolean' || value.actions.touchpads!==undefined&&typeof value.actions.touchpads!=='boolean' || value.actions.global!==undefined&&typeof value.actions.global!=='boolean')) return false;
   if (value.fan.canToggle !== undefined && typeof value.fan.canToggle !== 'boolean') return false;
+  if(value.fan.pending!==undefined&&typeof value.fan.pending!=='boolean'||value.fan.notice!==undefined&&typeof value.fan.notice!=='string')return false;
   return value.notice === undefined || typeof value.notice === 'string';
 }
 export class MirrorClient {

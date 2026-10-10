@@ -4,10 +4,10 @@ import { createFanMirrorActions } from '../src/bridge/deckyFanActions';
 import { NoIoHost } from './fixtures/fan_no_io_host';
 import type { FanPreset } from '../src/bridge/fanFeature';
 import type { PowerLifecycleState } from '../src/bridge/api';
-export function createOriginalFanFixture() {
+export function createOriginalFanFixture(options:{startWait?:Promise<void>}={}) {
   const host=new NoIoHost();
   const power:PowerLifecycleState={generation:1,phase:'ready',hardwareWritesAllowed:true,inputReady:true,resumeReady:false,hibernateAvailable:true};
-  const launcher:FanHostLauncher={start:async()=>({pid:943,executable:'no-io-fixture.exe'}),stop:async()=>{}};
+  const launcher:FanHostLauncher={start:async()=>{await options.startWait;return {pid:943,executable:'no-io-fixture.exe'};},stop:async()=>{}};
   const life=new FanHostLifecycle({enabled:true,launcher,adapter:host,heartbeatIntervalMs:5000,readNativePowerState:async()=>power,resumeWaitDeadlineMs:800});
   let active=false,preset:FanPreset='balanced',saveCount=0,handshakeSupported=false;
   const curves={soft:[{tempC:0,dutyPercent:0},{tempC:40,dutyPercent:15},{tempC:70,dutyPercent:30},{tempC:100,dutyPercent:70}],

@@ -1,5 +1,7 @@
 // Ephemeral display coordination only. No settings, hardware owner, timers or IPC.
 export interface FanMirrorDisplay { preset: 'soft' | 'balanced' | 'aggressive'; active: boolean; pending: boolean; notice: string; }
+let latest:FanMirrorDisplay|null=null;
+export function getFanMirrorDisplay():FanMirrorDisplay|null {return latest?{...latest}:null;}
 const listeners = new Set<(value: FanMirrorDisplay) => void>();
 const blockers = new Set<() => boolean>();
 const gateListeners = new Set<() => void>();
@@ -9,6 +11,7 @@ export function onFanMirrorDisplay(listener: (value: FanMirrorDisplay) => void):
   listeners.add(listener); return () => { listeners.delete(listener); };
 }
 export function observeFanMirrorDisplay(value: FanMirrorDisplay): void {
+  latest={...value};
   for (const listener of listeners) { try { listener({ ...value }); } catch {} }
 }
 export function registerFanMirrorUiBlocker(blocked: () => boolean): () => void {

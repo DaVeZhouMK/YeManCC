@@ -92,7 +92,7 @@ function Content() {
   const openMenu = (fieldName: string, show: () => void) => {
     const current = client.snapshot(), field = menuField(current.snapshot,fieldName);
     if (!visible || menu.current || current.busy || !current.connected || !current.snapshot?.ready || !menuAllowed(current.snapshot,menuCommand(fieldName,current.snapshot)) || !field?.supported) return false;
-    if (fieldName === 'gyroPreset' && current.snapshot.game?.fields.gyroEnabled?.value !== 'on') return false;
+    if (fieldName === 'gyroPreset' && menuField(current.snapshot,'gyroEnabled')?.value !== 'on') return false;
     powerChoice.cancel();
     menu.current = { snapshot: structuredClone(current.snapshot), field: fieldName, selecting: false, timer: null };
     const owned = menu.current;
@@ -140,7 +140,7 @@ function Content() {
     const data=menuField(snapshot,key);if(!data)return <PanelSectionRow key={key}><div className="ymcc-decky-unavailable">{label} · 待读取 YMCC 状态</div></PanelSectionRow>;
     const owned=menu.current?.field===key;
     return <PanelSectionRow key={key}><AnchoredDropdown label={smallLabel(label)} selectedOption={data.value} rgOptions={data.choices}
-      opened={menuActive && owned} disabled={(disabled && !owned)||!data.supported || !menuAllowed(snapshot,menuCommand(key,snapshot))}
+      opened={menuActive && owned} disabled={(disabled && !owned)||!data.supported || !menuAllowed(snapshot,menuCommand(key,snapshot)) || key==='gyroPreset'&&menuField(snapshot,'gyroEnabled')?.value!=='on'}
       onMenuWillOpen={(show:()=>void)=>openMenu(key,show)} onCancel={cancelMenu} onChange={(option:{data:string})=>selectMenu(key,option)}/></PanelSectionRow>;
   };
   return <div className="ymcc-decky-sidebar">
@@ -176,11 +176,14 @@ function Content() {
         bottomSeparator="none" disabled={disabled || !snapshot?.actions?.fan || !snapshot?.fan.canToggle}
         onChange={(enabled: boolean) => { if (snapshot?.actions?.fan && snapshot.fan.canToggle && typeof enabled === 'boolean' && enabled !== snapshot.fan.enabled) apply('fan.setEnabled', { enabled },'fan'); }} /></PanelSectionRow>
       {snapshot && <PanelSectionRow>{slider('风扇挡位（全局）', snapshot.fan.preset, snapshot.fan.choices,
-        !snapshot.fan.enabled || !snapshot.fan.supported || !snapshot.actions?.fan, '', 'fan.setPreset')}</PanelSectionRow>}
+        !snapshot.fan.enabled || (!snapshot.fan.supported && !snapshot.fan.pending) || !snapshot.actions?.fan, '', 'fan.setPreset')}</PanelSectionRow>}
+      {snapshot?.fan.notice&&<PanelSectionRow><div role="status" className="ymcc-decky-notice">{snapshot.fan.pending?'已开启，等待 YMCC 风扇真实信号 · ':''}{snapshot.fan.notice}</div></PanelSectionRow>}
       {moduleTitle('lossless','LosslessScaling 插帧','一键插帧')}
       <PanelSectionRow><ToggleField key={toggleKey('losslessScaling')} label={smallLabel('LosslessScaling 插帧')} checked={losslessData?.value==='on'} description={description(snapshot?.game?'匹配当前 EXE；无 Profile 时由原一键入口创建':state.connected?'需 YMCC 确认当前游戏 EXE 后才能插帧':'待读取 YMCC 连接')} bottomSeparator="none" disabled={disabled||!snapshot?.game||!snapshot?.actions?.game||!losslessData?.supported} onChange={(enabled:boolean)=>{if(snapshot?.game&&losslessData?.supported&&typeof enabled==='boolean')apply('game.setField',{field:'losslessScaling',value:enabled?'on':'off'},'losslessScaling');}}/></PanelSectionRow>
       {moduleTitle('virtual','虚拟手柄',snapshot?.game?'当前游戏专属':'全局默认')}
       {renderDropdown('padPersona','虚拟手柄')}
+      {(() => {const data=menuField(snapshot,'gyroEnabled'),command=menuCommand('gyroEnabled',snapshot),allowed=menuAllowed(snapshot,command);return <PanelSectionRow><ToggleField key={toggleKey('gyroEnabled')} label={smallLabel('陀螺仪')} checked={data?.value==='on'} bottomSeparator="none" disabled={disabled||!allowed||!data?.supported||!['on','off'].includes(data?.value??'')} onChange={(enabled:boolean)=>{if(allowed&&data?.supported&&typeof enabled==='boolean'&&enabled!==(data.value==='on'))apply(command,{field:'gyroEnabled',value:enabled?'on':'off'},'gyroEnabled');}} /></PanelSectionRow>;})()}
+      {renderDropdown('gyroPreset','陀螺仪预设')}
       {moduleTitle('touchpads','触摸板','始终全局，不写专属')}
       {snapshot?.touchpads && <PanelSectionRow><div style={{fontSize:'12px',padding:'8px 0 4px'}}>触摸板（全局）</div></PanelSectionRow>}
       {snapshot?.touchpads && Object.entries(touchpadLabels).map(([field,label])=>{
@@ -196,7 +199,7 @@ function Content() {
       {snapshot?.game&&<PanelSectionRow><div className="ymcc-module-title">高级调节（当前游戏）</div></PanelSectionRow>}
       {snapshot?.game && Object.entries(fieldLabels).map(([field, label]) => {
         const data = snapshot.game!.fields[field];
-        if (['acMode','dcMode','padPersona','losslessScaling'].includes(field) || !data || field === 'acMode' && snapshot.powerSource !== 'ac' || field === 'dcMode' && snapshot.powerSource !== 'dc') return null;
+        if (['acMode','dcMode','padPersona','losslessScaling','gyroEnabled','gyroPreset'].includes(field) || !data || field === 'acMode' && snapshot.powerSource !== 'ac' || field === 'dcMode' && snapshot.powerSource !== 'dc') return null;
         const unavailable = !snapshot.actions?.game || !data.supported;
         if (field === 'padPersona' || field === 'gyroPreset' || field === 'corePolicyMode' || field === 'speedFactor') return <PanelSectionRow key={field}><AnchoredDropdown label={smallLabel(label)} selectedOption={data.value}
           rgOptions={data.choices} opened={menuActive && menu.current?.field === field} disabled={(disabled && menu.current?.field !== field) || unavailable || field === 'gyroPreset' && snapshot.game!.fields.gyroEnabled?.value !== 'on'} onMenuWillOpen={(show: () => void) => openMenu(field,show)}

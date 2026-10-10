@@ -162,7 +162,7 @@ export class ReadOnlyMirrorRelay {
     }
     if(command==='global.setField'&&(snapshot.game!==null||request.identity!=='')){await failure('全局目标已变化，未执行操作');return;}
     if(command==='frame.setField' && request.identity!==(snapshot.game?.identity??'')){await failure('帧率目标已变化，未执行操作');return;}
-    if (command === 'fan.setPreset' && !snapshot.fan.supported || command === 'fan.setEnabled' && !snapshot.fan.canToggle) {
+    if (command === 'fan.setPreset' && !snapshot.fan.supported && !snapshot.fan.pending || command === 'fan.setEnabled' && !snapshot.fan.canToggle) {
       await failure('风扇操作当前不可用'); return;
     }
     // Another request may have entered while this one was awaiting a dirty source read.

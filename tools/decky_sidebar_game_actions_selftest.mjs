@@ -87,7 +87,8 @@ function inputFixture(f){
  const timers=new Map(),calls=[],listeners=[];
  const state={input:{schemaVersion:1,revision:1,outputTarget:{persona:'elite',buttonMappingEnabled:true,gyroEnabled:false},gyroMotion:{enabled:false,presets:{fps:{motionMode:'on',innerDeadzone:3}}},buttonMapping:{unchanged:true},gameOverride:null},failCas:0};
  const owner=load(fs.readFileSync(path.join(root,'src/bridge/gameInputOverride.ts'),'utf8'),{
- '@/bridge/settingsRepository':{loadSettings:async()=>({input:structuredClone(state.input)}),compareAndSwapInputSettings:async(expected,patch,current)=>{calls.push({expected,patch:structuredClone(patch)});if(!current()||expected!==state.input.revision||state.failCas-->0)return {ok:false,value:structuredClone(state.input)};state.input={...state.input,...structuredClone(patch),revision:state.input.revision+1};return {ok:true,value:structuredClone(state.input)};}},
+ './gyroPresetModel':load(fs.readFileSync(path.join(root,'src/bridge/gyroPresetModel.ts'),'utf8')),
+    '@/bridge/settingsRepository':{loadSettings:async()=>({input:structuredClone(state.input)}),compareAndSwapInputSettings:async(expected,patch,current)=>{calls.push({expected,patch:structuredClone(patch)});if(!current()||expected!==state.input.revision||state.failCas-->0)return {ok:false,value:structuredClone(state.input)};state.input={...state.input,...structuredClone(patch),revision:state.input.revision+1};return {ok:true,value:structuredClone(state.input)};}},
  '@/bridge/gamePolicyTarget':{getPolicyGame:()=>f.state.game,gamePolicyKey,isPolicyGameInitialized:()=>true,subscribePolicyGameStatus:callback=>{listeners.push(callback);callback(f.state.game);return()=>listeners.splice(listeners.indexOf(callback),1);}},
  '@/bridge/ipc':{invoke:async command=>{assert.equal(command,'input.gameOverride.session');return 'inert-session';}},
  '@/scheduler':{registerScheduledTask:(name,interval,run)=>{timers.set(name,{interval,run});return()=>timers.delete(name);}},

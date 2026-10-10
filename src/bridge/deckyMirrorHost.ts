@@ -6,6 +6,7 @@ import { createTouchpadMirrorActions, touchpadMirrorFields, touchpadMirrorSource
 import { screenTouchpadsGet, screenTouchpadsSet, screenTouchpadProfile } from './screenTouchpads';
 import { watch } from 'vue';
 import { createGlobalMirrorActions, globalMirrorRead } from './deckyGlobalActions';
+import { DECKY_PAD_CHOICES } from './deckyInputOptions';
 import { getGameInputOverrideState } from './gameInputOverride';
 import { invoke, on } from './ipc';
 import { powerLifecycle } from './api';
@@ -25,7 +26,7 @@ import { readGameMirrorGyroDefaults } from './deckyGyroDefaults';
 import { detectedGameName } from './gamedetect';
 import { tryAcquireQuickAction } from './quickActionLock';
 import { closeJoyxoffIfRunning } from './gameproc';
-import { observeFanMirrorDisplay, isFanMirrorUiBusy, onFanMirrorUiGate } from './deckyFanDisplay';
+import { observeFanMirrorDisplay, getFanMirrorDisplay, onFanMirrorDisplay, isFanMirrorUiBusy, onFanMirrorUiGate } from './deckyFanDisplay';
 import { fanHostLifecycle } from './fanHost';
 import { ReadOnlyMirrorRelay, type MirrorPeer, type MirrorRequest } from './deckyMirrorRelay';
 import type { SteamRunningObservation } from '../../decky-plugin/src/steamRunningContext';
@@ -35,7 +36,7 @@ const labels: Record<ScheduleMode,string> = { eco:'节能',balanced:'平衡',med
 const core: Choice[] = [{data:'big-small',label:'大核为主'},{data:'only-big',label:'仅大核'},{data:'all',label:'全部核心'},
   {data:'default',label:'Windows 默认'},{data:'small-super-small',label:'小核＋超小核'},{data:'only-small',label:'仅小核'}];
 const hyper: Choice[] = [{data:'default',label:'Windows 默认'},{data:'on',label:'开启'},{data:'off',label:'关闭'}];
-const pad: Choice[] = [{data:'disabled',label:'本机手柄'},{data:'steamdeck',label:'SteamDeck'},{data:'dualsense-edge',label:'PS5'},{data:'elite',label:'Xbox'},{data:'follow',label:'全局方案',disabled:true}];
+const pad: Choice[] = DECKY_PAD_CHOICES;
 const gyro: Choice[] = [{data:'follow',label:'遵循全局',disabled:true},{data:'off',label:'陀螺仪关闭'},{data:'fps',label:'FPS射击'},{data:'racing',label:'赛车'},{data:'custom',label:'自定义'},{data:'steam',label:'Steam'}];
 const fan: Choice[] = [{data:'soft',label:'轻柔转速'},{data:'balanced',label:'均衡转速'},{data:'aggressive',label:'暴力转速'}];
 function field(value: string, choices: Choice[], supported = true): MirrorField { return { value, choices: structuredClone(choices), supported }; }
@@ -138,7 +139,7 @@ export function startDeckyMirrorHost(): { ready: () => void; stop: () => void } 
         acMode:modes('ac'),dcMode:modes('dc'),
         corePolicyMode:field(draft?.corePolicyMode ?? 'default',core,topology?.heterogeneous === true),
         hyperThreadPolicy:field(draft?.hyperThreadPolicy ?? 'default',hyper,topology?.smtAvailable === true),
-        padPersona:field(entry && draft?.padPersona==='follow' && gyroDefaults?.padPersona ? gyroDefaults.padPersona : draft?.padPersona ?? 'follow', entry ? pad.filter(option=>option.data!=='follow') : pad, !entry || draft?.padPersona!=='follow' || !!gyroDefaults?.padPersona),
+        padPersona:field(draft?.padPersona==='follow'||!draft?.padPersona?gyroDefaults?.padPersona??'disabled':draft.padPersona,pad,!!gyroDefaults||draft?.padPersona!=='follow'),
         gyroEnabled:field(gyroState?.enabled?'on':'off',[{data:'off',label:'关闭'},{data:'on',label:'开启'}],gyroSupported),
         gyroPreset:field(gyroState?.preset??'fps',gyro.filter(option=>['fps','racing','custom','steam'].includes(option.data)),gyroSupported),
         gyroOverride:field(draft?.gyroOverride ?? 'follow',draft?.gyroOverride === 'on' ? [...gyro,{data:'on',label:'陀螺仪开启（旧档）'}] : gyro,draft?.padPersona !== 'disabled'),
@@ -159,7 +160,8 @@ export function startDeckyMirrorHost(): { ready: () => void; stop: () => void } 
       try{frames=await readFrames(false);}catch{controlError='独立帧率读取失败，暂不可修改';}
       try{touchpads=await readTouchpads();}catch{controlError=controlError||'全局触摸板读取失败，暂不可修改';}
       let global:Awaited<ReturnType<typeof readGlobal>>|null=null;if(!game){try{global=await readGlobal();}catch{controlError=controlError||'全局 TDP / 虚拟手柄读取失败';}}
-      const settings = getFanFeatureSettings();
+      const settings = getFanFeatureSettings(),fanDisplay=getFanMirrorDisplay(),fanEnabled=fanActions.pendingIntent||fanControlActive.value;
+      const fanPending=fanDisplay?.active===true&&fanEnabled&&(fanDisplay.pending===true||fanHostLifecycle.recoveryActive)&&!(fanHostLifecycle.controlReady&&fanHostLifecycle.state==='ready'&&!fanHostLifecycle.recoveryActive);
       return { gameAdmission:game ? {...makeGameMirrorAdmission(entry,schedule!,lossless?.xml,gyroDefaults?.source),speed:JSON.stringify(speedState)} : undefined,steam:structuredClone(steam),generation:power.generation,ready:power.phase === 'ready' && power.hardwareWritesAllowed === true,
         controlAdmission:{frames:frames?.source,touchpads:touchpads?.source,global:global?.source},
         global:global?{fields:global.fields}:undefined,
@@ -169,8 +171,8 @@ export function startDeckyMirrorHost(): { ready: () => void; stop: () => void } 
         game:game ? {label:entry?.displayName || gameLabel(game),
           identity:gameMirrorIdentity(game),fields} : null,
         provenance, powerSource:powerSourceMode.value,
-        fan:{supported:fanFeatureEnabled.value && fanHostLifecycle.controlReady,enabled:fanControlActive.value,preset:settings.preset,
-          canToggle:FAN_IMPORT_ENABLED && !FAN_FORCE_PREVIEW && !isFanMirrorUiBusy(),choices:structuredClone(fan)},
+        fan:{supported:fanFeatureEnabled.value && fanHostLifecycle.controlReady,enabled:fanEnabled,preset:settings.preset,
+          pending:fanPending,notice:fanDisplay?.notice,canToggle:FAN_IMPORT_ENABLED && !FAN_FORCE_PREVIEW && !isFanMirrorUiBusy(),choices:structuredClone(fan)},
         notice:power.phase !== 'ready' ? 'YMCC 电源恢复中；不可下发' : controlError || gyroReadError || losslessError || (!game ? 'YMCC 当前没有确认游戏' : lossless?.reason || (!lossless?.profile ? 'LosslessScaling 插帧列表待读取' : '')) };
     },
     observe(invalidate) {
@@ -190,6 +192,7 @@ export function startDeckyMirrorHost(): { ready: () => void; stop: () => void } 
         stops.push(on('power.resumed',invalidate));
         stops.push(on('fan.resume-ready',invalidate));
         stops.push(onFanMirrorUiGate(invalidate));
+        stops.push(onFanMirrorDisplay(invalidate));
       } catch (error) { for (const stop of stops) stop(); throw error; }
       return () => { for (const stop of stops) stop(); };
     },
@@ -202,7 +205,7 @@ export function startDeckyMirrorHost(): { ready: () => void; stop: () => void } 
       if(command === 'game.setField') return gameActions.execute(command,args,context);
       if(command === 'fan.setPreset' && !fanControlActive.value)return Promise.reject(new Error('FAN_MIRROR_CONTROL_DISABLED'));
       if(command !== 'fan.setEnabled' && command !== 'fan.setPreset') return Promise.reject(new Error('MIRROR_UNKNOWN_COMMAND'));
-      return fanActions.execute(command,args,context);
+      return fanActions.request(command,args,context);
     },
     reply: (connection,message) => invoke<boolean>('deckySidebar.mirrorReply',{connection,message},{timeoutMs:3000}),
   });
@@ -223,6 +226,6 @@ export function startDeckyMirrorHost(): { ready: () => void; stop: () => void } 
         }
       }).catch(() => {});
     },
-    stop() { ended = true; stopRequests(); stopPeers(); relay.dispose(); },
+    stop() { ended = true; fanActions.stop(); stopRequests(); stopPeers(); relay.dispose(); },
   };
 }

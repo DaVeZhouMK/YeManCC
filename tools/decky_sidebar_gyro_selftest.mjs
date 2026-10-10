@@ -4,7 +4,7 @@ import {root,load,fixture,seed,profile,functions} from './fixtures/decky_game_me
 const require=createRequire(path.join(root,'package.json')),ts=require('typescript');
 const key=load(fs.readFileSync(path.join(root,'src/bridge/gamePolicyHysteresis.ts'),'utf8'));
 const actions=load(fs.readFileSync(path.join(root,'src/bridge/deckyGameActions.ts'),'utf8'),{'./gamePolicyHysteresis':key});
-const overlayText=fs.readFileSync(path.join(root,'src/bridge/gameInputOverride.ts'),'utf8'),tree=ts.createSourceFile('overlay.ts',overlayText,ts.ScriptTarget.Latest,true,ts.ScriptKind.TS);
+const overlayText=fs.readFileSync(path.join(root,'src/bridge/gyroPresetModel.ts'),'utf8')+'\n'+fs.readFileSync(path.join(root,'src/bridge/gameInputOverride.ts'),'utf8'),tree=ts.createSourceFile('overlay.ts',overlayText,ts.ScriptTarget.Latest,true,ts.ScriptKind.TS);
 const functionNames=['isGyroPresetKey','gyroMotionParamsForPreset','isPadPersonaOverride','isGyroOverride','buildGameInputOverlay'];const constantNames=['PAD_PERSONAS','GYRO_OVERRIDES','GYRO_PRESET_KEYS','GYRO_PRESET_DEFINING_FIELDS'];
 const nodes=tree.statements.filter(n=>ts.isFunctionDeclaration(n)&&functionNames.includes(n.name?.text)||ts.isVariableStatement(n)&&n.declarationList.declarations.some(d=>constantNames.includes(d.name.getText(tree))));assert.equal(nodes.length,9);
 const overlay=load(nodes.map(n=>n.getText(tree)).join('\n'));

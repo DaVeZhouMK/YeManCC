@@ -51,9 +51,13 @@ const schedule={active:{ac:'balanced',dc:'eco'},profiles:{ac:{},dc:{}}};for(cons
 const frameModel=load('src/bridge/frameRateModel.ts');
 const screens=load('src/bridge/screenTouchpads.ts',{'./ipc':{isNativeRuntime:false}});
 const modules={
+'./deckyInputOptions':load('src/bridge/deckyInputOptions.ts'),
+'./deckyGlobalActions':load('src/bridge/deckyGlobalActions.ts',{'./deckyInputOptions':load('src/bridge/deckyInputOptions.ts'),'./gyroPresetModel':load('src/bridge/gyroPresetModel.ts')}),
+'./gameInputOverride':{getGameInputOverrideState:()=>({locked:false})},
+'./settingsRepository':{readSettingsSection:async()=>({revision:1,outputTarget:{persona:'steamdeck',buttonMappingEnabled:true},gyroMotion:{enabled:false,preset:'fps'}}),onInputSettingsChanged:()=>()=>{}},
 './deckyFrameActions':load('src/bridge/deckyFrameActions.ts',{'./frameRateModel':frameModel,'./deckyGameActions':gameActions}),
 './deckyTouchpadActions':load('src/bridge/deckyTouchpadActions.ts',{'./screenTouchpads':screens}),
-'./settingsRepository':{readSettingsSection:async()=>({outputTarget:{persona:'steamdeck',buttonMappingEnabled:true}})},
+
 './screenTouchpads':{...screens,screenTouchpadsGet:async()=>({...screens.screenTouchpadDefaults('steamdeck'),ok:true,available:true})},
 './frameRateLimits':{...frameModel,loadGlobalFrameRates:async()=>frameModel.frameRatePair({}),onFrameRatesChanged:()=>()=>{}},
 './deckySpeedActions':load('src/bridge/deckySpeedActions.ts',{'./deckyGameActions':gameActions}),
@@ -70,7 +74,7 @@ const modules={
 './deckyFanActions':{createFanMirrorActions},
 './deckyGameActions':gameActions,'./gamedetect':{detectedGameName:game=>game?.title||game?.name||''},
 './quickActionLock':{tryAcquireQuickAction:()=>{throw new Error('Snapshot fixture never acquires a mutation lock');}},'./gameproc':{closeJoyxoffIfRunning:()=>{throw new Error('Snapshot fixture never operates a process');}},
-'./deckyFanDisplay':{observeFanMirrorDisplay:()=>{},isFanMirrorUiBusy:()=>false,onFanMirrorUiGate:()=>()=>{}},
+'./deckyFanDisplay':{observeFanMirrorDisplay:()=>{},getFanMirrorDisplay:()=>null,onFanMirrorDisplay:()=>()=>{},isFanMirrorUiBusy:()=>false,onFanMirrorUiGate:()=>()=>{}},
 './fanFeature':{FAN_IMPORT_ENABLED:true,FAN_FORCE_PREVIEW:false,fanFeatureEnabled:{value:true},fanControlActive:{get value(){return state.fanEnabled;}},getFanFeatureSettings:()=>({preset:state.fanPreset})},
 './fanHost':{fanHostLifecycle:{controlReady:true}},'./deckyMirrorRelay':{ReadOnlyMirrorRelay}};
 const host=load('src/bridge/deckyMirrorHost.ts',modules).startDeckyMirrorHost();

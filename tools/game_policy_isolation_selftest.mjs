@@ -88,6 +88,7 @@ async function fixture(options = {}) {
     onPerformanceScheduleChanged(cb) { scheduleListeners.add(cb); return () => scheduleListeners.delete(cb); },
   };
   const input = load('src/bridge/gameInputOverride.ts', {
+    './gyroPresetModel':load('src/bridge/gyroPresetModel.ts'),
     '@/bridge/settingsRepository': repository, '@/bridge/gamePolicyTarget': target,
     '@/bridge/ipc': { invoke: async () => 'native-session-1' }, '@/scheduler': scheduler, '@/bridge/performanceSchedule': perf,
   }, clock);

@@ -2,12 +2,13 @@
 
 日期：2026-10-10，Asia/Hong_Kong。用户授权修改 YMCC Decky 做接入性测试。
 
-## 当前结论（截至 2026-10-10 13:57，Asia/Hong_Kong）
+## 当前结论（源码复核更新，2026-10-10，Asia/Hong_Kong）
 
-- **真实 2077 画面中现代圆角 HUD 已有像素证据**，且用户截图与目击确认；不是外置 H5 或后期合成图。
-- **关闭 Steam 叠加层后常驻尚未成功**：上一轮关闭后的两张游戏截图只见原生 Steam 监控，没有自定义 HUD。Notification 请求仍登记为 1，不能把 DOM/计数成功当作常驻成功。
-- 原生监控与自定义 HUD 的同时可见、真实输入穿透、无边框与独占全屏均未验收。
-- 本轮仅准备了示例数据与透明度矩阵；等待用户开启全屏 2077。没有替用户启动游戏或修改显示设置。
+- 早期实际2077画面已有现代圆角HUD像素与用户截图证据，不是外置H5仿页；这只证明菜单打开阶段能绘制。
+- 已测试游戏“全屏幕”选项下的窗口，但没有独立DXGI独占证明。**根页面DOM + Notification方式的菜单关闭后常驻仍失败**，四档底板透明度未取得可见HUD像素验收。
+- 后续已确认游戏前台、原生MenuStore收起和Notification1，HUD仍不显示；不能再把问题归给用户环境。root pin测试不是子窗口pin测试。
+- 用户已要求暂停本机直接验证；之后仅源码/惰性VM复核。21项离线规则通过不等于实机成功。
+- 下一候选是当前游戏绑定的Steam原生子popup/render-only BrowserView；未部署/实测，数据统一接口尚未接通。详情见本目录的STEAM-HUD-CARRIER-SOURCE-REVIEW-20261010.md。
 
 ## 阶段一：主大屏 DOM/hook 测试的结论边界
 
@@ -117,3 +118,11 @@ MagicBlack 商店 2.0.0 固定提交：`6f61a516f64b65d88e5b30248821a5a3b80fcb28
 采集 baseline → 四档各热键打开/关闭截图 → stop后截图。每帧都保留原生状态、DOM、父级opacity、composition cache、来源/序号、真实game-client坐标与路径。菜单状态目前按热键序列记录，未独立读取原生活跃状态；截图仍需人工逐张核验。结束移除探针，保留所有失败，不关闭游戏。
 
 重点验收：关闭Steam菜单后的可见性、亮暗背景透出、是否出现整屏黑底或蒙层、文字清晰度、原生监控共存和实际游戏输入。尚未通过这些项目；本轮“准备好”只代表测试工具就绪。
+
+## 阶段四：全屏失效复核与直接验证暂停
+
+后续全屏、菜单状态、root pin、hotkey激活轮次均保留真实截图。`2077-passive-20261010-141755`已确认游戏前台、MenuStore收起、Notification1，但HUD依然无像素；**不能归因用户没调好环境**。root SetWindowPinned/ShowWindow亦未成功，不能当作子popup路径已测。
+
+用户随后要求暂停本机直接验证、允许继续源码分析。已遵守：之后没有CDP、切应用、发键、截图或注入。现成MagicBlack/MangoPeel/Crosshair/PiP/DimmerDeck/浏览器源码与本机Steam原popup/BrowserView源码复核，得到“最低Composition请求 ≠ 独立游戏显示载体”的区别。
+
+21项静态/惰性VM检查通过，但不是实机pass。详情：`G:\YeManCC-Work\Mainline\YeManCC-source\YeManCC\docs\STEAM-HUD-CARRIER-SOURCE-REVIEW-20261010.md`。下一轮候选是**原生游戏绑定子popup**，或**当前game-owner的render-only BrowserView**；仍用YMCC统一数据源方向、示例先测、保持独立alpha，不部署外置置顶H5冒充Steam。需要用户恢复现场测试授权才会动桌面。
