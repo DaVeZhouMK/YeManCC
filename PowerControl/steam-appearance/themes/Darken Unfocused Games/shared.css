@@ -8,3 +8,5 @@
 
 /* YMCC file receipt: current option presence; no visual rule. */
 :root { --ymcc-file-2ec8ffe6c8f63bf7: 1; }
+/* YMCC content receipt: exact bundled file revision. */
+:root { --ymcc-content-17a99962151898fe: 1; }

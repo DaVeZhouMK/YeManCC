@@ -444,3 +444,5 @@ button.appdetailsactivitysection_FetchMoreContainer_39Zur.DialogButton.gamepaddi
 
 /* YMCC file receipt: current option presence; no visual rule. */
 :root { --ymcc-file-f2a3b738282d5024: 1; }
+/* YMCC content receipt: exact bundled file revision. */
+:root { --ymcc-content-d98d86f8cb48e2fa: 1; }

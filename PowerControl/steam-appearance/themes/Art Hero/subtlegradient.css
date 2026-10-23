@@ -13,3 +13,5 @@
 
 /* YMCC file receipt: current option presence; no visual rule. */
 :root { --ymcc-file-3d0f488bddd1ee0f: 1; }
+/* YMCC content receipt: exact bundled file revision. */
+:root { --ymcc-content-16218961a4ec169a: 1; }

@@ -128,3 +128,5 @@
 
 /* YMCC file receipt: current option presence; no visual rule. */
 :root { --ymcc-file-74b82ed7acf53846: 1; }
+/* YMCC content receipt: exact bundled file revision. */
+:root { --ymcc-content-9455d7d2e159312c: 1; }

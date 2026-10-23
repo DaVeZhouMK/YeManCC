@@ -15,3 +15,5 @@ mes_RecentGamesBackgroundImage_3Mp8R {
 
 /* YMCC file receipt: current option presence; no visual rule. */
 :root { --ymcc-file-05d9ce3fa4eef42f: 1; }
+/* YMCC content receipt: exact bundled file revision. */
+:root { --ymcc-content-f07e7793f8e4867e: 1; }
