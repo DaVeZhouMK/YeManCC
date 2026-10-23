@@ -1,0 +1,12 @@
+{
+  "name": "Centered Game Text",
+  "author": "SuchMeme",
+  "version": "v1.1",
+  "manifest_version": 3,
+  "inject": {
+    "shared.css": [
+      "SP"
+    ]
+  },
+  "id": "eb3f538b-173d-43b5-a83b-dddce528243f"
+}

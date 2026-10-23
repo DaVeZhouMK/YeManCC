@@ -1,0 +1,16 @@
+.gamepadhomerecentgames_RecentGamesBackground_1SRox {
+    opacity: 1!important;
+    filter: none!important
+}
+
+.gamepadhomerecentgames_RecentGamesBackgroundContainer_QNkOt, .gamepadhomerecentgames_RecentGamesBackgroundImages_30D-8 {
+    -webkit-mask-image: none!important;
+}
+
+.gamepadhomerecentgames_RecentGamesBackgroundImage_3Mp8R {
+    opacity: 1;
+    filter: brightness(100%)!important;
+}
+
+/* YMCC file receipt: current option presence; no visual rule. */
+:root { --ymcc-file-6aeebc22f356bfda: 1; }

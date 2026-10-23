@@ -1,0 +1,97 @@
+.DefaultTheme {
+	--background-color: #403e39;
+	--key-extendedkey-background-color: #888888 !important;
+	--key-emoji-focused-background-color: #88888880 !important;
+	--key-extendedkey-focused-background-color: #d5d2cc !important;
+	--key-touched-background-color: #d5d2cc94 !important;
+}
+
+.DefaultTheme .virtualkeyboard_KeyboardKey_2KhPX {
+	background: linear-gradient(180deg, #d5cebf, #9b9584);
+	box-shadow: inset -10px -6px 5px 4px #ebe8d947, 0 0 1px 1px #000000a1, 1px 1px 0px 1px #afab8c40;
+}
+
+.DefaultTheme .virtualkeyboard_KeyboardKey_2KhPX::before {
+	background: linear-gradient(85deg, #ebe7d8, #b0ab9a);
+	box-shadow: inset -1px -1px 0px 0px #d3cdb080, inset 1px 1px 0px 0px #eae4ce80;
+}
+
+.DefaultTheme .virtualkeyboard_KeyboardKey_2KhPX.virtualkeyboard_Focused_21EoN {
+	box-shadow: inset -10px -6px 5px 4px #21212180, 0 0 1px 1px #000000a1, 1px 1px 0px 1px #85858540;
+}
+
+.DefaultTheme .virtualkeyboard_KeyboardKey_2KhPX.virtualkeyboard_Focused_21EoN::before {
+	box-shadow: inset -1px -1px 0px 0px #87878780, inset 1px 1px 0px 0px #a7a7a73d;
+}
+
+.DefaultTheme .virtualkeyboard_KeyboardKey_2KhPX.virtualkeyboard_Focused_21EoN img {
+	filter: brightness(0) saturate(100%) invert(96%) sepia(11%) saturate(367%) hue-rotate(339deg) brightness(87%) contrast(90%);
+}
+
+.DefaultTheme .virtualkeyboard_KeyboardKey_2KhPX img {
+	filter: brightness(0) saturate(100%) invert(15%) sepia(10%) saturate(308%) hue-rotate(7deg) brightness(98%) contrast(86%);
+}
+
+.DefaultTheme .virtualkeyboard_KeyboardKey_2KhPX.virtualkeyboard_ToggleOn_3Qrs- {
+	background: linear-gradient(180deg, #cacaca, #8b8b8b) !important;
+	box-shadow: inset -10px -6px 5px 4px #21212180, 0 0 1px 1px #000000a1, 1px 1px 0px 1px #85858540;
+}
+
+.DefaultTheme .virtualkeyboard_KeyboardKey_2KhPX.virtualkeyboard_ToggleOn_3Qrs-::before {
+	background: linear-gradient(85deg, #cccccc, #9d9d9d) !important;
+	box-shadow: inset -1px -1px 0px 0px #87878780, inset 1px 1px 0px 0px #a7a7a780;
+}
+
+.DefaultTheme .Col_0,
+.DefaultTheme .Col_1,
+.DefaultTheme .Col_2,
+.DefaultTheme .Col_3,
+.DefaultTheme .Col_4,
+.DefaultTheme .Col_5,
+.DefaultTheme .Col_6,
+.DefaultTheme .Col_7,
+.DefaultTheme .Col_8,
+.DefaultTheme .Col_9,
+.DefaultTheme .Col_10,
+.DefaultTheme .Col_11,
+.DefaultTheme .Col_12,
+.DefaultTheme .Col_13 {
+	color: #272727 !important;
+}
+
+.DefaultTheme .Col_0.virtualkeyboard_Focused_21EoN,
+.DefaultTheme .Col_1.virtualkeyboard_Focused_21EoN,
+.DefaultTheme .Col_2.virtualkeyboard_Focused_21EoN,
+.DefaultTheme .Col_3.virtualkeyboard_Focused_21EoN,
+.DefaultTheme .Col_4.virtualkeyboard_Focused_21EoN,
+.DefaultTheme .Col_5.virtualkeyboard_Focused_21EoN,
+.DefaultTheme .Col_6.virtualkeyboard_Focused_21EoN,
+.DefaultTheme .Col_7.virtualkeyboard_Focused_21EoN,
+.DefaultTheme .Col_8.virtualkeyboard_Focused_21EoN,
+.DefaultTheme .Col_9.virtualkeyboard_Focused_21EoN,
+.DefaultTheme .Col_10.virtualkeyboard_Focused_21EoN,
+.DefaultTheme .Col_11.virtualkeyboard_Focused_21EoN,
+.DefaultTheme .Col_12.virtualkeyboard_Focused_21EoN,
+.DefaultTheme .Col_13.virtualkeyboard_Focused_21EoN {
+	color: #ebe7d8 !important;
+}
+
+.DefaultTheme .Col_0 .virtualkeyboard_ShiftedLabel_3FZuk,
+.DefaultTheme .Col_1 .virtualkeyboard_ShiftedLabel_3FZuk,
+.DefaultTheme .Col_2 .virtualkeyboard_ShiftedLabel_3FZuk,
+.DefaultTheme .Col_3 .virtualkeyboard_ShiftedLabel_3FZuk,
+.DefaultTheme .Col_4 .virtualkeyboard_ShiftedLabel_3FZuk,
+.DefaultTheme .Col_5 .virtualkeyboard_ShiftedLabel_3FZuk,
+.DefaultTheme .Col_6 .virtualkeyboard_ShiftedLabel_3FZuk,
+.DefaultTheme .Col_7 .virtualkeyboard_ShiftedLabel_3FZuk,
+.DefaultTheme .Col_8 .virtualkeyboard_ShiftedLabel_3FZuk,
+.DefaultTheme .Col_9 .virtualkeyboard_ShiftedLabel_3FZuk,
+.DefaultTheme .Col_10 .virtualkeyboard_ShiftedLabel_3FZuk,
+.DefaultTheme .Col_11 .virtualkeyboard_ShiftedLabel_3FZuk,
+.DefaultTheme .Col_12 .virtualkeyboard_ShiftedLabel_3FZuk,
+.DefaultTheme .Col_13 .virtualkeyboard_ShiftedLabel_3FZuk {
+	color: #323232;
+}
+
+/* YMCC file receipt: current option presence; no visual rule. */
+:root { --ymcc-file-2198cfba265e7425: 1; }

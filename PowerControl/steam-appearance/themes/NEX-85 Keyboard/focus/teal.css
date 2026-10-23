@@ -1,0 +1,14 @@
+.DefaultTheme {
+	--key-pointer-background-color: #7c8f91;
+}
+
+.DefaultTheme .virtualkeyboard_KeyboardKey_2KhPX.virtualkeyboard_Focused_21EoN {
+	background: linear-gradient(180deg, #7c8f91, #6a7d7c);
+}
+
+.DefaultTheme .virtualkeyboard_KeyboardKey_2KhPX.virtualkeyboard_Focused_21EoN::before {
+	background: linear-gradient(85deg, #7c9090, #768079);
+}
+
+/* YMCC file receipt: current option presence; no visual rule. */
+:root { --ymcc-file-3e998c9478c02ff2: 1; }

@@ -1,0 +1,1036 @@
+{
+  "name": "Art Hero",
+  "author": "Metagawa",
+  "version": "v3.2.03",
+  "manifest_version": 6,
+  "inject": {
+    "shared.css": [
+      "SP",
+      "MainMenu",
+      "QuickAccess"
+    ]
+  },
+  "dependencies": {
+    "Centered Game Text": {},
+    "Game Header Text Stroke": {},
+    "Mini Carousel": {
+      "Size": "0.7"
+    }
+  },
+  "patches": {
+    "Footer Options": {
+      "type": "dropdown",
+      "default": "Smaller Footer",
+      "values": {
+        "Smaller Footer": {
+          "footer.css": [
+            "SP",
+            "MainMenu",
+            "QuickAccess"
+          ]
+        },
+        "No Footer": {
+          "nofooter.css": [
+            "SP",
+            "MainMenu",
+            "QuickAccess"
+          ]
+        },
+        "Default": {}
+      },
+      "components": []
+    },
+    "Gradient Settings": {
+      "type": "dropdown",
+      "default": "Linear Gradient",
+      "values": {
+        "No Hero Gradient": {
+          "noherogradient.css": [
+            "SP",
+            "MainMenu",
+            "QuickAccess"
+          ]
+        },
+        "Subtle Gradient": {
+          "subtlegradient.css": [
+            "SP",
+            "MainMenu",
+            "QuickAccess"
+          ]
+        },
+        "Subtle Gradient - Inverted": {
+          "invertedgradient.css": [
+            "SP",
+            "MainMenu",
+            "QuickAccess"
+          ]
+        },
+        "Linear Gradient": {
+          "lineargradient.css": [
+            "SP",
+            "MainMenu",
+            "QuickAccess"
+          ]
+        },
+        "Linear Gradient - Inverted": {
+          "lineargradientinverted.css": [
+            "SP",
+            "MainMenu",
+            "QuickAccess"
+          ]
+        },
+        "No Change": {}
+      },
+      "components": []
+    },
+    "Hero Appearance": {
+      "type": "dropdown",
+      "default": "Expanded Hero",
+      "values": {
+        "Wide Hero": {
+          "StandardBG.css": [
+            "SP",
+            "MainMenu",
+            "QuickAccess"
+          ]
+        },
+        "Expanded Hero": {
+          "LeakingBG.css": [
+            "SP",
+            "MainMenu",
+            "QuickAccess"
+          ]
+        },
+        "Full Screen Hero": {
+          "FullBG.css": [
+            "SP",
+            "MainMenu",
+            "QuickAccess"
+          ]
+        },
+        "No Hero": {
+          "NoBG.css": [
+            "SP",
+            "MainMenu",
+            "QuickAccess"
+          ]
+        }
+      },
+      "components": []
+    },
+    "Hero Alignment": {
+      "type": "dropdown",
+      "default": "Center - Default",
+      "values": {
+        "Center - Default": {
+          "--met-hero-art-position": [
+            "center",
+            "SP",
+            "MainMenu",
+            "QuickAccess"
+          ]
+        },
+        "Left": {
+          "--met-hero-art-position": [
+            "left",
+            "SP",
+            "MainMenu",
+            "QuickAccess"
+          ]
+        },
+        "Right": {
+          "--met-hero-art-position": [
+            "right",
+            "SP",
+            "MainMenu",
+            "QuickAccess"
+          ]
+        },
+        "Top": {
+          "--met-hero-art-position": [
+            "top",
+            "SP",
+            "MainMenu",
+            "QuickAccess"
+          ]
+        },
+        "Bottom": {
+          "--met-hero-art-position": [
+            "bottom",
+            "SP",
+            "MainMenu",
+            "QuickAccess"
+          ]
+        }
+      },
+      "components": []
+    },
+    "Hero Fit": {
+      "type": "dropdown",
+      "default": "Cover - Default",
+      "values": {
+        "Cover - Default": {
+          "--met-hero-art-size": [
+            "cover",
+            "SP",
+            "MainMenu",
+            "QuickAccess"
+          ]
+        },
+        "Contain": {
+          "--met-hero-art-size": [
+            "contain",
+            "SP",
+            "MainMenu",
+            "QuickAccess"
+          ]
+        },
+        "Fill": {
+          "--met-hero-art-size": [
+            "fill",
+            "SP",
+            "MainMenu",
+            "QuickAccess"
+          ]
+        },
+        "None": {
+          "--met-hero-art-size": [
+            "none",
+            "SP",
+            "MainMenu",
+            "QuickAccess"
+          ]
+        },
+        "Scaledown": {
+          "--met-hero-art-size": [
+            "scaledown",
+            "SP",
+            "MainMenu",
+            "QuickAccess"
+          ]
+        }
+      },
+      "components": []
+    },
+    "Hero Z-Order": {
+      "type": "dropdown",
+      "default": "Default",
+      "values": {
+        "Default": {},
+        "In front of Carousel": {
+          "--met-hero-art-z-order": [
+            "3",
+            "SP",
+            "MainMenu",
+            "QuickAccess"
+          ]
+        }
+      },
+      "components": []
+    },
+    "Hero Height": {
+      "type": "slider",
+      "default": "0",
+      "values": {
+        "-10": {
+          "--met-hero-height-tens": [
+            "-100vh",
+            "SP",
+            "MainMenu",
+            "QuickAccess"
+          ]
+        },
+        "-9": {
+          "--met-hero-height-tens": [
+            "-90vh",
+            "SP",
+            "MainMenu",
+            "QuickAccess"
+          ]
+        },
+        "-8": {
+          "--met-hero-height-tens": [
+            "-80vh",
+            "SP",
+            "MainMenu",
+            "QuickAccess"
+          ]
+        },
+        "-7": {
+          "--met-hero-height-tens": [
+            "-70vh",
+            "SP",
+            "MainMenu",
+            "QuickAccess"
+          ]
+        },
+        "-6": {
+          "--met-hero-height-tens": [
+            "-60vh",
+            "SP",
+            "MainMenu",
+            "QuickAccess"
+          ]
+        },
+        "-5": {
+          "--met-hero-height-tens": [
+            "-50vh",
+            "SP",
+            "MainMenu",
+            "QuickAccess"
+          ]
+        },
+        "-4": {
+          "--met-hero-height-tens": [
+            "-40vh",
+            "SP",
+            "MainMenu",
+            "QuickAccess"
+          ]
+        },
+        "-3": {
+          "--met-hero-height-tens": [
+            "-30vh",
+            "SP",
+            "MainMenu",
+            "QuickAccess"
+          ]
+        },
+        "-2": {
+          "--met-hero-height-tens": [
+            "-20vh",
+            "SP",
+            "MainMenu",
+            "QuickAccess"
+          ]
+        },
+        "-1": {
+          "--met-hero-height-tens": [
+            "-10vh",
+            "SP",
+            "MainMenu",
+            "QuickAccess"
+          ]
+        },
+        "0": {
+          "--met-hero-height-tens": [
+            "0vh",
+            "SP",
+            "MainMenu",
+            "QuickAccess"
+          ]
+        },
+        "1": {
+          "--met-hero-height-tens": [
+            "10vh",
+            "SP",
+            "MainMenu",
+            "QuickAccess"
+          ]
+        },
+        "2": {
+          "--met-hero-height-tens": [
+            "20vh",
+            "SP",
+            "MainMenu",
+            "QuickAccess"
+          ]
+        },
+        "3": {
+          "--met-hero-height-tens": [
+            "30vh",
+            "SP",
+            "MainMenu",
+            "QuickAccess"
+          ]
+        },
+        "4": {
+          "--met-hero-height-tens": [
+            "40vh",
+            "SP",
+            "MainMenu",
+            "QuickAccess"
+          ]
+        },
+        "5": {
+          "--met-hero-height-tens": [
+            "50vh",
+            "SP",
+            "MainMenu",
+            "QuickAccess"
+          ]
+        },
+        "6": {
+          "--met-hero-height-tens": [
+            "60vh",
+            "SP",
+            "MainMenu",
+            "QuickAccess"
+          ]
+        },
+        "7": {
+          "--met-hero-height-tens": [
+            "70vh",
+            "SP",
+            "MainMenu",
+            "QuickAccess"
+          ]
+        },
+        "8": {
+          "--met-hero-height-tens": [
+            "80vh",
+            "SP",
+            "MainMenu",
+            "QuickAccess"
+          ]
+        },
+        "9": {
+          "--met-hero-height-tens": [
+            "90vh",
+            "SP",
+            "MainMenu",
+            "QuickAccess"
+          ]
+        },
+        "10": {
+          "--met-hero-height-tens": [
+            "100vh",
+            "SP",
+            "MainMenu",
+            "QuickAccess"
+          ]
+        }
+      },
+      "components": []
+    },
+    "Hero Height - Fine Control": {
+      "type": "slider",
+      "default": "0",
+      "values": {
+        "0": {
+          "--met-hero-height-ones": [
+            "0vh",
+            "SP",
+            "MainMenu",
+            "QuickAccess"
+          ]
+        },
+        "1": {
+          "--met-hero-height-ones": [
+            "1vh",
+            "SP",
+            "MainMenu",
+            "QuickAccess"
+          ]
+        },
+        "2": {
+          "--met-hero-height-ones": [
+            "2vh",
+            "SP",
+            "MainMenu",
+            "QuickAccess"
+          ]
+        },
+        "3": {
+          "--met-hero-height-ones": [
+            "3vh",
+            "SP",
+            "MainMenu",
+            "QuickAccess"
+          ]
+        },
+        "4": {
+          "--met-hero-height-ones": [
+            "4vh",
+            "SP",
+            "MainMenu",
+            "QuickAccess"
+          ]
+        },
+        "5": {
+          "--met-hero-height-ones": [
+            "5vh",
+            "SP",
+            "MainMenu",
+            "QuickAccess"
+          ]
+        },
+        "6": {
+          "--met-hero-height-ones": [
+            "6vh",
+            "SP",
+            "MainMenu",
+            "QuickAccess"
+          ]
+        },
+        "7": {
+          "--met-hero-height-ones": [
+            "7vh",
+            "SP",
+            "MainMenu",
+            "QuickAccess"
+          ]
+        },
+        "8": {
+          "--met-hero-height-ones": [
+            "8vh",
+            "SP",
+            "MainMenu",
+            "QuickAccess"
+          ]
+        },
+        "9": {
+          "--met-hero-height-ones": [
+            "9vh",
+            "SP",
+            "MainMenu",
+            "QuickAccess"
+          ]
+        }
+      },
+      "components": []
+    },
+    "Header Bar Height": {
+      "type": "slider",
+      "default": "0",
+      "values": {
+        "0": {
+          "--met-header-bar-height": [
+            "0vh",
+            "SP",
+            "MainMenu",
+            "QuickAccess"
+          ]
+        },
+        "1": {
+          "--met-header-bar-height": [
+            "10vh",
+            "SP",
+            "MainMenu",
+            "QuickAccess"
+          ]
+        },
+        "2": {
+          "--met-header-bar-height": [
+            "20vh",
+            "SP",
+            "MainMenu",
+            "QuickAccess"
+          ]
+        },
+        "3": {
+          "--met-header-bar-height": [
+            "30vh",
+            "SP",
+            "MainMenu",
+            "QuickAccess"
+          ]
+        },
+        "4": {
+          "--met-header-bar-height": [
+            "40vh",
+            "SP",
+            "MainMenu",
+            "QuickAccess"
+          ]
+        },
+        "5": {
+          "--met-header-bar-height": [
+            "50vh",
+            "SP",
+            "MainMenu",
+            "QuickAccess"
+          ]
+        },
+        "6": {
+          "--met-header-bar-height": [
+            "60vh",
+            "SP",
+            "MainMenu",
+            "QuickAccess"
+          ]
+        },
+        "7": {
+          "--met-header-bar-height": [
+            "70vh",
+            "SP",
+            "MainMenu",
+            "QuickAccess"
+          ]
+        },
+        "8": {
+          "--met-header-bar-height": [
+            "80vh",
+            "SP",
+            "MainMenu",
+            "QuickAccess"
+          ]
+        },
+        "9": {
+          "--met-header-bar-height": [
+            "90vh",
+            "SP",
+            "MainMenu",
+            "QuickAccess"
+          ]
+        },
+        "10": {
+          "--met-header-bar-height": [
+            "100vh",
+            "SP",
+            "MainMenu",
+            "QuickAccess"
+          ]
+        }
+      },
+      "components": []
+    },
+    "Header Bar Height - Fine Control": {
+      "type": "slider",
+      "default": "0",
+      "values": {
+        "0": {
+          "--met-header-bar-height-ones": [
+            "0vh",
+            "SP",
+            "MainMenu",
+            "QuickAccess"
+          ]
+        },
+        "1": {
+          "--met-header-bar-height-ones": [
+            "1vh",
+            "SP",
+            "MainMenu",
+            "QuickAccess"
+          ]
+        },
+        "2": {
+          "--met-header-bar-height-ones": [
+            "2vh",
+            "SP",
+            "MainMenu",
+            "QuickAccess"
+          ]
+        },
+        "3": {
+          "--met-header-bar-height-ones": [
+            "3vh",
+            "SP",
+            "MainMenu",
+            "QuickAccess"
+          ]
+        },
+        "4": {
+          "--met-header-bar-height-ones": [
+            "4vh",
+            "SP",
+            "MainMenu",
+            "QuickAccess"
+          ]
+        },
+        "5": {
+          "--met-header-bar-height-ones": [
+            "5vh",
+            "SP",
+            "MainMenu",
+            "QuickAccess"
+          ]
+        },
+        "6": {
+          "--met-header-bar-height-ones": [
+            "6vh",
+            "SP",
+            "MainMenu",
+            "QuickAccess"
+          ]
+        },
+        "7": {
+          "--met-header-bar-height-ones": [
+            "7vh",
+            "SP",
+            "MainMenu",
+            "QuickAccess"
+          ]
+        },
+        "8": {
+          "--met-header-bar-height-ones": [
+            "8vh",
+            "SP",
+            "MainMenu",
+            "QuickAccess"
+          ]
+        },
+        "9": {
+          "--met-header-bar-height-ones": [
+            "9vh",
+            "SP",
+            "MainMenu",
+            "QuickAccess"
+          ]
+        }
+      },
+      "components": []
+    },
+    "No Header": {
+      "type": "checkbox",
+      "default": "No",
+      "values": {
+        "Yes": {
+          "noheader.css": [
+            "SP",
+            "MainMenu",
+            "QuickAccess"
+          ]
+        },
+        "No": {}
+      },
+      "components": []
+    },
+    "Carousel Font Size": {
+      "type": "dropdown",
+      "default": "Larger",
+      "values": {
+        "No Change": {
+          "--met-game-carousel-font-size": [
+            "18px",
+            "SP"
+          ]
+        },
+        "Larger": {
+          "--met-game-carousel-font-size": [
+            "22px",
+            "SP"
+          ]
+        },
+        "Largest": {
+          "--met-game-carousel-font-size": [
+            "26px",
+            "SP"
+          ]
+        }
+      },
+      "components": []
+    },
+    "Carousel Font Height": {
+      "type": "slider",
+      "default": "-4",
+      "values": {
+        "No Change": {},
+        "-4.5": {
+          "--met-game-carousel-font-height": [
+            "-4.5em",
+            "SP"
+          ]
+        },
+        "-4": {
+          "--met-game-carousel-font-height": [
+            "-4em",
+            "SP"
+          ]
+        },
+        "-3": {
+          "--met-game-carousel-font-height": [
+            "-3em",
+            "SP"
+          ]
+        },
+        "-2": {
+          "--met-game-carousel-font-height": [
+            "-2em",
+            "SP"
+          ]
+        },
+        "-1": {
+          "--met-game-carousel-font-height": [
+            "-1em",
+            "SP"
+          ]
+        },
+        "0": {
+          "--met-game-carousel-font-height": [
+            "0em",
+            "SP"
+          ]
+        },
+        "1": {
+          "--met-game-carousel-font-height": [
+            "1em",
+            "SP"
+          ]
+        },
+        "2": {
+          "--met-game-carousel-font-height": [
+            "2em",
+            "SP"
+          ]
+        },
+        "3": {
+          "--met-game-carousel-font-height": [
+            "3em",
+            "SP"
+          ]
+        },
+        "4": {
+          "--met-game-carousel-font-height": [
+            "4em",
+            "SP"
+          ]
+        },
+        "5": {
+          "--met-game-carousel-font-height": [
+            "5em",
+            "SP"
+          ]
+        },
+        "6": {
+          "--met-game-carousel-font-height": [
+            "6em",
+            "SP"
+          ]
+        },
+        "7": {
+          "--met-game-carousel-font-height": [
+            "7em",
+            "SP"
+          ]
+        },
+        "8": {
+          "--met-game-carousel-font-height": [
+            "8em",
+            "SP"
+          ]
+        },
+        "9": {
+          "--met-game-carousel-font-height": [
+            "9em",
+            "SP"
+          ]
+        },
+        "10": {
+          "--met-game-carousel-font-height": [
+            "10em",
+            "SP"
+          ]
+        },
+        "11": {
+          "--met-game-carousel-font-height": [
+            "11em",
+            "SP"
+          ]
+        },
+        "12": {
+          "--met-game-carousel-font-height": [
+            "12.25em",
+            "SP"
+          ]
+        }
+      },
+      "components": []
+    },
+    "Carousel Height": {
+      "type": "slider",
+      "default": "5",
+      "values": {
+        "-10": {
+          "--met-game-carousel-height-tens": [
+            "-100vh",
+            "SP"
+          ]
+        },
+        "-9": {
+          "--met-game-carousel-height-tens": [
+            "-90vh",
+            "SP"
+          ]
+        },
+        "-8": {
+          "--met-game-carousel-height-tens": [
+            "-80vh",
+            "SP"
+          ]
+        },
+        "-7": {
+          "--met-game-carousel-height-tens": [
+            "-70vh",
+            "SP"
+          ]
+        },
+        "-6": {
+          "--met-game-carousel-height-tens": [
+            "-60vh",
+            "SP"
+          ]
+        },
+        "-5": {
+          "--met-game-carousel-height-tens": [
+            "-50vh",
+            "SP"
+          ]
+        },
+        "-4": {
+          "--met-game-carousel-height-tens": [
+            "-40vh",
+            "SP"
+          ]
+        },
+        "-3": {
+          "--met-game-carousel-height-tens": [
+            "-30vh",
+            "SP"
+          ]
+        },
+        "-2": {
+          "--met-game-carousel-height-tens": [
+            "-20vh",
+            "SP"
+          ]
+        },
+        "-1": {
+          "--met-game-carousel-height-tens": [
+            "-10vh",
+            "SP"
+          ]
+        },
+        "0": {
+          "--met-game-carousel-height-tens": [
+            "0vh",
+            "SP"
+          ]
+        },
+        "1": {
+          "--met-game-carousel-height-tens": [
+            "10vh",
+            "SP"
+          ]
+        },
+        "2": {
+          "--met-game-carousel-height-tens": [
+            "20vh",
+            "SP"
+          ]
+        },
+        "3": {
+          "--met-game-carousel-height-tens": [
+            "30vh",
+            "SP"
+          ]
+        },
+        "4": {
+          "--met-game-carousel-height-tens": [
+            "40vh",
+            "SP"
+          ]
+        },
+        "5": {
+          "--met-game-carousel-height-tens": [
+            "50vh",
+            "SP"
+          ]
+        },
+        "6": {
+          "--met-game-carousel-height-tens": [
+            "60vh",
+            "SP"
+          ]
+        },
+        "7": {
+          "--met-game-carousel-height-tens": [
+            "70vh",
+            "SP"
+          ]
+        },
+        "8": {
+          "--met-game-carousel-height-tens": [
+            "80vh",
+            "SP"
+          ]
+        },
+        "9": {
+          "--met-game-carousel-height-tens": [
+            "90vh",
+            "SP"
+          ]
+        },
+        "10": {
+          "--met-game-carousel-height-tens": [
+            "100vh",
+            "SP"
+          ]
+        }
+      },
+      "components": []
+    },
+    "Carousel Height - Fine Control": {
+      "type": "slider",
+      "default": "0",
+      "values": {
+        "0": {
+          "--met-game-carousel-height-ones": [
+            "0vh",
+            "SP"
+          ]
+        },
+        "1": {
+          "--met-game-carousel-height-ones": [
+            "1vh",
+            "SP"
+          ]
+        },
+        "2": {
+          "--met-game-carousel-height-ones": [
+            "2vh",
+            "SP"
+          ]
+        },
+        "3": {
+          "--met-game-carousel-height-ones": [
+            "3vh",
+            "SP"
+          ]
+        },
+        "4": {
+          "--met-game-carousel-height-ones": [
+            "4vh",
+            "SP"
+          ]
+        },
+        "5": {
+          "--met-game-carousel-height-ones": [
+            "5vh",
+            "SP"
+          ]
+        },
+        "6": {
+          "--met-game-carousel-height-ones": [
+            "6vh",
+            "SP"
+          ]
+        },
+        "7": {
+          "--met-game-carousel-height-ones": [
+            "7vh",
+            "SP"
+          ]
+        },
+        "8": {
+          "--met-game-carousel-height-ones": [
+            "8vh",
+            "SP"
+          ]
+        },
+        "9": {
+          "--met-game-carousel-height-ones": [
+            "9vh",
+            "SP"
+          ]
+        }
+      },
+      "components": []
+    }
+  },
+  "flags": [
+    "OPTIONAL_DEPENDENCIES"
+  ],
+  "id": "994360e7-cfca-46d3-9337-80d28ad169ba"
+}

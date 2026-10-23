@@ -1,0 +1,85 @@
+{
+  "name": "Round",
+  "author": "EMERALD#0874",
+  "version": "v2.7-ymcc.1",
+  "manifest_version": 2,
+  "inject": {
+    "shared.css": [
+      "SP",
+      "MainMenu",
+      "QuickAccess"
+    ]
+  },
+  "patches": {
+    "Intensity": {
+      "default": "10px",
+      "type": "slider",
+      "values": {
+        "3px": {
+          "intensity/3px.css": [
+            "SP",
+            "MainMenu",
+            "QuickAccess"
+          ]
+        },
+        "5px": {
+          "intensity/5px.css": [
+            "SP",
+            "MainMenu",
+            "QuickAccess"
+          ]
+        },
+        "10px": {
+          "intensity/10px.css": [
+            "SP",
+            "MainMenu",
+            "QuickAccess"
+          ]
+        },
+        "15px": {
+          "intensity/15px.css": [
+            "SP",
+            "MainMenu",
+            "QuickAccess"
+          ]
+        },
+        "20px": {
+          "intensity/20px.css": [
+            "SP",
+            "MainMenu",
+            "QuickAccess"
+          ]
+        },
+        "30px": {
+          "intensity/30px.css": [
+            "SP",
+            "MainMenu",
+            "QuickAccess"
+          ]
+        }
+      }
+    },
+    "Outlines": {
+      "default": "Round",
+      "type": "dropdown",
+      "values": {
+        "Round": {
+          "round-outline.css": [
+            "SP",
+            "MainMenu",
+            "QuickAccess"
+          ]
+        },
+        "Square": {},
+        "Hidden": {
+          "hide-outline.css": [
+            "SP",
+            "MainMenu",
+            "QuickAccess"
+          ]
+        }
+      }
+    }
+  },
+  "id": "c6844008-a809-41f6-b140-7aa76f2a62ad"
+}

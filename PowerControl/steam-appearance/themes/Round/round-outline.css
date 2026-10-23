@@ -1,0 +1,50 @@
+:root {
+  --round-radius-size: none;
+}
+
+.gpfocus .basicpartnereventspage_BasicPartnerEvent_2yuwU {
+  outline: none;
+  border: 2px solid rgba(255, 255, 255, 0.6);
+  border-radius: calc(var(--round-radius-size) + 2px);
+  margin: 54px auto 14px auto;
+}
+
+.focusring_FocusRing_1IZrQ {
+  outline: none;
+  border: 2px solid rgba(255, 255, 255, 0.6);
+  border-radius: calc(var(--round-radius-size) + 2px);
+  margin: -2px;
+  animation: none !important;
+}
+
+/* Stable focus border: native focus changes never animate border width/margins. */
+/* exceptions */
+.appactivityday_NoCommentSupport_2CB_R
+  > .appactivityday_EventBody_NEMXh
+  > .Panel
+  > .focusring_FocusRingRoot_3PH_X
+  > .focusring_FocusRing_1IZrQ,
+.controllerconfiguratorchoosebinding_ChooseBindingContainer_1Kj9l
+  > .gamepadtabbedpage_GamepadTabbedPage_3IBLc
+  > .gamepadtabbedpage_TabContents_WDa0_
+  > .overlappingtransition_TransitionGroup_11Twu
+  > .overlappingtransition_ContentWrapper_1knAs
+  > .Panel
+  > .gamepadtabbedpage_TabContentsScroll_1X4dt
+  > .focusring_FocusRingRoot_3PH_X
+  > .focusring_FocusRing_1IZrQ {
+  border: none;
+  outline: 2px solid rgba(255, 255, 255, 0.6);
+  border-radius: 0px;
+  margin: 0px;
+  animation: none !important;
+}
+
+/* Keep the selected cover outline steady too. Steam's native focus outline
+   otherwise grows from 12px and pulses 20 times even when dimming is disabled. */
+.BasicUI .appportrait_LibraryItemBox_WYgDg.Focusable:focus {
+  animation: none !important;
+}
+
+/* YMCC file receipt: current option presence; no visual rule. */
+:root { --ymcc-file-07e34e96ff7b3743: 1; }

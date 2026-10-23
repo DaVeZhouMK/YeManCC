@@ -1,0 +1,42 @@
+:root {
+	--ren-reflection-gradient: #ffffff00 30%;
+	--ren-reflection-focused-opacity: .5;
+	--ren-reflection-unfocused-opacity: .3;
+	--ren-reflection-blur: 2px;
+}
+
+.ReactVirtualized__Grid__innerScrollContainer 
+.libraryassetimage_Container_1R9r2.basicgamecarousel_CarouselCapsuleBackgroundGlow_1H3Kf {
+	opacity:var(--ren-reflection-unfocused-opacity);
+	filter:none;
+	width:100%;
+	height:199.5px;
+	top:199.5px;
+	transform:scaleX(1) scaleY(-1);
+	-webkit-mask-image: linear-gradient(to top,white, var(--ren-reflection-gradient));
+	/* The glow is reused as a reflection; native focus must not move its raster. */
+	animation: none !important;
+	transition: opacity .15s ease;
+	filter:blur(var(--ren-reflection-blur));
+}
+
+
+.ReactVirtualized__Grid__innerScrollContainer div.gpfocuswithin
+.libraryassetimage_Container_1R9r2.basicgamecarousel_CarouselCapsuleBackgroundGlow_1H3Kf {
+	opacity:var(--ren-reflection-focused-opacity);
+	transform:scaleX(1) scaleY(-1);
+	transition-duration: .15s;
+	transition-timing-function: cubic-bezier(0, 0.73, 0.48, 1);
+}
+
+.ReactVirtualized__Grid__innerScrollContainer >div:nth-child(1).gpfocuswithin
+.libraryassetimage_Container_1R9r2.basicgamecarousel_CarouselCapsuleBackgroundGlow_1H3Kf
+{
+	transform:scaleX(1) scaleY(-1);
+}
+
+/* YMCC: observe this theme file without changing layout or input. */
+:root { --ymcc-receipt-game-cover-reflections: 1; }
+
+/* YMCC file receipt: current option presence; no visual rule. */
+:root { --ymcc-file-5d2ccb9f7b66ca7b: 1; }

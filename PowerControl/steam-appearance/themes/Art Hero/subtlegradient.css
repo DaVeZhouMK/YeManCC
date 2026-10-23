@@ -1,0 +1,15 @@
+.gamepadhomerecentgames_RecentGamesBackgroundContainer_QNkOt, .gamepadhomerecentgames_RecentGamesBackgroundImages_30D-8 {
+    -webkit-mask-image: radial-gradient(100% 94% at 50%  10%, black 80%, rgb(0 0 0 / 67%) 95%, rgb(255 0 0 / 0%) 100%);
+    -webkit-mask-composite: source-out;
+}
+.gamepadhomerecentgames_RecentGamesBackgroundImage_3Mp8R {
+    opacity: 1;
+    filter: brightness(100%)!important;
+}
+.gamepadhomerecentgames_RecentGamesBackground_1SRox {
+    opacity: 1!important;
+    filter: none!important
+}
+
+/* YMCC file receipt: current option presence; no visual rule. */
+:root { --ymcc-file-3d0f488bddd1ee0f: 1; }

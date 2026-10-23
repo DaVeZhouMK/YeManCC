@@ -1,0 +1,301 @@
+{
+  "name": "Game Cover Reflections",
+  "author": "TheRensei",
+  "version": "v1.0-ymcc.1",
+  "manifest_version": 5,
+  "inject": {
+    "shared.css": [
+      "SP"
+    ]
+  },
+  "dependencies": {},
+  "patches": {
+    "Focused Opacity": {
+      "type": "slider",
+      "default": "0.5",
+      "values": {
+        "0": {
+          "--ren-reflection-focused-opacity": [
+            "0",
+            "SP"
+          ]
+        },
+        "0.1": {
+          "--ren-reflection-focused-opacity": [
+            "0.1",
+            "SP"
+          ]
+        },
+        "0.2": {
+          "--ren-reflection-focused-opacity": [
+            "0.2",
+            "SP"
+          ]
+        },
+        "0.3": {
+          "--ren-reflection-focused-opacity": [
+            "0.3",
+            "SP"
+          ]
+        },
+        "0.4": {
+          "--ren-reflection-focused-opacity": [
+            "0.4",
+            "SP"
+          ]
+        },
+        "0.5": {
+          "--ren-reflection-focused-opacity": [
+            "0.5",
+            "SP"
+          ]
+        },
+        "0.6": {
+          "--ren-reflection-focused-opacity": [
+            "0.6",
+            "SP"
+          ]
+        },
+        "0.7": {
+          "--ren-reflection-focused-opacity": [
+            "0.7",
+            "SP"
+          ]
+        },
+        "0.8": {
+          "--ren-reflection-focused-opacity": [
+            "0.8",
+            "SP"
+          ]
+        },
+        "0.9": {
+          "--ren-reflection-focused-opacity": [
+            "0.9",
+            "SP"
+          ]
+        },
+        "1.0": {
+          "--ren-reflection-focused-opacity": [
+            "1.0",
+            "SP"
+          ]
+        }
+      },
+      "components": []
+    },
+    "Unfocused Opacity": {
+      "type": "slider",
+      "default": "0.3",
+      "values": {
+        "0": {
+          "--ren-reflection-unfocused-opacity": [
+            "0",
+            "SP"
+          ]
+        },
+        "0.1": {
+          "--ren-reflection-unfocused-opacity": [
+            "0.1",
+            "SP"
+          ]
+        },
+        "0.2": {
+          "--ren-reflection-unfocused-opacity": [
+            "0.2",
+            "SP"
+          ]
+        },
+        "0.3": {
+          "--ren-reflection-unfocused-opacity": [
+            "0.3",
+            "SP"
+          ]
+        },
+        "0.4": {
+          "--ren-reflection-unfocused-opacity": [
+            "0.4",
+            "SP"
+          ]
+        },
+        "0.5": {
+          "--ren-reflection-unfocused-opacity": [
+            "0.5",
+            "SP"
+          ]
+        },
+        "0.6": {
+          "--ren-reflection-unfocused-opacity": [
+            "0.6",
+            "SP"
+          ]
+        },
+        "0.7": {
+          "--ren-reflection-unfocused-opacity": [
+            "0.7",
+            "SP"
+          ]
+        },
+        "0.8": {
+          "--ren-reflection-unfocused-opacity": [
+            "0.8",
+            "SP"
+          ]
+        },
+        "0.9": {
+          "--ren-reflection-unfocused-opacity": [
+            "0.9",
+            "SP"
+          ]
+        },
+        "1.0": {
+          "--ren-reflection-unfocused-opacity": [
+            "1",
+            "SP"
+          ]
+        }
+      },
+      "components": []
+    },
+    "Blur": {
+      "type": "slider",
+      "default": "3",
+      "values": {
+        "0": {
+          "--ren-reflection-blur": [
+            "0px",
+            "SP"
+          ]
+        },
+        "1": {
+          "--ren-reflection-blur": [
+            "1px",
+            "SP"
+          ]
+        },
+        "2": {
+          "--ren-reflection-blur": [
+            "2px",
+            "SP"
+          ]
+        },
+        "3": {
+          "--ren-reflection-blur": [
+            "3px",
+            "SP"
+          ]
+        },
+        "4": {
+          "--ren-reflection-blur": [
+            "4px",
+            "SP"
+          ]
+        },
+        "5": {
+          "--ren-reflection-blur": [
+            "5px",
+            "SP"
+          ]
+        },
+        "6": {
+          "--ren-reflection-blur": [
+            "6px",
+            "SP"
+          ]
+        },
+        "7": {
+          "--ren-reflection-blur": [
+            "7px",
+            "SP"
+          ]
+        },
+        "8": {
+          "--ren-reflection-blur": [
+            "8px",
+            "SP"
+          ]
+        },
+        "9": {
+          "--ren-reflection-blur": [
+            "9px",
+            "SP"
+          ]
+        },
+        "10": {
+          "--ren-reflection-blur": [
+            "10px",
+            "SP"
+          ]
+        }
+      },
+      "components": []
+    },
+    "Opacity Smoothness": {
+      "type": "slider",
+      "default": "0.5",
+      "values": {
+        "0.1": {
+          "--ren-reflection-gradient": [
+            "#ffffff00 10%",
+            "SP"
+          ]
+        },
+        "0.2": {
+          "--ren-reflection-gradient": [
+            "#ffffff00 20%",
+            "SP"
+          ]
+        },
+        "0.3": {
+          "--ren-reflection-gradient": [
+            "#ffffff00 30%",
+            "SP"
+          ]
+        },
+        "0.4": {
+          "--ren-reflection-gradient": [
+            "#ffffff00 40%",
+            "SP"
+          ]
+        },
+        "0.5": {
+          "--ren-reflection-gradient": [
+            "#ffffff00 50%",
+            "SP"
+          ]
+        },
+        "0.6": {
+          "--ren-reflection-gradient": [
+            "#ffffff00 60%",
+            "SP"
+          ]
+        },
+        "0.7": {
+          "--ren-reflection-gradient": [
+            "#ffffff00 70%",
+            "SP"
+          ]
+        },
+        "0.8": {
+          "--ren-reflection-gradient": [
+            "#ffffff00 80%",
+            "SP"
+          ]
+        },
+        "0.9": {
+          "--ren-reflection-gradient": [
+            "#ffffff00 90%",
+            "SP"
+          ]
+        },
+        "1.0": {
+          "--ren-reflection-gradient": [
+            "#ffffff00",
+            "SP"
+          ]
+        }
+      },
+      "components": []
+    }
+  },
+  "id": "26e6a114-4513-4440-9e81-65460ce54884"
+}
