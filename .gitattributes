@@ -55,3 +55,6 @@ decky-plugin/LICENSE.decky-api -text
 PowerControl/decky/LICENSE.decky-loader -text
 PowerControl/decky/plugins/ymcc-sidebar/LICENSE.decky-api -text
 *.tsx text eol=lf
+
+# Steam theme manifest binds exact CSS, JSON and license bytes on every machine.
+PowerControl/steam-appearance/themes/** -text
