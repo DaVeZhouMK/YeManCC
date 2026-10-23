@@ -51,6 +51,10 @@ Copy-Item -LiteralPath (Join-Path $source 'steam-appearance\idle.ps1') -Destinat
 $rejected=$false;try{Get-SteamAppearanceExportFiles $target|Out-Null}catch{$rejected=$_.Exception.Message -like '*render receipt protocol missing*'}
 if(!$rejected){throw 'Old style-count-only verifier was exported'};$cases.Add('Packaging rejects a render verifier without the per-theme receipt protocol')
 Copy-Item -LiteralPath (Join-Path $source 'steam-appearance\idle.ps1') -Destination $idlePath -Force
+[IO.File]::WriteAllText($idlePath,([IO.File]::ReadAllText($idlePath).Replace('$script:AppearanceContextProtocol=1','$script:AppearanceContextProtocol=0')),(New-Object Text.UTF8Encoding($true)))
+$rejected=$false;try{Get-SteamAppearanceExportFiles $target|Out-Null}catch{$rejected=$_.Exception.Message -like '*independent context protocol missing*'}
+if(!$rejected){throw 'Main-document-only render verifier was exported'};$cases.Add('Packaging rejects a renderer without independent MainMenu and QuickAccess context capability')
+Copy-Item -LiteralPath (Join-Path $source 'steam-appearance\idle.ps1') -Destination $idlePath -Force
 $manifestPath=Join-Path $target 'steam-appearance\manifest.json';$manifest=Get-Content -LiteralPath $manifestPath -Raw|ConvertFrom-Json
 $receiptPath=Join-Path $target 'steam-appearance\themes\Round\shared.css'
 [IO.File]::WriteAllText($receiptPath,([IO.File]::ReadAllText($receiptPath).Replace('--ymcc-receipt-round: 1;','--legacy-round: 1;')),(New-Object Text.UTF8Encoding($false)))

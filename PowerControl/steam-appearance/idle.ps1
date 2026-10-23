@@ -83,6 +83,7 @@ function Invoke-AppearanceIdle([uint32]$ExpectedPid=0,[string]$ExpectedBirth='',
 # Protocol 2 verifies every statically injected CSS file for the selected patch
 # values. Plans reuse the already parsed manifest/config; no extra file scan.
 $script:AppearanceRenderProtocol=4
+$script:AppearanceContextProtocol=1
 $script:AppearanceContentManifestFile=Join-Path $PSScriptRoot 'manifest.json'
 $script:AppearanceContentIndex=$null
 $script:AppearanceContentIndexStamp=''
@@ -168,10 +169,11 @@ function ConvertTo-AppearanceVariableValue([string]$Value) {
     }
     return $value
 }
-function Get-AppearanceThemeRenderPlan([string]$Name,$Manifest,$Config,$ContentIndex=$null) {
+function Get-AppearanceThemeRenderPlan([string]$Name,$Manifest,$Config,$ContentIndex=$null,[string]$Target='SP') {
+    if($Target -cnotin @('SP','MainMenu','QuickAccess')){throw 'render-plan-target-invalid'}
     if(!$Manifest -or $Manifest.name -cne $Name -or !$Config -or $Config.active -isnot [bool]){throw 'render-plan-source-invalid'}
     if(!$ContentIndex){$ContentIndex=Get-AppearanceContentIndex}
-    $files=@{};$defaults=Get-AppearanceVariableDefaults $Name;$variables=@{};$chosen=@{}
+    $files=@{};$defaults=Get-AppearanceVariableDefaults $Name;$variables=@{};$variableTargets=@{};$chosen=@{}
     $collect={param($Map,[bool]$Enabled)
         if($Map -isnot [pscustomobject]){throw 'render-inject-map-invalid'}
         if(@($Map.PSObject.Properties).Count -gt 128){throw 'render-inject-map-too-large'}
@@ -179,9 +181,10 @@ function Get-AppearanceThemeRenderPlan([string]$Name,$Manifest,$Config,$ContentI
             if($entry.Name.StartsWith('--')){
                 $property=[string]$entry.Name
                 if($property -cnotmatch '^--[a-z][a-z0-9-]{0,79}$' -or !$defaults.ContainsKey($property) -or $entry.Value -isnot [Array] -or $entry.Value.Count -lt 2 -or $entry.Value.Count -gt 16 -or @($entry.Value|Where-Object {$_ -isnot [string]}).Count){throw 'render-variable-definition-invalid'}
-                if('SP' -cnotin @($entry.Value|Select-Object -Skip 1)){continue}
                 $null=ConvertTo-AppearanceVariableValue $entry.Value[0]
-                if(!$variables.ContainsKey($property)){$variables[$property]=if($Config.active){[string]$defaults[$property]}else{''}}
+                if(!$variables.ContainsKey($property)){$variables[$property]='';$variableTargets[$property]=$false}
+                if($Target -cnotin @($entry.Value|Select-Object -Skip 1)){continue}
+                if(!$variableTargets[$property]){$variables[$property]=if($Config.active){[string]$defaults[$property]}else{''};$variableTargets[$property]=$true}
                 if($Enabled){
                     if($chosen.ContainsKey($property) -and $chosen[$property] -cne [string]$entry.Value[0]){throw 'render-variable-selection-conflict'}
                     $chosen[$property]=[string]$entry.Value[0];$variables[$property]=[string]$entry.Value[0]
@@ -189,11 +192,11 @@ function Get-AppearanceThemeRenderPlan([string]$Name,$Manifest,$Config,$ContentI
                 continue
             }
             if($entry.Value -isnot [Array] -or @($entry.Value).Count -gt 16 -or @($entry.Value|Where-Object {$_ -isnot [string]}).Count){throw 'render-inject-targets-invalid'}
-            if('SP' -cnotin @($entry.Value)){continue}
+            $applies=$Target -cin @($entry.Value)
             $file=([string]$entry.Name).Replace('\','/')
             $null=Get-AppearanceFileReceipt $Name $file
             if(!$files.ContainsKey($file)){$files[$file]=$false}
-            if($Enabled){$files[$file]=$true}
+            if($Enabled -and $applies){$files[$file]=$true}
             if($files.Count -gt 128){throw 'render-plan-too-large'}
         }
     }
@@ -217,11 +220,23 @@ function Get-AppearanceThemeRenderPlan([string]$Name,$Manifest,$Config,$ContentI
     })
     if($variables.Count -ne $defaults.Count){throw 'render-variable-definitions-incomplete'}
     $variableRows=@(foreach($property in @($variables.Keys|Sort-Object -CaseSensitive)){
-        [pscustomobject]@{property=$property;enabled=[bool]$Config.active;value=[string]$variables[$property]}
+        # Shared CSS can define a default even when the selected dynamic patch
+        # only targets SP. Other documents must retain that static fallback.
+        $enabled=[bool]($Config.active -and ($variableTargets[$property] -or $files['shared.css']))
+        $value=if(!$variableTargets[$property] -and $enabled){[string]$defaults[$property]}else{[string]$variables[$property]}
+        [pscustomobject]@{property=$property;enabled=$enabled;value=$value}
     })
-    [pscustomobject]@{protocol=4;files=$rows;variables=$variableRows}
+    $result=[pscustomobject]@{protocol=4;files=$rows;variables=$variableRows}
+    if($Target -ceq 'SP'){
+        $contexts=[ordered]@{}
+        foreach($context in @('MainMenu','QuickAccess')){$contexts[$context]=Get-AppearanceThemeRenderPlan $Name $Manifest $Config $ContentIndex $context}
+        $result|Add-Member -NotePropertyName contextProtocol -NotePropertyValue 1
+        $result|Add-Member -NotePropertyName contexts -NotePropertyValue ([pscustomobject]$contexts)
+    }
+    $result
 }
-function Get-AppearanceRenderExpectation($Status) {
+function Get-AppearanceRenderExpectation($Status,[string]$Target='SP') {
+    if($Target -cnotin @('SP','MainMenu','QuickAccess')){throw 'render-expectation-target-invalid'}
     $names=@('Art Hero','Centered Game Text','Darken Unfocused Games','Game Cover Reflections','Mini Carousel','NEX-85 Keyboard','Round','YMCC Game Details')
     $contentIndex=Get-AppearanceContentIndex
     $rows=@($Status.themes);$count=0;$properties=@{}
@@ -230,6 +245,10 @@ function Get-AppearanceRenderExpectation($Status) {
         $found=@($rows|Where-Object {$_.name -ceq $name})
         if($found.Count -ne 1 -or $found[0].installed -isnot [bool] -or !$found[0].installed -or $found[0].configured -isnot [bool] -or $found[0].error){throw 'render-snapshot-invalid'}
         $row=$found[0];$plan=$row.renderPlan
+        if($Target -cne 'SP'){
+            if(!$plan -or !(Test-AppearanceReceiptInteger $plan.contextProtocol 1 1) -or $plan.contexts -isnot [pscustomobject] -or @($plan.contexts.PSObject.Properties).Count -ne 2 -or !$plan.contexts.PSObject.Properties[$Target]){throw 'render-context-plan-unavailable'}
+            $plan=$plan.contexts.PSObject.Properties[$Target].Value
+        }
         if(!$plan -or !(Test-AppearanceReceiptInteger $plan.protocol 4 4) -or $plan.files -isnot [Array] -or !$plan.files.Count -or $plan.files.Count -gt 128){throw 'render-plan-unavailable'}
         $paths=@{}
         foreach($file in $plan.files){
@@ -246,7 +265,7 @@ function Get-AppearanceRenderExpectation($Status) {
         $defaults=Get-AppearanceVariableDefaults $name;$seenVariables=@{}
         if($plan.variables -isnot [Array] -or $plan.variables.Count -ne $defaults.Count -or $plan.variables.Count -gt 64){throw 'render-plan-variables-invalid'}
         foreach($variable in $plan.variables){
-            if($variable -isnot [pscustomobject] -or $variable.property -isnot [string] -or !$defaults.ContainsKey($variable.property) -or $properties.ContainsKey($variable.property) -or $seenVariables.ContainsKey($variable.property) -or $variable.enabled -isnot [bool] -or $variable.enabled -ne $row.configured -or $variable.value -isnot [string] -or (!$variable.enabled -and $variable.value -cne '')){throw 'render-plan-variable-invalid'}
+            if($variable -isnot [pscustomobject] -or $variable.property -isnot [string] -or !$defaults.ContainsKey($variable.property) -or $properties.ContainsKey($variable.property) -or $seenVariables.ContainsKey($variable.property) -or $variable.enabled -isnot [bool] -or (($Target -ceq 'SP' -and $variable.enabled -ne $row.configured) -or (!$row.configured -and $variable.enabled)) -or $variable.value -isnot [string] -or (!$variable.enabled -and $variable.value -cne '')){throw 'render-plan-variable-invalid'}
             $null=ConvertTo-AppearanceVariableValue $variable.value
             $seenVariables[$variable.property]=$true;$properties[$variable.property]=$true;$count++;if($count -gt 256){throw 'render-plan-too-large'}
             [pscustomobject]@{name=$name;property=$variable.property;enabled=[bool]$variable.enabled;kind='variable';value=[string]$variable.value;path=''}
@@ -255,9 +274,9 @@ function Get-AppearanceRenderExpectation($Status) {
 }
 
 function Get-AppearanceRenderedStatus($Session,$Status) {
-    $probe=[pscustomobject]@{checked=$false;confirmed=$false;reason='render-unconfirmed';mismatched=@();pages=0}
+    $probe=[pscustomobject]@{checked=$false;confirmed=$false;reason='render-unconfirmed';mismatched=@();pages=0;mainPages=0;contextPages=0;contextProtocol=1}
     try {
-        $expected=@(Get-AppearanceRenderExpectation $Status)
+        $expectations=@{SP=@(Get-AppearanceRenderExpectation $Status)}
         if(!$Session -or !$Session.root -or ![IO.Path]::IsPathRooted([string]$Session.root)){throw 'render-session-unconfirmed'}
         $listeners=@(Get-NetTCPConnection -State Listen -LocalPort 8080 -ErrorAction SilentlyContinue)
         if(!$listeners.Count){throw 'render-port-missing'}
@@ -273,19 +292,37 @@ function Get-AppearanceRenderedStatus($Session,$Status) {
         $tabs=@($response)
         if($response -isnot [Array] -or !$tabs.Count -or $tabs.Count -gt 64){throw 'render-target-list-invalid'}
         foreach($tab in $tabs){if($tab -isnot [pscustomobject]){throw 'render-target-invalid'}}
-        $main=@($tabs|Where-Object {$_.type -eq 'page' -and ($_.title -match '大屏|big.?picture|gamepad.?ui' -or $_.url -match 'browserType=3')})
+        $targets=@(foreach($tab in $tabs){
+            if($tab.type -cne 'page'){continue}
+            $target=if($tab.title -cmatch '^MainMenu(?:_uid[0-9]{1,10})?$'){'MainMenu'}elseif($tab.title -cmatch '^QuickAccess(?:_uid[0-9]{1,10})?$'){'QuickAccess'}elseif($tab.title -match '大屏|big.?picture|gamepad.?ui' -or $tab.url -match 'browserType=3'){'SP'}else{''}
+            if($target){[pscustomobject]@{tab=$tab;target=$target}}
+        })
+        $main=@($targets|Where-Object target -ceq 'SP');$auxiliary=@($targets|Where-Object target -cne 'SP')
         if(!$main.Count -or $main.Count -gt 4){throw 'render-main-target-unconfirmed'}
-        $keys=ConvertTo-Json -InputObject @($expected|ForEach-Object {$_.property}) -Compress
-        $fileRows=@($expected|Where-Object kind -eq 'file')
-        $fileKeys=ConvertTo-Json -InputObject @($fileRows|ForEach-Object property) -Compress
-        $expression='(()=>{const e=document.documentElement;if(!e)throw new Error("root missing");const s=getComputedStyle(e),nodes=[...document.querySelectorAll("style.css-loader-style")];if(nodes.length>16384)throw new Error("style count");let size=0;const texts=nodes.map(n=>{const t=n.textContent||"";size+=t.length;if(t.length>262144||size>4194304)throw new Error("style size");return t;});return {protocol:4,ready:document.readyState!=="loading",styles:nodes.length,values:'+ $keys +'.map(k=>s.getPropertyValue(k).trim()),fileCounts:'+ $fileKeys +'.map(k=>{const re=new RegExp(k+"\\s*:","g");return texts.reduce((n,t)=>n+(t.match(re)||[]).length,0)})};})()'
+        if($auxiliary.Count -gt 8){throw 'render-context-target-limit'}
+        $seenTargets=@{}
+        foreach($entry in $targets){
+            if($entry.tab.id -isnot [string] -or $entry.tab.id -cnotmatch '^[A-Za-z0-9_-]{1,128}$' -or $seenTargets.ContainsKey($entry.tab.id)){throw 'render-target-id-invalid'}
+            $seenTargets[$entry.tab.id]=$true
+        }
+        $targetOrder=@($main)+@($auxiliary)
+        $watch=[Diagnostics.Stopwatch]::StartNew()
         $bad=New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
-        $wanted=@($expected|Where-Object enabled).Count -gt 0
-        foreach($tab in $main){
-            if($tab.webSocketDebuggerUrl -notmatch '^ws://127\.0\.0\.1:8080/devtools/page/[A-Za-z0-9_-]+$'){throw 'render-websocket-not-local'}
+        foreach($entry in $targetOrder){
+            $tab=$entry.tab;$target=$entry.target
+            if(!$expectations.ContainsKey($target)){$expectations[$target]=@(Get-AppearanceRenderExpectation $Status $target)}
+            $expected=$expectations[$target]
+            $wanted=@($expected|Where-Object enabled).Count -gt 0
+            $keys=ConvertTo-Json -InputObject @($expected|ForEach-Object {$_.property}) -Compress
+            $fileRows=@($expected|Where-Object kind -eq 'file')
+            $fileKeys=ConvertTo-Json -InputObject @($fileRows|ForEach-Object property) -Compress
+        $expression='(()=>{const e=document.documentElement;if(!e)throw new Error("root missing");const s=getComputedStyle(e),nodes=[...document.querySelectorAll("style.css-loader-style")];if(nodes.length>16384)throw new Error("style count");let size=0;const texts=nodes.map(n=>{const t=n.textContent||"";size+=t.length;if(t.length>262144||size>4194304)throw new Error("style size");return t;});return {protocol:4,ready:document.readyState!=="loading",styles:nodes.length,values:'+ $keys +'.map(k=>s.getPropertyValue(k).trim()),fileCounts:'+ $fileKeys +'.map(k=>{const re=new RegExp(k+"\\s*:","g");return texts.reduce((n,t)=>n+(t.match(re)||[]).length,0)})};})()'
+            $remaining=4000-[int]$watch.ElapsedMilliseconds
+            if($remaining -le 0){throw 'render-context-budget-exhausted'}
+            if($tab.webSocketDebuggerUrl -cne ('ws://127.0.0.1:8080/devtools/page/'+$tab.id)){throw 'render-websocket-not-local'}
             $socket=New-Object Net.WebSockets.ClientWebSocket;$cancel=New-Object Threading.CancellationTokenSource;$stream=New-Object IO.MemoryStream
             try {
-                $cancel.CancelAfter(1000)
+                $cancel.CancelAfter([Math]::Min(1000,$remaining))
                 $socket.ConnectAsync([uri]$tab.webSocketDebuggerUrl,$cancel.Token).GetAwaiter().GetResult()|Out-Null
                 $message=@{id=1;method='Runtime.evaluate';params=@{expression=$expression;returnByValue=$true}}|ConvertTo-Json -Depth 6 -Compress
                 $bytes=[Text.Encoding]::UTF8.GetBytes($message);$segment=New-Object 'System.ArraySegment[byte]' -ArgumentList (,$bytes)
@@ -318,9 +355,10 @@ function Get-AppearanceRenderedStatus($Session,$Status) {
                 }
                 if($wanted -and $reply.styles -eq 0){foreach($row in $expected|Where-Object enabled){$null=$bad.Add([string]$row.name)}}
                 $probe.pages++
+                if($target -ceq 'SP'){$probe.mainPages++}else{$probe.contextPages++}
             }finally {$socket.Abort();$socket.Dispose();$cancel.Dispose();$stream.Dispose()}
         }
-        $probe.checked=$true;$probe.mismatched=@($expected|Where-Object {$bad.Contains([string]$_.name)}|ForEach-Object {$_.name}|Select-Object -Unique)
+        $probe.checked=$true;$probe.mismatched=@($Status.themes|Where-Object {$bad.Contains([string]$_.name)}|ForEach-Object {$_.name}|Select-Object -Unique)
         $probe.confirmed=$probe.mismatched.Count -eq 0
         $probe.reason=if($probe.confirmed){'render-receipts-confirmed'}else{'render-theme-receipts-mismatch'}
     }catch {

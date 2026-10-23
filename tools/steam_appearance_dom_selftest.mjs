@@ -11,23 +11,23 @@ const definitions=Object.fromEntries(names.map(name=>[name,{manifest:JSON.parse(
 function configFor(name,opts,render=false){const c={...definitions[name].config,...opts.configOverrides?.[name],...(render?opts.renderConfigOverrides?.[name]:{})};if(opts.missingConfigKey?.name===name)delete c[opts.missingConfigKey.key];if(opts.disabled)c.active=false;return c;}
 // Independent expected-selection fixture: it uses actual theme/config values,
 // while the plan under test is produced by the exact PowerShell implementation.
-function selectedFiles(name,config){const m=definitions[name].manifest,set=new Set();const collect=map=>{for(const [file,tabs] of Object.entries(map??{}))if(!file.startsWith('--')&&Array.isArray(tabs)&&tabs.includes('SP'))set.add(file)};collect(m.inject);for(const [label,patch] of Object.entries(m.patches??{}))collect(patch.values[Object.hasOwn(config,label)?config[label]:patch.default]);return [...set].map(file=>name+'/'+file);}
-function selectedVariables(name,config){const m=definitions[name].manifest,vars={};const collect=map=>{for(const[key,tokens]of Object.entries(map??{}))if(key.startsWith('--')&&tokens.slice(1).includes('SP'))vars[key]=tokens[0];};collect(m.inject);for(const[label,patch]of Object.entries(m.patches??{}))collect(patch.values[Object.hasOwn(config,label)?config[label]:patch.default]);return vars;}
-function variableCss(name,config,opts={},id=''){const vars={...(config.active===false?{}:selectedVariables(name,config)),...opts.variableOverrides?.[name]};for(const key of [...(opts.missingVariables??[]),...(opts.targetMissingVariables?.[id]??[])])delete vars[key];return ':root{'+Object.entries(vars).map(([key,value])=>key+':'+value+';').join('')+'}';}
+function selectedFiles(name,config,family='SP'){const m=definitions[name].manifest,set=new Set();const collect=map=>{for(const [file,tabs] of Object.entries(map??{}))if(!file.startsWith('--')&&Array.isArray(tabs)&&tabs.includes(family))set.add(file)};collect(m.inject);for(const [label,patch] of Object.entries(m.patches??{}))collect(patch.values[Object.hasOwn(config,label)?config[label]:patch.default]);return [...set].map(file=>name+'/'+file);}
+function selectedVariables(name,config,family='SP'){const m=definitions[name].manifest,vars={};const collect=map=>{for(const[key,tokens]of Object.entries(map??{}))if(key.startsWith('--')&&tokens.slice(1).includes(family))vars[key]=tokens[0];};collect(m.inject);for(const[label,patch]of Object.entries(m.patches??{}))collect(patch.values[Object.hasOwn(config,label)?config[label]:patch.default]);return vars;}
+function variableCss(name,config,opts={},id='',family='SP'){const vars={...(config.active===false?{}:selectedVariables(name,config,family)),...(family==='SP'?opts.variableOverrides?.[name]:{}),...opts.targetVariableOverrides?.[id]?.[name]};for(const key of [...(family==='SP'?(opts.missingVariables??[]):[]),...(opts.targetMissingVariables?.[id]??[])])delete vars[key];return ':root{'+Object.entries(vars).map(([key,value])=>key+':'+value+';').join('')+'}';}
 const defaultPatchFiles=names.flatMap(name=>selectedFiles(name,definitions[name].config)).filter(file=>!file.endsWith('/shared.css'));
 const sourceHashes=Object.fromEntries(names.map(name=>{const file=path.join(pack,'themes',name,'shared.css');return [path.relative(root,file).replaceAll('\\','/'),crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex')]}));
 for(const relative of ['PowerControl/steam-appearance/idle.ps1','PowerControl/steam-appearance.ps1','PowerControl/steam-appearance/manifest.json'])sourceHashes[relative]=crypto.createHash('sha256').update(fs.readFileSync(path.join(root,relative))).digest('hex');
 let scenario={},port=0,queries=0,frames=0,expressions=[],themeWrites=[],visualSnapshots=[];const sockets=new Set(),pagesByTarget=new Map(),failures=[];
+const familyFor=(id)=>{const tab=(scenario.pages??[]).find(p=>p.id===id);const title=tab?.title||(id==='popup'?'QuickAccess':'');return /^MainMenu(?:_uid\d+)?$/.test(title)?'MainMenu':/^QuickAccess(?:_uid\d+)?$/.test(title)?'QuickAccess':'SP'};
 const page=(id,title='Steam Big Picture')=>({id,type:'page',title,url:'about:blank?browserType=3',webSocketDebuggerUrl:`ws://127.0.0.1:${port}/devtools/page/${id}`});
 const server=http.createServer((req,res)=>{
  if(req.url==='/fixture/apply'){
   let text='';req.on('data',b=>{text+=b;if(text.length>4096)req.destroy()});req.on('end',()=>{void(async()=>{
    const request=JSON.parse(text);assert(names.includes(request.name));assert.equal(typeof request.state,'boolean');themeWrites.push({name:request.name,state:request.state});
-   if(!scenario.keepMissing){const files=request.state?selectedFiles(request.name,configFor(request.name,scenario)):[];const content=files.map(file=>({file,css:fs.readFileSync(path.join(pack,'themes',file),'utf8')}));if(request.state)content.push({file:'variables',css:variableCss(request.name,configFor(request.name,scenario),scenario.keepVariables?scenario:{})});
-    for(const target of pagesByTarget.values())await target.evaluate(({name,files})=>{
-     for(const old of [...document.querySelectorAll('style[data-fixture-theme]')])if(old.getAttribute('data-fixture-theme')===name)old.remove();
-     for(const file of files){const style=document.createElement('style');style.className='css-loader-style';style.setAttribute('data-fixture-theme',name);style.textContent=file.css;document.head.appendChild(style);}
-    },{name:request.name,files:content});
+   if(!scenario.keepMissing){
+    for(const [id,target]of pagesByTarget){const family=familyFor(id),files=request.state?selectedFiles(request.name,configFor(request.name,scenario),family):[],content=files.map(file=>({file,css:fs.readFileSync(path.join(pack,'themes',file),'utf8')}));if(request.state)content.push({file:'variables',css:variableCss(request.name,configFor(request.name,scenario),scenario.keepVariables?scenario:{},id,family)});
+     await target.evaluate(({name,files})=>{for(const old of [...document.querySelectorAll('style[data-fixture-theme]')])if(old.getAttribute('data-fixture-theme')===name)old.remove();for(const file of files){const style=document.createElement('style');style.className='css-loader-style';style.setAttribute('data-fixture-theme',name);style.textContent=file.css;document.head.appendChild(style);}}, {name:request.name,files:content});
+    }
    }
    res.writeHead(200,{'Content-Type':'application/json'});res.end('{"ok":true}');
   })().catch(error=>{failures.push(String(error));res.writeHead(500);res.end()})});return;
@@ -40,11 +40,11 @@ const server=http.createServer((req,res)=>{
 function send(socket,value){if(socket.destroyed)return;const body=Buffer.from(JSON.stringify(value));assert(body.length<=65535);let header;if(body.length<126)header=Buffer.from([0x81,body.length]);else{header=Buffer.alloc(4);header[0]=0x81;header[1]=126;header.writeUInt16BE(body.length,2)}socket.write(Buffer.concat([header,body]));}
 async function renderTarget(id){
  if(pagesByTarget.has(id))return pagesByTarget.get(id);
- const created=await context.newPage();pagesByTarget.set(id,created);
+ const created=await context.newPage();pagesByTarget.set(id,created);const family=familyFor(id);
  let included=scenario.included??(scenario.disabled?[]:names);
  included=included.filter(name=>!(scenario.missing??[]).includes(name)&&!(scenario.targetMissing?.[id]??[]).includes(name));
- let files=included.flatMap(name=>selectedFiles(name,configFor(name,scenario,true)));
- files=files.filter(file=>!(scenario.missingFiles??[]).includes(file)&&!(scenario.targetMissingFiles?.[id]??[]).includes(file));files.push(...(scenario.extraFiles??[]));
+ let files=included.flatMap(name=>selectedFiles(name,configFor(name,scenario,true),family));
+ files=files.filter(file=>!(scenario.missingFiles??[]).includes(file)&&!(scenario.targetMissingFiles?.[id]??[]).includes(file));files.push(...(scenario.extraFiles??[]),...(scenario.targetExtraFiles?.[id]??[]));
   let css=files.map(file=>{
   const current=fs.readFileSync(path.join(pack,'themes',file),'utf8');let body=current;
   if((scenario.staleContentFiles??[]).includes(file)){body=current.replace(/--ymcc-content-[0-9a-f]{16}/g,'--ymcc-content-0000000000000000');if(file==='Round/round-outline.css')body=body.replaceAll('animation: none !important;','animation: fixture_twitch 1.2s ease-in-out infinite;')+'\n@keyframes fixture_twitch {50%{opacity:.25}}';}
@@ -52,7 +52,7 @@ async function renderTarget(id){
   const copies=(scenario.duplicateFiles??[]).includes(file)?2:1;
   return Array.from({length:copies},()=>'<style class="css-loader-style" data-fixture-theme="'+file.split('/')[0]+'">'+body+'</style>').join('\n');
  }).join('\n');
- for(const name of new Set([...included,...Object.keys(scenario.variableOverrides??{})])){const value=variableCss(name,included.includes(name)?configFor(name,scenario,true):{active:false},scenario,id);css+=`<style class="css-loader-style" data-fixture-theme="${name}">${value}</style>`;}
+ for(const name of new Set([...included,...Object.keys(scenario.variableOverrides??{})])){const value=variableCss(name,included.includes(name)?configFor(name,scenario,true):{active:false},scenario,id,family);css+=`<style class="css-loader-style" data-fixture-theme="${name}">${value}</style>`;}
  const extras=scenario.extraStyles??0;for(let i=0;i<extras;i++)css+='<style class="css-loader-style">.fixture-unrelated { color: red; }</style>';
  await created.setContent('<!doctype html><html><head>'+css+'</head><body class="BasicUI"><div>Owned CSS fixture</div><div id="proof-round" class="DialogInput">Actual rounded surface</div><div id="proof-ring" class="focusring_FocusRing_1IZrQ">Actual focus border</div><div id="proof-carousel" class="basicgamecarousel_BasicGameCarousel_3MdH5">Actual carousel</div></body></html>');
  return created;
@@ -61,8 +61,9 @@ async function reply(req,socket,request){
  assert.equal(request.method,'Runtime.evaluate');assert.equal(request.params.returnByValue,true);assert.equal(typeof request.params.expression,'string');++frames;expressions.push(request.params.expression);
  if(scenario.unrelated)send(socket,{method:'Runtime.consoleAPICalled'});
  if(scenario.rpcError){send(socket,{id:request.id,error:{code:-32000,message:'fixture rejected'}});return;}
+ if(scenario.targetRpcError?.includes(req.url.split('/').at(-1))){send(socket,{id:request.id,error:{code:-32000,message:'target closed'}});return;}
  const target=await renderTarget(req.url.split('/').at(-1));
- visualSnapshots.push(await target.evaluate(()=>({roundRadius:getComputedStyle(document.getElementById('proof-round')).borderRadius,ringAnimation:getComputedStyle(document.getElementById('proof-ring')).animationName,carouselTransform:getComputedStyle(document.getElementById('proof-carousel')).transform,scaleValue:getComputedStyle(document.documentElement).getPropertyValue('--scale-value').trim()})));
+ visualSnapshots.push({target:familyFor(req.url.split('/').at(-1)),...await target.evaluate(()=>({roundRadius:getComputedStyle(document.getElementById('proof-round')).borderRadius,ringAnimation:getComputedStyle(document.getElementById('proof-ring')).animationName,carouselTransform:getComputedStyle(document.getElementById('proof-carousel')).transform,scaleValue:getComputedStyle(document.documentElement).getPropertyValue('--scale-value').trim()}))});
  let value;try{value=await target.evaluate(request.params.expression);}catch(error){send(socket,{id:request.id,result:{exceptionDetails:{text:String(error)},result:{type:'undefined'}}});return;}
  if(scenario.badProtocol&&value&&typeof value==='object')value.protocol=99;
  if(scenario.notReady&&value&&typeof value==='object')value.ready=false;
@@ -86,7 +87,7 @@ server.on('upgrade',(req,socket)=>{
 });
 await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));port=server.address().port;
 const cases=[];
-async function probe(name,opts={},moduleFile=path.join(pack,'idle.ps1')){
+async function probe(name,opts={},moduleFile=process.env.YMCC_DOM_MODULE_OVERRIDE||path.join(pack,'idle.ps1')){
  for(const p of pagesByTarget.values())await p.close();pagesByTarget.clear();scenario={...opts};queries=0;frames=0;expressions=[];themeWrites=[];visualSnapshots=[];
  const module=fs.readFileSync(moduleFile,'utf8').replaceAll('8080',String(port)),target=path.join(out,name+'-idle.ps1');fs.writeFileSync(target,'\ufeff'+module.replace(/^\ufeff/,''));
  const wrapper=path.join(out,name+'.ps1'),result=path.join(out,name+'.json');
@@ -102,7 +103,7 @@ function Test-CurrentUserProcess($p){__OWNER__}
 $inputs=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('__STATUS__'))|ConvertFrom-Json
 $status=[pscustomobject]@{themes=@(foreach($item in $inputs){
  $plan=$null;$planError=''
- try {if(Get-Command Get-AppearanceThemeRenderPlan -ErrorAction SilentlyContinue){$plan=Get-AppearanceThemeRenderPlan $item.name $item.manifest $item.config}}catch{$planError=$_.Exception.Message}
+ try {if(Get-Command Get-AppearanceThemeRenderPlan -ErrorAction SilentlyContinue){$plan=Get-AppearanceThemeRenderPlan $item.name $item.manifest $item.config;if(__BAD_CONTEXT_PLAN__){$plan.contextProtocol=$true}}}catch{$planError=$_.Exception.Message}
  [pscustomobject]@{name=$item.name;installed=$true;configured=$item.config.active;error=$planError;renderPlan=$plan}
 })}
 $session=[pscustomobject]@{root='C:\fixture\Steam';pid=42;birth='100'}
@@ -148,15 +149,34 @@ if(__REPAIR__){
 $variableDefaults=@{};if(Get-Command Get-AppearanceVariableDefaults -ErrorAction SilentlyContinue){foreach($item in $inputs){$variableDefaults[$item.name]=Get-AppearanceVariableDefaults $item.name}}
 [pscustomobject]@{variableDefaults=$variableDefaults;confirmed=[bool]$value;receipt=$observed;repairOk=$(if($repairResult){[bool]$repairResult.ok}else{$null});repairMessage=$repairMessage;powerShell=$PSVersionTable.PSVersion.ToString();elapsedMs=$timer.ElapsedMilliseconds}|ConvertTo-Json -Depth 8|Set-Content -LiteralPath '__RESULT__' -Encoding UTF8
 `;
- fs.writeFileSync(wrapper,'\ufeff'+ps.replace('__MODULE__',target.replaceAll("'","''")).replace('__CONTENT_MANIFEST__',path.join(pack,'manifest.json').replaceAll("'","''")).replace('__RESULT__',result.replaceAll("'","''")).replace('__ADDRESS__',opts.address||'127.0.0.1').replace('__IMAGE__',opts.wrongOwnerPath?'other.exe':'bin\\cef\\steamwebhelper.exe').replace('__OWNER__',opts.foreignOwner?'$false':'$true').replace('__STATUS__',encoded).replace('__WRAPPER__',opts.wrapper?'$true':'$false').replace('__REPAIR__',opts.repair?'$true':'$false').replace('__PORT__',String(port)).replace('__EDITOR_RACE__',opts.editorRace?'$true':'$false').replace('__CONFIG_RACE__',opts.configRace?'$true':'$false').replace('__CONTROL__',path.join(root,'PowerControl/steam-appearance.ps1').replaceAll("'","''")));
+ fs.writeFileSync(wrapper,'\ufeff'+ps.replace('__MODULE__',target.replaceAll("'","''")).replace('__CONTENT_MANIFEST__',path.join(pack,'manifest.json').replaceAll("'","''")).replace('__RESULT__',result.replaceAll("'","''")).replace('__ADDRESS__',opts.address||'127.0.0.1').replace('__IMAGE__',opts.wrongOwnerPath?'other.exe':'bin\\cef\\steamwebhelper.exe').replace('__OWNER__',opts.foreignOwner?'$false':'$true').replace('__STATUS__',encoded).replace('__BAD_CONTEXT_PLAN__',opts.badContextPlan?'$true':'$false').replace('__WRAPPER__',opts.wrapper?'$true':'$false').replace('__REPAIR__',opts.repair?'$true':'$false').replace('__PORT__',String(port)).replace('__EDITOR_RACE__',opts.editorRace?'$true':'$false').replace('__CONFIG_RACE__',opts.configRace?'$true':'$false').replace('__CONTROL__',path.join(root,'PowerControl/steam-appearance.ps1').replaceAll("'","''")));
  await exec(process.env.YMCC_DOM_POWERSHELL||'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe',['-NoLogo','-NoProfile','-ExecutionPolicy','Bypass','-File',wrapper],{windowsHide:true,timeout:15000});
  const row={name,...JSON.parse(fs.readFileSync(result,'utf8').replace(/^\ufeff/,'')),queries,frames,expressions,themeWrites:[...themeWrites],visualSnapshots:[...visualSnapshots]};cases.push(row);return row;
 }
 try{
  if(process.argv[3]){const old=await probe('before-missing-active-patch',{missingFiles:['Round/intensity/10px.css']},path.resolve(process.argv[3]));assert.equal(old.confirmed,true);assert.equal(old.frames,1);console.log('EXPECTED_OLD_FALSE_POSITIVE: eight shared theme receipts passed while the selected Round intensity CSS was missing');}
  if(process.env.YMCC_VARIABLE_BEFORE_MODULE){const old=await probe('before-missing-selected-variable',{configOverrides:{'Mini Carousel':{Size:'0.9'}},missingVariables:['--scale-value']},path.resolve(process.env.YMCC_VARIABLE_BEFORE_MODULE));assert.equal(old.confirmed,true);assert.equal(old.visualSnapshots[0].scaleValue,'0.7');console.log('EXPECTED_OLD_FALSE_POSITIVE: selected 0.9, variable missing, actual scale 0.7');}
+ if(process.env.YMCC_CONTEXT_BEFORE_MODULE){const old=await probe('before-menu-only-missing',{pages:[page('main'),{...page('menu','MainMenu_uid1'),url:'about:blank?popup=1'}],targetMissingFiles:{menu:['Round/round-outline.css']}},path.resolve(process.env.YMCC_CONTEXT_BEFORE_MODULE));assert.equal(old.confirmed,true);assert.equal(old.frames,1);console.log('EXPECTED_OLD_FALSE_POSITIVE: main page matches while the independent MainMenu focus CSS is missing');}
  if(process.env.YMCC_CONTENT_BEFORE_MODULE){const old=await probe('before-stale-content-current-path',{staleContentFiles:['Round/round-outline.css']},path.resolve(process.env.YMCC_CONTENT_BEFORE_MODULE));assert.equal(old.confirmed,true);assert.equal(old.frames,1);assert.equal(old.visualSnapshots[0].ringAnimation,'fixture_twitch');console.log('EXPECTED_OLD_FALSE_POSITIVE: previous path-only receipt accepts the same CSS path while an obsolete focus animation is actually running');}
  const scenarios=[
+  ['contexts-only-main-document',{pages:[page('main')]},true],
+  ['contexts-disabled-all',{disabled:true,pages:[page('main'),{...page('menu','MainMenu_uid1'),url:'about:blank?popup=1'}]},true],
+  ['contexts-reject-boolean-plan-protocol',{badContextPlan:true,pages:[page('main'),{...page('menu','MainMenu_uid1'),url:'about:blank?popup=1'}]},false],
+  ['contexts-reject-menu-foreign-websocket',{pages:[page('main'),{...page('menu','MainMenu_uid1'),url:'about:blank?popup=1',webSocketDebuggerUrl:'ws://example.invalid:8080/devtools/page/menu'}]},false],
+  ['contexts-reject-duplicate-target-id',{pages:[page('main'),{...page('main','MainMenu_uid1'),url:'about:blank?popup=1'}]},false],
+  ['contexts-reject-menu-without-main',{pages:[{...page('menu','MainMenu_uid1'),url:'about:blank?popup=1'}]},false],
+  ['contexts-ignore-unrecognized-menu-title',{pages:[page('main'),{...page('other','MainMenu_invalid'),url:'about:blank?popup=1'}]},true],
+  ['contexts-closed-menu-stays-unconfirmed',{repair:true,pages:[page('main'),{...page('menu','MainMenu_uid1'),url:'about:blank?popup=1'}],targetRpcError:['menu'],expectedWrites:[]},false],
+  ['contexts-SP-file-leaked-into-menu',{pages:[page('main'),{...page('menu','MainMenu_uid1'),url:'about:blank?popup=1'}],targetExtraFiles:{menu:['Mini Carousel/shared.css']}},false],
+  ['contexts-SP-variable-leaked-into-menu',{pages:[page('main'),{...page('menu','MainMenu_uid1'),url:'about:blank?popup=1'}],targetVariableOverrides:{menu:{'Mini Carousel':{'--scale-value':'0.9'}}}},false],
+  ['contexts-repair-SP-variable-leak',{repair:true,pages:[page('main'),{...page('menu','MainMenu_uid1'),url:'about:blank?popup=1'}],targetVariableOverrides:{menu:{'Mini Carousel':{'--scale-value':'0.9'}}},expectedWrites:['Mini Carousel']},true],
+  ['contexts-main-menu-only-missing',{pages:[page('main'),{...page('menu','MainMenu_uid1'),url:'about:blank?popup=1'}],targetMissingFiles:{menu:['Round/round-outline.css']}},false],
+  ['contexts-quickaccess-only-missing',{pages:[page('main'),{...page('quick','QuickAccess_uid2'),url:'about:blank?popup=1'}],targetMissingFiles:{quick:['Round/intensity/10px.css']}},false],
+  ['contexts-two-menu-uids',{pages:[page('main'),{...page('menu1','MainMenu_uid1'),url:'about:blank?popup=1'},{...page('menu2','MainMenu_uid2'),url:'about:blank?popup=1'},{...page('quick1','QuickAccess_uid1'),url:'about:blank?popup=1'},{...page('quick2','QuickAccess_uid2'),url:'about:blank?popup=1'}]},true],
+  ['contexts-repair-menu-focus',{repair:true,pages:[page('main'),{...page('menu','MainMenu_uid1'),url:'about:blank?popup=1'}],targetMissingFiles:{menu:['Round/round-outline.css']},expectedWrites:['Round']},true],
+  ['contexts-repair-same-theme-two-documents',{repair:true,pages:[page('main'),{...page('menu','MainMenu_uid1'),url:'about:blank?popup=1'},{...page('quick','QuickAccess_uid1'),url:'about:blank?popup=1'}],targetMissingFiles:{menu:['Round/round-outline.css'],quick:['Round/shared.css']},expectedWrites:['Round']},true],
+  ['contexts-excess-menu-targets',{pages:[page('main'),...Array.from({length:9},(_,i)=>({...page('m'+i,'MainMenu_uid'+i),url:'about:blank?popup=1'}))]},false],
+
   ['healthy-all-eight',{},true],['boolean-wrapper-healthy',{wrapper:true},true],['boolean-wrapper-partial',{wrapper:true,included:[names[0]]},false],['single-page',{pages:[page('only')]},true],['unrelated-events',{unrelated:true},true],
   ['one-of-eight-only',{included:[names[0]],extraStyles:31},false],['no-themes',{included:[]},false],
   ['all-disabled',{disabled:true},true],['all-disabled-with-unrelated-style',{disabled:true,extraStyles:1},true],['disabled-stale-theme',{disabled:true,included:[names[1]]},false],
@@ -207,16 +227,16 @@ try{
   ['incomplete-receipt',{truncatedValues:true},false],['non-string-receipt',{nonStringValue:true},false],['document-still-loading',{notReady:true},false],
   ['incomplete-config-snapshot',{badSnapshot:true},false],['invalid-config-value',{badConfigured:true},false]
  ];
- const selectedScenarios=process.env.YMCC_CONTENT_DOM_ONLY==='1'?scenarios.filter(([name])=>/healthy-all-eight|stale-file-current-path|stale-two-files|duplicate-exact-current-file|duplicate-within-current-style|repair-stale-current-path|repair-duplicate-current-file|repair-stale-content-silently-fails/.test(name)):scenarios;
- for(const [name,opts,expected] of selectedScenarios){const row=await probe(name,opts);assert.equal(row.confirmed,expected,name+' '+row.receipt?.reason);assert(row.queries<=(opts.repair?4:1),name+' repeated target query');if(opts.repair)assert.deepEqual(row.themeWrites.map(write=>write.name),opts.expectedWrites,name+' unrelated or repeated theme write');if(expected){assert(row.frames>=1&&row.frames<=(opts.repair?8:2));assert(row.powerShell.startsWith(process.env.YMCC_DOM_POWERSHELL?'7.':'5.1.'));if(!opts.wrapper)assert.equal(row.receipt.checked,true);}if(name.startsWith('missing-managed-theme-')||name.startsWith('missing-active-patch-')){assert.equal(row.receipt.checked,true);assert.equal(row.receipt.mismatched.length,1);}if(['repair-one-active-patch','repair-two-patches-one-theme','repair-two-themes'].includes(name)){assert.equal(row.visualSnapshots[0].roundRadius,'0px');assert.equal(row.visualSnapshots.at(-1).roundRadius,'10px');}
- if(name==='repair-old-option-residue'){assert.equal(row.visualSnapshots[0].roundRadius,'10px');assert.equal(row.visualSnapshots.at(-1).roundRadius,'30px');}
- if(name==='repair-backend-silently-fails'){assert.equal(row.visualSnapshots[0].roundRadius,'0px');assert.equal(row.visualSnapshots.at(-1).roundRadius,'0px');}
- if(name==='repair-selected-variable'){assert.equal(row.visualSnapshots[0].carouselTransform,'matrix(0.7, 0, 0, 0.7, 0, 0)');assert.equal(row.visualSnapshots.at(-1).carouselTransform,'matrix(0.9, 0, 0, 0.9, 0, 0)');}
- if(name==='repair-variable-silently-fails'){assert.equal(row.visualSnapshots.at(-1).scaleValue,'0.7');}
- if(name==='repair-stale-current-path'){assert.equal(row.visualSnapshots[0].ringAnimation,'fixture_twitch');assert.equal(row.visualSnapshots.at(-1).ringAnimation,'none');}
- if(name==='repair-stale-content-silently-fails')assert.equal(row.visualSnapshots.at(-1).ringAnimation,'fixture_twitch');
+ const selectedScenarios=process.env.YMCC_CONTEXT_DOM_ONLY==='1'?scenarios.filter(([name])=>name.startsWith('contexts-')):process.env.YMCC_CONTENT_DOM_ONLY==='1'?scenarios.filter(([name])=>/healthy-all-eight|stale-file-current-path|stale-two-files|duplicate-exact-current-file|duplicate-within-current-style|repair-stale-current-path|repair-duplicate-current-file|repair-stale-content-silently-fails/.test(name)):scenarios;
+ for(const [name,opts,expected] of selectedScenarios){const row=await probe(name,opts);assert.equal(row.confirmed,expected,name+' '+row.receipt?.reason);assert(row.queries<=(opts.repair?4:1),name+' repeated target query');if(opts.repair)assert.deepEqual(row.themeWrites.map(write=>write.name),opts.expectedWrites,name+' unrelated or repeated theme write');if(expected){const documents=opts.pages?opts.pages.filter(t=>t?.type==='page'&&(/browserType=3/.test(t.url)||/^(MainMenu|QuickAccess)/.test(t.title))).length:2;assert(row.frames>=1&&row.frames<=(opts.repair?4:1)*documents);assert(row.powerShell.startsWith(process.env.YMCC_DOM_POWERSHELL?'7.':'5.1.'));if(!opts.wrapper)assert.equal(row.receipt.checked,true);}if(name.startsWith('missing-managed-theme-')||name.startsWith('missing-active-patch-')){assert.equal(row.receipt.checked,true);assert.equal(row.receipt.mismatched.length,1);}if(['repair-one-active-patch','repair-two-patches-one-theme','repair-two-themes'].includes(name)){assert.equal(row.visualSnapshots.find(v=>v.target==='SP').roundRadius,'0px');assert.equal(row.visualSnapshots.filter(v=>v.target==='SP').at(-1).roundRadius,'10px');}
+ if(name==='repair-old-option-residue'){assert.equal(row.visualSnapshots.find(v=>v.target==='SP').roundRadius,'10px');assert.equal(row.visualSnapshots.filter(v=>v.target==='SP').at(-1).roundRadius,'30px');}
+ if(name==='repair-backend-silently-fails'){assert.equal(row.visualSnapshots.find(v=>v.target==='SP').roundRadius,'0px');assert.equal(row.visualSnapshots.filter(v=>v.target==='SP').at(-1).roundRadius,'0px');}
+ if(name==='repair-selected-variable'){assert.equal(row.visualSnapshots.find(v=>v.target==='SP').carouselTransform,'matrix(0.7, 0, 0, 0.7, 0, 0)');assert.equal(row.visualSnapshots.filter(v=>v.target==='SP').at(-1).carouselTransform,'matrix(0.9, 0, 0, 0.9, 0, 0)');}
+ if(name==='repair-variable-silently-fails'){assert.equal(row.visualSnapshots.filter(v=>v.target==='SP').at(-1).scaleValue,'0.7');}
+ if(name==='repair-stale-current-path'){assert.equal(row.visualSnapshots.find(v=>v.target==='SP').ringAnimation,'fixture_twitch');assert.equal(row.visualSnapshots.filter(v=>v.target==='SP').at(-1).ringAnimation,'none');}
+ if(name==='repair-stale-content-silently-fails')assert.equal(row.visualSnapshots.filter(v=>v.target==='SP').at(-1).ringAnimation,'fixture_twitch');
  assert.deepEqual(failures,[]);console.log('PASS '+name+' confirmed='+row.confirmed+' HTTP='+row.queries+' CDP='+row.frames);}
- const actualDefaults=cases.find(row=>row.name==='healthy-all-eight').variableDefaults,baselineChecks=[];
+ const actualDefaults=cases[0].variableDefaults,baselineChecks=[];
  for(const[name,variables]of Object.entries(actualDefaults)){const target=await context.newPage();await target.setContent('<style>'+fs.readFileSync(path.join(pack,'themes',name,'shared.css'),'utf8')+'</style>');const actual=await target.evaluate(keys=>Object.fromEntries(keys.map(key=>[key,getComputedStyle(document.documentElement).getPropertyValue(key).trim()])),Object.keys(variables));assert.deepEqual(actual,variables,'Canonical baseline drift '+name);baselineChecks.push({name,variables:actual});await target.close();}
  const assetReceiptChecks=[];const assetPage=await context.newPage();
  for(const file of manifest.files.filter(row=>/\.css$/i.test(row.path))){
