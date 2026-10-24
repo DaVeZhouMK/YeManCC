@@ -1,69 +1,44 @@
-# 野蛮系统控制中心 YeManCC
+# YeManCC · 野蛮系统控制台
 
-野蛮系统控制中心（YeManCC）是一款面向 Windows 游戏设备和高性能电脑的综合控制工具，帮助用户集中管理性能、功耗、CPU、游戏、Steam 大屏和系统启动项。
+**简体中文** | [English](README.en.md)
 
-## 主要功能
+## 把 SteamOS 的顺手，带进 Windows。
 
-- 性能调度：自动或手动切换多档性能配置。
-- TDP 功耗控制：调节功耗上限、FPS 目标和自动应用策略。
-- CPU 调度：管理 CPU 性能档位、睿频、核心和电源方案。
-- 游戏监控：查看游戏、FPS、功耗、温度和 CPU/GPU 状态。
-- 游戏暂停与恢复：睡眠前暂停游戏，唤醒后自动恢复。
-- Windows 睡眠与现代待机：电源键触发的睡眠事务、S0 低功耗诊断和受控恢复。
-- Steam 大屏：启动 Steam 大屏模式，并管理相关启动项。
-- 模拟鼠标：支持 JoyXoff 和微软鼠标方案。
-- 开机启动：管理 YeManCC、RTSS、JoyXoff 等常用程序。
-- 快捷应用：音乐播放、显示设置、游戏加速、FSR 4.1 等功能。
-- 支持自定义游戏配置，为不同游戏保存独立的性能方案。
+**让 Steam 成为你的掌机主场。**
 
+YeManCC（YMCC）是一款面向 Windows PC 掌机的开源控制台。围绕 Steam 大屏，把手柄操控、屏幕触摸板、性能散热、动态外观和游戏增强整合到一起。配合野蛮系统，让选游戏、调设置、回到游戏连贯完成。
 
-<img width="1036" height="1029" alt="屏幕截图 2026-08-13 133255" src="https://github.com/user-attachments/assets/bd6294c8-3edc-44fe-bc93-8c44d97b63ee" />
+![YeManCC 掌机场景：ROG 掌机上的 Steam 大屏](docs/images/ymcc-handheld-overview.jpg)
 
+*掌机场景为照片与 H5 界面的合成示意。功能以所下载版本和设备支持情况为准。*
 
-## 下载
+## 你能用它做什么
 
-推荐从野蛮系统主页下载完整系统和手动优化包：
+| 能力 | 带来的便利 |
+| --- | --- |
+| **让游戏重新集结** | 将非 Steam 游戏加入 Steam，统一浏览、启动并整理游戏封面与背景。 |
+| **用掌机的方式操作** | 全手柄导航，屏幕双触摸板接入 Steam 映射，配合陀螺仪和自定义按键。 |
+| **在 Steam 里随手调节** | 通过 YMCC Decky 侧栏调整功耗、锁帧、风扇与常用操控选项。 |
+| **性能跟着玩法走** | 自动或手动调度，插电与电池分别设置，也能为游戏保存专属方案。 |
+| **让游戏库动起来** | 自动获取动态壁纸，搭配首页布局、封面倒影与大屏美化。 |
+| **状态看得清，样式自己定** | 组织帧率、功耗、温度等监控信息，按需选择外观、位置和显示内容。 |
+| **常用增强集中使用** | 整合 OptiScaler FSR / XeSS、小黄鸭缩放插帧、游戏变速和修改器入口。 |
+| **照顾 Windows 掌机日常** | 睡前暂停、醒后恢复原游戏，并集中管理启动项、显示与快捷应用。 |
 
+## 0.0.36 准备内容
 
-请优先使用主页提供的完整系统包，避免因缺少运行组件导致程序无法正常工作。
+本轮围绕**开机模式与整套预设、实体手柄自定义、Steam 外观与联动、游戏增强和更新诊断**整理下一版体验。介绍与中英文发布稿已备好，正式内容以发布包为准。
 
-睡眠接口规范见：`G:\YeManCC-Work\Docs\Research\Sleep\YMCC-SLEEP-MODERN-STANDBY.md`。
-该规范区分电源键意图、确认挂起、S0 低功耗会话和实际唤醒；不得仅凭屏幕关闭或风扇转速判断睡眠结果。
+[查看 0.0.36 中文发布稿](docs/release-notes/v0.0.36.md) · [English release draft](docs/release-notes/v0.0.36.en.md)
 
-## 安装方法
+## 下载与开始使用
 
-1. 下载正式 Release 附件 **`YeManCC.zip`**；这是完整程序包，也是自动升级器使用的唯一包名。
-2. 解压到 `C:\SOFT\YeMan`，保持以下目录结构，不要把所有文件展平：
+从 [Releases](https://github.com/DaVeZhouMK/YeManCC/releases) 获取完整安装包 **YeManCC.zip**。配合野蛮系统及所需组件使用，可减少环境配置。
 
-   ```text
-   C:\SOFT\YeMan\
-   ├─ YeManCC\
-   │  ├─ YeManCC.exe
-   │  ├─ update-manifest.json
-   │  └─ CustomSteamLibrary\
-   │     ├─ CustomSteamLibrary.exe
-   │     ├─ SteamArtworkLab.exe
-   │     └─ package-manifest.json
-   └─ PowerControl\
-      ├─ fan-host-v2\
-      ├─ handheldcompanion-runtime\
-      └─ pawnio\
-   ```
+[安装与构建说明](docs/getting-started.zh-CN.md) · [反馈问题](https://github.com/DaVeZhouMK/YeManCC/issues)
 
-3. 运行 `C:\SOFT\YeMan\YeManCC\YeManCC.exe`。ZIP 根目录以包内 `YeManCC/update-manifest.json` 为准；不要手动改动已锁定风扇文件。
+硬件控制、游戏增强和监控输出按机型、游戏及相关工具提供；触摸轮盘为测试功能。项目持续完善低后台开销与掌机操作体验，性能和续航表现以实测为准。
 
-028 自动升级沿用 `YeManCC.zip`。033 使用 `PowerControl/fan-host-v2`，旧安装中的 `fan-host` 保留但不是新版本运行回退。更新过程保留用户配置、数据及清单之外的文件；仍建议更新前备份。
+## 开源
 
-## 源码构建
-
-需要 Windows x64、Node.js 22、pnpm 11.16.0、.NET 10 SDK，以及 Visual Studio C++ Build Tools 和 Windows SDK。InputHost 的批准依赖现位于仓库内，不再依赖开发机的 Archives 目录。
-
-```powershell
-pnpm install --frozen-lockfile
-pnpm run build
-pnpm run package
-```
-
-使用 Git 的 `main` checkout，保持仓库中的锁定载荷原始字节。发布 CI 使用 tag 的 detached checkout。独立源码 ZIP 用于审查/归档；发布前以批准的 Git checkout 及重新构建结果为准。构建/打包只产生工作区文件，不部署实际安装。
-
-更新记录见 `docs/release-notes/v0.0.33.md`。
+YeManCC 采用 [GPL v3](LICENSE)。欢迎反馈、贡献和按需定制；第三方工具遵循各自授权。
