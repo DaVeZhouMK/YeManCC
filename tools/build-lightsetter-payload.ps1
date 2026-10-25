@@ -22,13 +22,17 @@ function Relative([string]$file){$full=[IO.Path]::GetFullPath($file);if(-not $fu
 function Reference([string]$file){[pscustomobject]@{path=(Relative $file);sha256=(Get-YmccLightingFileHash $file)}}
 function Run([string]$name,[string]$exe,[string[]]$arguments){
  $info=[Diagnostics.ProcessStartInfo]::new();$info.FileName=$exe;$info.UseShellExecute=$false;$info.CreateNoWindow=$true;$info.RedirectStandardOutput=$true;$info.RedirectStandardError=$true;$info.WorkingDirectory=$project
+ # The approved Core embeds its compiler-host runtime in its portable PDB.
+ # Use the exact runtime requested by the pinned SDK for compilation only;
+ # helper/test application execution retains its normal runtime resolution.
+ if([IO.Path]::GetFileNameWithoutExtension($exe) -ieq 'dotnet' -and $arguments.Count -gt 0 -and $arguments[0] -in @('msbuild','publish')){$info.Environment['DOTNET_ROLL_FORWARD']='Disable'}
  foreach($argument in $arguments){$info.ArgumentList.Add($argument)}
  $process=[Diagnostics.Process]::new();$process.StartInfo=$info;$started=[DateTime]::UtcNow
  try{
   if(-not $process.Start()){throw 'LIGHTING_CANDIDATE_PROCESS_START'};$stdout=$process.StandardOutput.ReadToEndAsync();$stderr=$process.StandardError.ReadToEndAsync();$timedOut=$false
   while(-not $process.WaitForExit(1000)){if(([DateTime]::UtcNow-$started).TotalSeconds -gt 240){$timedOut=$true;$process.Kill($true);$process.WaitForExit();break}}
   $text=$stdout.GetAwaiter().GetResult();$errorText=$stderr.GetAwaiter().GetResult();[IO.File]::WriteAllText((Join-Path $candidate ($name+'.stdout.log')),$text,[Text.UTF8Encoding]::new($false));[IO.File]::WriteAllText((Join-Path $candidate ($name+'.stderr.log')),$errorText,[Text.UTF8Encoding]::new($false))
-  $toolCalls.Add([pscustomobject]@{name=$name;executable=$exe;executableSha256=(Get-YmccLightingFileHash $exe);arguments=$arguments;pid=$process.Id;exitCode=$process.ExitCode;naturalExit=(-not $timedOut);startedUtc=$started.ToString('o');finishedUtc=[DateTime]::UtcNow.ToString('o')})
+  $toolCalls.Add([pscustomobject]@{name=$name;compilerRuntimeRollForward=$info.Environment['DOTNET_ROLL_FORWARD'];executable=$exe;executableSha256=(Get-YmccLightingFileHash $exe);arguments=$arguments;pid=$process.Id;exitCode=$process.ExitCode;naturalExit=(-not $timedOut);startedUtc=$started.ToString('o');finishedUtc=[DateTime]::UtcNow.ToString('o')})
   if($timedOut -or $process.ExitCode -ne 0){throw ('LIGHTING_CANDIDATE_PROCESS_FAILED: '+$name)}
   return $text
  }finally{$process.Dispose()}
