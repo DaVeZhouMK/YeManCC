@@ -19,6 +19,6 @@ Push-Location $toolRoot
 try{& $npm ci --ignore-scripts --no-audit --no-fund;if($LASTEXITCODE -ne 0){throw 'Locked release browser tools restore failed'}}finally{Pop-Location}
 $modules=Join-Path $toolRoot 'node_modules'
 $settings=[ordered]@{YMCC_SIM_CORE_ROOT=$core;YMCC_RELEASE_NODE_MODULES=$modules;YMCC_UI_BROWSER_MODULE_DIR=$modules;YMCC_UI_TEST_REQUIRE_ANCHOR=(Join-Path $modules '_release.cjs')}
-if(-not $CaptureOnly){$settings.YMCC_RELEASE_HOSTED_ENVIRONMENT='1'}
+if(-not $CaptureOnly){$settings['YMCC_RELEASE_HOSTED_ENVIRONMENT']='1'}
 foreach($entry in $settings.GetEnumerator()){[Environment]::SetEnvironmentVariable($entry.Key,$entry.Value,'Process');($entry.Key+'='+$entry.Value)|Out-File -LiteralPath $env:GITHUB_ENV -Encoding utf8 -Append}
 Write-Output ('HOSTED_RELEASE_CHECK_ENVIRONMENT_READY captureOnly='+[bool]$CaptureOnly)

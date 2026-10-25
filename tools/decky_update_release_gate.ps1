@@ -94,7 +94,8 @@ function Initialize-DeckyLifecycleEvidence([string]$Requested='') {
 # existing testing core. Keep publication logs in gateRoot, and give that
 # consumer a separately owned, short evidence root inside the same core.
 function Initialize-DeckyRecoveryEvidence {
-  $coreEvidence=Get-DeckyLifecycleFullPath 'G:\YeManCC-Work\Testing\YMCC\Evidence'
+  . (Join-Path $PSScriptRoot 'ymcc_sim/global/release-host-environment.ps1')
+  $coreEvidence=Get-DeckyLifecycleFullPath (Join-Path (Get-YmccSimulationCoreRoot) 'Evidence')
   if(-not [IO.Directory]::Exists($coreEvidence)){throw 'DECKY_RECOVERY_TEST_CORE_UNAVAILABLE'}
   $root=Join-Path (Join-Path $coreEvidence 'DR') ((Get-DeckyLifecycleOwnerKey).Substring(0,12))
   return (Initialize-DeckyLifecycleEvidence $root)

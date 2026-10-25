@@ -1,3 +1,4 @@
+import {simulationCorePath,selectedNativeTools} from '../release-host-environment.mjs';
 // Bounded current-producer migration entry. This does not register or replace
 // the full parent adapter, the 240s baseline, or historical legacy failures.
 import fs from 'node:fs';
@@ -28,7 +29,7 @@ if(get('--consumer-native')){
  process.exitCode=result.passed?0:1;
 }else{
  const out=path.resolve(get('--evidence-dir')??''),work=path.resolve(get('--workspace-dir')??'');
- const core=path.resolve('G:/YeManCC-Work/Testing/YMCC');
+ const core=path.resolve(simulationCorePath(""));
  assert(get('--evidence-dir')&&get('--workspace-dir'),'EXPLICIT_CORE_EVIDENCE_AND_WORKSPACE_REQUIRED');
  assert(within(path.join(core,'Evidence/DeckyParentMigration-20261023'),out),'EVIDENCE_SCOPE');
  assert(within(path.join(core,'Workspace/DeckyParentMigration-20261023'),work),'WORKSPACE_SCOPE');
@@ -104,7 +105,7 @@ if(get('--consumer-native')){
   report.nativeExtractions={producer:{path:'tools/decky_binding_runtime_selftest.cpp',sha256:sourcePins.get('tools/decky_binding_runtime_selftest.cpp').sha256,beginByte:0,endByte:mainStart,generated:pin(helper),scope:'unchanged reusable producer helpers; original six cases execute separately through original mjs'},ready:{path:'native/main.cpp',sha256:sourcePins.get('native/main.cpp').sha256,beginByte:begin,endByte:end,sliceSha256:crypto.createHash('sha256').update(slice).digest('hex'),generated:pin(ready),scope:'unchanged current committed-Ready consumer; UI/OS events are not dispatched'}};
   report.nativeExtractions.crashPolicy={path:'tools/decky_sidebar_crash_breaker_selftest.cpp',sha256:sourcePins.get('tools/decky_sidebar_crash_breaker_selftest.cpp').sha256,beginByte:policyBegin,endByte:policyEnd,generated:pin(policyInclude),scope:'unchanged original pure policy() body; entire legacy fixture and its macro are not compiled'};
   write(path.join(out,'NATIVE-EXTRACTIONS.json'),report.nativeExtractions);
-  const tools=read(path.join(repo,'tools/ymcc_sim/global/decky-update-recovery/native-launch-noio/native-tools.json')).native;
+  const tools=selectedNativeTools().native;
   const env=Object.fromEntries(Object.entries(process.env).map(([k,v])=>[k.toUpperCase(),v]));env.PATH=path.dirname(tools.compiler)+';'+process.env.SystemRoot+'/System32';env.INCLUDE=tools.include.join(';');env.LIB=tools.lib.join(';');for(const n of ['CL','_CL_','LINK','_LINK_'])env[n]='';env.TEMP=path.join(nativeDir,'t');env.TMP=env.TEMP;fs.mkdirSync(env.TEMP);
   const image=path.join(nativeDir,'steam.exe'),graph=path.join(nativeDir,'d.json');
   // YMCC and the public Windows Loader are GUI images. A console fixture can

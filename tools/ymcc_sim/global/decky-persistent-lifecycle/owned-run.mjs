@@ -1,3 +1,4 @@
+import {simulationCorePath} from '../release-host-environment.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -70,7 +71,7 @@ export async function executeOwnedRuntime({repoRoot=path.resolve(import.meta.dir
  const sourcePins=new Map(),toolPins=new Map();
  // Keep the original fixture's Win32 paths short while all new work stays in
  // the project core. Its raw receipts stay at their original live paths.
- const workspace=path.resolve('G:/YeManCC-Work/Testing/YMCC/Workspace');
+ const workspace=path.resolve(simulationCorePath("Workspace"));
  assert(fs.statSync(workspace).isDirectory(),'CORE_WORKSPACE_REQUIRED');
  const fixtureRoot=path.join(workspace,'DR');fs.mkdirSync(fixtureRoot,{recursive:true});assert.equal(key(fs.realpathSync(fixtureRoot)),key(fixtureRoot),'SHORT_WORKSPACE_REPARSE');
  const original=path.join(fixtureRoot,crypto.randomUUID().slice(0,8));assert(!fs.existsSync(original));

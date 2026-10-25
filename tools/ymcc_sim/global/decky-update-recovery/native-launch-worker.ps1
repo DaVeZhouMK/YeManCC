@@ -8,7 +8,8 @@ Need ($PSVersionTable.PSVersion.Major -eq 5) 'WINDOWS_POWERSHELL_5_REQUIRED'
 Need ((Sha $Request) -ceq $ExpectedSha256) 'REQUEST_PIN'
 $r=Get-Content -LiteralPath $Request -Raw -Encoding UTF8|ConvertFrom-Json
 $separator=[IO.Path]::DirectorySeparatorChar
-$root=[IO.Path]::GetFullPath('G:/YeManCC-Work/Testing/YMCC/Workspace/Nl').TrimEnd($separator)+$separator
+. (Join-Path $PSScriptRoot '../release-host-environment.ps1')
+$root=[IO.Path]::GetFullPath((Join-Path (Get-YmccSimulationCoreRoot) 'Workspace/Nl')).TrimEnd($separator)+$separator
 $work=[IO.Path]::GetFullPath($r.work)
 Need ($work.StartsWith($root,[StringComparison]::OrdinalIgnoreCase) -and [IO.Path]::GetDirectoryName($work) -eq $root.TrimEnd($separator)) 'EXACT_OWNED_SHORT_ROOT'
 Need (([IO.FileInfo]$Request).Directory.FullName -eq $work) 'REQUEST_IN_OWNED_ROOT'
@@ -104,7 +105,7 @@ try {
  $stopTask=$controlReader.ReadLineAsync()
  $changes=@(Validate-Pins);Need ($changes.Count -eq 0) 'SOURCE_OR_TOOL_CHANGED_BEFORE_COMPILE'
  Need ((Sha $r.packageManifest.path) -ceq '2ba2e58c4c1367375cd265192972a371e993544880623f4b51ca412cfe85746a') 'ORIGINAL_PACKAGE_MANIFEST_PIN'
- $authority=Get-Content -LiteralPath $r.packageManifest.path -Raw|ConvertFrom-Json
+ $authority=Get-YmccPackageFixtureToolAuthority $r.packageManifest.path
  Need ($authority.files.Count -eq 42) 'ORIGINAL_42_COMPILER_TOOLS'
  foreach($row in $authority.files){Need ((Sha $row.path) -ceq $row.sha256) ('COMPILER_TOOL_PIN:'+ $row.path)}
  $cs=Join-Path $work 'owned-job.cs';$dll=Join-Path $work 'owned-job.dll'

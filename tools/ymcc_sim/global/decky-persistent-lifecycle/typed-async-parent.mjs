@@ -1,3 +1,4 @@
+import {selectedNativeTools} from '../release-host-environment.mjs';
 /** Read-only parent consumer of completed, independently pinned AsyncRequest runs.
  * verified means evidence integrity, never PASS. No compiler/native process is run.
  * sourceMode=frozen seals historical FAILs; it can never authorize acceptance.
@@ -286,7 +287,7 @@ export function validateTypedAsyncRequestParentReceipt(value, {
     verify(row, workRoot); compilePins.set(key(row.path), row);
   });
   assert.deepEqual(read(path.join(evidenceRoot,'GENERATED.json')), value.generated, fail('EXTRACTION_FILE'));
-  const native = read(path.join(repo,'tools/ymcc_sim/global/decky-update-recovery/native-launch-noio/native-tools.json')).native;
+  const native = selectedNativeTools().native;
   const driverSource=fs.readFileSync(path.join(repo,DRIVER+'.mjs'),'utf8');
   const guiFlagsDeclared=driverSource.includes("'/SUBSYSTEM:WINDOWS','/ENTRY:mainCRTStartup'");
   const guiGuardDeclared=driverSource.includes('TYPED_NATIVE_GUI_REQUIRED');

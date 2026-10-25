@@ -1,3 +1,4 @@
+import {selectedNativeTools} from '../release-host-environment.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -23,7 +24,7 @@ for(const rel of fs.readdirSync(path.join(root,'native')).filter(n=>/\.(h|cpp|js
 for(const rel of fs.readdirSync(path.join(root,'decky-plugin/src')).filter(n=>/\.(ts|tsx|js)$/.test(n)).map(n=>'decky-plugin/src/'+n))bind(rel);
 const report={schemaVersion:1,passed:false,status:'FAIL',softwareAcceptance:false,physicalSleepPerformed:false,officialLoaderExecuted:false,installedApplicationsStarted:false,hardwareWrites:0,cases:[],sourceHashes:Object.fromEntries(inputs),sourceInputs:[...inputs].map(([path,sha256])=>({path,sha256})),lifecycleContract,lifecycleEvidence:{schemaVersion:1,contractFingerprint:lifecycleContractFingerprint(lifecycleContract),features:[{id:'plugins.decky',observations:[]}]},boundaries:[adapter.boundary,'Selected frozen consumer capture, not full HC snapshot or release approval. Host/client, native and public-gate scopes remain separate.']};
 const cases=report.cases;
-const tools=readJson(path.join(root,'tools/ymcc_sim/global/decky-update-recovery/native-launch-noio/native-tools.json'));
+const tools=selectedNativeTools();
 const nativeEnv={...process.env,INCLUDE:tools.native.include.join(';'),LIB:tools.native.lib.join(';'),PATH:path.dirname(tools.native.compiler)+';'+path.dirname(tools.native.linker)+';'+process.env.PATH,CL:'',_CL_:'',LINK:'',_LINK_:''};
 const env={...nativeEnv,YMCC_DECKY_ARTIFACT_ROOT:path.join(out,'original-artifacts')};
 function execute(id,program,argv,{timeout=45000,cwd=out,environment=env,allowFailure=false,record=true,preserveStreams=false}={}){

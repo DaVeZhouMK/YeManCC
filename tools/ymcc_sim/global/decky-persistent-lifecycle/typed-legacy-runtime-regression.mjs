@@ -1,3 +1,4 @@
+import {simulationCorePath,selectedNativeTools} from '../release-host-environment.mjs';
 // Independent sidecar; no parent registration or source changes are performed.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -71,7 +72,7 @@ export function validateRuntimeResult(raw,expected) {
 }
 export async function execute(argv) {
  const get=name=>{const i=argv.indexOf(name);return i<0?null:argv[i+1];};
- const core=path.resolve('G:/YeManCC-Work/Testing/YMCC'),out=path.resolve(get('--evidence-dir')??''),work=path.resolve(get('--workspace-dir')??'');
+ const core=path.resolve(simulationCorePath("")),out=path.resolve(get('--evidence-dir')??''),work=path.resolve(get('--workspace-dir')??'');
  assert(get('--evidence-dir')&&get('--workspace-dir'),'EXPLICIT_CORE_PATHS_REQUIRED');
  assert(inside(path.join(core,'Evidence/DeckyTypedLegacyRuntime-20261023'),out),'EVIDENCE_SCOPE');
  assert(inside(path.join(core,'Workspace/DeckyTypedLegacyRuntime-20261023'),work),'WORKSPACE_SCOPE');
@@ -118,7 +119,7 @@ export async function execute(argv) {
    const file=path.join(work,'s/tools/typed-legacy-runtime-'+name+'.inc');fs.writeFileSync(file,text);frozen.set(key(file),pin(file));report.generated.push({...pin(file),origin,originSha256:sources.get(origin).sha256,bytePreserved:true});
   }
   write(path.join(out,'GENERATED.json'),report.generated);
-  const compiler=read(path.join(repo,'tools/ymcc_sim/global/decky-update-recovery/native-launch-noio/native-tools.json')).native;
+  const compiler=selectedNativeTools().native;
   env=Object.fromEntries(Object.entries(process.env).map(([k,v])=>[k.toUpperCase(),v]));env.PATH=path.dirname(compiler.compiler)+';'+process.env.SystemRoot+'/System32';env.INCLUDE=compiler.include.join(';');env.LIB=compiler.lib.join(';');
   for(const k of ['CL','_CL_','LINK','_LINK_'])env[k]='';
   for(const k of Object.keys(env))if(k.startsWith('YMCC_BINDING_')||k.startsWith('YMCC_DECKY_'))delete env[k];

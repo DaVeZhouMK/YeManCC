@@ -51,7 +51,8 @@ $nativeRows=@(foreach($row in $native.files){
 $hostRows=@(foreach($directory in @((Join-Path $toolRoot 'bin/Hostx64/x64'),(Join-Path $toolRoot 'include'))){
  foreach($entry in Get-ChildItem -LiteralPath $directory -File -Recurse){[ordered]@{path=$entry.FullName;sha256=(Get-FileHash -LiteralPath $entry.FullName).Hash.ToLowerInvariant();role='Complete selected host MSVC x64 bin inventory or STL header inventory'}}
 })
-$nativeFiles=@(@($nativeRows)+@($hostRows)|Sort-Object -Property path -Unique)
+$nativeFiles=@(@($nativeRows)+@($hostRows)|Sort-Object -Property { $_.path } -Unique)
+if($nativeFiles.Count -lt $hostRows.Count){throw 'Hosted compiler inventory aggregation failed'}
 $ownedFiles=@(foreach($row in $owned.files){$pin=Capture $row 'owned';if($pin){$pin}})
 $packageFiles=@(foreach($row in $package.files){$pin=Capture $row 'package';if($pin){$pin}})
 $powerShell=Capture $native.powershell 'powershell'

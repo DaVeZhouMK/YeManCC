@@ -1,3 +1,4 @@
+import {selectedOwnedTools,HOST_ENVIRONMENT_SOURCE_INPUTS} from '../release-host-environment.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -30,10 +31,10 @@ export const OWNED_SOURCES=Object.freeze([
  "native/decky_sidebar_recovery.h",
  "tools/decky_binding_runtime_selftest.mjs"
 ]);
-export const OWNED_INPUTS=Object.freeze([...new Set([...OWNED_SOURCES,...BUNDLED_AUTHORITY_SOURCES,'tools/ymcc_sim/global/capability-lifecycle/index.mjs',OWNED_MODULE+'/owned-adapter.mjs',OWNED_MODULE+'/owned-run.mjs',OWNED_MODULE+'/owned-tools.json',OWNED_MODULE+'/README.md','tools/ymcc_sim/global/decky-update-recovery/native-launch-noio/index.mjs','tools/ymcc_sim/global/decky-update-recovery/native-launch-noio/native-tools.json'])]);
+export const OWNED_INPUTS=Object.freeze([...new Set([...OWNED_SOURCES,...HOST_ENVIRONMENT_SOURCE_INPUTS,...BUNDLED_AUTHORITY_SOURCES,'tools/ymcc_sim/global/capability-lifecycle/index.mjs',OWNED_MODULE+'/owned-adapter.mjs',OWNED_MODULE+'/owned-run.mjs',OWNED_MODULE+'/owned-tools.json',OWNED_MODULE+'/README.md','tools/ymcc_sim/global/decky-update-recovery/native-launch-noio/index.mjs','tools/ymcc_sim/global/decky-update-recovery/native-launch-noio/native-tools.json'])]);
 export function ownedToolDeclaration(repo){
  const native=getNativeLaunchNoIoToolDeclaration();if(native.blockedReason)return native;
- try{const pins=JSON.parse(fs.readFileSync(path.join(repo,OWNED_MODULE,'owned-tools.json'))).files;
+ try{const pins=selectedOwnedTools().files;
   for(const row of pins){if(fs.realpathSync(row.path).toLowerCase()!==path.resolve(row.path).toLowerCase()||crypto.createHash('sha256').update(fs.readFileSync(row.path)).digest('hex')!==row.sha256)throw Error('OWNED_NATIVE_TOOL_CHANGED:'+row.path);}
   const rows=[...new Set([...native.artifactInputs,...lockBundledNodeTools(repo).tools.map(r=>r.path),...pins.map(r=>r.path)])];if(rows.length>3072)throw Error('TOOL_LIMIT');return {artifactInputs:rows};
  }catch(error){return {artifactInputs:[],blockedReason:'OWNED_RUNTIME_TOOL_DECLARATION:'+error.message};}

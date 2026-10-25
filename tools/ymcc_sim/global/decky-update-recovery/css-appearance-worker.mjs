@@ -1,3 +1,4 @@
+import {simulationCorePath,selectedNativeTools,HOST_ENVIRONMENT_SOURCE_INPUTS} from '../release-host-environment.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -6,9 +7,9 @@ import {fileURLToPath,pathToFileURL} from 'node:url';
 import {verifyPackageFixtureTools,PACKAGE_FIXTURE_AUTHORITY_SOURCES} from './package-fixture-tools.mjs';
 import {getCssAppearanceInputs,getCssAppearanceTools} from './css-appearance-sequence.mjs';
 
-const core='G:/YeManCC-Work/Testing/YMCC',modulePath='tools/ymcc_sim/global/decky-update-recovery';
+const core=simulationCorePath(""),modulePath='tools/ymcc_sim/global/decky-update-recovery';
 // Read-only declaration for the caller's source closure and adapter registration.
-export const CSS_APPEARANCE_WORKER_SOURCE_INPUTS=Object.freeze([
+export const CSS_APPEARANCE_WORKER_SOURCE_INPUTS=Object.freeze([...HOST_ENVIRONMENT_SOURCE_INPUTS,
  modulePath+'/css-appearance-worker.mjs',
  modulePath+'/css-appearance-worker-bootstrap.mjs',
  modulePath+'/css-appearance-worker.ps1',
@@ -49,7 +50,7 @@ function start({repo,callerEvidence,deadlineMs},mode){
  const packageTools=verifyPackageFixtureTools();need(packageTools.files.length===42,'ORIGINAL_42_TOOL_MEMBERS');
  const cssTools=getCssAppearanceTools(repo);
  need(!process.env.YMCC_STEAM_APPEARANCE_SERVICE_SOURCE,'UNDECLARED_SERVICE_SOURCE_OVERRIDE');
- const manifest=read(path.join(repo,modulePath,'native-launch-noio/native-tools.json'));
+ const manifest=selectedNativeTools();
  const powershell=plain(manifest.powershell.path);need(hash(powershell)===manifest.powershell.sha256,'FIXED_WINDOWS_POWERSHELL');
  const {lockBundledNodeTools}=awaitlessAuthority(repo);
  const nodeGraph=lockBundledNodeTools(repo);

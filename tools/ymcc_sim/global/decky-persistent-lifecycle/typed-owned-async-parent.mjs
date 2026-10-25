@@ -1,3 +1,4 @@
+import {selectedNativeTools} from '../release-host-environment.mjs';
 /** Read-only parent consumer of completed, independently pinned AsyncRequest runs.
  * verified means evidence integrity, never PASS. No compiler/native process is run.
  * sourceMode=frozen seals historical FAILs; it can never authorize acceptance.
@@ -155,7 +156,7 @@ export function validateOwnedAsyncRequestParentReceipt(value, {
   const renamed=value.generated[3],v1Text=fs.readFileSync(path.join(repo,V1_DRIVER+'.cpp'),'utf8'),entry='int main(int argc,char** argv){',replacement='int legacySameProcessMain(int argc,char** argv){';
   assert.equal(v1Text.split(entry).length,2,fail('V1_RENAME_ENTRY_UNIQUE'));assert.equal(renamed.origin,V1_DRIVER+'.cpp');assert.equal(renamed.originSha256,sourcePins.get(V1_DRIVER+'.cpp'));assert.equal(renamed.derivation,'rename-main-only');assert.equal(renamed.entry,entry);assert.equal(renamed.replacement,replacement);samePath(renamed.path,path.join(workRoot,'s/tools/typed-owned-async-legacy-body.inc'),fail('V1_DERIVED_PATH'));assert.equal(renamed.sha256,hash(Buffer.from(v1Text.replace(entry,replacement))),fail('V1_BODY_BYTE_PRESERVATION'));verify(renamed,workRoot);compilePins.set(key(renamed.path),renamed);
   assert.deepEqual(read(path.join(evidenceRoot,'GENERATED.json')), value.generated, fail('EXTRACTION_FILE'));
-  const native = read(path.join(repo,'tools/ymcc_sim/global/decky-update-recovery/native-launch-noio/native-tools.json')).native;
+  const native = selectedNativeTools().native;
   const driverSource=fs.readFileSync(path.join(repo,DRIVER+'.mjs'),'utf8');
   const guiFlagsDeclared=driverSource.includes("'/SUBSYSTEM:WINDOWS','/ENTRY:mainCRTStartup'");
   const guiGuardDeclared=driverSource.includes('TYPED_NATIVE_GUI_REQUIRED');
