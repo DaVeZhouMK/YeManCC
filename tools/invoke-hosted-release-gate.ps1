@@ -17,6 +17,11 @@ if($Worker){
  if($isAdmin -or -not $ExpectedSid -or $identity.User.Value -cne $ExpectedSid){throw 'Acceptance requires the exact non-administrator worker'}
  Save-Record 'worker-identity.json' @{sid=$identity.User.Value;isAdministrator=$isAdmin;sessionId=[Diagnostics.Process]::GetCurrentProcess().SessionId;mode=$Mode;source=$repo;realInstallationChanged=$false}
  Set-Location -LiteralPath $repo
+ # Node is an intermediate process: a PS7 module path can shadow the PS5 Utility
+ # module and hide Get-FileHash. Let each descendant shell build its own defaults.
+ # Microsoft Learn: about_PSModulePath / Starting Windows PowerShell from PS7.
+ $env:PSModulePath=$null
+ $env:WinPSModulePath=$null
  $env:PATH=(Join-Path $env:YMCC_RELEASE_NODE_MODULES '.bin')+';'+$env:PATH
  if($Mode -eq 'EnvironmentCheck'){
   & node tools/ymcc_sim/global/decky-persistent-lifecycle/current-parent-global.mjs --mode plan --evidence-dir (Join-Path $core 'Evidence/DeckyParentGlobal-20261023/standard-user-environment')
