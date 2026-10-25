@@ -15,6 +15,9 @@ concurrency:
 jobs:
   build:
     runs-on: windows-latest
+    env:
+      # Keep build outputs and acceptance evidence outside tracked product sources.
+      YEMAN_WORKSPACE_ROOT: ${{ github.workspace }}/../..
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -124,18 +127,17 @@ jobs:
       - name: Build and assemble Release
         shell: pwsh
         run: |
-          $env:YEMAN_WORKSPACE_ROOT = $env:GITHUB_WORKSPACE
           # Tag release explicitly requests full acceptance; ordinary exports do not.
           # 2026-09-23 裁定：legacy 信封退役，唯一产物 = 完整包 YeManCC.zip。
           $releaseEnvelope = 'full'
           $env:YEMAN_RELEASE_ENVELOPE = $releaseEnvelope
-          powershell -NoProfile -ExecutionPolicy Bypass -File tools/build-workspace.ps1 -WorkspaceRoot $env:GITHUB_WORKSPACE -FullAcceptance
+          powershell -NoProfile -ExecutionPolicy Bypass -File tools/build-workspace.ps1 -WorkspaceRoot $env:YEMAN_WORKSPACE_ROOT -FullAcceptance
           if ($LASTEXITCODE -ne 0) { throw 'Frozen source build failed.' }
           foreach ($test in @('test:updater', 'test:updater-manager-resume', 'test:updater-resume', 'test:updater-retry', 'test:updater-rollback', 'test:fan-host-paths', 'test:fan-payload')) {
             pnpm run $test
             if ($LASTEXITCODE -ne 0) { throw "Release regression failed: $test" }
           }
-          powershell -NoProfile -ExecutionPolicy Bypass -File tools/package-release.ps1 -WorkspaceRoot $env:GITHUB_WORKSPACE -ReleaseEnvelope $releaseEnvelope -FullAcceptance
+          powershell -NoProfile -ExecutionPolicy Bypass -File tools/package-release.ps1 -WorkspaceRoot $env:YEMAN_WORKSPACE_ROOT -ReleaseEnvelope $releaseEnvelope -FullAcceptance
           if ($LASTEXITCODE -ne 0) { throw 'Full package assembly failed.' }
           # This regression consumes the actual archive; never run it before assembly.
           pnpm run test:updater-install-chain
@@ -144,7 +146,7 @@ jobs:
       - name: Verify release outputs
         shell: pwsh
         run: |
-          $root = $env:GITHUB_WORKSPACE
+          $root = $env:YEMAN_WORKSPACE_ROOT
           $required = @(
             'Release\YeManCC\YeManCC.exe',
             'Release\YeManCC\index.html',
@@ -211,7 +213,7 @@ jobs:
       - name: Verify local Fan Host V2 lane before publishing
         shell: pwsh
         run: |
-          powershell -NoProfile -ExecutionPolicy Bypass -File tools/fan_host_path_gate.ps1 -ProjectRoot $env:GITHUB_WORKSPACE -ReleaseZip (Join-Path $env:GITHUB_WORKSPACE 'Release\Packages\YeManCC.zip')
+          powershell -NoProfile -ExecutionPolicy Bypass -File tools/fan_host_path_gate.ps1 -ProjectRoot $env:GITHUB_WORKSPACE -ReleaseZip (Join-Path $env:YEMAN_WORKSPACE_ROOT 'Release\Packages\YeManCC.zip')
           if ($LASTEXITCODE -ne 0) { throw 'Local Fan Host V2 path/identity gate failed.' }
 
       - name: Assemble complete release attachments from the immutable source tag
@@ -221,11 +223,11 @@ jobs:
           $tagCommit = (git rev-parse "$tag^{commit}").Trim()
           if ($LASTEXITCODE -ne 0 -or $tagCommit -ne (git rev-parse HEAD).Trim()) { throw 'Source archive must come from the checked-out release tag.' }
           $sourceName = "YeManCC-source-$tag.zip"
-          $sourcePath = Join-Path $env:GITHUB_WORKSPACE "Release/Packages/$sourceName"
+          $sourcePath = Join-Path $env:YEMAN_WORKSPACE_ROOT "Release/Packages/$sourceName"
           git archive --format=zip --prefix=YeManCC/ --output=$sourcePath $tag
           if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) { throw 'Tagged source ZIP creation failed.' }
-          $packageDir = Join-Path $env:GITHUB_WORKSPACE 'Release/Packages'
-          Copy-Item -LiteralPath Release/version.json -Destination (Join-Path $packageDir 'version.json') -Force
+          $packageDir = Join-Path $env:YEMAN_WORKSPACE_ROOT 'Release/Packages'
+          Copy-Item -LiteralPath (Join-Path $env:YEMAN_WORKSPACE_ROOT 'Release/version.json') -Destination (Join-Path $packageDir 'version.json') -Force
           $rows = foreach ($name in @('YeManCC.zip', $sourceName, 'version.json')) {
             $file = Join-Path $packageDir $name
             $hash = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash
@@ -237,7 +239,7 @@ jobs:
       - name: Required Decky dual-channel update gate
         shell: pwsh
         run: |
-          powershell -NoProfile -ExecutionPolicy Bypass -File tools/decky_update_release_gate.ps1 -Stage Verify -WorkspaceRoot $env:GITHUB_WORKSPACE
+          powershell -NoProfile -ExecutionPolicy Bypass -File tools/decky_update_release_gate.ps1 -Stage Verify -WorkspaceRoot $env:YEMAN_WORKSPACE_ROOT
           if ($LASTEXITCODE -ne 0) { throw 'Decky update release gate failed; refusing to publish.' }
 
       # Online hard gate: the immutable source tag must already contain the latest official Windows Loader.
@@ -247,24 +249,24 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
-          powershell -NoProfile -ExecutionPolicy Bypass -File tools/decky-loader-upgrade.ps1 -Action ReleaseGate -EvidenceDir (Join-Path $env:GITHUB_WORKSPACE 'Build/Validation/DeckyUpdate/OfficialLoader')
+          powershell -NoProfile -ExecutionPolicy Bypass -File tools/decky-loader-upgrade.ps1 -Action ReleaseGate -EvidenceDir (Join-Path $env:YEMAN_WORKSPACE_ROOT 'Build/Validation/DeckyUpdate/OfficialLoader')
           if ($LASTEXITCODE -ne 0) { throw 'Official Decky Loader is stale or unverified; refusing to publish.' }
 
       - name: Save required Decky update evidence
         uses: actions/upload-artifact@v4
         with:
           name: decky-update-release-evidence
-          path: Build/Validation/DeckyUpdate
+          path: ${{ env.YEMAN_WORKSPACE_ROOT }}/Build/Validation/DeckyUpdate
           if-no-files-found: error
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            Release/Packages/YeManCC.zip
-            Release/Packages/YeManCC-source-${{ github.ref_name }}.zip
-            Release/Packages/version.json
-            Release/Packages/SHA256SUMS.txt
+            ${{ env.YEMAN_WORKSPACE_ROOT }}/Release/Packages/YeManCC.zip
+            ${{ env.YEMAN_WORKSPACE_ROOT }}/Release/Packages/YeManCC-source-${{ github.ref_name }}.zip
+            ${{ env.YEMAN_WORKSPACE_ROOT }}/Release/Packages/version.json
+            ${{ env.YEMAN_WORKSPACE_ROOT }}/Release/Packages/SHA256SUMS.txt
           overwrite_files: false
           body_path: ${{ env.RELEASE_NOTES_PATH }}
           generate_release_notes: false
@@ -285,7 +287,7 @@ jobs:
           if ($retiredAsset.Count -ne 0) {
             throw 'GitHub Release must not contain the incorrect asset name YeManCC-Complete.zip.'
           }
-          $manifest = (Get-Content -LiteralPath Release\version.json -Raw -Encoding UTF8).TrimStart([char]0xFEFF) | ConvertFrom-Json
+          $manifest = (Get-Content -LiteralPath (Join-Path $env:YEMAN_WORKSPACE_ROOT 'Release/version.json') -Raw -Encoding UTF8).TrimStart([char]0xFEFF) | ConvertFrom-Json
           $downloadRoot = Join-Path $env:RUNNER_TEMP 'published-yemancc'
           New-Item -ItemType Directory -Path $downloadRoot -Force | Out-Null
           gh release download "${{ github.ref_name }}" --repo "${{ github.repository }}" --pattern 'YeManCC.zip' --dir $downloadRoot --clobber
@@ -303,7 +305,7 @@ jobs:
           $names = @('YeManCC.zip', "YeManCC-source-$tag.zip", 'version.json', 'SHA256SUMS.txt')
           $downloadRoot = Join-Path $env:RUNNER_TEMP 'published-yemancc'
           foreach ($name in $names) {
-            $local = Join-Path $env:GITHUB_WORKSPACE "Release/Packages/$name"
+            $local = Join-Path $env:YEMAN_WORKSPACE_ROOT "Release/Packages/$name"
             $public = Join-Path $downloadRoot $name
             if (-not (Test-Path -LiteralPath $public -PathType Leaf)) {
               gh release download $tag --repo '${{ github.repository }}' --pattern $name --dir $downloadRoot
@@ -324,14 +326,14 @@ jobs:
 
       - name: Preserve generated version manifest
         shell: pwsh
-        run: Copy-Item -LiteralPath Release\version.json -Destination $env:RUNNER_TEMP\version.json -Force
+        run: Copy-Item -LiteralPath (Join-Path $env:YEMAN_WORKSPACE_ROOT 'Release/version.json') -Destination $env:RUNNER_TEMP\version.json -Force
 
       - name: Check main manifest publish order
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          $generated = (Get-Content -LiteralPath Release\version.json -Raw -Encoding UTF8).TrimStart([char]0xFEFF) | ConvertFrom-Json
+          $generated = (Get-Content -LiteralPath (Join-Path $env:YEMAN_WORKSPACE_ROOT 'Release/version.json') -Raw -Encoding UTF8).TrimStart([char]0xFEFF) | ConvertFrom-Json
           $currentText = gh api "repos/${{ github.repository }}/contents/version.json?ref=main" --jq .content
           $currentText = ($currentText -replace '\s', '')
           $currentJsonText = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($currentText))
@@ -391,5 +393,5 @@ jobs:
           path: |
             ${{ runner.temp }}/release-runner-compatibility.json
             ${{ runner.temp }}/version.json
-            Release/Packages/SHA256SUMS.txt
+            ${{ env.YEMAN_WORKSPACE_ROOT }}/Release/Packages/SHA256SUMS.txt
           if-no-files-found: warn

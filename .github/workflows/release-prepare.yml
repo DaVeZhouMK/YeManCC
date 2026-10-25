@@ -19,6 +19,8 @@ jobs:
     timeout-minutes: 45
     env:
       pnpm_config_verify_deps_before_run: 'false'
+      # Build/evidence must remain outside the Git source root.
+      YEMAN_WORKSPACE_ROOT: ${{ github.workspace }}/../..
     steps:
       - name: Checkout candidate source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -159,15 +161,17 @@ jobs:
         run: |
           $env:Platform = $null
           $env:YEMAN_RELEASE_ENVELOPE = 'full'
-          & powershell -NoProfile -ExecutionPolicy Bypass -File tools/publish.ps1 -WorkspaceRoot $env:GITHUB_WORKSPACE -TestExport
+          & powershell -NoProfile -ExecutionPolicy Bypass -File tools/publish.ps1 -WorkspaceRoot $env:YEMAN_WORKSPACE_ROOT -TestExport
           if ($LASTEXITCODE -ne 0) { throw 'Candidate export failed' }
-          $package = Join-Path $env:GITHUB_WORKSPACE 'Release/Packages/YeManCC.zip'
+          $packageDir = Join-Path $env:YEMAN_WORKSPACE_ROOT 'Release/Packages'
+          $package = Join-Path $packageDir 'YeManCC.zip'
           if (!(Test-Path -LiteralPath $package)) { throw 'Complete candidate package missing' }
-          git archive --format=zip --prefix=YeManCC/ --output=Release/Packages/YeManCC-source-v0.0.36.zip HEAD
+          $sourcePath = Join-Path $packageDir 'YeManCC-source-v0.0.36.zip'
+          git archive --format=zip --prefix=YeManCC/ --output=$sourcePath HEAD
           if ($LASTEXITCODE -ne 0) { throw 'Candidate source archive failed' }
-          $rows = foreach ($name in @('YeManCC.zip', 'YeManCC-source-v0.0.36.zip')) { (Get-FileHash ('Release/Packages/' + $name) -Algorithm SHA256).Hash.ToLowerInvariant() + '  ' + $name }
-          $rows | Set-Content Release/Packages/SHA256SUMS.txt -Encoding UTF8
-          [ordered]@{ version='0.0.36'; commit=(git rev-parse HEAD); fixtureValidation='NOT_RUN'; formalReleaseAccepted=$false; publicReleaseCreated=$false; mainManifestUpdated=$false } | ConvertTo-Json | Set-Content Release/Packages/PREPARATION.json -Encoding UTF8
+          $rows = foreach ($name in @('YeManCC.zip', 'YeManCC-source-v0.0.36.zip')) { (Get-FileHash (Join-Path $packageDir $name) -Algorithm SHA256).Hash.ToLowerInvariant() + '  ' + $name }
+          $rows | Set-Content (Join-Path $packageDir 'SHA256SUMS.txt') -Encoding UTF8
+          [ordered]@{ version='0.0.36'; commit=(git rev-parse HEAD); fixtureValidation='NOT_RUN'; formalReleaseAccepted=$false; publicReleaseCreated=$false; mainManifestUpdated=$false } | ConvertTo-Json | Set-Content (Join-Path $packageDir 'PREPARATION.json') -Encoding UTF8
 
       - name: Save candidate package and environment evidence
         if: always()
@@ -175,11 +179,11 @@ jobs:
         with:
           name: ymcc-0.0.36-preparation-${{ github.run_id }}
           path: |
-            Release/Packages/YeManCC.zip
-            Release/Packages/YeManCC-source-v0.0.36.zip
-            Release/Packages/SHA256SUMS.txt
-            Release/Packages/PREPARATION.json
-            Build/Validation/**/*.json
+            ${{ env.YEMAN_WORKSPACE_ROOT }}/Release/Packages/YeManCC.zip
+            ${{ env.YEMAN_WORKSPACE_ROOT }}/Release/Packages/YeManCC-source-v0.0.36.zip
+            ${{ env.YEMAN_WORKSPACE_ROOT }}/Release/Packages/SHA256SUMS.txt
+            ${{ env.YEMAN_WORKSPACE_ROOT }}/Release/Packages/PREPARATION.json
+            ${{ env.YEMAN_WORKSPACE_ROOT }}/Build/Validation/**/*.json
             ${{ runner.temp }}/UpdaterPreparation/**
             ${{ runner.temp }}/release-runner-compatibility.json
           if-no-files-found: warn
