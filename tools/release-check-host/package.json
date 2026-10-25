@@ -1,0 +1,1 @@
+{"name":"ymcc-release-check-host","version":"1.0.0","private":true,"description":"Release gate tools only; never part of the application payload","dependencies":{"playwright":"1.62.1"}}

@@ -141,6 +141,10 @@ jobs:
           }
           'Platform=' | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
 
+      - name: Restore isolated release check tools
+        shell: pwsh
+        run: |
+          & tools/initialize-release-check-host.ps1 -CaptureOnly
       - name: Capture formal release gate host dependencies
         shell: pwsh
         run: |
